@@ -30,10 +30,14 @@ const OBJECT = 'oc_order';
 const DEF = {
   name: OBJECT,
   label: 'Order',
-  fields: { customer: { name: 'customer', type: 'text' }, amount: { name: 'amount', type: 'number' } },
+  fields: {
+    customer: { name: 'customer', type: 'text' },
+    amount: { name: 'amount', type: 'number' },
+    stage: { name: 'stage', type: 'select', options: [{ value: 'open', label: 'Open' }, { value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+  },
 };
 const DIRECTIVE = Symbol.for('objectstack.driver.aggregate.orderCut');
-const COUNT_COLUMN = '__os_group_count';
+const COUNT_COLUMN = '__os_total_groups';
 const PRINCIPAL = { userId: 'u1', isSystem: true } as unknown as ExecutionContext;
 
 /** 80 groups (more than the cap of 50), answered top-down as a database would after its ORDER BY. */
@@ -50,7 +54,7 @@ function makeDriver(name: string, answerCount = true) {
       const d = ast[DIRECTIVE];
       if (!d) return GROUPS.map((g) => ({ ...g }));
       const rows = GROUPS.slice(0, d.limit ?? GROUPS.length).map((g) => ({ ...g }));
-      return answerCount ? rows.map((r) => ({ ...r, [d.groupCountColumn]: GROUPS.length })) : rows;
+      return answerCount ? rows.map((r) => ({ ...r, [d.totalGroupsColumn]: GROUPS.length })) : rows;
     },
     async create(_o: string, data: Record<string, unknown>) { return { ...data }; },
     async update(_o: string, id: string, data: Record<string, unknown>) { return { ...data, id }; },
@@ -94,14 +98,14 @@ describe('[aggregate order and cut] stdio — aggregate_records over the engine'
       const { isError, body } = await h.call({ orderBy: [{ field: 'revenue', order: 'desc' }], limit: 5 });
       expect(isError, JSON.stringify(body)).toBe(false);
       expect(body.rows).toEqual(GROUPS.slice(0, 5));
-      expect(body.groupCount).toBe(80);
+      expect(body.totalGroups).toBe(80);
       expect(body.truncated).toBe(true);
       // The driver was handed the order, one probe group past the limit, and the count column — the cut is its statement's.
       expect(h.asts).toHaveLength(1);
       expect(h.asts[0][DIRECTIVE]).toEqual({
         orderBy: [{ column: 'revenue', order: 'desc' }, { column: 'customer', order: 'asc' }],
         limit: 6,
-        groupCountColumn: COUNT_COLUMN,
+        totalGroupsColumn: COUNT_COLUMN,
       });
     } finally {
       await h.close();
@@ -145,13 +149,32 @@ describe('[aggregate order and cut] stdio — aggregate_records over the engine'
     }
   });
 
-  it('CONTROL — no order, no limit: the uncut path, no directive, groupCount beside totalGroups', async () => {
+  it('a limit with no orderBy over a select key: the declared option order reaches the driver as the rank, before the cut', async () => {
+    const h = await makeStdio();
+    try {
+      const { isError, body } = await h.call({ groupBy: ['stage', 'customer'], limit: 5 });
+      expect(isError, JSON.stringify(body)).toBe(false);
+      expect(body.totalGroups).toBe(80);
+      expect(body).not.toHaveProperty('groupCount');
+      expect(h.asts).toHaveLength(1);
+      expect(h.asts[0][DIRECTIVE]).toEqual({
+        orderBy: [{ column: 'stage', order: 'asc', rank: ['open', 'won', 'lost'] }, { column: 'customer', order: 'asc' }],
+        limit: 6,
+        totalGroupsColumn: COUNT_COLUMN,
+      });
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('CONTROL — no order, no limit: the uncut path, no directive, totalGroups and no second spelling of it', async () => {
     const h = await makeStdio();
     try {
       const { isError, body } = await h.call({});
       expect(isError).toBe(false);
       expect(body.rows).toHaveLength(50);
-      expect(body).toMatchObject({ groupCount: 80, totalGroups: 80, truncated: true });
+      expect(body).toMatchObject({ totalGroups: 80, truncated: true });
+      expect(body).not.toHaveProperty('groupCount');
       expect(h.asts[0][DIRECTIVE]).toBeUndefined();
     } finally {
       await h.close();

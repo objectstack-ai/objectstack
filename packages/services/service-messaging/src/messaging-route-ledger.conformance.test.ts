@@ -2,8 +2,8 @@
 
 /**
  * Messaging route-ledger conformance — the package-local guard every
- * `*-route-ledger.ts` pairs with. `registerPreferenceOptionsRoutes` and
- * `registerInAppMessageRoutes` are standalone, synchronous functions that call
+ * `*-route-ledger.ts` pairs with. `registerPreferenceOptionsRoutes`,
+ * `registerMyPreferencesRoutes` and `registerInAppMessageRoutes` are standalone, synchronous functions that call
  * `http.get` / `http.post` and touch neither argument's services before a
  * request arrives, so a capturing mock `IHttpServer`
  * enumerates its real surface (the seam the print and settings ledgers use),
@@ -14,6 +14,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { registerPreferenceOptionsRoutes } from './preference-options-routes.js';
 import { registerInAppMessageRoutes } from './in-app-message-routes.js';
+import { registerMyPreferencesRoutes } from './my-preferences-routes.js';
 import { MESSAGING_ROUTE_LEDGER } from './messaging-route-ledger.js';
 
 function createMockServer() {
@@ -32,6 +33,7 @@ function createMockServer() {
 function enumerateMessagingRoutes(): Set<string> {
     const server = createMockServer();
     registerPreferenceOptionsRoutes(server as any, {} as any);
+    registerMyPreferencesRoutes(server as any, {} as any);
     registerInAppMessageRoutes(server as any, {} as any);
     const keys = new Set<string>();
     for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {

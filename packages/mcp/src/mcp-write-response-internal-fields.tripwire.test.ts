@@ -105,7 +105,7 @@ function makeSentinelEngine(): IDataEngine {
     // answered as the engine answers it once its driver served the cut.
     aggregate: vi.fn(async (_o: string, _q: unknown, options?: Record<symbol, unknown>) => {
       const cut = options?.[Symbol.for('objectstack.objectql.aggregateOrderCut')] as { outcome?: unknown } | undefined;
-      if (cut) cut.outcome = { kind: 'served', groupCount: 1 };
+      if (cut) cut.outcome = { kind: 'served', totalGroups: 1 };
       return [{ n: 1 }];
     }),
   } as unknown as IDataEngine;

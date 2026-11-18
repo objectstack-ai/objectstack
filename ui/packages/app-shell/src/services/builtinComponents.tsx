@@ -118,6 +118,9 @@ const PermissionMatrixEditPage = lazyPage('permission set', () =>
 const MobileAppPage = lazyPage('mobile app', () =>
   import('../console/mobile-app/MobileAppPage.js').then((m) => m.MobileAppPage),
 );
+const NotificationSettingsPage = lazyPage('notification settings', () =>
+  import('../console/notification-settings/NotificationSettingsPage.js').then((m) => m.NotificationSettingsPage),
+);
 const ConnectorCredentialsPage = lazyPage('connector credentials', () =>
   import('../views/setup/ConnectorCredentialsPage.js').then((m) => m.ConnectorCredentialsPage),
 );
@@ -195,6 +198,19 @@ registerAppComponent({
   label: 'Mobile App',
   source: '@object-ui/app-shell',
   component: MobileAppPage,
+});
+
+/**
+ * The account app's Notification Settings page: the signed-in person's own
+ * topic × channel preferences, digest and quiet hours, read from
+ * `GET /api/v1/messaging/me/preferences`. The account app's navigation names
+ * `account:notification_settings` (behind `requiresService: 'messaging'`).
+ */
+registerAppComponent({
+  ref: 'account:notification_settings',
+  label: 'Notification Settings',
+  source: '@object-ui/app-shell',
+  component: NotificationSettingsPage,
 });
 
 /**

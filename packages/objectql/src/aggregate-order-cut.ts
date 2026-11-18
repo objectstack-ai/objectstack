@@ -7,7 +7,7 @@
  * statement that groups: `engine.aggregate('crm_order', query,
  * { [AGGREGATE_ORDER_CUT]: { orderBy: [{ field: 'revenue', order: 'desc' }],
  * limit: 5 } })` reaches a SQL driver as
- * `SELECT g.*, COUNT(*) OVER () AS __os_group_count FROM (<the grouped
+ * `SELECT g.*, COUNT(*) OVER () AS __os_total_groups FROM (<the grouped
  * statement>) g ORDER BY … LIMIT 5`.
  *
  * ## An engine-internal option, never a wire key
@@ -37,7 +37,7 @@
  * ## The count is the statement's
  *
  * The driver answers the number of groups the statement formed before its cut
- * on every row, under {@link AGGREGATE_GROUP_COUNT_COLUMN}; the engine takes it
+ * on every row, under {@link AGGREGATE_TOTAL_GROUPS_COLUMN}; the engine takes it
  * off the rows and writes it to the request's {@link AggregateOrderCutOutcome}.
  * A driver that answered rows without it did not serve the cut, and its rows
  * are refused as a server fault, never served as an answer.
@@ -79,7 +79,7 @@ export const AGGREGATE_ORDER_CUT_DIRECTIVE: unique symbol = Symbol.for('objectst
  * the rows by the engine before anyone reads them; an aggregated column of the
  * same name is refused, so it never shadows one.
  */
-export const AGGREGATE_GROUP_COUNT_COLUMN = '__os_group_count';
+export const AGGREGATE_TOTAL_GROUPS_COLUMN = '__os_total_groups';
 
 /**
  * The most values a {@link AggregateOrderKey.rank} may list: a declared option
@@ -107,7 +107,7 @@ export interface AggregateOrderKey {
 export interface AggregateOrderCutOutcome {
   readonly kind: 'served';
   /** How many groups the statement formed before the cut. */
-  readonly groupCount: number;
+  readonly totalGroups: number;
 }
 
 /**
@@ -134,7 +134,7 @@ export interface DriverAggregateOrderCut {
   }>;
   readonly limit?: number;
   /** The column to answer the pre-cut group count under, on every row. */
-  readonly groupCountColumn: string;
+  readonly totalGroupsColumn: string;
 }
 
 /**
@@ -215,11 +215,11 @@ export function assertAggregateOrderCutShape(
   if (limit !== undefined && !(typeof limit === 'number' && Number.isInteger(limit) && limit >= 1)) {
     throw refusal('INVALID_QUERY', object, `\`limit\` must be a whole number of groups, 1 or more; received ${JSON.stringify(limit)}.`);
   }
-  if (columns.includes(AGGREGATE_GROUP_COUNT_COLUMN)) {
+  if (columns.includes(AGGREGATE_TOTAL_GROUPS_COLUMN)) {
     throw refusal(
       'INVALID_QUERY',
       object,
-      `the aggregated row already projects a column named '${AGGREGATE_GROUP_COUNT_COLUMN}', the name the group count `
+      `the aggregated row already projects a column named '${AGGREGATE_TOTAL_GROUPS_COLUMN}', the name the group count `
       + 'is answered under. Rename that alias.',
     );
   }
@@ -322,7 +322,7 @@ export function aggregateOrderCutDirective(
       ...groupColumns.filter((c) => !named.has(c)).map((column) => ({ column, order: 'asc' as const })),
     ],
     ...(request.limit !== undefined ? { limit: request.limit } : {}),
-    groupCountColumn: AGGREGATE_GROUP_COUNT_COLUMN,
+    totalGroupsColumn: AGGREGATE_TOTAL_GROUPS_COLUMN,
   };
 }
 
@@ -343,11 +343,11 @@ export function takeAggregateGroupCount(
   request: AggregateOrderCutRequest,
 ): Record<string, unknown>[] {
   const list = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-  let groupCount = 0;
+  let totalGroups = 0;
   const out = list.map((row, i) => {
-    const raw = row?.[AGGREGATE_GROUP_COUNT_COLUMN];
+    const raw = row?.[AGGREGATE_TOTAL_GROUPS_COLUMN];
     const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
-    if (!Number.isInteger(n) || n < list.length || (i > 0 && n !== groupCount)) {
+    if (!Number.isInteger(n) || n < list.length || (i > 0 && n !== totalGroups)) {
       const err = new Error(
         `aggregate('${object}'): the driver '${driverNameOf(driver)}' answered an ordered and cut aggregate without `
         + 'the group count of its own statement, so its rows are not the answer and none is returned.',
@@ -357,10 +357,10 @@ export function takeAggregateGroupCount(
       err.httpStatus = 500;
       throw err;
     }
-    groupCount = n;
-    const { [AGGREGATE_GROUP_COUNT_COLUMN]: _count, ...rest } = row;
+    totalGroups = n;
+    const { [AGGREGATE_TOTAL_GROUPS_COLUMN]: _count, ...rest } = row;
     return rest;
   });
-  request.outcome = { kind: 'served', groupCount };
+  request.outcome = { kind: 'served', totalGroups };
   return out;
 }

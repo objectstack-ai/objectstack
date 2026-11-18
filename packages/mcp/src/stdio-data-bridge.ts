@@ -1383,7 +1383,23 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
           dropType: read.addedType,
         }).map((row) => serveStoredMetadataHashes(object, row, digest)),
       );
-      return { object, records, total: records.length };
+      // [#35138] The page facts the data door answers (`findData`): a paged
+      // read is counted under the same filter, as the caller, so `total` is
+      // the match total and `hasMore` says whether rows remain past this page.
+      // Before, a capped page answered `total: records.length` and claimed to
+      // be the whole set. ⛔ A total this bridge did not count is never stated:
+      // a count that fails leaves `total` out, and `hasMore` answers from the
+      // page alone, the door's `$count=false` arm (a full page may have more).
+      const limit = typeof opts?.limit === 'number' ? opts.limit : undefined;
+      const offset = typeof opts?.offset === 'number' && opts.offset > 0 ? opts.offset : 0;
+      if (limit === undefined && offset === 0) return { object, records, total: records.length, hasMore: false };
+      let counted: number;
+      try {
+        counted = await engine.count(object, opts?.where ? { where: opts.where } : {}, { context });
+      } catch {
+        return { object, records, hasMore: limit !== undefined && records.length >= limit };
+      }
+      return { object, records, total: counted, hasMore: offset + records.length < counted };
     },
 
     async get(object, id) {
@@ -1609,21 +1625,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const orderCut: {
         orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
         limit?: number;
-        outcome?: { kind?: unknown; groupCount?: unknown };
+        outcome?: { kind?: unknown; totalGroups?: unknown };
       } = {
         orderBy: opts.orderBy,
         ...(typeof opts.limit === 'number' ? { limit: opts.limit } : {}),
       };
       const { orderBy: _orderBy, limit: _limit, ...read } = opts;
       const rows = await runAggregate(object, read, orderCut);
-      const groupCount = orderCut.outcome?.groupCount;
-      if (orderCut.outcome?.kind !== 'served' || typeof groupCount !== 'number') {
+      const totalGroups = orderCut.outcome?.totalGroups;
+      if (orderCut.outcome?.kind !== 'served' || typeof totalGroups !== 'number') {
         throw new Error(
           `aggregate_records on '${object}': the ordered and cut aggregate came back without being served by the `
           + 'driver\'s own statement, so its rows are not the answer and none is returned.',
         );
       }
-      return { rows, groupCount };
+      return { rows, totalGroups };
     };
   }
 

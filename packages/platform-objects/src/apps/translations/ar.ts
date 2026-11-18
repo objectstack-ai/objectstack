@@ -20,6 +20,7 @@ export const ar: TranslationData = {
         nav_account_profile: { label: 'الملف الشخصي' },
         nav_account_mobile_app: { label: 'تطبيق الجوال' },
         nav_account_notifications: { label: 'الإشعارات' },
+        nav_account_notification_settings: { label: 'إعدادات الإشعارات' },
         nav_account_approvals: { label: 'بانتظار موافقتي' },
         nav_account_memberships: { label: 'مؤسساتي' },
         nav_account_linked: { label: 'الحسابات المرتبطة' },

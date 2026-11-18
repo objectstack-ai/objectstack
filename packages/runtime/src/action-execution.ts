@@ -991,7 +991,7 @@ export async function callData(deps: ActionExecutionDeps,
                         + 'driver\'s own statement, so its rows are not the answer and none is returned.',
                 };
             }
-            return { object: params.object, rows: rows ?? [], groupCount: orderCut.outcome.groupCount };
+            return { object: params.object, rows: rows ?? [], totalGroups: orderCut.outcome.totalGroups };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }

@@ -81,7 +81,7 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
         { customer: 'c66', revenue: 665 },
         { customer: 'c65', revenue: 655 },
       ],
-      groupCount: CUSTOMERS,
+      totalGroups: CUSTOMERS,
     });
     // One statement: grouped, counted, ordered and cut in the database.
     const ran = statements.filter((s) => /group by/i.test(s));
@@ -94,7 +94,7 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
   it('ordered by a group key, ascending', async () => {
     const answer = await bridge.aggregateGroups(OBJECT, { ...REVENUE, orderBy: [{ field: 'customer', order: 'asc' }], limit: 3 });
     expect(answer.rows.map((r: any) => r.customer)).toEqual(['c00', 'c01', 'c02']);
-    expect(answer.groupCount).toBe(CUSTOMERS);
+    expect(answer.totalGroups).toBe(CUSTOMERS);
   });
 
   it('a declared order (a rank on a group key) reaches the statement: the listed groups first, in their order', async () => {
@@ -105,7 +105,7 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
       limit: 3,
     });
     expect(answer.rows.map((r: any) => r.customer)).toEqual(['c03', 'c01', 'c02']);
-    expect(answer.groupCount).toBe(CUSTOMERS);
+    expect(answer.totalGroups).toBe(CUSTOMERS);
     const ran = statements.filter((s) => /group by/i.test(s));
     expect(ran[0]).toMatch(/order by case [^ ]+ when \? then 0 when \? then 1 when \? then 2 else 3 end asc/i);
   });
@@ -120,6 +120,6 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
   it('CONTROL — aggregate with no order answers every group as before, with no count column', async () => {
     const rows = await bridge.aggregate(OBJECT, REVENUE);
     expect(rows).toHaveLength(CUSTOMERS);
-    expect(rows[0]).not.toHaveProperty('__os_group_count');
+    expect(rows[0]).not.toHaveProperty('__os_total_groups');
   });
 });

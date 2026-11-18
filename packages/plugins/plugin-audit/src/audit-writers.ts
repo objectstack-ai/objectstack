@@ -17,7 +17,7 @@ import type { IDataEngine, WriteObservabilityOptions } from '@objectstack/spec/c
 // data path", and the engine's read path OMITS it. The ledger is a second exit
 // for the same value, so it honours the same declaration the same way — the
 // producer's declaration consumed, not a masking rule of this package's own.
-import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
+import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields, platformSystemApi } from '@objectstack/objectql/core';
 // [#24625] The mask of a mail-log row's body columns in a copy of it.
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 // The key-material columns no copy of a row carries (`key-material-copy.ts`).
@@ -264,8 +264,10 @@ export interface AuditWriterOptions {
  *    separately and only over the objects a deployment opts in: record-detail
  *    views, batched off the request path. This writer stays write-only.
  *
- * All writes go through `ctx.api.sudo()` so they bypass record-level
- * permissions and always succeed regardless of the calling user's RBAC.
+ * All writes go through the platform's own system api over `ctx.api`
+ * (`platformSystemApi`, objectql) so they bypass record-level permissions and
+ * always succeed regardless of the calling user's RBAC — and so they are the
+ * platform's rows, never an insert of the automation whose write they record.
  */
 
 /**
@@ -1504,6 +1506,16 @@ export function installAuditWriters(
    * writer advances it before the activity row, so after a throw it still names
    * the table whose insert threw. ⛔ Not caught here — the failure must keep
    * reaching the caller's `catch`, which is the site the gate holds at `error`.
+   *
+   * [#35052] Both rows are written through the platform's own system api
+   * (`platformSystemApi`, objectql), never `api.sudo()`. `sudo()` keeps the
+   * write's provenance — the app-automation elevation mark of an action body
+   * or a system hook, a flow run's `flowRunId` — so under such a write the
+   * platform's own ledger rows were judged as the automation's insert into an
+   * append-only object (plugin-security's deprecation today, its refusal once
+   * that arm ships, which would lose the audit trail of every such write). An
+   * api the engine did not build has no context to derive from and keeps its
+   * own `sudo()`.
    */
   const persistAuditTrailRow = async (
     api: any,
@@ -1511,7 +1523,7 @@ export function installAuditWriters(
     activityRow: Record<string, any> | undefined,
     progress: AuditTrailWriteProgress,
   ): Promise<void> => {
-    const sys = api.sudo();
+    const sys = platformSystemApi(api) ?? api.sudo();
     await sys.object('sys_audit_log').create(auditRow);
     if (activityRow) {
       progress.writing = 'sys_activity';

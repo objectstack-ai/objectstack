@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import {
-  AGGREGATE_GROUP_COUNT_COLUMN,
+  AGGREGATE_TOTAL_GROUPS_COLUMN,
   AGGREGATE_ORDER_CUT,
   AGGREGATE_ORDER_CUT_DIRECTIVE,
   type AggregateOrderCutRequest,
@@ -93,8 +93,8 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
 
   it('hands the driver the order (the request\'s keys, then the unnamed group keys ascending), the limit and the count column; takes the count off the rows', async () => {
     rec.answer([
-      { customer: 'c9', area: 'west', revenue: 90, n: 3, [AGGREGATE_GROUP_COUNT_COLUMN]: 7 },
-      { customer: 'c8', area: 'east', revenue: 80, n: 2, [AGGREGATE_GROUP_COUNT_COLUMN]: 7 },
+      { customer: 'c9', area: 'west', revenue: 90, n: 3, [AGGREGATE_TOTAL_GROUPS_COLUMN]: 7 },
+      { customer: 'c8', area: 'east', revenue: 80, n: 2, [AGGREGATE_TOTAL_GROUPS_COLUMN]: 7 },
     ]);
     const request = TOP_TWO();
     const rows = await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request));
@@ -102,7 +102,7 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
       { customer: 'c9', area: 'west', revenue: 90, n: 3 },
       { customer: 'c8', area: 'east', revenue: 80, n: 2 },
     ]);
-    expect(request.outcome).toEqual({ kind: 'served', groupCount: 7 });
+    expect(request.outcome).toEqual({ kind: 'served', totalGroups: 7 });
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].ast[AGGREGATE_ORDER_CUT_DIRECTIVE]).toEqual({
       orderBy: [
@@ -111,7 +111,7 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
         { column: 'area', order: 'asc' },
       ],
       limit: 2,
-      groupCountColumn: AGGREGATE_GROUP_COUNT_COLUMN,
+      totalGroupsColumn: AGGREGATE_TOTAL_GROUPS_COLUMN,
     });
   });
 
@@ -119,7 +119,7 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
     rec.answer([]);
     const request: AggregateOrderCutRequest = { orderBy: [{ field: 'area', order: 'desc' }] };
     expect(await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request))).toEqual([]);
-    expect(request.outcome).toEqual({ kind: 'served', groupCount: 0 });
+    expect(request.outcome).toEqual({ kind: 'served', totalGroups: 0 });
     const directive = rec.calls[0].ast[AGGREGATE_ORDER_CUT_DIRECTIVE];
     expect(directive.orderBy[0]).toEqual({ column: 'area', order: 'desc' });
     expect(directive).not.toHaveProperty('limit');
@@ -144,7 +144,7 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
       { column: 'area', order: 'asc', rank: ['west', 'east'] },
       { column: 'customer', order: 'asc' },
     ]);
-    expect(request.outcome).toEqual({ kind: 'served', groupCount: 0 });
+    expect(request.outcome).toEqual({ kind: 'served', totalGroups: 0 });
   });
 
   it('a malformed request is INVALID_QUERY, and the driver is never asked', async () => {
@@ -226,7 +226,7 @@ describe('[aggregate order and cut] engine.aggregate — refused on every driver
       rec.answer([]);
       const request = TOP_TWO();
       await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request));
-      expect(request.outcome, name).toEqual({ kind: 'served', groupCount: 0 });
+      expect(request.outcome, name).toEqual({ kind: 'served', totalGroups: 0 });
     }
   });
 });

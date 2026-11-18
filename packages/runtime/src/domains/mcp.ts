@@ -1250,7 +1250,7 @@ export function buildMcpBridge(
          * [aggregate order and cut] `aggregate_records` with an `orderBy` /
          * `limit`: the same engine door as `aggregate` above, with the
          * engine's request on its own symbol key (never a wire key). `callData`
-         * reads the engine's outcome back and answers its `groupCount`; a read
+         * reads the engine's outcome back and answers its `totalGroups`; a read
          * the driver's statement did not serve is refused there.
          */
         aggregateGroups: async (object: string, o: any) => {
@@ -1272,14 +1272,14 @@ export function buildMcpBridge(
                 envId,
                 ec,
             );
-            if (typeof res?.groupCount !== 'number') {
+            if (typeof res?.totalGroups !== 'number') {
                 throw {
                     statusCode: 500,
                     message: `The ordered and cut aggregate of '${object}' came back without its group count, so its `
                         + 'rows are not the answer and none is returned.',
                 };
             }
-            return { rows: res?.rows ?? [], groupCount: res.groupCount };
+            return { rows: res?.rows ?? [], totalGroups: res.totalGroups };
         },
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────

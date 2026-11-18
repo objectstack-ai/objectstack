@@ -26,7 +26,7 @@ import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dial
 import { AGGREGATE_ORDER_CUT_DIRECTIVE, type AggregateOrderCutDirective } from './sql-driver-aggregation.js';
 
 const TABLE = 'os_agg_order_cut_order';
-const COUNT_COLUMN = '__os_group_count';
+const COUNT_COLUMN = '__os_total_groups';
 
 /**
  * 60 customers `c00`..`c59` in org_a, each with two orders (`i * 10` and `5`),
@@ -59,7 +59,7 @@ const query = (directive: unknown, over: Partial<DriverQuery> = {}): DriverQuery
 const cut = (
   orderBy: AggregateOrderCutDirective['orderBy'],
   limit?: number,
-): AggregateOrderCutDirective => ({ orderBy, ...(limit !== undefined ? { limit } : {}), groupCountColumn: COUNT_COLUMN });
+): AggregateOrderCutDirective => ({ orderBy, ...(limit !== undefined ? { limit } : {}), totalGroupsColumn: COUNT_COLUMN });
 
 const customers = (rows: Array<Record<string, unknown>>) => rows.map((r) => r.customer);
 

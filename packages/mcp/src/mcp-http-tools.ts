@@ -212,7 +212,9 @@ export interface McpDataBridge {
    * that judge what a field declares (`required`, `defaultValue`, a
    * `reference`'s target, an external binding) read the definition, which
    * `describeObject`'s projection does not carry. Never rendered to the
-   * caller: only the gate's findings are.
+   * caller: only the gate's findings are. [#35138] `aggregate_records` reads
+   * two facts off it the same way, a group key's declared option order and
+   * an amount's fixed currency, and renders those alone.
    *
    * OPTIONAL, like {@link optionFieldsOf}: a bridge that omits it gets the
    * shared validator's verdict alone, exactly as before.
@@ -282,7 +284,7 @@ export interface McpDataBridge {
   /**
    * `aggregate_records` with an `orderBy` or a `limit`: the groups ORDERED by
    * an aggregated column (an aggregation alias or a group key's projected
-   * name), CUT to at most `limit`, and `groupCount`, how many groups existed
+   * name), CUT to at most `limit`, and `totalGroups`, how many groups existed
    * before the cut — all three computed by the driver's own statement
    * (`@objectstack/objectql` `aggregate-order-cut.ts`, which the bridge
    * reaches through `engine.aggregate`'s read option). The bridge runs it
@@ -310,7 +312,7 @@ export interface McpDataBridge {
       orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
       limit?: number;
     },
-  ): Promise<{ rows: unknown[]; groupCount: number }>;
+  ): Promise<{ rows: unknown[]; totalGroups: number }>;
   /**
    * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
    * query, each with its dimensions and measures, their business vocabulary,
@@ -731,6 +733,194 @@ function textResult(value: unknown) {
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true as const };
+}
+
+/**
+ * [#35138] The fields of `objectName` as this caller is served them
+ * ({@link McpDataBridge.servedObjectDefinitionOf}): the map
+ * `aggregate_records` reads a group key's declared options and an amount's
+ * fixed currency from. A field the caller's view removed is not in it, so
+ * nothing read from it names a field the caller cannot see.
+ *
+ * `undefined` when the bridge cannot say — no member, no object, or a throw —
+ * and the tool then renders exactly what it rendered before. ⛔ This read
+ * never fails the aggregate it annotates.
+ */
+async function servedFieldsOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
+  try {
+    const fields = (await bridge.servedObjectDefinitionOf(objectName))?.fields;
+    return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+      ? (fields as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The served field `name`, or `undefined` when the caller's view has no such field. */
+function servedFieldOf(fields: Record<string, unknown>, name: unknown): Record<string, unknown> | undefined {
+  if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const def = fields[name];
+  return def !== null && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+}
+
+/**
+ * [#35138] The field types whose group value is ONE declared option, so the
+ * groups have the order the author declared the options in. A `multiselect`
+ * groups by a combination of options, which has no declared order.
+ */
+const OPTION_ORDERED_GROUP_TYPES: ReadonlySet<string> = new Set(['select', 'radio']);
+
+/**
+ * Each declared option value of `def` with its position, or `undefined` when
+ * the served field is not a single-option field declaring options.
+ */
+function declaredOptionRank(def: Record<string, unknown> | undefined): Map<unknown, number> | undefined {
+  if (!def || typeof def.type !== 'string' || !OPTION_ORDERED_GROUP_TYPES.has(def.type)) return undefined;
+  if (!Array.isArray(def.options)) return undefined;
+  const rank = new Map<unknown, number>();
+  for (const option of def.options) {
+    if (option === null || typeof option !== 'object' || !('value' in option)) continue;
+    const value = (option as { value: unknown }).value;
+    if (!rank.has(value)) rank.set(value, rank.size);
+  }
+  return rank.size > 0 ? rank : undefined;
+}
+
+/**
+ * [#35138] The leading group keys whose groups follow a declared option order,
+ * each with its {@link declaredOptionRank}: read in `groupBy` order while each
+ * key is a single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served
+ * schema declares options for; the first key that is not one ends the reading.
+ * Both paths of `aggregate_records` take the rule from here: the uncut path
+ * sorts by it ({@link inDeclaredOptionOrder}), the order-and-cut path hands it
+ * to the database ({@link declaredOptionOrderBy}).
+ */
+function declaredOptionOrderKeys(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ column: string; rank: Map<unknown, number> }> {
+  const keys: Array<{ column: string; rank: Map<unknown, number> }> = [];
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    // A bucketed key is a period, not a declared option.
+    if (item.dateGranularity !== undefined) break;
+    const rank = declaredOptionRank(servedFieldOf(fields, item.field));
+    if (!rank) break;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keys.push({ column, rank });
+  }
+  return keys;
+}
+
+/**
+ * The most values one order key's `rank` may list: `@objectstack/objectql`'s
+ * `AGGREGATE_ORDER_RANK_MAX` (a declared option list, not a data set), which
+ * this package does not import at runtime. A longer declared list ends the
+ * reading at its key rather than send a rank the engine refuses.
+ */
+const ORDER_RANK_MAX = 500;
+
+/**
+ * [aggregate order and cut] The declared option order of
+ * {@link declaredOptionOrderKeys} as the order-and-cut path's `orderBy`, for a
+ * call with a `limit` and no `orderBy` of its own: each leading option-ordered
+ * key ascending by its `rank`, so the database orders the groups, and a value
+ * no option declares (a NULL among them) after every declared one, before the
+ * cut. The engine orders the group keys after these ascending. Empty when no
+ * leading key has a declared order.
+ */
+function declaredOptionOrderBy(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ field: string; order: 'asc'; rank: Array<string | number> }> {
+  const orderBy: Array<{ field: string; order: 'asc'; rank: Array<string | number> }> = [];
+  for (const { column, rank } of declaredOptionOrderKeys(groupBy, fields)) {
+    const values = [...rank.keys()];
+    if (values.length > ORDER_RANK_MAX || !values.every((v) => typeof v === 'string' || typeof v === 'number')) break;
+    orderBy.push({ field: column, order: 'asc', rank: values as Array<string | number> });
+  }
+  return orderBy;
+}
+
+/**
+ * [#35138] `aggregate_records`' groups in the option order the caller's
+ * served schema declares, for a call that states no order of its own.
+ *
+ * The group keys are read in `groupBy` order while each one is a
+ * single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served schema
+ * declares options for; the first key that is not one ends the reading, so
+ * the groups under it keep the order the driver answered. A value no option
+ * declares (a null, a value stored before an option was removed) sorts after
+ * every declared one. The sort is stable: groups the declared order does not
+ * tell apart keep the driver's order. With no such leading key, `rows` comes
+ * back as it is.
+ *
+ * Run over every group, BEFORE the tool's cap, so the groups the cap keeps
+ * are the first in the declared order. Reordering a list the driver already
+ * answered whole runs no second query.
+ */
+function inDeclaredOptionOrder(
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): unknown[] {
+  const keys = declaredOptionOrderKeys(groupBy, fields);
+  if (keys.length === 0) return rows;
+  const position = (row: unknown, key: { column: string; rank: Map<unknown, number> }): number => {
+    const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[key.column] : undefined;
+    return key.rank.get(value) ?? key.rank.size;
+  };
+  return [...rows].sort((a, b) => {
+    for (const key of keys) {
+      const by = position(a, key) - position(b, key);
+      if (by !== 0) return by;
+    }
+    return 0;
+  });
+}
+
+/**
+ * [#35138] The aggregate functions whose value is an amount in the field's
+ * currency: the ones that read the amount (ADR-0144 Open item 10, the set
+ * `@objectstack/objectql`'s `record-currency-aggregate-door.ts` judges).
+ * `count` reads no amount and `count_distinct` counts values, so neither
+ * answers a currency.
+ */
+const AMOUNT_AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
+
+/**
+ * [#35138] The currency of each amount column whose field has ONE currency,
+ * by the column's alias: a served field whose `currencyConfig` is
+ * `currencyMode: 'fixed'` answers its `defaultCurrency`. Empty when no
+ * column has one.
+ *
+ * The other two modes answer nothing here. A `record`-mode amount is
+ * answered by the engine only grouped by its own currency code field
+ * (`record-currency-aggregate-door.ts`, ADR-0144 D6), so each group's code is
+ * already in its row. A `dynamic`-mode amount has no currency of its own: it
+ * displays in the tenant default currency, which the served schema does not
+ * carry.
+ */
+function fixedAmountCurrencies(
+  aggregations: NonNullable<EngineAggregateOptions['aggregations']>,
+  fields: Record<string, unknown>,
+): Record<string, string> {
+  const currencies: Record<string, string> = {};
+  for (const aggregation of aggregations) {
+    if (!AMOUNT_AGGREGATE_FUNCTIONS.has(aggregation.function)) continue;
+    const config = servedFieldOf(fields, aggregation.field)?.currencyConfig;
+    if (config === null || typeof config !== 'object') continue;
+    const { currencyMode, defaultCurrency } = config as { currencyMode?: unknown; defaultCurrency?: unknown };
+    if (currencyMode === 'fixed' && typeof defaultCurrency === 'string' && defaultCurrency !== '') {
+      currencies[aggregation.alias] = defaultCurrency;
+    }
+  }
+  return currencies;
 }
 
 /**
@@ -1829,6 +2019,54 @@ function wireCodeOf(err: unknown, thrownCode: string): string {
   if (!isEngineDuplicateRecordEnvelope(err)) return thrownCode;
   const armCode = structuredCodeAnswer(err)?.body.code;
   return typeof armCode === 'string' ? armCode : thrownCode;
+}
+
+/**
+ * [#35138] May `query_records` read one row past its page, to learn whether
+ * the page was capped?
+ *
+ * The data door's read window REFUSES, never clamps, a read asking for more
+ * rows than `OS_DATA_MAX_PAGE_SIZE` or walking past `OS_DATA_QUERY_ROW_BUDGET`
+ * (`@objectstack/types`' `query-read-limits.ts`). A probe row that crosses
+ * either would turn a page the caller may read into a refusal, so there the
+ * page is read exactly as asked and the door's counted `hasMore` decides
+ * ({@link servedQueryPage}).
+ */
+function queryPageProbeFits(page: number, offset: number | undefined): boolean {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits();
+  if (maxPageSize !== undefined && page + 1 > maxPageSize) return false;
+  if (rowBudget !== undefined && (offset ?? 0) + page + 1 > rowBudget) return false;
+  return true;
+}
+
+/**
+ * [#35138] Serve one `query_records` page, and say when it was capped.
+ *
+ * A page read with a probe (`probed`: the bridge was asked for `page + 1`
+ * rows) is capped when the probe row came back: the extra row is dropped and
+ * the answer carries `truncated: true`. A page read without one is capped
+ * when the door's own counted `hasMore` says so. `truncated` is present only
+ * when true, so an answer whose page holds every matching row (exactly
+ * `page` rows included) is unchanged. `hasMore`, where the bridge answers it,
+ * states the same fact: it was counted against the probe-widened read, so it
+ * is restated from the probe rather than left one row out.
+ *
+ * Anything that is not a `{ records: [...] }` object is served as it came —
+ * the {@link withDelegationNotice} posture: no wrapper is invented to carry a
+ * flag about a shape this tool cannot read.
+ */
+function servedQueryPage(result: unknown, page: number, probed: boolean): unknown {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return result;
+  const answer = result as Record<string, unknown>;
+  const records = answer.records;
+  if (!Array.isArray(records)) return result;
+  const truncated = probed ? records.length > page : answer.hasMore === true;
+  return {
+    ...answer,
+    records: probed ? records.slice(0, page) : records,
+    ...(probed && typeof answer.hasMore === 'boolean' ? { hasMore: truncated } : {}),
+    ...(truncated ? { truncated: true as const } : {}),
+  };
 }
 
 /**
@@ -2942,6 +3180,11 @@ export function registerObjectTools(
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
           'Runs under the caller\'s permissions and row-level security. ' +
+          // [#35138] A capped page is one page, never the set: the model is
+          // told not to sum, count or rank it as if whole.
+          'The answer is one page of at most limit rows. When more records match, it carries "truncated": true: ' +
+          'the rows are not all of them, so do not sum, count or rank them as if whole; read on with offset, ' +
+          'or, where it is offered, use aggregate_records for totals and breakdowns. ' +
           'A filter value "{current_user_id}" stands for you. ' +
           // [#32442] The console's My Pending list, filter for filter: the
           // participant read alone also serves requests the caller submitted
@@ -3003,13 +3246,21 @@ export function registerObjectTools(
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
-          const result = await bridge.query(objectName, {
-            where,
-            fields,
-            limit: Math.min(limit ?? maxLimit, maxLimit),
-            offset,
-            orderBy,
-          });
+          // [#35138] A capped page says so: one row past the page is asked
+          // for, and its coming back is the cap (`servedQueryPage`).
+          const page = Math.min(limit ?? maxLimit, maxLimit);
+          const probed = queryPageProbeFits(page, offset);
+          const result = servedQueryPage(
+            await bridge.query(objectName, {
+              where,
+              fields,
+              limit: probed ? page + 1 : page,
+              offset,
+              orderBy,
+            }),
+            page,
+            probed,
+          );
           // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
           // the agent ceiling NARROWED is served with the narrowing stated. The
           // rows are still served — a partial answer is the most useful true
@@ -3037,12 +3288,16 @@ export function registerObjectTools(
           description:
             'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
             'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
+            // [#35138] The two facts the answer carries from the served schema.
+            'Groups of a select field come back in the order the field declares its options. ' +
+            'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
+            'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
             'For a ranking (top or bottom N), set orderBy to an aggregation alias or a group key and limit to N: ' +
-            'the database orders and cuts the groups, and groupCount says how many groups existed before the cut. ' +
+            'the database orders and cuts the groups, and totalGroups says how many groups existed before the cut. ' +
             `At most ${maxLimit} groups come back; truncated: true says more existed. ` +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
@@ -3132,11 +3387,19 @@ export function registerObjectTools(
           const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
+            // [#35138] Read off the object as the caller is served it: the
+            // declared option order of a select group key, and the one
+            // currency of a fixed-currency amount. Only when the call has a
+            // group key or an amount column to read it for.
+            const readServedFields = () => (groupBy?.length ?? 0) > 0
+              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
+              ? servedFieldsOf(bridge, objectName)
+              : Promise.resolve(undefined);
             if (orderBy !== undefined || limit !== undefined) {
               // [aggregate order and cut] Ordered, cut and counted by the
               // driver's own statement, through the bridge's member for it;
               // one group past the cap is asked for, so `truncated` is a fact
-              // (the capped-list key every read tool shares), and `groupCount`
+              // (the capped-list key every read tool shares), and `totalGroups`
               // is the statement's own count of the groups before the cut.
               // ⛔ Never sorted or sliced from an uncut list here.
               if (typeof bridge.aggregateGroups !== 'function') {
@@ -3149,21 +3412,26 @@ export function registerObjectTools(
                 });
               }
               const cap = Math.min(limit ?? maxLimit, maxLimit);
+              const fields = await readServedFields();
               const answer = await bridge.aggregateGroups(objectName, {
                 where,
                 groupBy,
                 aggregations,
                 timezone,
-                orderBy: orderBy ?? [],
+                // [#35138] A call that states no order of its own gets the
+                // declared option order, taken by the database before the cut.
+                // ⛔ An `orderBy` the caller sent is never changed.
+                orderBy: orderBy ?? (fields ? declaredOptionOrderBy(groupBy, fields) : []),
                 limit: cap + 1,
               });
               const groups = Array.isArray(answer?.rows) ? answer.rows : [];
               const cut = groups.length > cap;
+              const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
               return textResult({
                 rows: cut ? groups.slice(0, cap) : groups,
-                groupCount: answer.groupCount,
-                totalGroups: answer.groupCount,
+                totalGroups: answer.totalGroups,
                 ...(cut ? { truncated: true } : {}),
+                ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
               });
             }
             const rows = (await aggregateFn(objectName, {
@@ -3172,16 +3440,17 @@ export function registerObjectTools(
               aggregations,
               timezone,
             })) ?? [];
+            const fields = await readServedFields();
+            const groups = fields ? inDeclaredOptionOrder(rows, groupBy, fields) : rows;
+            const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
-            const truncated = rows.length > maxLimit;
+            const truncated = groups.length > maxLimit;
             return textResult({
-              rows: truncated ? rows.slice(0, maxLimit) : rows,
-              // How many groups existed before the cap: the card's
-              // `groupCount`, beside the earlier `totalGroups` it equals.
-              groupCount: rows.length,
+              rows: truncated ? groups.slice(0, maxLimit) : groups,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
+              ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
             });
           } catch (err) {
             return dataDoorErrorResult(err, 'aggregate_records', objectName);

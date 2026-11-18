@@ -549,13 +549,13 @@ export class AggregationFacet {
       if (unknown !== undefined) {
         throw aggregateOrderCutFault(`it orders by '${unknown.column}', which the grouped statement does not project`);
       }
-      if (projected.has(orderCut.groupCountColumn)) {
-        throw aggregateOrderCutFault(`the group count column '${orderCut.groupCountColumn}' is also a projected column`);
+      if (projected.has(orderCut.totalGroupsColumn)) {
+        throw aggregateOrderCutFault(`the group count column '${orderCut.totalGroupsColumn}' is also a projected column`);
       }
       const groups = this.aliasIdentifierSql('__os_groups');
       let outer = this.knex
         .select(this.knex.raw(`${groups}.*`))
-        .select(this.knex.raw(`count(*) over () as ${this.aliasIdentifierSql(orderCut.groupCountColumn)}`))
+        .select(this.knex.raw(`count(*) over () as ${this.aliasIdentifierSql(orderCut.totalGroupsColumn)}`))
         .from(builder.as('__os_groups'));
       if (options?.transaction) outer = outer.transacting(options.transaction as Knex.Transaction);
       for (const key of orderCut.orderBy) {
@@ -573,7 +573,7 @@ export class AggregationFacet {
         }
       }
       if (orderCut.limit !== undefined) outer.limit(orderCut.limit);
-      presentedOutput.set(orderCut.groupCountColumn, 'number');
+      presentedOutput.set(orderCut.totalGroupsColumn, 'number');
       statement = outer;
     }
     let rows: unknown[];
@@ -642,7 +642,7 @@ export interface AggregateOrderCutDirective {
   /** The most groups to answer; absent = every group. */
   readonly limit?: number;
   /** The column every row answers the pre-cut group count under. */
-  readonly groupCountColumn: string;
+  readonly totalGroupsColumn: string;
 }
 
 /** A directive the engine did not compose: refused, INTERNAL_ERROR / 500, before anything runs. */
@@ -666,7 +666,7 @@ export function aggregateOrderCutOf(query: DriverQuery): AggregateOrderCutDirect
       && (k.rank === undefined || (Array.isArray(k.rank) && k.rank.length >= 1
         && k.rank.every((v: unknown) => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))))))
     && (d.limit === undefined || (typeof d.limit === 'number' && Number.isInteger(d.limit) && d.limit >= 1))
-    && typeof d.groupCountColumn === 'string' && d.groupCountColumn !== '';
+    && typeof d.totalGroupsColumn === 'string' && d.totalGroupsColumn !== '';
   if (!ok) throw aggregateOrderCutFault('malformed');
   return d as AggregateOrderCutDirective;
 }
