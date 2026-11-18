@@ -770,6 +770,32 @@ export class ObjectRegistrationFacet {
   }
 
   /**
+   * [#34901] The body of `SchemaRegistry#getWithheldExtensionFields`; the
+   * method's docblock there is its contract. Read off
+   * {@link withholdDisabledExtensions}, the one reading of what a disable
+   * withholds, so this answer and the served fold cannot disagree.
+   */
+  static getWithheldExtensionFields(this: Pick<ObjectRegistrationHost, 'objectContributors' | 'resolveObjectKey' | 'withholdDisabledExtensions'>, name: string): Record<string, { packageId: string }> {
+    const fqn = this.resolveObjectKey(name);
+    const contributors = fqn === undefined ? undefined : this.objectContributors.get(fqn);
+    if (!contributors || contributors.length === 0) return {};
+    const withheld = this.withholdDisabledExtensions(contributors);
+    if (!withheld || withheld.withheldFields.size === 0) return {};
+    const out: Record<string, { packageId: string }> = {};
+    // In fold order, so a field two disabled packages both add names the
+    // first; any of them re-enabled serves it again.
+    for (const c of contributors) {
+      if (c.ownership !== 'extend' || withheld.kept.includes(c) || typeof c.packageId !== 'string') continue;
+      for (const field of fieldNamesOf(c.definition)) {
+        if (withheld.withheldFields.has(field) && !Object.prototype.hasOwnProperty.call(out, field)) {
+          out[field] = { packageId: c.packageId };
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * [#29903, #29872, ADR-0146 D8 item 3] An object as {@link resolveObject}
    * resolves it, but with the `extend` contributions `options` names left out
    * of the fold ({@link ObjectExtensionFoldOptions}), as if those packages had
@@ -792,16 +818,19 @@ export class ObjectRegistrationFacet {
     const asEnabled = options?.asEnabled !== undefined && this.isPackageDisabled(options.asEnabled)
       ? options.asEnabled
       : undefined;
-    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
+    // [#34901] …and `includeDisabledExtensions` folds EVERY disabled package in.
+    const includeDisabled = options?.includeDisabledExtensions === true;
+    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined || includeDisabled ? this.objectContributors.get(fqn) : undefined;
     if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
-      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled)
+      || (includeDisabled && c.ownership === 'extend' && this.isPackageDisabled(c.packageId)))) return this.resolveObject(fqn);
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
     const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
     // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}),
-    // except the one `asEnabled` names.
-    const withheld = this.withholdDisabledExtensions(kept, asEnabled);
+    // except the one `asEnabled` names — and none at all under `includeDisabledExtensions`.
+    const withheld = includeDisabled ? undefined : this.withholdDisabledExtensions(kept, asEnabled);
     return withheld
       ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
       : this.foldExtenders(kept, base);
@@ -1473,8 +1502,9 @@ export class ObjectRegistrationFacet {
     const registered = this.objectContributors.get(fqn);
     const listed = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
     // A disabled package's `extend` contributions are withheld, and taken off
-    // a base that already carries them, as on {@link resolveObject}.
-    const withheld = listed ? this.withholdDisabledExtensions(listed) : undefined;
+    // a base that already carries them, as on {@link resolveObject} — unless
+    // [#34901] `includeDisabledExtensions` asks for the storage fold.
+    const withheld = listed && options?.includeDisabledExtensions !== true ? this.withholdDisabledExtensions(listed) : undefined;
     const contributors = withheld?.kept ?? listed;
     const served = withheld ? withoutWithheldMembers(base as unknown as ServiceObject, withheld) : base as unknown as ServiceObject;
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) {

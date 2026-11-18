@@ -365,6 +365,14 @@ export const SPEC_ACTION_KEYS = [
   'submitText',
   'successMessage',
   'target',
+  // Added to `ActionSchema` by the action half of objectstack#34374: the
+  // sentences a `script` action's `js` body writes into records (`ctx.text`).
+  // The SERVER answers it — the body stores the sentence already picked in the
+  // organization's language — so it is listed for the reason `refusals` is:
+  // this array restates the spec's declared keys, so an action carrying it is
+  // not reported as having an unknown key. `ActionDef` does NOT declare it and
+  // the runner does not read it.
+  'texts',
   'type',
   'undoable',
   'variant',

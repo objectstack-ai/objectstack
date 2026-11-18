@@ -15,7 +15,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
@@ -56,7 +56,14 @@ metadata:
 ### Object Definition
 
 An **Object** is the fundamental data entity in ObjectStack. It maps to a
-database table and exposes automatic CRUD APIs.
+database table and exposes automatic CRUD APIs. As JSON (in TypeScript the
+same literal goes inside `ObjectSchema.create({...})`):
+
+```json
+{ "name": "crm_account", "label": "Account", "pluralLabel": "Accounts", "icon": "building",
+  "sharingModel": "public_read_write",
+  "fields": { "name": { "type": "text", "label": "Name", "required": true } } }
+```
 
 **Required properties:**
 
@@ -67,8 +74,7 @@ database table and exposes automatic CRUD APIs.
 | `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
 **`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
-removed). A *custom* object that omits it resolves to `private` at runtime, but
-the publish door rejects it before that:
+removed):
 
 | Value | Who can read / write |
 |:--|:--|
@@ -93,7 +99,7 @@ all (Relationship Patterns below).
 | `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
 | `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
-| `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
+| `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
@@ -279,8 +285,8 @@ lowercase option values — incorrect/correct examples: [rules/naming.md](./rule
 The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
 From here, three to get right: credentials are `secret` (**encrypted-at-rest**, ADR-0100) —
 never `password`, which on a generic object is **plaintext at rest**; `user` is the person
-picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`; see
-**objectstack-formula**).
+picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` envelope —
+`F\`...\`` in TypeScript; see **objectstack-formula**).
 
 - A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`
   and never `required`: a checkbox always holds one of its two values, so

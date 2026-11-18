@@ -24,6 +24,8 @@
     "ActionSchema": "ui/Action",
     "ActionSession": "ui/ActionSession",
     "ActionSessionSchema": "ui/ActionSession",
+    "ActionText": "ui/ActionText",
+    "ActionTextSchema": "ui/ActionText",
     "ActionType": "ui/ActionType",
     "AddRecordConfig": "ui/AddRecordConfig",
     "AddRecordConfigSchema": "ui/AddRecordConfig",

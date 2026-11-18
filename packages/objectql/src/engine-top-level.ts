@@ -2241,8 +2241,8 @@ export function undeclaredWriteFieldErrors(
  * projection and `driver-sql`'s `fieldHasColumn` use. `summary` is NOT here: a
  * roll-up HAS a column, and a caller-supplied value is persisted (measured on
  * #20805, SQLite and memory) — a separate question, not this door's. [#34672]
- * Its answer is the update's static-`readonly` strip
- * ({@link summaryFieldsLockedOnUpdate}), which exempts the `isSystem` write
+ * Its answer is the static-`readonly` strip on both verbs
+ * ({@link summaryFieldsLockedOnWrite}), which exempts the `isSystem` write
  * the roll-up recompute makes; this door, which runs in every context, would
  * take that write too.
  *
@@ -2432,12 +2432,23 @@ function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganizatio
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
  * disagree about the column. [#25062] The write preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnWrite}), as {@link updateStaticReadonlySubject}
+ * reads it on update: a person's or an import's starting value for a roll-up
+ * is taken and reported as `readonly`, and the create strip re-seeds the
+ * column with the empty-child-list value (`staticReadonlyCreateStrip`). The
+ * flag is added BEFORE {@link staticReadonlyInsertSubject} judges the schema,
+ * so its exclusions hold for the roll-ups too: a `sys_` object and a
+ * platform-internal `managedBy` bucket stay outside the subject. `isSystem`
+ * (seed loads, package installs, historical imports, the recompute) runs none
+ * of these passes and keeps the value it sends.
  */
 export function insertStaticReadonlySubject(
   schema: unknown,
   wallJudgesOrganization: boolean,
 ): ReturnType<typeof staticReadonlyInsertSubject> {
-  const subject = staticReadonlyInsertSubject(schema as any);
+  const subject = staticReadonlyInsertSubject(withSummaryRollUpsReadonly(schema) as any);
   if (!subject || !staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return subject;
   const fields = { ...subject.fields };
   delete fields[SystemFieldName.ORGANIZATION_ID];
@@ -2461,7 +2472,7 @@ export function insertStaticReadonlySubject(
  * `update`-mode preview's strip reads it too.
  *
  * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
- * ({@link summaryFieldsLockedOnUpdate}): the engine owns that value on
+ * ({@link summaryFieldsLockedOnWrite}): the engine owns that value on
  * update, so a person's or an import's write to it is taken and reported as
  * `readonly`, exactly as if the author had declared the flag. The roll-up's
  * own write is `isSystem` and skips these passes. Because the lock lives in
@@ -2469,37 +2480,55 @@ export function insertStaticReadonlySubject(
  */
 export function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
   const sparesOrganization = staticReadonlySparesOrganization(schema, wallJudgesOrganization);
-  const rollUps = summaryFieldsLockedOnUpdate(schema);
-  if (!sparesOrganization && rollUps.length === 0) return schema;
-  const { name, fields } = schema as { name?: string; fields: Record<string, unknown> };
+  const locked = withSummaryRollUpsReadonly(schema);
+  if (!sparesOrganization) return locked;
+  const { name, fields } = locked as { name?: string; fields: Record<string, unknown> };
   const kept = { ...fields };
-  if (sparesOrganization) delete kept[SystemFieldName.ORGANIZATION_ID];
-  for (const field of rollUps) kept[field] = { ...(kept[field] as Record<string, unknown>), readonly: true };
+  delete kept[SystemFieldName.ORGANIZATION_ID];
   return { name, fields: kept };
 }
 
 /**
- * [#34672] The roll-up `summary` fields an UPDATE judges read-only although
- * the author did not declare `readonly: true`. The engine computes a roll-up
- * from its child rows and writes it through `update()` under an `isSystem`
- * context (`recomputeSummaries`, the backfill, the enable refresh), which the
- * static strip exempts. So the only writes this lock takes are a caller's:
- * a REST `PATCH`, an import with `writeMode: 'update'`, a predicate update.
- * Before it, such a write was stored and read downstream until the next
- * child write recomputed the roll-up.
+ * [#34672] `schema` with every field {@link summaryFieldsLockedOnWrite} names
+ * read as `readonly: true`, or `schema` itself when it names none. The one
+ * spelling of the roll-up lock that both static-`readonly` views read
+ * ({@link insertStaticReadonlySubject}, {@link updateStaticReadonlySubject}).
+ * The schema's other members are carried over, so the insert subject's
+ * `name` and `managedBy` exclusions judge the locked view as they judge the
+ * registered one.
+ */
+function withSummaryRollUpsReadonly(schema: unknown): unknown {
+  const rollUps = summaryFieldsLockedOnWrite(schema);
+  if (rollUps.length === 0) return schema;
+  const fields = { ...(schema as { fields: Record<string, unknown> }).fields };
+  for (const field of rollUps) fields[field] = { ...(fields[field] as Record<string, unknown>), readonly: true };
+  return { ...(schema as Record<string, unknown>), fields };
+}
+
+/**
+ * [#34672] The roll-up `summary` fields a person's or an import's write
+ * judges read-only although the author did not declare `readonly: true`, on
+ * create and on update alike. The engine computes a roll-up from its child
+ * rows and writes it through `update()` under an `isSystem` context
+ * (`recomputeSummaries`, the backfill, the enable refresh), which the static
+ * strip exempts. So the only writes this lock takes are a caller's: a REST
+ * `POST` or `PATCH`, an import in any `writeMode`, an MCP create, a
+ * predicate update. Before it, such a write was stored and read downstream
+ * until the next child write recomputed the roll-up.
  *
- * ⛔ UPDATE only. An insert keeps a caller's initial value: seed data and a
- * historical import may carry a pre-computed total, and
- * `initializeSummaryFields` seeds only the roll-ups the caller left out. See
- * the `summary` note on `RUNTIME_OWNED_FIELD_TYPES` in
- * `validation/rule-validator.ts`, which keeps the type out of the
- * insert-side runtime-owned strip for that reason.
+ * On create the taken value is replaced by the empty-child-list seed
+ * (`initializeSummaryFields`, re-run by `staticReadonlyCreateStrip`): `0`
+ * for `count` / `sum`, nothing for `min` / `max` / `avg`. Seed loads,
+ * package installs and historical imports write as the system principal and
+ * keep a pre-computed total. The `summary` note on
+ * `RUNTIME_OWNED_FIELD_TYPES` in `validation/rule-validator.ts` says why the
+ * type rides this strip and not the runtime-owned one.
  *
  * Keyed on `type === 'summary'` literally, like the roll-up readers
  * (`getSummaryDescriptors`, `summary-enable-refresh.ts`). A field already
  * declared `readonly: true` is left as it is.
  */
-export function summaryFieldsLockedOnUpdate(schema: unknown): string[] {
+export function summaryFieldsLockedOnWrite(schema: unknown): string[] {
   const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
   const locked: string[] = [];

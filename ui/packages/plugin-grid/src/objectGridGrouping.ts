@@ -10,7 +10,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn } from '@object-ui/types';
 import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import type { useSafeFieldLabel } from '@object-ui/react';
-import { buildCategoryOrder, buildCategoryRank } from '@object-ui/core';
+import { buildCategoryOrder, buildCategoryRank, isExpandableFieldType, referencedRecordTitle } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
 import type { GridCellFieldLike } from './cellRendererResolution';
 import { temporalCellFaceOf, type TemporalCellFace } from './temporalCellFace';
@@ -19,6 +19,7 @@ import {
   type GroupAggregationConfig, type GroupOptionRanks, type ServerGroupSource, type TemporalAggregateFaces,
 } from './useGroupedData';
 import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
+import { useLookupTargetDefs } from './lookupGroupTargets';
 import { normalizeColumns } from './objectGridColumns';
 import { honestGroupAggregations } from './recordCurrencyAggregates';
 import type { useGridTranslation } from './objectGridTranslations';
@@ -33,7 +34,16 @@ type RowLoad = ReturnType<typeof useObjectGridRowLoad>;
 type GroupingFieldDef = GridCellFieldLike & {
   type?: string;
   options?: Parameters<ReturnType<typeof useSafeFieldLabel>['translateOptions']>[2];
+  reference?: unknown;
+  displayField?: unknown;
 };
+
+/** The object a grouping field points at, when it is a lookup that names one. */
+function lookupTargetOf(def: GroupingFieldDef | undefined): string | undefined {
+  return isExpandableFieldType(def) && typeof def?.reference === 'string' && def.reference !== ''
+    ? def.reference
+    : undefined;
+}
 
 /**
  * The date-family face the cell of `field` paints in this grid: the authored
@@ -105,6 +115,19 @@ export function useObjectGridGrouping({
   // readable label for select/boolean fields rather than the raw value
   // (e.g. "In Progress" instead of "in_progress", "Yes" instead of "true").
   // A select value's label is the OBJECT FIELD's option label (objectui#11544).
+  // [objectstack#35053] The objects the client-grouped lookup fields point at:
+  // an expanded record is named by its target's declared `nameField` when the
+  // lookup declares no `displayField`, as the lookup's own cell names it. A
+  // server-grouped grid names its keys in the header read instead.
+  const lookupTargetDefs = useLookupTargetDefs(
+    dataSource,
+    serverGroupedFetch
+      ? []
+      : usableGroupingFields(schema.grouping?.fields).flatMap((gf) => {
+        const target = lookupTargetOf(objectFields?.[gf.field]);
+        return target ? [target] : [];
+      }),
+  );
   const groupValueFormatter = React.useMemo(() => {
     // [objectui#7217] ONE normalized entry list, shared with the
     // `useGroupedDataInOptionOrder` call below. Reading `grouping.fields` raw here threw
@@ -118,7 +141,12 @@ export function useObjectGridGrouping({
 
     // Per-field { value -> label } lookup, plus a per-field type so we can
     // handle booleans / dates / users without dedicated option lists.
-    const lookup = new Map<string, { type?: string; options?: Map<string, string> }>();
+    const lookup = new Map<string, {
+      type?: string;
+      options?: Map<string, string>;
+      target?: string;
+      displayField?: string;
+    }>();
 
     for (const gf of groupingFields) {
       const fieldName = gf.field;
@@ -151,15 +179,24 @@ export function useObjectGridGrouping({
         }
       }
 
+      const target = lookupTargetOf(objectDefField);
+      const displayField = objectDefField?.displayField;
       lookup.set(fieldName, {
         type: type || undefined,
         options: optionsMap.size > 0 ? optionsMap : undefined,
+        ...(target ? { target } : {}),
+        ...(target && typeof displayField === 'string' && displayField !== '' ? { displayField } : {}),
       });
     }
 
     return (field: string, value: any): string | undefined => {
       const meta = lookup.get(field);
       if (!meta) return undefined;
+      // A lookup's expanded record: its `displayField`, then the target's
+      // declared `nameField`, then the shared ladder. Grouped by its id still.
+      if (meta.target && value && typeof value === 'object' && !Array.isArray(value)) {
+        return referencedRecordTitle(lookupTargetDefs?.get(meta.target), value, meta.displayField);
+      }
       // Select / multi-select: resolve from options map first.
       if (meta.options) {
         const label = meta.options.get(String(value));
@@ -176,7 +213,7 @@ export function useObjectGridGrouping({
       }
       return undefined;
     };
-  }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t]);
+  }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t, lookupTargetDefs]);
 
   // [objectui#13234] Per grouping field whose cell paints a date-family face,
   // that face; `temporalCellText` draws the field's group headings through

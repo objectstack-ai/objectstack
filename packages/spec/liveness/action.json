@@ -134,6 +134,29 @@
         }
       }
     },
+    "texts": {
+      "status": "live",
+      "verifiedAt": "2026-11-17",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (the one reader: `ctx.text(key, params)` on a script action's sandboxed body answers a declared text in the organization's language, and a key the action does not declare as a fault naming the action and the key); packages/runtime/src/sandbox/body-runner.ts#actionBodyRunnerFactory (builds it for every action body invocation and hands it to the body's sandbox context); packages/runtime/src/sandbox/quickjs-runner.ts#installCtx (wires it onto the VM's `ctx.text`)",
+      "producer": "packages/runtime/src/app-plugin.ts#collectBundleActions and packages/runtime/src/app-artifact-handlers.ts#bindAppArtifactHandlers (hand the AUTHORED action, `texts` included, to the body runner factory); packages/spec/src/ui/action.zod.ts#refuseUndeclaredLiteralActionTextKey (refuses at save `texts` on an action that runs no js body, and a key the body asks for literally that `texts` does not declare)",
+      "note": "[#34374, action half; ruling 6913660232 parameter 7] The hook texts' twin (`HookSchema.texts`), seeded `live` with its reader in one change (Prime Directive 10): the key, the action body runner that answers it, the translation address (`objects.<object>._actions.<action>.texts.<key>.message` / `globalActions.<action>.texts.<key>.message`), `objectstack validate`'s key check and the i18n coverage walk. One entry shape for both (`data/declared-entry.zod.ts`) and one run-time answer (`hook-text.ts`). Never the caller's language (parameter 2); a missing translation writes the declared sentence (parameter 5); an unreadable Localization setting rejects the call. Only a `type: 'script'` action's js body runs code of its own, so that is the one path it is served on. DRILLED to the entry's two keys: the entry face is closed.",
+      "children": {
+        "message": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (the sentence `ctx.text` answers: `actionTextMessageKey` — `objects.<object>._actions.<action>.texts.<key>.message`, or `globalActions.<action>.texts.<key>.message` for an object-less action — picked through the `i18n` service in the organization's language, `readOrganizationTextLocale`, negotiated by `resolveBundleLocale`, else the declared `message`)"
+        },
+        "params": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#renderHookTemplate (fills the picked sentence's `{{ NAME }}` holes from the call's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (fills an entry that declares `params`; one that declares none stays plain text)",
+          "producer": "packages/spec/src/data/declared-entry.zod.ts#declaredTextEntrySchema (judges the message's holes against the declared names at save)"
+        }
+      }
+    },
     "params": {
       "status": "live",
       "verifiedAt": "2026-09-15",

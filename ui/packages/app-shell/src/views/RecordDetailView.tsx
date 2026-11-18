@@ -4720,6 +4720,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       } as any);
     }
     if (affordances.edit) {
+      const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
       // Single primary Edit CTA → opens the full record form. Inline editing
       // is no longer a standalone header button; it is entered by
       // double-clicking a field (or its hover pencil) in the record body,
@@ -4765,7 +4766,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // edit form is a third reason for the same off, explained beside the
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
-        disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
+        disabled: editOff,
+        // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
+        // first slot is its primary place, and an action that cannot be
+        // pressed never holds it: whichever of the three reasons above turns
+        // this Edit off, it moves into the bar's `⋯` (still drawn, still
+        // off), and the first usable action takes the slot. The approval band
+        // states the lock, and the `editLockedByState` badge the state lock.
+        // The desktop row keeps it greyed in place for every reason, and an
+        // Edit that is on is untouched.
+        ...(phonePage && editOff ? { component: 'action:menu' } : {}),
         onClick: () => onEdit({ id: pureRecordId }, objectName),
       } as any);
     }

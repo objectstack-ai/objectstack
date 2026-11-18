@@ -28,6 +28,13 @@ import { renderSummaryMarkdown, summariseRound } from '../../src/skill-evals/sum
 const scratch = mkdtempSync(join(tmpdir(), 'skill-evals-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
+// The two `--regrade` command tests run a full round, then `regradeRound`; the first of them to run in a
+// worker pays a load-bound cost the rest of the file does not. Measured, not vitest's 5 s default:
+// 36-168 ms locally, 2356 ms on a light Test Core shard (merge-queue job 134557796904), 6218 ms and
+// 9728 ms on the shard beside plugin-security (jobs 134498092500, 134551614597), where the second
+// one took 141 ms. 30 s is ~3x the slowest observed, the budget of this package's stand-in suites.
+const REGRADE_COMMAND_TEST_TIMEOUT_MS = 30_000;
+
 /** A two-bundle catalog in the shape every `skills/BUNDLE/evals/*.json` uses. */
 function writeCatalog(): string {
   const root = mkdtempSync(join(scratch, 'skills-'));
@@ -400,7 +407,7 @@ describe('--regrade grades an old answer only against the case that ran', () => 
     expect(md).toContain('1 case(s) changed since the round, set apart: not regraded and out of every pass rate below: `alpha-skill/cases#2`');
     expect(md).toContain('2 record(s) carry no case hash');
     expect(md).not.toContain('| alpha-skill/cases#2 |');
-  });
+  }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
 });
 
 describe('trigger cases: graded on whether the with-skill turn loaded the bundle, reported beside the behaviour cases', () => {
@@ -527,7 +534,7 @@ describe('trigger cases: graded on whether the with-skill turn loaded the bundle
     const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: { added: string[] }; summary: { triggers: { cases: Array<{ key: string; tally: { pass: number; fail: number } }> } } };
     expect(round.regraded.added).toEqual([]);
     expect(round.summary.triggers.cases.map((t) => [t.key, t.tally.pass, t.tally.fail])).toEqual([['beta-skill/triggers#1', 0, 1], ['beta-skill/triggers#2', 1, 0]]);
-  });
+  }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
 });
 
 describe('`files`: what a case needs on disk, placed in the turn\'s project on both arms', () => {

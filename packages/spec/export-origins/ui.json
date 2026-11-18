@@ -44,6 +44,8 @@
     "ActionSchema": "src/ui/action.zod.ts#ActionSchema (const)",
     "ActionSession": "src/ui/action-params.zod.ts#ActionSession (type)",
     "ActionSessionSchema": "src/ui/action-params.zod.ts#ActionSessionSchema (const)",
+    "ActionText": "src/ui/action.zod.ts#ActionText (type)",
+    "ActionTextSchema": "src/ui/action.zod.ts#ActionTextSchema (const)",
     "ActionType": "src/ui/action.zod.ts#ActionType (type)",
     "AddRecordConfig": "src/ui/view.zod.ts#AddRecordConfig (type)",
     "AddRecordConfigParsed": "src/ui/view.zod.ts#AddRecordConfigParsed (type)",

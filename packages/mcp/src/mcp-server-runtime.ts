@@ -1812,8 +1812,11 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * that the same question, listing each candidate's label, dataset label and
  * description, never a pick and never a match, even for a single candidate;
  * only a word with no match and no candidate falls back to the object tools,
- * with the answer labelled. The skill's own loose-form rows predate
- * `candidates` and are amended in its lane.
+ * with the answer labelled. [#34919] The answer itself then states the
+ * case (`list_datasets` `nextStep`, composed by the service-analytics
+ * executor, `dataset-next-step.ts`) and the source to cite
+ * (`query_dataset` `sourceLine`); the rule says to follow the one and cite
+ * the other, and names the precedence the executor reports mixed cases by.
  * Sent only where both dataset tools register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =
@@ -1824,7 +1827,9 @@ const DATASET_SELECTION_RULE =
   + 'they mean; do not pick. A word with no match but with candidates in the answer: ask the same way, listing '
   + 'each candidate\'s label, dataset label and description; do not pick one or treat it as a match. No match '
   + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
-  + 'metric.';
+  + 'metric. The list_datasets answer states which of these cases your words are in as nextStep: follow its note, '
+  + 'which reports the first of several_measures, one_measure, candidates_only, no_measure when words differ. Cite '
+  + 'query_dataset\'s sourceLine as the answer\'s source.';
 
 /**
  * [#34686] The published skills package an open server points a client to

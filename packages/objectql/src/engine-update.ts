@@ -61,14 +61,18 @@ import type { ReferentialClearExemption } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases } from './summary-batch-accumulation.js';
+import type { SummaryDependents } from './summary-batch-accumulation.js';
+import { SUMMARY_GROUPED_AGGREGATE_CHUNK } from './summary-aggregate.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
 import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveEngineUpdateDispatch } from './engine-update-dispatch.js';
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
-  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
+  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
-  lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
+  lowerWhereFilterArray, masterIdOf, planFormulaProjection, planStoredExpressions, rejectUnknownEngineOptions,
+  storedExpressionsReading,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
   callerInputRefusalLogMeta,
@@ -137,6 +141,7 @@ export interface UpdateHost {
   resolveOptionPermissions: ObjectQLClass['resolveOptionPermissions'];
   resolvePredicateRelated: ObjectQLClass['resolvePredicateRelated'];
   settleMasterDetailLanding: ObjectQLClass['settleMasterDetailLanding'];
+  summaryDescriptorsReadByRules: ObjectQLClass['summaryDescriptorsReadByRules'];
   summaryForeignKeyColumns: ObjectQLClass['summaryForeignKeyColumns'];
   triggerHooks: ObjectQLClass['triggerHooks'];
   update: ObjectQLClass['update'];
@@ -149,7 +154,7 @@ export interface UpdateHost {
 /** The bodies of the "Update" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class UpdateFacet {
   /** The body of `ObjectQL#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
+  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryDescriptorsReadByRules' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
      // [#22782, #34412] An aborting `afterUpdate`, or a refusal after a `beforeUpdate` hook's
      // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
@@ -165,7 +170,7 @@ export class UpdateFacet {
      // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
      // carve an append-only system ledger out of the transaction. Before any
      // hook, default or validation runs, so a refusal costs nothing.
-     this.enforceTransactionOrigin(object, driver, 'update');
+     this.enforceTransactionOrigin(object, driver, 'update', options?.context?.transaction);
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads
@@ -2097,9 +2102,35 @@ export class UpdateFacet {
                );
                if (referencesFirst) await checkReferences();
                if (rulesNeedRows) {
-                   for (const row of priorRows ?? []) {
+                   // [#34465] Batch equals one-by-one for a rule that reads a
+                   // roll-up of a parent: each matched row is judged against
+                   // the value the rows judged before it move that roll-up to,
+                   // as consecutive by-id updates would read it (ruling
+                   // 6377847361, C; ruling record 6928862195, B). Only when a
+                   // rule reads one and more than one row matched; still all
+                   // rows judged before the one `updateMany`.
+                   const matchedRows = priorRows ?? [];
+                   const readSummaries = matchedRows.length > 1 ? this.summaryDescriptorsReadByRules(object) : [];
+                   const matchedStates = readSummaries.length > 0
+                     ? matchedRows.map((row) => ({ previous: row ?? {}, next: { ...(row ?? {}), ...bulkPatch } }))
+                     : [];
+                   const summaryFold = readSummaries.length > 0
+                     ? createPredicateUpdateSummaryFold(
+                         await loadPredicateUpdateSummaryBases(this.facade, readSummaries, matchedStates, { ...(opCtx.context ?? {}), isSystem: true }),
+                         matchedStates,
+                         (updateSchema as any)?.fields,
+                       )
+                     : undefined;
+                   if (summaryFold) {
+                       summaryFold.setDependents(await loadSummaryFoldDependents(this, summaryFold.foldedSummaries(), opCtx.context));
+                   }
+                   const foldMaster = summaryFold && parentForRow ? resolveMasterDetailRelation(updateSchema as any)?.master : undefined;
+                   for (const [i, row] of matchedRows.entries()) {
                        try {
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions }), this.logger, object);
+                           const header = parentForRow?.(row);
+                           const related = bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch });
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: foldMaster ? summaryFold!.overlayRow(foldMaster, header) : header, previousParent: foldMaster ? summaryFold!.overlayRow(foldMaster, previousParentForRow?.(row)) : previousParentForRow?.(row), related: summaryFold ? summaryFold.overlay(related) : related, permissions: bulkPermissions }), this.logger, object);
+                           summaryFold?.advance(i);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2347,4 +2378,141 @@ export class UpdateFacet {
 
      return opCtx.result;
   }
+}
+
+/**
+ * [#34465] What computes, for the parents a predicate update's summary fold
+ * moves, their fields calculated from the folded roll-ups: a `formula`
+ * (computed on read) or a stored computed field (an `expression` on a field
+ * that is not a formula, computed on the recompute's write), directly or
+ * through another such field (`remaining = budget - spent`, `spent` a
+ * roll-up). A rule reading `record.project.remaining` reads such a field, and
+ * one by one it would read it over the roll-up the earlier rows moved.
+ *
+ * Read the way a by-id update's rule reads the parent: the values as SYSTEM
+ * (`resolvePredicateRelated` reads related rows under system authority). So
+ * the parents' stored rows, the plan's permission map (with the SYSTEM
+ * context's own permission resolution), its one-hop related rows and its
+ * option labels are all resolved under the SYSTEM context, ONCE over the
+ * stored parents: none of them moves while the update is judged, only the
+ * roll-ups do.
+ *
+ * Computed as one by one computes them, in two passes over each parent:
+ *
+ * 1. the stored computed fields, as the recompute's write computes them:
+ *    over the stored image (the row WITHOUT its formula fields, which a write's
+ *    image never carries, so a stored field reading a formula computes
+ *    `null` here as it does on every write), in their own plan order, with the
+ *    DECLARED option labels, and TWICE: a by-id write computes them before its
+ *    `beforeUpdate` hooks, moves the changed values onto the patch, and
+ *    computes them again over the row with that patch before the statement.
+ *    So a stored field declared BEFORE the stored field it reads (`flag` over
+ *    `headroom`, `headroom` over the roll-up) is written over the moved value,
+ *    and the second evaluation here reads it the same way;
+ * 2. then the formulas, as the next read computes them: over that row with
+ *    the stored fields just computed and the stored row's values of the
+ *    formulas the plan does not hold back on it, in the read plan's order,
+ *    with the option labels the SYSTEM read of the parent uses. A formula
+ *    outside the plan reads no folded roll-up, so it does not move while the
+ *    update is judged, and the SYSTEM read of the stored parent already
+ *    computed it: a planned formula reading one (`room = ceiling - total`,
+ *    `ceiling = budget + extra`) reads it as the by-id rule's read does.
+ *
+ * The stored pass carries one image per parent through the update, as one by
+ * one does: after each matched row is judged, the parents it names are
+ * written again (`advance`), from the row the previous write stored, and the
+ * next row reads that row. A stored computed field reading its own stored
+ * value (a high-water mark) or a chain of them declared against their reading
+ * order then holds what one by one holds at every row, not only the second.
+ *
+ * Each pass runs synchronously, with the read path's own evaluator
+ * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
+ * of reads nothing.
+ */
+async function loadSummaryFoldDependents(
+  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
+  folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
+  context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
+): Promise<SummaryDependents> {
+  type Plan = ReturnType<typeof planStoredExpressions>;
+  const served = new Map<string, {
+    storedPlan: Plan;
+    formulaPlan: Plan;
+    formulaFields: string[];
+    unplannedFormulas: string[];
+    rows: Map<string, Record<string, unknown>>;
+    permissions: Awaited<ReturnType<UpdateHost['resolveFormulaPermissions']>>;
+    related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
+    storedLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    formulaLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+  }>();
+  const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
+  const systemResolution = host.permissionResolution(systemCtx);
+  for (const [object, { fields, parentIds }] of folded) {
+    const schema = host.getSchema(object) as any;
+    if (!schema) continue;
+    const storedAll = planStoredExpressions(schema);
+    const formulaAll = planFormulaProjection(schema, undefined).plan;
+    const readers = new Set(storedExpressionsReading([...storedAll, ...formulaAll], fields));
+    const storedPlan = storedAll.filter((entry) => readers.has(entry));
+    const formulaPlan = formulaAll.filter((entry) => readers.has(entry));
+    if (storedPlan.length + formulaPlan.length === 0 || parentIds.size === 0) continue;
+    const rows = new Map<string, Record<string, unknown>>();
+    const ids = [...parentIds];
+    for (let start = 0; start < ids.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
+      const found = await host.facade.find(object, { where: { id: { $in: ids.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK) } }, context: systemCtx }) as Array<Record<string, unknown>>;
+      for (const row of found ?? []) if (row?.id != null) rows.set(String(row.id), row);
+    }
+    if (rows.size === 0) continue;
+    const storedRows = [...rows.values()];
+    const plan = [...storedPlan, ...formulaPlan];
+    served.set(object, {
+      storedPlan,
+      formulaPlan,
+      formulaFields: formulaAll.map((entry) => entry.name),
+      unplannedFormulas: formulaAll.filter((entry) => !readers.has(entry)).map((entry) => entry.name),
+      rows,
+      permissions: await host.resolveFormulaPermissions(object, plan, storedRows, systemCtx, systemResolution),
+      related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
+      storedLabels: declaredOptionLabels(schema, storedPlan),
+      formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
+    });
+  }
+  type Served = NonNullable<ReturnType<typeof served.get>>;
+  /** What the recompute's write stores from `from` with the folded roll-ups `moved`: no formula on it, the stored fields computed. */
+  const written = (entry: Served, from: Record<string, unknown>, moved: Readonly<Record<string, number | null>>): Record<string, unknown> => {
+    const scratch: Record<string, unknown> = { ...from, ...moved };
+    for (const name of entry.formulaFields) delete scratch[name];
+    // Twice, as the write computes them: before its hooks, then over the row with the moved values.
+    for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
+      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+    }
+    return scratch;
+  };
+  /** Parent (`object|id`) → the row the last recompute the fold carried for it stored. */
+  const images = new Map<string, Record<string, unknown>>();
+  const dependents = ((object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored) return undefined;
+    // The row the rule reads: the one the previous row's recompute stored, or, before any, the
+    // write's image over the stored row.
+    const image = images.get(`${object}|${parentId}`);
+    const scratch = image ? { ...image, ...moved } : written(entry, stored, moved);
+    // The read's row: the formulas the plan does not recompute back at their stored values.
+    for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
+    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
+    const values: Record<string, unknown> = {};
+    for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
+    return values;
+  }) as SummaryDependents;
+  // After each matched row, the recompute writes the parents it names: the next write starts from that row.
+  dependents.advance = (object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored || entry.storedPlan.length === 0) return;
+    const key = `${object}|${parentId}`;
+    images.set(key, written(entry, images.get(key) ?? stored, moved));
+  };
+  return dependents;
 }
