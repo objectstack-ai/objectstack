@@ -22,8 +22,8 @@ import { Config } from '@oclif/core';
 const { default: SkillsInstall } = await import('../src/commands/skills/install.js');
 const { default: SkillsUpdate } = await import('../src/commands/skills/update.js');
 const { default: SkillsStatus } = await import('../src/commands/skills/status.js');
-const { skillsRegistry, catalogFromTarball, resolveSkillsVersion } = await import('../src/utils/skills-catalog.js');
-const { SKILLS_MANIFEST_FILE } = await import('../src/utils/skills-install-state.js');
+const { skillsRegistry, catalogFromTarball, resolveSkillsVersion, npmPackInvocation } = await import('../src/utils/skills-catalog.js');
+const { SKILLS_MANIFEST_FILE, applySkillsWrite, readSkillsManifest } = await import('../src/utils/skills-install-state.js');
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 // The oclif config is loaded once, here: a clocked test window measures the commands, never this load.
@@ -393,7 +393,68 @@ describe('the catalog in a tarball', () => {
     expect(() => catalogFromTarball(skillsTarball(V1, CATALOG_V1, [{ path: 'package/dist/skills/a/../../x', data: 'x' }]), V1)).toThrow(/leaves its own tree/);
   });
 
+  it('refuses a Windows separator or a drive letter in a path segment', () => {
+    expect(() => catalogFromTarball(skillsTarball(V1, CATALOG_V1, [{ path: 'package/dist/skills/a/..\\..\\x', data: 'x' }]), V1)).toThrow(/leaves its own tree/);
+    expect(() => catalogFromTarball(skillsTarball(V1, CATALOG_V1, [{ path: 'package/dist/skills/a/C:x', data: 'x' }]), V1)).toThrow(/leaves its own tree/);
+  });
+
   it('refuses a catalog with no skill', () => {
     expect(() => catalogFromTarball(skillsTarball(V1, {}), V1)).toThrow(/holds no skill/);
+  });
+});
+
+describe('writing stays under the skills directory', () => {
+  let root = '';
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'os-skills-34773-root-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('refuses a catalog file whose target resolves outside the skills directory, and writes nothing there', () => {
+    const dir = join(root, 'skills');
+    const catalog = { version: V1, skills: new Map([['a', new Map([['SKILL.md', Buffer.from('a')], ['../../escaped.md', Buffer.from('x')]])]]) };
+    expect(() => applySkillsWrite(dir, catalog, { added: ['a'], replaced: [], dropped: [], conflicts: [] })).toThrow(/outside/);
+    expect(existsSync(join(root, 'escaped.md'))).toBe(false);
+  });
+
+  it('refuses a record naming a skill or a file with a Windows separator or a drive letter', () => {
+    const write = (skills: Record<string, Record<string, string>>) => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, SKILLS_MANIFEST_FILE), JSON.stringify({ package: '@objectstack/skills', version: V1, skills }));
+    };
+    write({ 'C:x': { 'SKILL.md': 'h' } });
+    expect(() => readSkillsManifest(root)).toThrow(/cannot read/);
+    write({ a: { '..\\..\\x': 'h' } });
+    expect(() => readSkillsManifest(root)).toThrow(/cannot read/);
+  });
+});
+
+describe('the npm pack invocation', () => {
+  const DEST = 'C:\\Users\\Ada Lovelace\\AppData\\Local\\Temp\\os-skills-pack-x';
+
+  it('on Windows runs through a shell and quotes the destination, so a path with a space stays one argument', () => {
+    const { command, args, options } = npmPackInvocation('@objectstack/skills@18.5.0', DEST, 'C:\\work', 'win32');
+    expect(command).toBe('npm');
+    expect(options.shell).toBe(true);
+    expect(args).toEqual(['pack', '@objectstack/skills@18.5.0', '--pack-destination', `"${DEST}"`, '--json']);
+  });
+
+  it('elsewhere runs without a shell and passes the destination as it is', () => {
+    const { args, options } = npmPackInvocation('@objectstack/skills@18.5.0', '/tmp/a b/os-skills-pack-x', '/work', 'linux');
+    expect(options.shell).toBe(false);
+    expect(args).toEqual(['pack', '@objectstack/skills@18.5.0', '--pack-destination', '/tmp/a b/os-skills-pack-x', '--json']);
+  });
+});
+
+describe('a malformed record is refused whole', () => {
+  let root = '';
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'os-skills-34773-record-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it.each([
+    ['an empty skill name', { '': { 'SKILL.md': 'h' }, a: { 'SKILL.md': 'h' } }],
+    ['a `..` skill name', { '..': { 'SKILL.md': 'h' }, a: { 'SKILL.md': 'h' } }],
+    ['a backslash in a skill name', { 'a\\b': { 'SKILL.md': 'h' }, a: { 'SKILL.md': 'h' } }],
+  ])('%s', (_label, skills) => {
+    writeFileSync(join(root, SKILLS_MANIFEST_FILE), JSON.stringify({ package: '@objectstack/skills', version: V1, skills }));
+    expect(() => readSkillsManifest(root)).toThrow(/cannot read/);
   });
 });

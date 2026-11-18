@@ -141,21 +141,34 @@ function npmPackError(stdout: string): { code?: string; summary?: string } | und
  * Reads the package tarball from the configured registry. A seam: tests stand
  * in for the registry here, so no test touches the network.
  */
+/**
+ * The `npm pack` invocation for one spec into `destination`. On Windows `npm`
+ * is a `.cmd` shim, which only a shell resolves, and under `shell: true` Node
+ * joins the arguments unquoted, so a path argument is quoted there.
+ */
+export function npmPackInvocation(spec: string, destination: string, cwd: string, platform: NodeJS.Platform = process.platform): {
+  command: string;
+  args: string[];
+  options: { cwd: string; timeout: number; maxBuffer: number; shell: boolean };
+} {
+  const shell = platform === 'win32';
+  return {
+    command: 'npm',
+    args: ['pack', spec, '--pack-destination', destination, '--json'],
+    options: { cwd, timeout: NPM_PACK_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, shell },
+  };
+}
+
 export const skillsRegistry = {
   fetchTarball(version: string, cwd: string = process.cwd()): Promise<SkillsTarballFetch> {
     const spec = `${SKILLS_PACKAGE}@${version}`;
     const destination = mkdtempSync(join(tmpdir(), 'os-skills-pack-'));
+    const invocation = npmPackInvocation(spec, destination, cwd);
     return new Promise<SkillsTarballFetch>((resolvePromise) => {
       execFile(
-        'npm',
-        ['pack', spec, '--pack-destination', destination, '--json'],
-        {
-          cwd,
-          timeout: NPM_PACK_TIMEOUT_MS,
-          maxBuffer: 16 * 1024 * 1024,
-          // `npm` is a `.cmd` shim on Windows, which only a shell resolves.
-          shell: process.platform === 'win32',
-        },
+        invocation.command,
+        invocation.args,
+        invocation.options,
         (error, stdout, stderr) => {
           try {
             if (error) {
