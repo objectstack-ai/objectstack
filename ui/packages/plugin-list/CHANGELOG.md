@@ -1,5 +1,288 @@
 # @object-ui/plugin-list
 
+## 18.6.0
+
+### Minor Changes
+
+- 4240719: feat(ui): timesheet list view, an editable row × weekday entry grid
+  
+  Clause-②: yes (widening — new list view type `timesheet`, its `timesheet` block and the `VisualizationType` member; new locale keys)
+  Metadata-protocol: added
+  
+  A list view can now be `type: 'timesheet'`. It pivots detail records into rows × the seven days of one week, and every cell is editable:
+  
+  ```ts
+  type: 'timesheet',
+  timesheet: {
+    rowFields: ['project', 'task'], // 1–3 fields; one row per distinct combination
+    dateField: 'work_date',         // date or datetime
+    valueField: 'hours',            // number, currency or percent
+  }
+  ```
+  
+  - Typing into an empty cell creates a record carrying the row's field values, the day and the number. Changing a cell updates that record, and clearing it deletes the record. Each cell is one call on the record API, so hooks, validation rules and permissions judge it; a refusal stays on that cell with the server's message.
+  - A cell holding several records shows their sum and is read-only.
+  - The grid offers each write only to a caller who may make it (the affordance-to-grant map's `gridAddRow`, `listInlineEdit` with the value field's write permission, and `rowDelete`). A cell no granted write can change is read-only, and **Add row** needs the create grant. An interface page's list block relays the view's `timesheet` block.
+  - The week starts on the viewer's locale first day, with previous / this / next navigation. Row, day and week totals are always shown.
+  - **Add row** asks for the row field values first; typing a day then creates the record. The view's `filter` applies to the week's query.
+  - A `timesheet` view with an incomplete block shows "Timesheet configuration required", and `os validate` warns with `view/layout-without-binding`. `view/list-view-field-refs` checks the three field names.
+  
+  The renderer is the new lazy package `@object-ui/plugin-timesheet` (`object-timesheet`), with its own lazy locale namespace `timesheet.*`. The view switcher, the create-view dialog and the Studio list-view type section offer the new type.
+
+### Patch Changes
+
+- d68f014: fix(plugin-list): on a phone the list toolbar keeps the view name readable
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Below `sm`, the Console draws the list's view switcher at the start of the list toolbar (`toolbarLeading`). On one line with the filter chips, the 「In a queue」 toggle and the tool icons (44 px touch targets on a phone), the view name was cut to about one character: 「全部客户」 showed as 「全.」 at 375 px. With a leading node, the toolbar row now wraps below `sm`. The name keeps the row's width, and the chips, the toggle and the tools move to a second line when they no longer fit beside it, with the tools at the right edge. A name wider than the row ends in an ellipsis. Nothing scrolls the page sideways. From `sm` up, and in a list without a leading node, the toolbar is unchanged.
+- 6c7d730: fix(ui): CSV files the Console builds in the browser start with a UTF-8 byte-order mark, so Excel shows Chinese and other non-ASCII text correctly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Excel reads a CSV file that has no byte-order mark in the computer's own code page, so Chinese names and other non-ASCII values opened as garbled text. The server export already writes the mark. Six Console downloads build their CSV in the browser and did not:
+  
+  - the list view's export when the data source cannot export on the server;
+  - the grid's export in the same case;
+  - the data table's Export CSV button;
+  - a report's CSV export;
+  - the bulk action's Download error CSV;
+  - the temporary-password CSV after an identity import.
+  
+  All six now build their file with the new `csvBlob(text)` from `@object-ui/core`. It puts one mark (U+FEFF, the bytes EF BB BF) before the text and types the file `text/csv;charset=utf-8`. The core package also exports the mark as `UTF8_BYTE_ORDER_MARK`. The CSV import already removes one leading mark, so a downloaded file can still be imported again. The data table's file is now typed with `charset=utf-8` too.
+- 0004e8d: fix(plugin-list): the list toolbar no longer offers the "In a queue" toggle on a view whose own filter pins `owner_id`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "In a queue" toggle adds `owner_id is_empty` and `queue is_not_empty` to the list's query. On a view whose own filter already requires an owner, such as a "My records" view filtered by `owner_id equals {current_user_id}`, the two conditions contradict each other, so turning the toggle on always showed an empty list. The toggle is now withheld when the view's filter has a top-level AND condition on `owner_id` with `equals` (a non-empty value), `in` (a list of non-empty values) or `is_not_empty`. A condition inside an OR group does not count, because the other members of the group can still match unowned records.
+  
+  While the toggle is withheld it adds nothing to the query. If it was on when the user switched to such a view, it is turned off, so switching back to a view that offers it shows it off.
+  
+  Nothing changes on views without an owner condition, and no metadata or server behaviour changes.
+- e61af97: feat: the list toolbar offers the "In a queue" toggle only on objects that actually use queues
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Until now the toggle appeared on every list of an object with a user owner as soon as the organization had a single queue, although on most of those objects no record ever sits in a queue, so it could only return an empty list. It now appears only on an object where a queue can hold something:
+  
+  - a record of the object sits in a queue now (no owner, a queue set), or
+  - an active assignment rule routes the object's new records into a queue: one of the organization's own rules, or a rule an installed package declares that is not switched off.
+  
+  Nothing is authored for this. The server works it out from the rules and the records.
+  
+  `GET /auth/me/permissions` carries the answer as a new field beside `hasAnyQueue`: `objectsUsingQueues`, a list of object names, declared in `MePermissionsAuthenticatedResponseSchema`. It names only objects the caller may read, and never a queue name or a count. It is empty when the organization has no queue, when no ownership-queue service is registered, and on the closed body. The ownership-queue service contract gains the optional method `objectsUsingQueues(organizationId)`, implemented by `@objectstack/plugin-sharing`. The method checks each owned object for one sitting record (`limit 1`) and reads the routing rules once. The route asks only when `hasAnyQueue` is true, so an organization with no queue pays nothing extra.
+  
+  **Migration.** `objectsUsingQueues` is required on the strict `MePermissionsAuthenticatedResponseSchema`. Code that builds a `MePermissionsAuthenticatedResponse` (a test fixture, a stub server) adds `objectsUsingQueues: []` beside `hasAnyQueue`. Code that parses a body from a server older than this release with the schema gets a parse failure for the missing key: parse with `.partial({ objectsUsingQueues: true })` or default it to `[]` until the server is upgraded. The console does not parse; it reads the field and treats its absence as "no object".
+  
+  The console reads the field from the payload it already loads once per session. A record that starts sitting in a queue on an object not listed yet shows the toggle from the next time the permissions are read. An answer without the field is treated as "no", the same way an unknown `hasAnyQueue` is.
+- 90f2b1c: fix(console): every object route words an object you cannot open the same neutral way, and the list filter's empty state is translated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The server answers an object you cannot read exactly like a name that does not exist, so the console never tells them apart. But the sentence it drew still said the object does not exist. That sentence was spread over two keys: one for the list and data routes, and another, longer one for the record and create routes. All four routes now draw one key, `console.objectView.objectNotFoundDescription`, and it says what is true in both cases: "The object "NAME" does not exist, or you do not have access to it." It is translated in all eleven built-in languages (zh-Hans: 对象"NAME"不存在，或者您无权访问它。). `empty.objectNotFoundDescription` is retired from every pack. The list route's hint and the disabled-package sentence are unchanged.
+  
+  A list's dropdown filter for a field with no options showed a hard-coded English "No options", even in a Chinese console. It now reads the pack's `fields.options.empty` ("No options available", 暂无可选项), the same key the form's options empty state uses.
+- 4aeeca5: fix(console): under draft preview, a list column on a field that exists only in the draft no longer makes the whole list fail
+  
+  Clause-②: yes (widening — one new @object-ui/i18n `list.*` key only; no exported prop, no typed interface member; the `_draftOnly` field marker is an internal undeclared key on an untyped value)
+  Metadata-protocol: none
+  
+  Under `?preview=draft` a list view may show a column on a field the draft adds. The data door validates every `$select`, `$filter`, `$orderby` and `$searchFields` name against the published object, so that one column made it refuse the whole list query with `400 INVALID_FIELD`. In draft preview the console's list pages (the object view, `/:objectName/data` and interface list pages) now hand the list a data source whose `getObjectSchema` answers the published object definition plus each draft-only field, with its draft label and the marker `_draftOnly: true`, the published sortability projection kept. Outside preview they hand the list the adapter itself, unchanged. The data contract is unchanged: data reads never see a draft schema.
+  
+  `@object-ui/plugin-list`: `ListView` leaves a field marked `_draftOnly` out of `$select`, `$expand`, `$filter` and `$orderby` (and out of the `$searchFields` it sends with a search term, and a server export's fields), and out of the Filter panel and Sort picker. Its column is drawn empty under the field's draft label. A sort or filter that names such a field is left out of the request, and one line above the rows says so (`list.draftOnlyQueryDropped`). `_draftOnly` is an underscore-private convention between the console and this package, never an authoring key; nothing new is exported.
+  
+  `@object-ui/i18n`: new key `list.draftOnlyQueryDropped` in every locale.
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [159757a]
+- Updated dependencies [e08aad7]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [ea6de74]
+- Updated dependencies [39fa82b]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [adccc24]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [22bcc76]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [dc54c60]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [bdd5176]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [046c224]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [518baca]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [646b13e]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [0d0a088]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [8bc0808]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [d83a275]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [aa5a7d0]
+- Updated dependencies [9c70c16]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b633afe]
+- Updated dependencies [0584eb5]
+- Updated dependencies [ab44198]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [db1a05c]
+- Updated dependencies [2ce9c7f]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [3c535ee]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/plugin-grid@18.6.0
+  - @object-ui/plugin-detail@18.6.0
+  - @object-ui/fields@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+  - @object-ui/mobile@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes
