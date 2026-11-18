@@ -772,6 +772,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // implicit; making it explicit is the migration, not a widening — the
       // effective access for a member is byte-identical.
       sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [rulings 6968686390 and 6969143776] A member's own notification
+      // preferences: which topics reach them on which channel, their digest
+      // and their quiet hours (Account → Notification Settings). The object is
+      // `system-data` ("RLS is the authz"), so WHICH ROWS is the
+      // `sys_notification_preference_self` policy below, which carries a write
+      // check and binds ordinary members only; read that policy before
+      // touching this line. ⛔ No `allowDelete`, for the anchor reason above
+      // (ADR-0090 D5): "reset to the administrator's default" is not a
+      // baseline right.
+      sys_notification_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       // A reader's own named list views (ruling 6570568131 on #28971, letter
       // C): save and rename their own views, on the preference template.
       // The object's own owner-only default row scope (`sys_personal_view_self`,
@@ -1015,6 +1025,32 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         object: 'sys_user_preference',
         operation: 'all',
         using: 'user_id == current_user.id',
+      },
+      // [rulings 6968686390 and 6969143776] The WHICH-ROWS half of the
+      // `sys_notification_preference` grant above. A row whose `user_id` is
+      // EMPTY is the organization's default for everyone (ADR-0118 D1), so
+      // this policy must keep a member off it on every face, and its two
+      // added keys are each load-bearing (measured, os-dev-report 6968930571):
+      //   - `check`: without it the write check is the OR of every applicable
+      //     `using` (`writeCheckPolicies`, case 2), and the `owner_only_writes`
+      //     floor above takes part. A row the member created keeps
+      //     `created_by == current_user.id`, so they could move it to another
+      //     person or to the empty user, muting a topic for the whole
+      //     organization. A declared `check` alone judges the row as written.
+      //   - `positions: ['org_member']`: this set resolves for organization
+      //     administrators too (the `everyone` anchor), and a policy here
+      //     would narrow their Setup grid to their own rows. Administrators
+      //     keep listing every row, writing the default and editing another
+      //     person's row.
+      // `default-permission-sets.notification-preference.integration.test.ts`
+      // pins both, and the administrator's access beside them.
+      {
+        name: 'sys_notification_preference_self',
+        object: 'sys_notification_preference',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+        check: 'user_id == current_user.id',
+        positions: ['org_member'],
       },
       {
         name: 'sys_api_key_self',
