@@ -119,7 +119,7 @@ function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: st
     // The live type set the unknown-type refusal reads: without it the refusal
     // cannot disprove a type and lets it through.
     async getMetaTypes() {
-      return { types: ['object', 'flow', 'view', 'dashboard', 'book', 'doc'] } as any;
+      return { types: ['object', 'flow', 'view', 'dashboard', 'book', 'doc', 'datasource'] } as any;
     },
     async getMetaItems(handed: any) {
       calls.push(['getMetaItems', handed]);
@@ -538,6 +538,34 @@ describe('the read tools withhold what every /meta door withholds from this huma
       ['getMetaItem', { type: 'dashboard', name: 'people_board' }],
     ]));
     expect(served.protocolCalls.some((c: any) => c[1]?.type === 'docs' || c[1]?.type === 'dashboards')).toBe(false);
+  });
+
+  it('a type the caller may not read is refused on item and list reads, on every state, before any protocol read', async () => {
+    const store = { ...STORE, datasource: [{ name: 'warehouse', label: 'Warehouse', driver: 'postgres' }] };
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    const served = await serve(ec, { store });
+    const authoring = served.authoring!;
+    for (const state of [undefined, 'active', 'draft'] as const) {
+      for (const [toolName, input] of [
+        ['get_metadata_item', { type: 'datasource', name: 'warehouse' }],
+        ['get_metadata_item', { type: 'datasources', name: 'warehouse' }],
+        ['get_metadata_item', { type: 'datasource', name: 'missing' }],
+        ['list_metadata_items', { type: 'datasource' }],
+      ] as const) {
+        const refused = await call(authoring, toolName, { ...input, ...(state ? { state } : {}) });
+        const label = `${toolName} ${JSON.stringify(input)} ${state ?? '(default)'}`;
+        expect(refused.isError, label).toBe(true);
+        expect(refused.body.error, label).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(JSON.stringify(refused.body), label).not.toContain('postgres');
+      }
+    }
+    expect(served.protocolCalls).toEqual([]);
+
+    // The control: a human who holds the type's capability is served the same reads.
+    const holder = [...ADMIN, 'manage_platform_settings'];
+    const allowed = (await serve(await oauthEnvelope(['metadata:write'], holder), { store, systemPermissions: holder })).authoring!;
+    expect((await call(allowed, 'get_metadata_item', { type: 'datasource', name: 'warehouse' })).body.item).toMatchObject({ name: 'warehouse' });
+    expect((await call(allowed, 'list_metadata_items', { type: 'datasources' })).body.items.map((i: any) => i.name)).toEqual(['warehouse']);
   });
 
   it('a gate that cannot evaluate refuses: a books read that throws serves no doc', async () => {
