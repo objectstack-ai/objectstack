@@ -1465,6 +1465,26 @@ describe('[#34766] the public draft publish verdict judges the stored draft', ()
         expect(read).toEqual({ code: 'NO_DRAFT', status: 404 });
     });
 
+    it('one closure map for a pass collects each package\'s closure once and changes no answer; without it, each call collects', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const names = ['deal_followup', 'deal_followup_b', 'deal_followup_c'];
+        for (const name of names) await stageDraft(protocol, 'flow', { ...unroutable, name });
+        const collect = vi.spyOn(protocol as any, 'collectBatchPendingDeclarations');
+
+        const alone = [];
+        for (const name of names) alone.push(await protocol.draftPublishJudgement({ type: 'flow', name, packageId: PKG }));
+        expect(collect).toHaveBeenCalledTimes(3);
+
+        collect.mockClear();
+        const packageClosures = new Map();
+        const pass = [];
+        for (const name of names) pass.push(await protocol.draftPublishJudgement({ type: 'flow', name, packageId: PKG, packageClosures }));
+        expect(collect).toHaveBeenCalledTimes(1);
+        expect(pass).toEqual(alone);
+        expect(alone.every((j) => j.refusals.some((issue) => issue.rule === 'flow-trigger-unroutable'))).toBe(true);
+    });
+
     it('a draft the publish passes answers no refusal', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);

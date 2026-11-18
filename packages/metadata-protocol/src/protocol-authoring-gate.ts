@@ -777,6 +777,14 @@ export async function draftPublishJudgement(
          * doors). Absent ⇒ `en`. Selects a language, never a verdict.
          */
         userTextLocales?: readonly (string | undefined)[];
+        /**
+         * [#34766] One map per pass, for a caller that judges several drafts in
+         * one answer (the open MCP door's draft list): a package's closure is
+         * collected on its first draft and reused for the rest, since it is a
+         * function of the package alone, never of the draft judged. Absent ⇒
+         * collected on this call, as before.
+         */
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
     },
 ): Promise<DraftPublishJudgement> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
@@ -799,7 +807,13 @@ export async function draftPublishJudgement(
     if (draft.packageId) {
         const repo = this.getOverlayRepo();
         if (typeof repo.listDrafts === 'function') {
-            pending = await this.collectBatchPendingDeclarations(await repo.listDrafts({ packageId: draft.packageId }));
+            const packageId = draft.packageId;
+            let closure = draft.packageClosures?.get(packageId);
+            if (!closure) {
+                closure = repo.listDrafts({ packageId }).then((drafts) => this.collectBatchPendingDeclarations(drafts));
+                draft.packageClosures?.set(packageId, closure);
+            }
+            pending = await closure;
         }
     }
     // The promotion's restored-credential read: the stored draft holds no

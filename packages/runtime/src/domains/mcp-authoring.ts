@@ -85,9 +85,9 @@
  *  - A gate that cannot evaluate (a books or doc read that throws, a security
  *    service that cannot resolve holdings) refuses: the read answers that
  *    fault, never the item (ADR-0049).
- *  - `list_drafts` runs no item gate, as `/meta/_drafts` runs none for this
- *    same caller: a draft row carries the item's identity and its own `label`,
- *    no body for a gate to judge.
+ *  - `list_drafts` runs no item gate on its rows, as `/meta/_drafts` runs none
+ *    for this same caller: a draft row carries the item's identity and its own
+ *    `label`, no body for a gate to judge (each row's verdict is gated, below).
  *
  * ## What the writes do (E3: the save answers with the publish verdict)
  *
@@ -316,6 +316,8 @@ export type OpenAuthoringProtocol = Partial<Pick<MetadataProtocol, 'getMetaTypes
     draftPublishJudgement?(draft: {
         type: string; name: string; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
+        /** One map per pass: each package's publish closure is collected once, on its first draft. */
+        packageClosures?: Map<string, Promise<unknown>>;
     }): Promise<OpenAuthoringDraftJudgement>;
 };
 
@@ -670,8 +672,16 @@ export function createOpenAuthoringRegistry(opts: {
                         // none: a row is the item's identity and its own label. Each
                         // verdict is read off the draft's BODY, so it is told only where
                         // the item gate admits the strict draft read for this human.
+                        // Cost per draft: that strict read, which the item gate needs
+                        // (it judges the served body, and the read folds its own verdict
+                        // into `_diagnostics` as every `/meta` draft read does), and the
+                        // judgement, which reads the row as stored (the bytes the publish
+                        // judges; the served copy is not) and answers each finding whole.
+                        // The closure a draft is judged against is its package's alone,
+                        // so one map collects it once per package for the judgements.
+                        const packageClosures = new Map<string, Promise<unknown>>();
                         const judged = [];
-                        for (const draft of drafts) judged.push({ ...draft, ...(await gatedDraftVerdict(protocol, draft)) });
+                        for (const draft of drafts) judged.push({ ...draft, ...(await gatedDraftVerdict(protocol, draft, packageClosures)) });
                         return answer({ count: judged.length, drafts: judged });
                     }
                     case 'save_metadata_draft': {
@@ -799,6 +809,7 @@ export function createOpenAuthoringRegistry(opts: {
             async function gatedDraftVerdict(
                 p: OpenAuthoringProtocol,
                 listed: { type: string; name: string; packageId?: string | null; member?: string },
+                packageClosures: Map<string, Promise<unknown>>,
             ): Promise<{ verdict: ReturnType<typeof verdictOf> | null; verdictWithheld?: unknown; verdictError?: unknown }> {
                 // The gate and the judgement read the canonical singular, folded by
                 // the door's one helper; a row with no type keeps the row's own.
@@ -835,6 +846,7 @@ export function createOpenAuthoringRegistry(opts: {
                         packageId: draft.packageId ?? null,
                         ...(draft.member !== undefined ? { member: draft.member } : {}),
                         ...(writer ? { userTextLocales: writer.userTextLocales } : {}),
+                        packageClosures,
                     });
                     return { verdict: verdictOf(judgement) };
                 } catch (error) {

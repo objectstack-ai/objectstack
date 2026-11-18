@@ -20,7 +20,7 @@
  * resolution that throws admits nothing.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -870,6 +870,36 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     // Discarded, it leaves the list; there was no active item to touch.
     expect((await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE })).isError).toBe(false);
     expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts).toEqual([]);
+  });
+
+  it('list_drafts collects a package\'s publish closure once for all its drafts, and each verdict equals the draft judged alone', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    const routed = structuredClone(unroutable);
+    (routed.nodes[0]!.config as Record<string, unknown>).triggerType = 'record-after-create';
+    const names = ['crm_opportunity_followup', 'crm_opportunity_followup_b', 'crm_opportunity_followup_c'];
+    for (const [i, name] of names.entries()) {
+      const item = { ...(i === 1 ? routed : unroutable), name };
+      expect((await call(authoring, 'save_metadata_draft', { type: 'flow', name, item, package: STUDIO_BASE })).isError).toBe(false);
+    }
+
+    const collect = vi.spyOn(protocol as any, 'collectBatchPendingDeclarations');
+    const listed = await call(authoring, 'list_drafts', { package: STUDIO_BASE });
+    expect(listed.body.count).toBe(3);
+    // Each strict draft read collects for the verdict it folds into its own
+    // `_diagnostics`; the door's judgements share one collection per package.
+    expect(collect).toHaveBeenCalledTimes(names.length + 1);
+
+    // Each draft judged alone, one closure collection per call: the same verdict.
+    collect.mockClear();
+    for (const entry of listed.body.drafts) {
+      const alone = await protocol.draftPublishJudgement!({ type: 'flow', name: entry.name, packageId: STUDIO_BASE });
+      expect(entry.verdict, entry.name).toEqual({ publishable: alone.refusals.length === 0, refusals: alone.refusals, advisories: alone.advisories });
+    }
+    expect(collect).toHaveBeenCalledTimes(3);
+    const unroutableOf = (d: any) => d.verdict.refusals.some((issue: any) => issue.rule === 'flow-trigger-unroutable');
+    expect(listed.body.drafts.map((d: any) => [d.name, unroutableOf(d)]).sort())
+      .toEqual([[names[0], true], [names[1], false], [names[2], true]]);
   });
 
   it('a save the schema refuses answers its structured findings beside the headline, and writes nothing', async () => {

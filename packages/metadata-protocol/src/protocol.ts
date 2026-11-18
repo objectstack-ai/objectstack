@@ -1916,6 +1916,7 @@ export class ObjectStackProtocolImplementation implements
     draftPublishJudgement(draft: {
         type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
     }): Promise<DraftPublishJudgement> {
         return draftPublishJudgement.call(this.draftVerdictHost(), draft);
     }
