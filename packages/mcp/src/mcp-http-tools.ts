@@ -3622,8 +3622,9 @@ export function registerObjectTools(
           // [#35145] One level of forward relations in the same call.
           `To read the records a lookup points at in the same call, pass expand: up to ${QUERY_EXPAND_MAX_FIELDS} of the ` +
           'object\'s lookup, master-detail, user or tree fields, e.g. expand ["account","owner_id"]; each one comes back ' +
-          'as the record it names, under your permissions on that object. One level only; a field whose object you ' +
-          'may not read refuses the call. ' +
+          'as the record it names, under your permissions on that object. One level only. A field whose object this ' +
+          'door does not serve you refuses the call; a record you may not read on a served object is not expanded, ' +
+          'and the field keeps its stored id. ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
@@ -3978,10 +3979,17 @@ export function registerObjectTools(
               ? (page as Record<string, unknown>)
               : { records: page };
             // [#35137] …each list naming the fields withheld from its own rows.
-            return withWithheldFields(
+            const list = withWithheldFields(
               { ...answer, object: plan.object, field: plan.field },
               await withheldFieldsFor(bridge, plan.object, plan.fields),
             );
+            // [ADR-0090 D10] …and, as `query_records` states it, a list the
+            // agent ceiling narrowed carries the narrowing beside its `total`.
+            // ⛔ The probe never fails the list it annotates.
+            const diagnosed = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(plan.object).catch(() => undefined)
+              : undefined;
+            return diagnosed?.narrowed && diagnosed.statement ? withDelegationNotice(list, diagnosed.statement) : list;
           }));
           return textResult({ record: served, related: lists });
         } catch (err) {

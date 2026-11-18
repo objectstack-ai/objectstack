@@ -76,6 +76,7 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
   const uid: Record<string, string> = {};
   const acct: Record<string, string> = {};
   const opp: Record<string, string> = {};
+  let contactId = '';
 
   const idOf = (b: any): string => String(b?.id ?? b?.record?.id ?? '');
   const userId = async (email: string): Promise<string> =>
@@ -135,8 +136,10 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
       name: `RR ${key}`, account, owner_id: owner, stage, close_date: '2031-06-30', amount: 100, probability: 40, organization_id: o,
     }, SYS));
   };
-  const activity = async (o: string, account: string, subject: string) =>
-    idOf(await ql.insert(ACTIVITY, { subject, type: 'call', status: 'planned', account, organization_id: o }, SYS));
+  const activity = async (o: string, account: string, subject: string, contact?: string) =>
+    idOf(await ql.insert(ACTIVITY, {
+      subject, type: 'call', status: 'planned', account, ...(contact ? { contact } : {}), organization_id: o,
+    }, SYS));
 
   beforeAll(async () => {
     stack = await bootStack(crmStack as never, {
@@ -169,7 +172,9 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     await deal('b1', org.b, acct.b1, uid.b, 'proposal');
     await deal('bx', org.b, acct.a1, uid.b, 'proposal');
     // Activities: two on a1, MANY on a2 (more than a list's cap).
-    await activity(org.a, acct.a1, 'RR call 1');
+    // A contact of a1, which the member may not read, on the first call.
+    contactId = idOf(await ql.insert(CONTACT, { first_name: 'Rita', last_name: 'Reader', account: acct.a1, organization_id: org.a }, SYS));
+    await activity(org.a, acct.a1, 'RR call 1', contactId);
     await activity(org.a, acct.a1, 'RR call 2');
     for (let i = 0; i < MANY; i++) await activity(org.a, acct.a2, `RR many ${String(i).padStart(2, '0')}`);
 
@@ -306,6 +311,17 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     expect({ code: viaRelated.code, status: viaRelated.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
     expect(viaRelated.text).not.toContain(opp.x1);
     expect(viaRelated.text).not.toContain('RR account a1');
+  });
+
+  it('⭐ expand onto an object the guard admits but the member may not read: the call is answered, the field keeps its stored id', async () => {
+    const payload = await ok(tok.a, 'query_records', {
+      objectName: ACTIVITY, where: { subject: 'RR call 1' }, expand: ['contact', 'account'],
+    });
+    const [row] = rowsOf(payload);
+    expect(row.contact).toBe(contactId);
+    expect(JSON.stringify(payload)).not.toContain('Rita');
+    // …while the readable target in the same call is expanded.
+    expect(row.account?.id).toBe(acct.a1);
   });
 
   it('⭐ a related object the member may not read refuses the whole call, before any read', async () => {

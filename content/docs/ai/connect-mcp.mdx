@@ -352,7 +352,13 @@ each answered as a list of at most 20 rows (`limit` lowers it):
   as the object the call names. An object the guard refuses (a system object
   that is not opted into AI reads) refuses the whole call with
   `PERMISSION_DENIED` before anything is read. A related object that is not
-  served to you refuses it too.
+  served to you refuses it too. An expanded field is different: when the guard
+  admits its object but you may not read the record it names (no permission on
+  that object, or a row it hides from you), the call is answered and the field
+  keeps its stored id.
+- Each related list carries the delegation notice (`delegationNarrowed`,
+  `warning`) that `query_records` carries when the agent ceiling narrowed the
+  read.
 - A name that is not a relationship field, or a `field` that does not point at
   the record, is refused with `INVALID_FIELD`.
 

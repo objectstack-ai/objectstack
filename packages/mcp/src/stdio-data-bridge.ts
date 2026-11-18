@@ -60,8 +60,8 @@
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
  * to the engine; this bridge is engine-only. So the HTTP tools additionally get
  * that layer's existence probes, its spec-shaped receipts and `select`
-(`expand` is served here since #35145, built as that layer builds it:
-{@link stdioExpandMap}).
+ * (`expand` is served here since #35145, built as that layer builds it:
+ * {@link stdioExpandMap}).
  * (That layer's create-side `readonly` strip used to head this list; since the
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the

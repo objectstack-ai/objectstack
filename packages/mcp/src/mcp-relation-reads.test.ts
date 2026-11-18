@@ -253,6 +253,27 @@ describe('get_record related — the tool', () => {
     expect(plain.payload.withheldFields).toEqual(answer.payload.related[0].withheldFields);
   });
 
+  it('a list the agent ceiling narrowed carries the delegation notice query_records carries; others do not', async () => {
+    const { bridge } = makeBridge();
+    bridge.diagnoseDelegation = async (name: string) =>
+      name === OPP ? { narrowed: true, statement: 'narrowed by the agent ceiling' } : { narrowed: false };
+    const answer = await call(bridge, 'get_record', {
+      objectName: ACCOUNT, recordId: 'a1', related: [{ object: OPP }, { object: ACTIVITY, field: 'account' }],
+    });
+    expect(answer.payload.related[0]).toMatchObject({ delegationNarrowed: true, warning: 'narrowed by the agent ceiling' });
+    expect(answer.payload.related[1].delegationNarrowed).toBeUndefined();
+    const plain = await call(bridge, 'query_records', { objectName: OPP });
+    expect(plain.payload).toMatchObject({ delegationNarrowed: true, warning: 'narrowed by the agent ceiling' });
+  });
+
+  it('a diagnosis that throws never fails the list', async () => {
+    const { bridge } = makeBridge();
+    bridge.diagnoseDelegation = async () => { throw new Error('probe down'); };
+    const answer = await call(bridge, 'get_record', { objectName: ACCOUNT, recordId: 'a1', related: [{ object: OPP }] });
+    expect(answer.isError, answer.text).toBe(false);
+    expect(answer.payload.related[0].delegationNarrowed).toBeUndefined();
+  });
+
   it('a multi-value link field is matched with $contains', async () => {
     const { bridge, calls } = makeBridge();
     await call(bridge, 'get_record', { objectName: ACCOUNT, recordId: 'a1', related: [{ object: NOTE }] });
