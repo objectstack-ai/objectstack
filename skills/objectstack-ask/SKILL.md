@@ -62,9 +62,9 @@ wrote its business definition) outranks a number you work out yourself.
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
 When you ask, the reply is the question alone: no figure, and no tool call
-until the user answers. Write it without any numerals at all: name each option
-by its label in a bullet, never as "1." or "option 2", and leave out counts,
-dates and years. Ask only about matches or candidates for words the user
+until the user answers. State no figure of your own in it (no count, total
+or option number): name each option by its label in a bullet, and quote its
+description as written. Ask only about matches or candidates for words the user
 wrote; when their word matched nothing and has no candidates, go to step 4
 instead of asking about some other word's matches. `partial: true` on the answer means the catalogue may
 be incomplete; `warning` says why, and you repeat it when you fall back.
