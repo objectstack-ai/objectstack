@@ -11,6 +11,8 @@
  * here and requires the two patches' edges to be equal.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -60,7 +62,8 @@ function removeWithInspector(draft: Fixture, id: string): { nodes: Node[]; edges
       locale="en-US"
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole('menuitem', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
   expect(onPatch).toHaveBeenCalledTimes(1);
   cleanup();
   return onPatch.mock.calls[0][0];
