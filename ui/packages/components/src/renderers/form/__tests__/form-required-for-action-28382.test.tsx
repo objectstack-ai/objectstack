@@ -28,6 +28,8 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererContext } from '@object-ui/react';
 // Module scope, not `beforeAll` — see object-ui/no-dynamic-import-in-test-hook.
 import '../../../renderers';
+// `react-page.tsx` (reached through `../../../renderers`) loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 import { patchingUpdateActions } from '../actionRequirements';
 
 beforeEach(() => {
