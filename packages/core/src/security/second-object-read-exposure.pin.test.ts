@@ -261,6 +261,16 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
+  // [#35146] The post-publish build probes' two landed-data checks.
+  'packages/metadata-protocol/src/build-probes.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the post-publish build probes (`runBuildProbes`) name the object a reference column or a roll-up's foreign key " +
+      "points at, under the system identity and scoped to the publishing organization like their sample reads, only " +
+      "to report whether a landed reference resolves (`seed_reference_unresolved`) or a parent's roll-up was ever " +
+      'computed (`rollup_never_computed`); the finding carries counts and the referencing column\'s own values, never ' +
+      'a field of the target, and is returned to the publisher on the publish receipt, not served to a caller',
+  },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",

@@ -637,8 +637,10 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 const parentIds = [...new Set(asArr(children).map(asRec).flatMap((c) =>
                     c && (!childField || (c[childField] !== null && c[childField] !== undefined)) ? idsIn(c[fk]) : []))];
                 if (parentIds.length === 0) continue;
+                // Scoped like the sample read above: a parent is judged in the
+                // organization the children were read in.
                 const parents = asArr(await engine.find(p.name, {
-                    where: { id: { $in: parentIds } },
+                    where: scoped(organizationId, { id: { $in: parentIds } }),
                     limit: parentIds.length,
                     context: SYSTEM_READ,
                 })).map(asRec).filter((r): r is Rec => !!r);
@@ -709,8 +711,11 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             if (values.length === 0) continue;
             let found: Set<string>;
             try {
+                // Scoped like the sample read above: the edit form resolves a
+                // reference inside the organization, so a row of another one
+                // does not resolve it here either.
                 const existing = asArr(await engine.find(target, {
-                    where: { id: { $in: values } },
+                    where: scoped(organizationId, { id: { $in: values } }),
                     limit: values.length,
                     context: SYSTEM_READ,
                 })).map(asRec);

@@ -219,3 +219,41 @@ describe('flow_connector_action_unresolved: a connector step the runtime cannot 
         expect(report.issues).toEqual([]);
     });
 });
+
+describe('the target and parent reads are scoped like the sample reads', () => {
+    /** Records every read's `where`, over the same fixed tables. */
+    const recording = (tables: Record<string, Row[]>) => {
+        const wheres: Array<[string, Record<string, unknown> | undefined]> = [];
+        const inner = engineOver(tables);
+        const engine: ProbeEngine = {
+            find: async (object, query) => {
+                wheres.push([object, (query as { where?: Record<string, unknown> } | undefined)?.where]);
+                return inner.find(object, query);
+            },
+        };
+        return { engine, wheres };
+    };
+
+    it('seed_reference_unresolved: a target row of another organization does not resolve the reference', async () => {
+        const { engine, wheres } = recording({
+            deal: [{ id: 'd1', organization_id: 'o1', acct_ref: 'a9' }],
+            acct: [{ id: 'a9', organization_id: 'o2' }],
+        });
+        const report = await run({ engine, organizationId: 'o1', published: [{ type: 'seed', name: 'deal_seed' }] });
+        expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
+        expect(wheres.filter(([o]) => o === 'acct')).toEqual([['acct', { id: { $in: ['a9'] }, organization_id: 'o1' }]]);
+    });
+
+    it('rollup_never_computed: a parent row of another organization is not judged', async () => {
+        const { engine, wheres } = recording({
+            deal: [{ id: 'd1', organization_id: 'o1', acct_ref: 'a1', amount: 5 }],
+            acct: [{ id: 'a1', organization_id: 'o2', deal_count: null, deal_total: null }],
+        });
+        const report = await run({ engine, organizationId: 'o1', published: [{ type: 'object', name: 'acct' }] });
+        expect(report.issues).toEqual([]);
+        for (const [, where] of wheres.filter(([o]) => o === 'acct')) {
+            expect(where).toEqual({ id: { $in: ['a1'] }, organization_id: 'o1' });
+        }
+        expect(wheres.filter(([o]) => o === 'acct')).toHaveLength(2);
+    });
+});

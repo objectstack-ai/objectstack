@@ -9,7 +9,7 @@ feat(lint): six publish-time checks for metadata that passes the schema and does
 
 Clause-②: no (narrowing: six publish-time refusals of metadata the schema accepts today)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/** traps for the six rules
+Skills-docs: follow-up #35245
 
 <!-- adr-0087: registered publish-refuses-metadata-the-runtime-ignores -->
 
