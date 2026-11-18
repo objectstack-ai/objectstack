@@ -106,7 +106,7 @@ export function enterpriseAbsenceConsequence(token: string): string {
   const shape = Object.prototype.hasOwnProperty.call(ENTERPRISE_ABSENCE_CONSEQUENCE, token)
     ? ENTERPRISE_ABSENCE_CONSEQUENCE[token]
     : `nothing provides "${token}", and the metadata that relies on it is not enforced`;
-  return `The enterprise edition enforces it; on the open edition ${shape}, and no log line says so.`;
+  return `Only the enterprise edition enforces it: without a wired provider, as on the open edition, ${shape}, and no log line says so.`;
 }
 
 /** {@link renderCapabilityMessage} without the package prefix. */
