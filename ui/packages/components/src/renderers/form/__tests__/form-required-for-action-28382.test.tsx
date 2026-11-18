@@ -153,7 +153,7 @@ describe('form renderer — fields an update action would require (objectstack#2
     expect(noteOnIssuedOn()).toBeNull();
   });
 
-  it('does not read or note anything on a create form', async () => {
+  it('makes one object read on a create form, the formula pass\'s, and notes nothing', async () => {
     const { getObjectSchema } = renderInvoiceForm({ edit: false });
     // Let any effect settle before reading the absence.
     await new Promise((r) => setTimeout(r, 20));
