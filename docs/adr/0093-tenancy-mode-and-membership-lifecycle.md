@@ -1,6 +1,6 @@
 # ADR-0093: Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle
 
-**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates. · **Amended** (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request; see the amendment note under D8. · **Amended** (2026-11-17, maintainer ruling (security#2)) — D1 and D7: under the `invite_only` audience posture, a sign-up admitted by the invitation it presents is not bound while its email address is unverified; it joins by accepting the invitation; see the amendment note under D1.
+**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates. · **Amended** (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request; see the amendment note under D8. · **Amended** (2026-11-17, maintainer ruling (security#2)) — D1 and D7: a sign-up admitted by its invitation alone is not bound while its email address is unverified — under `invite_only`, one admitted by the invitation it presents; under `email_domain`, one whose address is off the allowlist that a pending invitation admitted; it joins by accepting the invitation; see the amendment note under D1.
 - **Date:** 2026-07-13
 - **Deciders:** ObjectStack Protocol Architects
 - **Implementation:** #2882 (Phase 0 — tactical create-user bind, merged) → this PR (Phases 1–3 — `tenancy` service, fail-fast boot guard, membership reconciler, consumer migration, backfill, docs). One revision from the original plan, ratified in D2: the endpoint-level create-user bind **delegates to the shared reconciler** (one implementation, two call sites) instead of being deleted. Runtime verification confirmed the hook fires for `admin.createUser`, but better-auth *defers* `user.create.after` post-commit (#1881), so the endpoint keeps its delegated call to report `organizationId` / `membershipCreated` deterministically in its response. Cloud-host semantics (personal-org hook precedence, multi-org non-binding, D5 blast radius) verified against `objectstack-ai/cloud` — see D2/D3/D5.
@@ -169,19 +169,29 @@ for them.
 > explicitly). What `invite-only` decides is *who grants* the membership and
 > *when*, not whether a person who reaches the data holds one.
 
-> *Amended 2026-11-17 (maintainer ruling 2026-11-17 (security#2)).* Under the
-> `invite_only` audience posture with `membershipPolicy: 'auto'`, a sign-up
-> admitted by the invitation it presents is not bound while its email address
-> is unverified. The invitation's id admits the account and nothing more: it
-> does not prove the invited mailbox, and accepting an invitation needs a
-> verified address. Such an account joins by accepting the invitation once its
-> address is verified, which writes the membership with the invitation's role,
-> or by a platform administrator adding it. The decision stays at creation (D7):
-> verifying the address later binds nothing by itself. Every other creation
-> binds as D1 states — the first account, an account an administrator creates,
-> an account the deployment's boot command provisions, and a sign-up the
-> invitation mail's own proof verifies. Enforced by
-> `packages/plugins/plugin-auth/src/auth-manager-membership-admission.ts#settleMembership`.
+> *Amended 2026-11-17 (maintainer ruling (security#2)).* With
+> `membershipPolicy: 'auto'`, a sign-up admitted by its invitation alone is not
+> bound while its email address is unverified. Two cases:
+>
+> - (a) `invite_only`: a sign-up admitted by the invitation it presents;
+> - (b) `email_domain`: a self-serve sign-up whose address is off the allowlist
+>   and that a pending invitation addressed to it admitted. Under
+>   `email_domain`, an address on the allowlist is admitted by the domain rule
+>   and binds as before.
+>
+> The invitation admits the account and nothing more: it does not prove the
+> invited mailbox, and accepting an invitation needs a verified address. Such
+> an account joins by accepting the invitation once its address is verified,
+> which writes the membership with the invitation's role, or a platform
+> administrator adds it. The decision stays at creation (D7): verifying the
+> address later binds nothing by itself. Every other creation binds as D1
+> states — the first account, an account an administrator creates, an account
+> the deployment's boot command provisions, and a sign-up the invitation mail's
+> own proof verifies. Enforced by
+> `packages/plugins/plugin-auth/src/auth-manager-membership-admission.ts#settleMembership`,
+> which reads the admission that
+> `packages/plugins/plugin-auth/src/audience-posture.ts#isAdmittedByInvitationAlone`
+> decides.
 
 ### D2 — One owner: the membership reconciler hook
 
@@ -440,6 +450,7 @@ admin surfaces.
 | User leaves their only org | Allowed today, unchanged. The invariant governs *creation*, not the full lifecycle; a leave-then-rejoin flow is user intent |
 | Machine / service accounts | Out of scope now; when a first-class service-account marker exists, it should exempt from auto-bind (tracked as a follow-up, not blocking) |
 | Invitation sign-up, address unverified (`invite_only`) | Not bound at creation (amendment note under D1, 2026-11-17); joins by accepting the invitation once verified. Verifying later binds nothing by itself: membership is decided at creation |
+| Invitation sign-up off the allowlist, address unverified (`email_domain`) | Not bound at creation (amendment note under D1, 2026-11-17), as the `invite_only` row; an address on the allowlist is admitted by the domain rule and binds as before |
 
 ### D8 — Non-goals (explicit refusals)
 
