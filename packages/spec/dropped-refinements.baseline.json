@@ -82,6 +82,11 @@
         "schema"
       ]
     },
+    "api/AiSavedQuestion": {
+      "sites": [
+        "source.filter.lazy"
+      ]
+    },
     "api/AnalyticsQueryRequest": {
       "sites": [
         "where.lazy"
@@ -205,6 +210,11 @@
         "data.flow.errorHandling",
         "data.flow.nodes.element.in.waitEventConfig",
         "data.flow.variables.element"
+      ]
+    },
+    "api/CreateAiSavedQuestionResponse": {
+      "sites": [
+        "question.source.filter.lazy"
       ]
     },
     "api/CreateFlowRequest": {
@@ -530,6 +540,11 @@
         "options[1].manifest.views.element.list.grouping.fields.element.field",
         "options[1].manifest.views.element.list.kanban.groupByField",
         "options[1].manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/ListAiSavedQuestionsResponse": {
+      "sites": [
+        "questions.element.source.filter.lazy"
       ]
     },
     "api/ListInstalledPackagesResponse": {
