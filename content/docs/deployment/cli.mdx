@@ -883,9 +883,12 @@ What one run does:
   account with no password sign-in, are refused too. A refusal writes nothing.
 - **It sets the password with the hash every server verifies**, clears the account's
   development seed mark and a sign-in lock, and records the change time.
+- **It deletes the account's outstanding password-reset links and codes from the project
+  database** before the new password lands. A server's secondary storage (a host cache) is
+  out of its reach.
 - **It ends every session and revokes every API key of the account**, as an
-  administrator's forced reset does: credentials issued under the old password do not
-  outlive it. It asks for no password change at the next sign-in.
+  administrator's forced reset does: the sessions and keys issued under the old password do
+  not outlive it. It asks for no password change at the next sign-in.
 
 ### Build & Validate
 

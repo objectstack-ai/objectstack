@@ -20,10 +20,15 @@
  * - **Clears the seed stamp** (`sys_user.dev_seed_credential`), stamps
  *   `password_changed_at`, and clears a sign-in lock, so the new password
  *   signs in at once.
+ * - **Ends every outstanding password-reset token** of the account before the
+ *   password lands, as every door that sets a password does
+ *   (`credential-change-ends-reset-tokens.ts`). The CLI holds no server cache,
+ *   so it ends the token rows, as the raw adapter (handed no secondary storage)
+ *   does.
  * - **Ends every session and revokes every API key** of the account, as an
  *   administrator's forced reset with revocation does
- *   (`forced-reset-revocation.ts`, `admin_password_reset`): credentials minted
- *   under the old password do not outlive it.
+ *   (`forced-reset-revocation.ts`, `admin_password_reset`): the sessions and
+ *   keys issued under the old password do not outlive it.
  *
  * It asks for no password change at the next sign-in: the operator chose the
  * password.
@@ -32,6 +37,7 @@
 import { SystemObjectName } from '@objectstack/spec/system';
 import { DEV_SEED_CREDENTIAL_FIELD, isDevSeedPassword } from './dev-seed-credential.js';
 import { revokeSessionsAndApiKeys } from './forced-reset-revocation.js';
+import { endResetTokensOnCredentialWrite } from './credential-change-ends-reset-tokens.js';
 
 /** better-auth's default bounds for a password (`emailAndPassword.minPasswordLength` / `maxPasswordLength`). */
 export const OPERATOR_PASSWORD_MIN_LENGTH = 8;
@@ -40,7 +46,9 @@ export const OPERATOR_PASSWORD_MAX_LENGTH = 128;
 /** The slice of the data engine the reset reads and writes through. */
 export interface OperatorPasswordResetEngine {
   find(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+  findOne(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
   update(object: string, doc: Record<string, unknown>, opts?: unknown): Promise<unknown>;
+  delete(object: string, options?: unknown): Promise<unknown>;
 }
 
 /** Why a reset was refused. Nothing was written. */
@@ -144,11 +152,20 @@ export async function setOperatorPassword(
 
   const { hashPassword } = await import('better-auth/crypto');
   const now = (opts.now ?? (() => new Date()))();
-  await engine.update(
+  const credentialWrite = { id: credential.id, password: await hashPassword(input.password), updated_at: now };
+  // Before the write, as the adapters do: a token that cannot be ended aborts
+  // it, and the old password stands (`credential-change-ends-reset-tokens.ts`).
+  await endResetTokensOnCredentialWrite(
+    {
+      find: async (object, query) => rowsOf(await engine.find(object, { ...query, context: SYSTEM_CTX })),
+      findOne: (object, query) => engine.findOne(object, { ...query, context: SYSTEM_CTX }),
+      delete: (object, query) => engine.delete(object, { ...query, context: SYSTEM_CTX }),
+    },
     SystemObjectName.ACCOUNT,
-    { id: credential.id, password: await hashPassword(input.password), updated_at: now },
-    { context: SYSTEM_CTX },
+    credentialWrite,
+    [{ user_id: user.id }],
   );
+  await engine.update(SystemObjectName.ACCOUNT, credentialWrite, { context: SYSTEM_CTX });
   await engine.update(
     SystemObjectName.USER,
     {

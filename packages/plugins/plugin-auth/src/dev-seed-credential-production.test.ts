@@ -344,6 +344,27 @@ describe('a server outside development mode refuses a development seed credentia
     expect((await server.doors.signIn(SEED_EMAIL, CUSTOM_SEED_PASSWORD)).status).toBe(401);
   });
 
+  it('`os user set-password` ends the account\'s outstanding password-reset links before the password lands, and no other account\'s', async () => {
+    const seeded = await bootDevelopment();
+    const adminId = await seeded.userId(SEED_EMAIL);
+    const staffId = await seeded.userId(STAFF_EMAIL);
+    const expiresAt = new Date(Date.now() + 3_600_000);
+    for (const [identifier, value] of [
+      ['reset-password:tok_admin_1', adminId],
+      ['reset-password:tok_admin_2', adminId],
+      ['reset-password:tok_staff', staffId],
+    ] as const) {
+      await seeded.ql.insert('sys_verification', { identifier, value, expires_at: expiresAt }, { context: SYS } as never);
+    }
+    process.env.NODE_ENV = 'production';
+    const links = async (userId: string) => (await seeded.rows('sys_verification', { value: userId })).length;
+    expect({ admin: await links(adminId), staff: await links(staffId) }).toEqual({ admin: 2, staff: 1 });
+
+    const outcome = await setOperatorPassword(seeded.ql as never, { email: SEED_EMAIL, password: NEW_PASSWORD });
+    expect(outcome).toMatchObject({ outcome: 'set', userId: adminId });
+    expect({ admin: await links(adminId), staff: await links(staffId) }).toEqual({ admin: 0, staff: 1 });
+  });
+
   it('the operator reset refuses a password a server would refuse, and an address no account holds, and writes nothing', async () => {
     const seeded = await bootDevelopment();
     const adminId = await seeded.userId(SEED_EMAIL);
