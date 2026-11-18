@@ -54,6 +54,36 @@
       "prompt": "How many open opportunities do we have this quarter, by stage?",
       "should_trigger": false,
       "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "We ship our ObjectStack app to customers and want to remove a field some of them still have data in. What has to happen first?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "给我们的 ObjectStack 应用写个测试：折扣超过 20% 必须经理审批。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "Write a unit test for our ObjectStack plugin's `kernel:ready` handler.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "Add zh-CN translations for the `invoice` object's field labels in our ObjectStack app.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 14,
+      "prompt": "Build a kanban view of `task` grouped by status in our ObjectStack app.",
+      "should_trigger": false,
+      "files": []
     }
   ]
 }
