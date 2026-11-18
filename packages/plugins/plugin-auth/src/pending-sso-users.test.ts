@@ -1638,3 +1638,234 @@ describe('[#34130] Set Password is offered and works without the admin plugin', 
     expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The organization an identity-route action forward stamps
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A `type: 'api'` action forwarded to the auth mount carries the caller's
+// active organization as `body.organizationId` (`buildApiActionRequest` in
+// `@objectstack/runtime`; its control pin lives beside it in
+// `api-action-forward.test.ts`). Each of the three doors admits that one key,
+// and only when it equals the organization the caller's own session is
+// working in; any other value is refused before anything is read or written,
+// and the value never feeds scope. The staged admin's session holds
+// DEFAULT_ORG as its active organization (the session-create hook selects the
+// sole membership), and `clearActiveOrganization` takes it away.
+
+describe('[#34912] the SSO-user doors admit the stamped organizationId only when it is the session\'s', () => {
+  const OTHER_ORG = 'org_elsewhere';
+
+  /** The admin's sessions with no active organization, as a caller working in none holds them. */
+  const clearActiveOrganization = (s: Awaited<ReturnType<typeof stage>>): number => {
+    const sessions = ((s.engine.tables.get('sys_session') ?? []) as any[]).filter((r) => String(r.user_id) === s.ids.admin);
+    for (const session of sessions) {
+      session.active_organization_id = null;
+      delete session.activeOrganizationId;
+    }
+    return sessions.length;
+  };
+
+  /** Whether the staged admin's session holds DEFAULT_ORG, the fixture invariant every equal-key leg rests on. */
+  const assertSessionHoldsDefaultOrg = (s: Awaited<ReturnType<typeof stage>>): void => {
+    const sessions = ((s.engine.tables.get('sys_session') ?? []) as any[]).filter((r) => String(r.user_id) === s.ids.admin);
+    expect(
+      sessions.some((r) => (r.active_organization_id ?? r.activeOrganizationId) === DEFAULT_ORG),
+      'fixture invariant: the admin session works in DEFAULT_ORG',
+    ).toBe(true);
+  };
+
+  describe('admin/add-sso-user', () => {
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: the person is added, joined to the session organization', async (_label, extra) => {
+      const s = await managedStage();
+      assertSessionHoldsDefaultOrg(s);
+      const email = `add.${Object.keys(extra).length}@example.com`;
+
+      const res = await s.fire('/admin/add-sso-user', { email, name: 'Stamped', ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(201);
+      const row = s.row(email)!;
+      expect(row.source).toBe(PENDING_SSO_SOURCE);
+      expect(s.rowsOf('sys_member', String(row.id)).map((m) => m.organization_id)).toEqual([DEFAULT_ORG]);
+      expect(body.data).toMatchObject({ email, alreadyPending: false, organizationId: DEFAULT_ORG });
+      expect(s.told.map((t) => t.kind)).toEqual(['added']);
+    });
+
+    it('a different organization is refused 400 naming both, and no one is added or told', async () => {
+      const s = await managedStage();
+      const v = await verdict(
+        await s.fire('/admin/add-sso-user', { email: 'foreign.add@example.com', name: 'F', organizationId: OTHER_ORG }, s.bearers.admin),
+      );
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.row('foreign.add@example.com')).toBeUndefined();
+      expect(s.told).toEqual([]);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION; CONTROL: without the key the add stands', async () => {
+      const s = await managedStage();
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+
+      const v = await verdict(
+        await s.fire('/admin/add-sso-user', { email: 'noorg.add@example.com', name: 'N', organizationId: DEFAULT_ORG }, s.bearers.admin),
+      );
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.row('noorg.add@example.com')).toBeUndefined();
+      expect(s.told).toEqual([]);
+
+      const control = await s.fire('/admin/add-sso-user', { email: 'noorg.add@example.com', name: 'N' }, s.bearers.admin);
+      expect(control.status, await control.clone().text()).toBe(201);
+    });
+
+    it('an organizationId that is not a non-empty string is refused 400 and no one is added', async () => {
+      const s = await managedStage();
+      for (const organizationId of [null, '', 42]) {
+        const v = await verdict(
+          await s.fire('/admin/add-sso-user', { email: 'typed.add@example.com', name: 'T', organizationId }, s.bearers.admin),
+        );
+        expect([v.status, v.code], `${JSON.stringify(organizationId)}: ${v.text}`).toEqual([400, 'INVALID_REQUEST']);
+      }
+      expect(s.row('typed.add@example.com')).toBeUndefined();
+    });
+  });
+
+  describe('admin/import-sso-users', () => {
+    const CSV = 'email,name\nstamp.one@example.com,One\nstamp.two@example.com,Two\n';
+
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: every row is added, joined to the session organization', async (_label, extra) => {
+      const s = await managedStage();
+      assertSessionHoldsDefaultOrg(s);
+
+      const res = await s.fire('/admin/import-sso-users', { csv: CSV, ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data.summary).toEqual({ total: 2, added: 2, alreadyPending: 0, failed: 0 });
+      for (const email of ['stamp.one@example.com', 'stamp.two@example.com']) {
+        const row = s.row(email)!;
+        expect(row.source).toBe(PENDING_SSO_SOURCE);
+        expect(s.rowsOf('sys_member', String(row.id)).map((m) => m.organization_id)).toEqual([DEFAULT_ORG]);
+      }
+    });
+
+    it('a different organization is refused 400 naming both, and no row is imported or told', async () => {
+      const s = await managedStage();
+      const before = s.users().length;
+      const v = await verdict(await s.fire('/admin/import-sso-users', { csv: CSV, organizationId: OTHER_ORG }, s.bearers.admin));
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.users()).toHaveLength(before);
+      expect(s.told).toEqual([]);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION', async () => {
+      const s = await managedStage();
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+      const before = s.users().length;
+      const v = await verdict(await s.fire('/admin/import-sso-users', { csv: CSV, organizationId: DEFAULT_ORG }, s.bearers.admin));
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.users()).toHaveLength(before);
+      expect(s.told).toEqual([]);
+    });
+  });
+
+  describe('admin/remove-sso-user', () => {
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: the pending person is removed', async (_label, extra) => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      assertSessionHoldsDefaultOrg(s);
+      const id = await addPending(s, 'stamp.remove@example.com');
+
+      const res = await s.fire('/admin/remove-sso-user', { userId: id, ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data).toMatchObject({ userId: id, removed: true });
+      expect(s.row('stamp.remove@example.com')).toBeUndefined();
+      expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    });
+
+    it('a different organization is refused 400 naming both; the person is kept and the host is not asked', async () => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      const id = await addPending(s, 'foreign.remove@example.com');
+
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id, organizationId: OTHER_ORG }, s.bearers.admin));
+
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.row('foreign.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+      expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+      expect(told.map((t) => t.kind)).toEqual(['added']);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION; the person is kept', async () => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      const id = await addPending(s, 'noorg.remove@example.com');
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id, organizationId: DEFAULT_ORG }, s.bearers.admin));
+
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.row('noorg.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+      expect(told.map((t) => t.kind)).toEqual(['added']);
+    });
+  });
+
+  it('the body organization never feeds scope: on a multi-organization deployment the person joins the session organization', async () => {
+    // Driven over fakes so the join's target is observable: the door reads the
+    // organization from the session seam, and an equal body value is admitted
+    // without being the value the join is handed.
+    const engine = createMemoryEngine();
+    const joined: unknown[] = [];
+    const sessionReads: string[] = [];
+    const deps = {
+      isCloudManaged: () => true,
+      getDataEngine: () => engine as any,
+      getTenancy: () => ({ isolationActive: true }) as any,
+      getCallerActiveOrganizationId: async () => {
+        sessionReads.push('read');
+        return 'org_session';
+      },
+      getAddMember: async () => async (input: { body: { organizationId: string } }) => {
+        joined.push(input.body.organizationId);
+        return {};
+      },
+      createGrant: {
+        resolveActorContext: async () => ({}),
+        runAtomically: async <T,>(work: () => Promise<T>) => work(),
+      },
+    } as any;
+    const request = (organizationId: unknown) =>
+      new Request(`${ORIGIN}${BASE}/admin/add-sso-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'multi.org@example.com', name: 'Multi', organizationId }),
+      });
+
+    const refused = await runAddSsoUser(deps, { id: 'admin-1' } as any, request('org_attacker'));
+    expect([refused.status, refused.body.error?.code]).toEqual([400, 'INVALID_REQUEST']);
+    expect(joined).toEqual([]);
+    expect(((engine.tables.get('sys_user') ?? []) as any[]).length).toBe(0);
+
+    const admitted = await runAddSsoUser(deps, { id: 'admin-1' } as any, request('org_session'));
+    expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
+    expect(joined).toEqual(['org_session']);
+    // The check and the join each read the session; neither read the body's value as the scope.
+    expect(sessionReads.length).toBeGreaterThanOrEqual(2);
+  });
+});

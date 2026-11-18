@@ -1642,6 +1642,9 @@ const fr = {
     },
     total: "Total",
     noDataSourceFor: "Aucune source de données pour",
+    drillTooMany: 'Trop d’enregistrements sont liés à cette valeur pour les lister ici. Affinez les filtres du tableau de bord et réessayez.',
+    drillUnavailable: 'Les enregistrements correspondant à cette valeur ne peuvent pas être listés ici.',
+    drillFailed: 'Les enregistrements correspondant à cette valeur n’ont pas pu être chargés. Réessayez plus tard.',
     config: {
       breadcrumb: {
         dashboard: "Tableau de bord",

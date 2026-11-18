@@ -82,6 +82,27 @@ describe('collectExpectedEntries — a hook\'s declared texts (#34374)', () => {
   });
 });
 
+describe('collectExpectedEntries — a named import mapping\'s label', () => {
+  const entries = collectExpectedEntries({
+    mappings: [
+      { name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] },
+      { name: 'unlabelled_feed', targetObject: 'lead', fieldMapping: [] },
+    ],
+  }, { warnedGroups: new Set() });
+
+  it('yields mappings.<mapping>.label with the authored label, from the mapping', () => {
+    const entry = entries.find((e) => e.path.join('.') === 'mappings.lead_feed.label');
+    expect(entry?.sourceValue).toBe('Lead feed');
+    expect(entry?.source).toBe('mapping');
+  });
+
+  it('keys nothing from the field mapping, and no authored text for a mapping with no label', () => {
+    const keys = entries.map((e) => e.path.join('.'));
+    expect(keys.filter((k) => k.startsWith('mappings.lead_feed.'))).toEqual(['mappings.lead_feed.label']);
+    expect(entries.find((e) => e.path.join('.') === 'mappings.unlabelled_feed.label')?.sourceValue).toBeUndefined();
+  });
+});
+
 describe('authorWarnedTranslationGroups on the shipped ledger', () => {
   // A browser reads no ledger file, so there the default leaves no group out.
   // That matches the CLI only while the ledger warns on no translation group;

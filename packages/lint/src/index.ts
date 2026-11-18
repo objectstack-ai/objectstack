@@ -1020,6 +1020,17 @@ export type {
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
 
+// An action body must compile in the wrapper the runtime runs it in, which the
+// runtime builds from `actionBodyFunctionExpression` — the same function the
+// rule compiles inside, so the two cannot disagree about the wrapper.
+export {
+  validateActionBodyCompiles,
+  hostCompileFailure,
+  ACTION_BODY_DOES_NOT_COMPILE,
+} from './validate-action-body-compiles.js';
+export type { ActionBodyCompileFinding, HostCompileFailure } from './validate-action-body-compiles.js';
+export { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
+
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and
 // implicit-field set so all three agree on what is writable without being
