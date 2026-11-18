@@ -5002,6 +5002,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/rest/src/meta-destructive-still-shown-by-flat-issues.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
       "verb": "delete",
       "pinned": 1
