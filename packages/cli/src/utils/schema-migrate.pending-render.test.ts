@@ -12,6 +12,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// `schema-migrate.ts` reaches these through guarded dynamic imports
+// (`schema-migration-plugins.ts`); loading them here pays the transform during
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 import {
   renderPendingSchemaWork,
   splitRefusedSchemaWork,
