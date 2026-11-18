@@ -290,10 +290,14 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     expect(viaRelated.text).not.toContain('RR account a1');
   });
 
-  it('⭐ a related object the member may not read refuses the whole call', async () => {
+  it('⭐ a related object the member may not read refuses the whole call, before any read', async () => {
+    // Its definition is not served to the member at all, so the call is
+    // refused while the relation is judged: no record of either list is read.
     const answer = await refused(tok.a, 'get_record', { objectName: ACCOUNT, recordId: acct.a1, related: [{ object: OPP }, { object: CONTACT }] });
-    expect(answer.code).toBe('PERMISSION_DENIED');
+    expect({ code: answer.code, status: answer.status }).toEqual({ code: 'OBJECT_NOT_FOUND', status: 404 });
+    expect(answer.text).toContain(CONTACT);
     expect(answer.text).not.toContain(opp.x1);
+    expect(answer.text).not.toContain('RR account a1');
   });
 
   it('⭐ an unknown field, or a field that is no relation, is INVALID_FIELD', async () => {
