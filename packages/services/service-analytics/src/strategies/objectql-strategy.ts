@@ -70,6 +70,7 @@ import {
 // of an offset-only window per dialect, shared with the native face.
 // [#25907] `orderClauseSql` likewise for the order and its NULL placement.
 import { aggregateOfMeasure, orderClauseSql, windowClauseSql, windowTopSql } from './native-sql-strategy.js';
+import { answerWholeGrid, groupCountRequestOf } from '../dataset-group-count.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -812,6 +813,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * orders chronologically here.)
    */
   private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+    // [query_dataset totalGroups] The rows in hand are every group: no read
+    // above hands `engine.aggregate` an order or a window, so it answers the
+    // whole grid, and the cut is this line's. A caller that asked for the
+    // group count (`dataset-group-count.ts`) gets the grid's length before the
+    // cut — no read is added for it. A read that ever hands the engine a
+    // window must take the count from the engine instead, never from here.
+    const groupCount = groupCountRequestOf(query);
+    if (groupCount) answerWholeGrid(rows, groupCount);
     return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
   }
 

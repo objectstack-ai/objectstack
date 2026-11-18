@@ -34,7 +34,7 @@ import {
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
-import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
@@ -734,6 +734,16 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
 }
 
 /**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The stdio twin is
+ * `describedFieldNames` in `packages/mcp/src/stdio-data-bridge.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+    const fields = described.fields;
+    return Array.isArray(fields) ? fields.map((f: any) => String(f?.name ?? '')).filter(Boolean) : [];
+}
+
+/**
  * [#34721] An object's or a field's `description` as `list_objects` and
  * `describe_object` serve it: `{ description }` when the definition, as the
  * caller is served it ({@link servedToCaller}), carries a non-blank string
@@ -1081,6 +1091,24 @@ export function buildMcpBridge(
         return out;
     };
 
+    /**
+     * `describe_object`'s answer for THIS caller: the object as they are
+     * served it ({@link readObjectForCaller}'s two steps, kept apart so the
+     * declaration it masks is in hand, [#32530] `readonly`), [#34872] in
+     * their locale, [#32435] each field and rule carrying what a write needs
+     * ({@link describeServedObject}). `null` for an object not served.
+     * [#35137] Also the served-schema half of `fieldVisibilityOf`, so the
+     * fields `withheldFields` may name are exactly the ones this answer lists.
+     */
+    const describeForCaller = async (name: string): Promise<Record<string, unknown> | null> => {
+        const declared: any = await readServedObject(name);
+        const def: any = declared ? await servedToCaller(declared) : declared;
+        if (!def) return null;
+        // `declared` is read for the `readonly` verdict alone, which no translation touches.
+        const [localized] = await inCallerLocale([def]);
+        return describeServedObject(localized, declared);
+    };
+
     return {
         listObjects: listObjectSummaries,
         /**
@@ -1148,18 +1176,7 @@ export function buildMcpBridge(
                 : await ((await getMeta()) as any)?.getObject?.(name);
             return isAiReadExposed(def);
         },
-        describeObject: async (name: string) => {
-            // {@link readObjectForCaller}'s two steps, kept apart so the
-            // declaration it masks is in hand ([#32530] `readonly`).
-            const declared: any = await readServedObject(name);
-            const def: any = declared ? await servedToCaller(declared) : declared;
-            if (!def) return null;
-            // [#34872] …in the caller's locale. `declared` is read for the
-            // `readonly` verdict alone, which no translation touches.
-            const [localized] = await inCallerLocale([def]);
-            // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(localized, declared);
-        },
+        describeObject: describeForCaller,
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
@@ -1229,6 +1246,27 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
+        /**
+         * [#35137] The two answers `query_records` and `get_record` name
+         * withheld fields from (`McpFieldVisibility`, `@objectstack/mcp`), both
+         * asked as THIS request's caller: the field names `describe_object`
+         * lists for them, read off the very answer it serves
+         * ({@link describeForCaller}, so whatever it leaves out is left out
+         * here too), and this request's security service's readable answer
+         * (`getReadableFields`). No security service, an object not served,
+         * or no readable answer: `undefined`, and nothing is named. A throw
+         * reaches the tool layer, which names nothing either.
+         */
+        fieldVisibilityOf: async (object: string) => {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.getReadableFields !== 'function') return undefined;
+            const described = await describeForCaller(object);
+            if (!described) return undefined;
+            const readable = await security.getReadableFields(object, ec);
+            if (!Array.isArray(readable)) return undefined;
+            return { served: describedFieldNames(described), readable };
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
@@ -1253,6 +1291,10 @@ export function buildMcpBridge(
             );
             return res?.rows ?? [];
         },
+        // [#35138] The caller's locale ladder for a sentence the record tools
+        // compose (`ifNotRecorded`): this request's, as the dataset tools'
+        // `nextStep` reads it on this door (`userTextLocalesOf`).
+        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────
         // ADR-0063 §2 names skills the only third-party extension primitive,

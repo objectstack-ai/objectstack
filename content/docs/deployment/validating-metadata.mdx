@@ -959,7 +959,10 @@ What the failure does depends on what the predicate guards:
 
 At **submit** a broken field rule is refused, not passed. A field `visibleWhen` that
 cannot be evaluated refuses the submit on the client, with a message naming the field
-and the rule, because no server evaluates a field's `visibleWhen`. A broken
+and the rule. The server reads a field's `visibleWhen` only when the field is also
+`required`, to decide whether the requirement applies to the write: hidden means not
+required, and a `visibleWhen` it cannot evaluate counts as shown, so the field stays
+required and the server logs the fault. A broken
 `requiredWhen` or `readonlyWhen`, or an option's `visibleWhen`, is refused by the
 server, and the form shows that refusal beside the input. One exception: a
 `readonlyWhen` that reads a name the write does not bind (a bare field name, or

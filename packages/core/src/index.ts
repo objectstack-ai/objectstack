@@ -59,6 +59,10 @@ export * from './stack-organization-record-page.js';
 // in packages that cannot import each other (`@objectstack/service-automation`
 // and `@objectstack/runtime`'s seed load), and both already depend on this one.
 export * from './organization-locale.js';
+// The language a sentence in a tool's result is written in — one picker for
+// the dataset tools (`@objectstack/service-analytics`) and the MCP record
+// tools (`@objectstack/mcp`), which cannot import each other.
+export * from './sentence-locale.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

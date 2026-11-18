@@ -253,6 +253,9 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     expect(ids(rowsOf(deals))).toEqual([opp.x1, opp.x2].sort());
     expect(ids(rowsOf(deals))).not.toContain(opp.lost);
     for (const row of rowsOf(deals)) expect(row.probability).toBeUndefined();
+    // …and the list names it as withheld, as a plain read of the deals does.
+    expect(deals.withheldFields).toContain('probability');
+    expect(payload.record.withheldFields).toContain('annual_revenue');
     expect(deals.truncated).toBeUndefined();
     const acts = listOf(payload, ACTIVITY);
     expect(rowsOf(acts).map((r) => r.subject).sort()).toEqual(['RR call 1', 'RR call 2']);

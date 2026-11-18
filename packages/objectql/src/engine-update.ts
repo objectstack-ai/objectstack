@@ -55,7 +55,7 @@ import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHome
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { declaredOptionLabels } from './formula-option-labels.js';
-import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecord, validateRecordInScope } from './validation/record-validator.js';
+import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecordInScope } from './validation/record-validator.js';
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, hasReadonlyWhenInPayload, needsPriorRecord, stripReadonlyFields, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti } from './validation/rule-validator.js';
 import type { ReferentialClearExemption } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
@@ -70,7 +70,7 @@ import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveE
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
   ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
-  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
+  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, formulaValuesFor, hydrateWriteFormulas,
   lowerWhereFilterArray, masterIdOf, planFormulaProjection, planStoredExpressions, rejectUnknownEngineOptions,
   storedExpressionsReading,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
@@ -1201,7 +1201,10 @@ export class UpdateFacet {
            // this write.
            const judgeStrippedPayload = (payload: Record<string, unknown>): void => {
                normalizeMultiValueFields(updateSchema, payload, 'skip');
-               validateRecord(updateSchema, payload, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+               // [ADR-0113 D1, as amended] `'deferred'`: a clear of a field
+               // required only when shown is judged by `evaluateValidationRules`
+               // (both branches below), against its visibility and the prior row.
+               validateRecordInScope(updateSchema, payload, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
            };
            // [#19887] A `readonlyWhen` predicate's `record` is the payload the
            // write STORES, so it reads each multi-valued field in its stored
@@ -1663,7 +1666,7 @@ export class UpdateFacet {
                  async () => [priorRecord],
                );
                if (referencesFirst) await checkReferences();
-               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
+               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate, formulaValues: formulaValuesFor(updateSchema, opCtx.context, permissionsForUpdate) }), this.logger, object);
                if (!referencesFirst) await checkReferences();
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -2112,6 +2115,8 @@ export class UpdateFacet {
                  readPriorRows,
                );
                if (referencesFirst) await checkReferences();
+               // One formula closure for the batch: its plan is built once.
+               const bulkFormulaValues = formulaValuesFor(updateSchema, opCtx.context, bulkPermissions);
                if (rulesNeedRows) {
                    // [#34465] Batch equals one-by-one for a rule that reads a
                    // roll-up of a parent: each matched row is judged against
@@ -2140,7 +2145,7 @@ export class UpdateFacet {
                        try {
                            const header = parentForRow?.(row);
                            const related = bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch });
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: foldMaster ? summaryFold!.overlayRow(foldMaster, header) : header, previousParent: foldMaster ? summaryFold!.overlayRow(foldMaster, previousParentForRow?.(row)) : previousParentForRow?.(row), related: summaryFold ? summaryFold.overlay(related) : related, permissions: bulkPermissions }), this.logger, object);
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: foldMaster ? summaryFold!.overlayRow(foldMaster, header) : header, previousParent: foldMaster ? summaryFold!.overlayRow(foldMaster, previousParentForRow?.(row)) : previousParentForRow?.(row), related: summaryFold ? summaryFold.overlay(related) : related, permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
                            summaryFold?.advance(i);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
@@ -2157,7 +2162,7 @@ export class UpdateFacet {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
+                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
                }
                if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.

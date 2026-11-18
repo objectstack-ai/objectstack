@@ -43,18 +43,22 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { DisplayNameObjectMeta, EngineAggregateOptions } from '@objectstack/spec/data';
 // [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
 import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
+// [#35138] ADR-0079's one reading of an object's name field
+// (`nameField ?? displayNameField ?? derived`), which names a lookup group.
+import { resolveDisplayField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // The repo's ONE not-found envelope, which the HTTP bridge's `get` throws:
 // `get_record` refuses a null read with it, so both doors answer one 404.
-import { recordNotFoundError } from '@objectstack/core';
+import { pickSentenceLocale, recordNotFoundError } from '@objectstack/core';
+import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -146,6 +150,23 @@ export interface McpObjectSummary {
    */
   description?: string;
   fieldCount?: number;
+}
+
+/**
+ * [#35137] What {@link McpDataBridge.fieldVisibilityOf} answers for one
+ * object, both halves asked AS the caller:
+ *
+ * - `served` — the field names the caller's own served schema shows: the
+ *   object as `describe_object` serves it to this caller (ADR-0106 D1/D5, the
+ *   `/meta` object door's projection), so a field removed from their schema
+ *   is not in it;
+ * - `readable` — the fields the security service answers this caller may
+ *   READ on the object (`ISecurityService.getReadableFields`), the exact
+ *   complement of what the read path's field mask deletes from a row.
+ */
+export interface McpFieldVisibility {
+  served: readonly string[];
+  readable: readonly string[];
 }
 
 /**
@@ -279,6 +300,21 @@ export interface McpDataBridge {
    * only where one was established.
    */
   diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [#35137] The two framework answers `query_records` and `get_record` name
+   * the fields field-level security withholds from: both asked AS the caller,
+   * neither derived from rows ({@link McpFieldVisibility}). The tool layer
+   * names a field only when the first shows it and the second leaves it out
+   * (`withheldFieldNames`), so a field the caller's schema does not show is
+   * never named.
+   *
+   * OPTIONAL, with the graceful-degradation contract of
+   * {@link McpDataBridge.diagnoseDelegation}: a bridge that omits it, answers
+   * `undefined` (no security service, or no answer from it) or throws gets no
+   * `withheldFields`, and the tools render exactly what they rendered before.
+   * ⛔ The probe never fails the read it annotates.
+   */
+  fieldVisibilityOf?(object: string): Promise<McpFieldVisibility | undefined>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -307,6 +343,19 @@ export interface McpDataBridge {
       timezone?: string;
     },
   ): Promise<unknown[]>;
+  /**
+   * [#35138] The caller's locale ladder for a sentence the tools compose into
+   * a result (`ifNotRecorded`): the codes in order, the shared picker
+   * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
+   * the sentence is written in, `en` below all. The HTTP bridge answers
+   * `userTextLocalesOf` over the request's `ExecutionContext`, the ladder the
+   * dataset tools' `nextStep` reads on that door; the stdio bridge answers the
+   * principal's ladder, then the i18n service's default.
+   *
+   * OPTIONAL: a bridge that omits it, or whose answer throws, is written to in
+   * `en`.
+   */
+  userTextLocales?(): Promise<readonly string[]>;
   /**
    * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
    * query, each with its dimensions and measures, their business vocabulary,
@@ -776,15 +825,31 @@ async function servedFieldsOf(
   bridge: McpDataBridge,
   objectName: string,
 ): Promise<Record<string, unknown> | undefined> {
+  return fieldMapOf(await servedDefinitionOf(bridge, objectName));
+}
+
+/**
+ * The object `objectName` as this caller is served it, or `undefined` when the
+ * bridge cannot say (no member, no object, or a throw).
+ */
+async function servedDefinitionOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
   if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
   try {
-    const fields = (await bridge.servedObjectDefinitionOf(objectName))?.fields;
-    return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
-      ? (fields as Record<string, unknown>)
-      : undefined;
+    return (await bridge.servedObjectDefinitionOf(objectName)) ?? undefined;
   } catch {
     return undefined;
   }
+}
+
+/** A served definition's name-keyed field map, or `undefined` when it carries none. */
+function fieldMapOf(def: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const fields = def?.fields;
+  return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+    ? (fields as Record<string, unknown>)
+    : undefined;
 }
 
 /** The served field `name`, or `undefined` when the caller's view has no such field. */
@@ -861,6 +926,127 @@ function inDeclaredOptionOrder(
     }
     return 0;
   });
+}
+
+/**
+ * [#35138] The field types whose group value is the id of a record of another
+ * object, the field's `reference`.
+ */
+const LOOKUP_GROUP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+/** [#35138] The member beside a lookup group key that names its record: `<key>__label`. */
+const LOOKUP_LABEL_SUFFIX = '__label';
+
+/**
+ * [#35138] `aggregate_records`' groups with each lookup key's record named
+ * beside it, in `<key>__label`, where `<key>` is the group column (the key's
+ * alias when it has one).
+ *
+ * A group key is a lookup key when the caller's served schema shows it as a
+ * `lookup` or `master_detail` field with a `reference`. The name is the
+ * referenced record's value of the referenced object's name field (ADR-0079,
+ * {@link resolveDisplayField}), read AS THE CALLER: one `bridge.query` per
+ * referenced object, for the ids of the groups served, through the same
+ * bridge and context as the aggregate. Nothing is read with other rights, so
+ * the caller's object, field and record permissions apply as to any read the
+ * caller makes.
+ *
+ * A label is set only for a key whose record that read returns with a
+ * non-blank name. Every other key carries no label, and nothing else in the
+ * answer changes, so the answer says nothing about why a key has none.
+ * No label at all is added, and the rows come back as they are, when the
+ * referenced object is not one this tool reads (`admitsRead`), when the
+ * caller is not served it or its name field, or when the read fails.
+ * ⛔ This read never fails the aggregate it annotates.
+ */
+async function withLookupGroupLabels(
+  bridge: McpDataBridge,
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<unknown[]> {
+  const keysByTarget = new Map<string, string[]>();
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    if (item.dateGranularity !== undefined) continue;
+    const def = servedFieldOf(fields, item.field);
+    if (!def || typeof def.type !== 'string' || !LOOKUP_GROUP_TYPES.has(def.type)) continue;
+    if (typeof def.reference !== 'string' || def.reference === '') continue;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keysByTarget.set(def.reference, [...(keysByTarget.get(def.reference) ?? []), column]);
+  }
+  if (keysByTarget.size === 0) return rows;
+
+  const namesByColumn = new Map<string, Map<string, string>>();
+  for (const [target, columns] of keysByTarget) {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (row === null || typeof row !== 'object') continue;
+      for (const column of columns) {
+        const id = (row as Record<string, unknown>)[column];
+        if (typeof id === 'string' && id !== '') ids.add(id);
+      }
+    }
+    if (ids.size === 0) continue;
+    const names = await recordNamesAsCaller(bridge, target, [...ids], admitsRead);
+    if (!names || names.size === 0) continue;
+    for (const column of columns) namesByColumn.set(column, names);
+  }
+  if (namesByColumn.size === 0) return rows;
+
+  return rows.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const source = row as Record<string, unknown>;
+    const labelled: Record<string, unknown> = {};
+    for (const [member, value] of Object.entries(source)) {
+      labelled[member] = value;
+      const names = namesByColumn.get(member);
+      const name = names && typeof value === 'string' ? names.get(value) : undefined;
+      const labelMember = `${member}${LOOKUP_LABEL_SUFFIX}`;
+      // A column the aggregate itself answers under that name is never overwritten.
+      if (name !== undefined && !Object.prototype.hasOwnProperty.call(source, labelMember)) labelled[labelMember] = name;
+    }
+    return labelled;
+  });
+}
+
+/**
+ * [#35138] The name of each of `ids` in `target` that the caller's own read
+ * returns with a non-blank name, by id. `undefined` when no name can be read
+ * at all: the object is not one this tool reads, the caller is not served it
+ * or its name field, or the read fails.
+ */
+async function recordNamesAsCaller(
+  bridge: McpDataBridge,
+  target: string,
+  ids: string[],
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<Map<string, string> | undefined> {
+  try {
+    if (!(await admitsRead(target))) return undefined;
+    const def = await servedDefinitionOf(bridge, target);
+    const targetFields = fieldMapOf(def);
+    if (!def || !targetFields) return undefined;
+    const nameField = resolveDisplayField(def as DisplayNameObjectMeta);
+    if (!nameField || !servedFieldOf(targetFields, nameField)) return undefined;
+    const answer = await bridge.query(target, { where: { id: { $in: ids } }, fields: ['id', nameField], limit: ids.length });
+    const records = (answer as { records?: unknown } | null | undefined)?.records;
+    if (!Array.isArray(records)) return undefined;
+    const asked = new Set(ids);
+    const names = new Map<string, string>();
+    for (const record of records) {
+      if (record === null || typeof record !== 'object') continue;
+      const id = idOfRow(record as Record<string, unknown>);
+      const name = (record as Record<string, unknown>)[nameField];
+      if (id === undefined || !asked.has(id)) continue;
+      if (typeof name === 'string' && name.trim() !== '') names.set(id, name);
+      else if (typeof name === 'number' && Number.isFinite(name)) names.set(id, String(name));
+    }
+    return names;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1262,9 +1448,14 @@ function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoo
  * code-less sentences, which the door's message heuristics would misread, so
  * it keeps {@link errorResultWithCode}.
  */
-function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RECORDS_TOOL, objectName: string) {
+function dataDoorErrorResult(
+  err: unknown,
+  tool: DataDoorTool | typeof DELETE_RECORDS_TOOL,
+  objectName: string,
+  beside?: NotRecordedMembers,
+) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope });
+  if (envelope) return codedErrorResult({ ...envelope }, beside);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({
@@ -1274,7 +1465,181 @@ function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RE
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
     });
   }
-  return codedErrorResult(door);
+  return codedErrorResult(door, isServerFault(door.status) ? undefined : beside);
+}
+
+/**
+ * [#35138] What a record read's refusal says about data the caller's app does
+ * not record: `notRecorded` names it, as the caller sent it, and
+ * `ifNotRecorded` tells the model, in the caller's language, to say so rather
+ * than answer around a bare not-found. Rendered beside the coded refusal
+ * (`{ error, notRecorded, ifNotRecorded }`), whose `error` is unchanged.
+ *
+ * - `{ object }`: the caller's schema shows no object by the name they sent;
+ * - `{ object, fields }`: it shows the object, and not these names the call
+ *   sent (in the order first sent).
+ */
+export interface NotRecordedMembers {
+  notRecorded: { object: string; fields?: string[] };
+  ifNotRecorded: string;
+}
+
+/** The languages {@link NOT_RECORDED_SENTENCE} is written in; `en` is the floor. */
+const NOT_RECORDED_LOCALES = ['en', 'zh-Hans', 'zh-Hant', 'ja'] as const;
+
+/**
+ * [#35138, ADR-0149 M1] The `ifNotRecorded` sentence, one per language, in
+ * the executor: the spec fixes no wording. ⛔ One sentence for every case the
+ * member is served on, naming nothing: what is not recorded is the
+ * `notRecorded` member's, built from the caller's own words.
+ */
+const NOT_RECORDED_SENTENCE: Readonly<Record<(typeof NOT_RECORDED_LOCALES)[number], string>> = {
+  en:
+    'What notRecorded names is not recorded here, so nothing was read: tell the user this data is not recorded, '
+    + 'never report 0 or an empty result for it, and do not answer with another object or field in its place.',
+  'zh-Hans': 'notRecorded 所列的内容在这里没有记录，因此没有读取任何数据：请告诉用户这项数据没有记录，不要为它报告 0 或空结果，也不要用其他对象或字段代替回答。',
+  'zh-Hant': 'notRecorded 所列的內容在這裡沒有記錄，因此沒有讀取任何資料：請告訴使用者這項資料沒有記錄，不要為它回報 0 或空結果，也不要用其他物件或欄位代替回答。',
+  ja: 'notRecorded に挙げたものはここに記録されていないため、何も読み取っていません：このデータは記録されていないとユーザーに伝え、0 や空の結果を報告せず、別のオブジェクトやフィールドで代わりに答えないでください。',
+};
+
+/**
+ * The columns every object answers whatever its schema lists: the primary key
+ * and the two audit timestamps the engine's read and write doors admit on any
+ * object (`PLATFORM_PROVISIONED_COLUMNS`, `@objectstack/objectql`). A schema
+ * need not list them, so their absence there never makes them not recorded.
+ */
+const ALWAYS_ADDRESSABLE_COLUMNS: ReadonlySet<string> = new Set([
+  SystemFieldName.ID,
+  SystemFieldName.CREATED_AT,
+  SystemFieldName.UPDATED_AT,
+]);
+
+/** The logical operators whose operands are themselves conditions on the object's fields. */
+const WHERE_LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['$and', '$or', '$nor', '$not']);
+
+/**
+ * The name a sent field name addresses on the object itself: its first path
+ * segment. A dotted name (`owner.name`) reaches a relation's field through its
+ * head, and the head is what the object's schema lists; the rest is the
+ * related object's business. Every channel's names are read this way.
+ */
+function sentFieldHead(name: string): string {
+  return name.split('.')[0];
+}
+
+/**
+ * The field names a `where` the caller sent addresses, in order: each
+ * condition key, through the logical operators. Other `$` keys are operators,
+ * never names.
+ */
+function whereFieldNames(where: unknown, into: string[]): string[] {
+  if (Array.isArray(where)) {
+    for (const branch of where) whereFieldNames(branch, into);
+    return into;
+  }
+  if (!where || typeof where !== 'object') return into;
+  for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+    if (key.startsWith('$')) {
+      if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
+      continue;
+    }
+    into.push(key);
+  }
+  return into;
+}
+
+/** The field names a `query_records` call sent: `where`, `fields`, `orderBy`. */
+function queryRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  fields?: string[];
+  orderBy?: Array<{ field: string }>;
+}): string[] {
+  return [
+    ...whereFieldNames(args.where, []),
+    ...(args.fields ?? []),
+    ...(args.orderBy ?? []).map((o) => o.field),
+  ];
+}
+
+/** The field names an `aggregate_records` call sent: `where`, `groupBy`, each aggregation's `field` and `filter`. */
+function aggregateRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  groupBy?: Array<string | { field: string }>;
+  aggregations: Array<{ field?: string; filter?: unknown }>;
+}): string[] {
+  const names = whereFieldNames(args.where, []);
+  for (const g of args.groupBy ?? []) names.push(typeof g === 'string' ? g : g.field);
+  for (const a of args.aggregations) {
+    if (typeof a.field === 'string' && a.field !== '') names.push(a.field);
+    whereFieldNames(a.filter, names);
+  }
+  return names;
+}
+
+/**
+ * [#35138] {@link NotRecordedMembers} for a refused record read, or
+ * `undefined`. Decided from two things only: the names the caller sent, and
+ * the object as the caller's own schema shows it (`describeObject`, the
+ * `describe_object` answer). ⛔ So an object or a field the caller's schema
+ * does not show is answered exactly as one that does not exist, whatever the
+ * refusal beside it says, and nothing the schema shows is ever named or
+ * counted. Each sent name is read by its head ({@link sentFieldHead}) on
+ * every channel, so a dotted name whose head the schema shows is never named. A schema read that throws, or one with no field list, establishes
+ * nothing: no member.
+ */
+async function notRecordedMembersOf(
+  bridge: McpDataBridge,
+  objectName: string,
+  sentFields: readonly string[],
+): Promise<NotRecordedMembers | undefined> {
+  let served: unknown;
+  try {
+    served = await bridge.describeObject(objectName);
+  } catch {
+    return undefined;
+  }
+  let notRecorded: NotRecordedMembers['notRecorded'];
+  if (served == null) {
+    notRecorded = { object: objectName };
+  } else {
+    const fields = (served as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return undefined;
+    const shown = new Set<string>(ALWAYS_ADDRESSABLE_COLUMNS);
+    for (const f of fields) {
+      const name = (f as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') shown.add(name);
+    }
+    const heads = sentFields.map(sentFieldHead).filter((head) => head !== '');
+    const absent = [...new Set(heads)].filter((name) => !shown.has(name));
+    if (absent.length === 0) return undefined;
+    notRecorded = { object: objectName, fields: absent };
+  }
+  let locales: readonly string[] = [];
+  try {
+    locales = (await bridge.userTextLocales?.()) ?? [];
+  } catch {
+    locales = [];
+  }
+  return { notRecorded, ifNotRecorded: NOT_RECORDED_SENTENCE[pickSentenceLocale(locales, NOT_RECORDED_LOCALES)] };
+}
+
+/**
+ * [#35138] A record read tool's answer to a throw ({@link dataDoorErrorResult},
+ * unchanged), with {@link NotRecordedMembers} beside the refusal where the
+ * caller's schema does not show what the call named. A server fault is not a
+ * refusal and carries none.
+ */
+async function recordReadErrorResult(
+  bridge: McpDataBridge,
+  err: unknown,
+  tool: 'query_records' | 'aggregate_records' | 'get_record',
+  objectName: string,
+  sentFields: readonly string[],
+) {
+  const refusal = dataDoorRefusalEnvelope(err, objectName) !== undefined
+    || !isServerFault(dataDoorAnswerOf(err, objectName).status);
+  const beside = refusal ? await notRecordedMembersOf(bridge, objectName, sentFields) : undefined;
+  return dataDoorErrorResult(err, tool, objectName, beside);
 }
 
 /**
@@ -1354,16 +1719,19 @@ function landedWriteResultOrError(
  * (`tool-call-interceptor.ts`), so a host's deny reaches the client in the
  * envelope the tools' own refusals use; not on the package entry.
  */
-export function codedErrorResult(error: {
-  code?: string;
-  message: string;
-  status?: number;
-  declaredCode?: string;
-  userMessage?: string;
-  details?: unknown;
-}) {
+export function codedErrorResult(
+  error: {
+    code?: string;
+    message: string;
+    status?: number;
+    declaredCode?: string;
+    userMessage?: string;
+    details?: unknown;
+  },
+  beside?: NotRecordedMembers,
+) {
   return {
-    content: [{ type: 'text' as const, text: jsonText({ error }) }],
+    content: [{ type: 'text' as const, text: jsonText(beside ? { error, ...beside } : { error }) }],
     isError: true as const,
   };
 }
@@ -2066,6 +2434,76 @@ function withDelegationNotice(value: unknown, statement: string): unknown {
     return { ...(value as Record<string, unknown>), ...notice };
   }
   return { result: value, ...notice };
+}
+
+/**
+ * [#35137] The sentence served beside `withheldFields`. It names no field and
+ * no value: the list beside it does the naming.
+ */
+const WITHHELD_FIELDS_NOTE =
+  'The fields in withheldFields exist on this object, but field-level security does not let you read them, '
+  + 'so they are left out of these records. Say they are not visible to you; never say they are empty or blank.';
+
+/**
+ * [#35137] The one line `query_records` and `get_record` describe the member with.
+ */
+const WITHHELD_FIELDS_DESCRIPTION =
+  'A field that field-level security hides from you is left out of the records and named in withheldFields: '
+  + 'it exists but is not visible to you, which is not the same as empty.';
+
+/**
+ * [#35137] Which fields `query_records` / `get_record` name as withheld: of
+ * the fields the call asked for (or, asking none, every field the caller's
+ * served schema shows), those the caller's served schema shows AND the
+ * security service does not answer readable. ⛔ A field the served schema does
+ * not show is never named, whatever the readable answer says: that is the
+ * card's bound, and the `served.has` test below is what holds it.
+ */
+function withheldFieldNames(visibility: McpFieldVisibility, asked: readonly string[] | undefined): string[] {
+  const served = new Set(visibility.served);
+  const readable = new Set(visibility.readable);
+  const candidates = asked !== undefined && asked.length > 0 ? asked : visibility.served;
+  const named: string[] = [];
+  for (const name of candidates) {
+    if (!served.has(name)) continue;
+    if (readable.has(name) || named.includes(name)) continue;
+    named.push(name);
+  }
+  return named;
+}
+
+/**
+ * [#35137] The withheld names for one read, or `[]` when the bridge cannot
+ * say. ⛔ Never fails the read it annotates: no member, `undefined` and a
+ * throw all answer `[]`, which renders exactly what the tool rendered before.
+ */
+async function withheldFieldsFor(
+  bridge: McpDataBridge,
+  objectName: string,
+  asked: readonly string[] | undefined,
+): Promise<string[]> {
+  if (typeof bridge.fieldVisibilityOf !== 'function') return [];
+  try {
+    const visibility = await bridge.fieldVisibilityOf(objectName);
+    return visibility ? withheldFieldNames(visibility, asked) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#35137] `value` with the withheld names and {@link WITHHELD_FIELDS_NOTE}
+ * beside it, or `value` itself when nothing is withheld, so an unrestricted
+ * caller's answer is byte-identical to before. A record's own keys cannot
+ * collide: field names are snake_case, these members camelCase.
+ */
+function withWithheldFields(value: unknown, withheld: readonly string[]): unknown {
+  if (withheld.length === 0) return value;
+  const member = { withheldFields: [...withheld], withheldFieldsNote: WITHHELD_FIELDS_NOTE };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>), ...member };
+  }
+  return { result: value, ...member };
 }
 
 function jsonText(value: unknown): string {
@@ -3185,7 +3623,8 @@ export function registerObjectTools(
           `To read the records a lookup points at in the same call, pass expand: up to ${QUERY_EXPAND_MAX_FIELDS} of the ` +
           'object\'s lookup, master-detail, user or tree fields, e.g. expand ["account","owner_id"]; each one comes back ' +
           'as the record it names, under your permissions on that object. One level only; a field whose object you ' +
-          'may not read refuses the call.',
+          'may not read refuses the call. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -3299,10 +3738,14 @@ export function registerObjectTools(
           const diagnosed = typeof bridge.diagnoseDelegation === 'function'
             ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
             : undefined;
-          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
-          return textResult(withDelegationNotice(result, diagnosed.statement));
+          // [#35137] …and the fields field-level security withheld from these
+          // rows named beside them, so a left-out field is not read as blank.
+          const answer = withWithheldFields(result, await withheldFieldsFor(bridge, objectName, fields));
+          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(answer);
+          return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
-          return dataDoorErrorResult(err, 'query_records', objectName);
+          // [#35138] …with what the call named that the caller's schema does not show.
+          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }));
         }
       },
     );
@@ -3319,6 +3762,10 @@ export function registerObjectTools(
             'Groups of a select field come back in the order the field declares its options. ' +
             'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
             'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
+            // [#35138] The name of a lookup group's record, read as the caller.
+            'A group keyed by a lookup or master-detail field carries <key>__label beside the record id: the name of that record, ' +
+            'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
+            'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
@@ -3405,14 +3852,23 @@ export function registerObjectTools(
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
+            const served = truncated ? groups.slice(0, maxLimit) : groups;
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only.
+            const labelled = fields
+              ? await withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
             return textResult({
-              rows: truncated ? groups.slice(0, maxLimit) : groups,
+              rows: labelled,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
             });
           } catch (err) {
-            return dataDoorErrorResult(err, 'aggregate_records', objectName);
+            // [#35138] …with what the call named that the caller's schema does not show.
+            return recordReadErrorResult(
+              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }),
+            );
           }
         },
       );
@@ -3432,7 +3888,8 @@ export function registerObjectTools(
           `several fields. Each list holds at most ${relatedMaxRows} rows (limit), filtered only by the link to this ` +
           'record, under your permissions on that object; fields and orderBy are that object\'s. The answer is then ' +
           '{ record, related: [{ object, field, records, total, hasMore }] }; a list that carries "truncated": true ' +
-          'has more rows than came back. An object you may not read refuses the call.',
+          'has more rows than came back. An object you may not read refuses the call. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -3493,7 +3950,9 @@ export function registerObjectTools(
           // `RECORD_NOT_FOUND` / 404. A missing id and an id the caller may not
           // read reach here as the same empty read, so they answer alike.
           if (record == null) throw recordNotFoundError(objectName, recordId);
-          if (plans === undefined) return textResult(record);
+          // [#35137] …with the fields field-level security withheld from it named.
+          const served = withWithheldFields(record, await withheldFieldsFor(bridge, objectName, undefined));
+          if (plans === undefined) return textResult(served);
           // [#35145] Each list is one `query_records` read of the child as the
           // caller, filtered by the link to the record just read (so no list
           // is read for a record the caller cannot see), capped the way a
@@ -3518,11 +3977,16 @@ export function registerObjectTools(
             const answer = page !== null && typeof page === 'object' && !Array.isArray(page)
               ? (page as Record<string, unknown>)
               : { records: page };
-            return { ...answer, object: plan.object, field: plan.field };
+            // [#35137] …each list naming the fields withheld from its own rows.
+            return withWithheldFields(
+              { ...answer, object: plan.object, field: plan.field },
+              await withheldFieldsFor(bridge, plan.object, plan.fields),
+            );
           }));
-          return textResult({ record, related: lists });
+          return textResult({ record: served, related: lists });
         } catch (err) {
-          return dataDoorErrorResult(err, 'get_record', refusedOn ?? objectName);
+          // [#35138] …and an object the caller's schema does not show is said to be not recorded.
+          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, []);
         }
       },
     );
