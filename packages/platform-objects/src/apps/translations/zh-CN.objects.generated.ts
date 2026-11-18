@@ -240,6 +240,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "邮箱",
+            pendingAgain: "已在待激活中",
             notApplied: "此人仍待激活，以下内容未生效（请在其记录上设置）",
             managerError: "上级",
             "host.reason": "邀请未发出"
