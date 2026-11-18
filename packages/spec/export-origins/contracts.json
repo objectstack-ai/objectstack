@@ -6,6 +6,7 @@
     "ACTION_CONFIRMATION_SERVICE": "src/contracts/ai-service.ts#ACTION_CONFIRMATION_SERVICE (const)",
     "AIActionConfirmation": "src/contracts/ai-service.ts#AIActionConfirmation (interface)",
     "AIConversation": "src/contracts/ai-service.ts#AIConversation (interface)",
+    "AIConversationMessage": "src/contracts/ai-service.ts#AIConversationMessage (type)",
     "AIMessage": "src/contracts/ai-service.ts#AIMessage (type)",
     "AIMessageWithTools": "src/contracts/ai-service.ts#AIMessageWithTools (type)",
     "AIObjectResult": "src/contracts/ai-service.ts#AIObjectResult (interface)",

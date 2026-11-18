@@ -1635,7 +1635,6 @@ const zhHant = {
     widgetForbiddenMessage: '你沒有檢視該元件資料的權限。',
     allWidgetsForbiddenMessage: '你沒有檢視該儀表盤資料的權限。',
     details: '明細',
-    exportCsv: '匯出 CSV',
     openInList: '在列表中開啟',
     config: {
       breadcrumb: {

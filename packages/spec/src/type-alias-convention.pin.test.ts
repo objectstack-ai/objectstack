@@ -302,9 +302,11 @@ import type * as M203 from './system/restriction-profile.zod.js';
 import type * as M204 from './ai/dataset-tools.zod.js';
 // The Ask data tools' object-query `source` block -- new module, next free index.
 import type * as M205 from './ai/object-query-source.zod.js';
+// The AI answer follow-up routes (saved questions, answer artifact, answer feedback) -- new module, next free index.
+import type * as M207 from './api/ai-answer.zod.js';
 
 // ---------------------------------------------------------------------------
-// 863 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 886 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -440,6 +442,30 @@ export type Iso_ai_tool__ToolSchema = Assert<Eq< z.input< typeof M9.ToolSchema >
 // ai/usage.zod.ts
 export type Iso_ai_usage__AIUsageRecordSchema = Assert<Eq< z.input< typeof M10.AIUsageRecordSchema >, z.infer< typeof M10.AIUsageRecordSchema > >>;
 export type Iso_ai_usage__TokenUsageSchema = Assert<Eq< z.input< typeof M10.TokenUsageSchema >, z.infer< typeof M10.TokenUsageSchema > >>;
+
+// api/ai-answer.zod.ts
+export type Iso_api_aiAnswer__AiAnswerArtifactDraftSchema = Assert<Eq< z.input< typeof M207.AiAnswerArtifactDraftSchema >, z.infer< typeof M207.AiAnswerArtifactDraftSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerArtifactErrorCodeSchema = Assert<Eq< z.input< typeof M207.AiAnswerArtifactErrorCodeSchema >, z.infer< typeof M207.AiAnswerArtifactErrorCodeSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerArtifactErrorSchema = Assert<Eq< z.input< typeof M207.AiAnswerArtifactErrorSchema >, z.infer< typeof M207.AiAnswerArtifactErrorSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerArtifactKindSchema = Assert<Eq< z.input< typeof M207.AiAnswerArtifactKindSchema >, z.infer< typeof M207.AiAnswerArtifactKindSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerArtifactRefusalReasonSchema = Assert<Eq< z.input< typeof M207.AiAnswerArtifactRefusalReasonSchema >, z.infer< typeof M207.AiAnswerArtifactRefusalReasonSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerFeedbackErrorCodeSchema = Assert<Eq< z.input< typeof M207.AiAnswerFeedbackErrorCodeSchema >, z.infer< typeof M207.AiAnswerFeedbackErrorCodeSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerFeedbackErrorSchema = Assert<Eq< z.input< typeof M207.AiAnswerFeedbackErrorSchema >, z.infer< typeof M207.AiAnswerFeedbackErrorSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerFeedbackSchema = Assert<Eq< z.input< typeof M207.AiAnswerFeedbackSchema >, z.infer< typeof M207.AiAnswerFeedbackSchema > >>;
+export type Iso_api_aiAnswer__AiAnswerRatingSchema = Assert<Eq< z.input< typeof M207.AiAnswerRatingSchema >, z.infer< typeof M207.AiAnswerRatingSchema > >>;
+export type Iso_api_aiAnswer__AiSavedQuestionErrorCodeSchema = Assert<Eq< z.input< typeof M207.AiSavedQuestionErrorCodeSchema >, z.infer< typeof M207.AiSavedQuestionErrorCodeSchema > >>;
+export type Iso_api_aiAnswer__AiSavedQuestionErrorSchema = Assert<Eq< z.input< typeof M207.AiSavedQuestionErrorSchema >, z.infer< typeof M207.AiSavedQuestionErrorSchema > >>;
+export type Iso_api_aiAnswer__AiSavedQuestionRefusalReasonSchema = Assert<Eq< z.input< typeof M207.AiSavedQuestionRefusalReasonSchema >, z.infer< typeof M207.AiSavedQuestionRefusalReasonSchema > >>;
+export type Iso_api_aiAnswer__AiSavedQuestionSchema = Assert<Eq< z.input< typeof M207.AiSavedQuestionSchema >, z.infer< typeof M207.AiSavedQuestionSchema > >>;
+export type Iso_api_aiAnswer__CreateAiAnswerArtifactRequestSchema = Assert<Eq< z.input< typeof M207.CreateAiAnswerArtifactRequestSchema >, z.infer< typeof M207.CreateAiAnswerArtifactRequestSchema > >>;
+export type Iso_api_aiAnswer__CreateAiAnswerArtifactResponseSchema = Assert<Eq< z.input< typeof M207.CreateAiAnswerArtifactResponseSchema >, z.infer< typeof M207.CreateAiAnswerArtifactResponseSchema > >>;
+export type Iso_api_aiAnswer__CreateAiSavedQuestionRequestSchema = Assert<Eq< z.input< typeof M207.CreateAiSavedQuestionRequestSchema >, z.infer< typeof M207.CreateAiSavedQuestionRequestSchema > >>;
+export type Iso_api_aiAnswer__CreateAiSavedQuestionResponseSchema = Assert<Eq< z.input< typeof M207.CreateAiSavedQuestionResponseSchema >, z.infer< typeof M207.CreateAiSavedQuestionResponseSchema > >>;
+export type Iso_api_aiAnswer__GetAiAnswerFeedbackResponseSchema = Assert<Eq< z.input< typeof M207.GetAiAnswerFeedbackResponseSchema >, z.infer< typeof M207.GetAiAnswerFeedbackResponseSchema > >>;
+export type Iso_api_aiAnswer__ListAiSavedQuestionsResponseSchema = Assert<Eq< z.input< typeof M207.ListAiSavedQuestionsResponseSchema >, z.infer< typeof M207.ListAiSavedQuestionsResponseSchema > >>;
+export type Iso_api_aiAnswer__RunAiSavedQuestionResponseSchema = Assert<Eq< z.input< typeof M207.RunAiSavedQuestionResponseSchema >, z.infer< typeof M207.RunAiSavedQuestionResponseSchema > >>;
+export type Iso_api_aiAnswer__SetAiAnswerFeedbackRequestSchema = Assert<Eq< z.input< typeof M207.SetAiAnswerFeedbackRequestSchema >, z.infer< typeof M207.SetAiAnswerFeedbackRequestSchema > >>;
+export type Iso_api_aiAnswer__SetAiAnswerFeedbackResponseSchema = Assert<Eq< z.input< typeof M207.SetAiAnswerFeedbackResponseSchema >, z.infer< typeof M207.SetAiAnswerFeedbackResponseSchema > >>;
 
 // api/analytics.zod.ts
 // [#17551] The ADR-0021 dataset selection (`DatasetSelectionSchema`) and its two
@@ -594,6 +620,7 @@ export type Iso_api_protocol__AiChatRequestSchema = Assert<Eq< z.input< typeof M
 export type Iso_api_protocol__AiChatResponseSchema = Assert<Eq< z.input< typeof M28.AiChatResponseSchema >, z.infer< typeof M28.AiChatResponseSchema > >>;
 export type Iso_api_protocol__AiCompleteRequestSchema = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
 export type Iso_api_protocol__AiConversationSchema = Assert<Eq< z.input< typeof M28.AiConversationSchema >, z.infer< typeof M28.AiConversationSchema > >>;
+export type Iso_api_protocol__AiConversationMessageSchema = Assert<Eq< z.input< typeof M28.AiConversationMessageSchema >, z.infer< typeof M28.AiConversationMessageSchema > >>;
 export type Iso_api_protocol__AiMessageSchema = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
 export type Iso_api_protocol__AiModelsResponseSchema = Assert<Eq< z.input< typeof M28.AiModelsResponseSchema >, z.infer< typeof M28.AiModelsResponseSchema > >>;
 export type Iso_api_protocol__AiPendingActionSchema = Assert<Eq< z.input< typeof M28.AiPendingActionSchema >, z.infer< typeof M28.AiPendingActionSchema > >>;
@@ -1838,7 +1865,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 863 isomorphic pins', () => {
+  it('still declares all 886 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2943,7 +2970,14 @@ describe('ADR-0122 type-alias convention', () => {
     // declared-entry factory as `HookTextSchema` and closed at the same two
     // keys with no default or transform, pinned here
     // (Iso_ui_action__ActionTextSchema). +1 added.
-    expect(pins).toHaveLength(863);
+    // 863 -> 886 is the AI answer follow-up routes (`api/ai-answer.zod.ts`):
+    // its twenty-two schemas are plain objects, closed enums, a discriminated
+    // union of plain objects and `ApiErrorSchema` extensions, none with a
+    // default or a transform (Iso_api_aiAnswer__*), and
+    // `AiConversationMessageSchema` (`api/protocol.zod.ts`), `AiMessageSchema`
+    // plus an optional string (Iso_api_protocol__AiConversationMessageSchema).
+    // +23 added.
+    expect(pins).toHaveLength(886);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
