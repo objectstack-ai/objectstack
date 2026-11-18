@@ -213,6 +213,7 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   // above. The audit half is unchanged and is still the bulk of what it reports.
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  { check: 'check:skill-served-sections', why: 'audits the skill sections the hosted MCP door serves (headings, JSON examples) against a hand-kept list — no artifact' },
   // #13086 — the YAML half of the surface `check:skill-examples` covers for
   // TypeScript: tagged ```yaml blocks in skills/ + content/docs/ are safeParsed
   // against the live spec schemas. Reads src/ through tsx (no dist), writes
