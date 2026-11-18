@@ -27,7 +27,7 @@
  * engine's expansion and the record page's related lists ask too.
  */
 
-import { StandardErrorCode } from '@objectstack/spec/api';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { REFERENCE_VALUE_TYPES, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import type { McpDataBridge } from './mcp-http-tools.js';
 
@@ -70,7 +70,7 @@ export interface RelatedListPlan {
 type Refusal = Error & { code: string; status: number; object?: string; field?: string; param?: string };
 
 function refusal(
-  code: string,
+  code: StandardErrorCode,
   status: number,
   message: string,
   extra: { object?: string; field?: string; param?: string } = {},
@@ -95,7 +95,7 @@ async function servedFieldMap(
 ): Promise<Record<string, Record<string, unknown>>> {
   if (typeof bridge.servedObjectDefinitionOf !== 'function') {
     throw refusal(
-      StandardErrorCode.enum.NOT_IMPLEMENTED,
+      'NOT_IMPLEMENTED',
       501,
       `'${param}' needs the object definitions this host's data bridge does not serve, so nothing was read. `
         + 'Read the related records with their own query_records call.',
@@ -105,7 +105,7 @@ async function servedFieldMap(
   const def = await bridge.servedObjectDefinitionOf(objectName);
   if (!def) {
     throw refusal(
-      StandardErrorCode.enum.OBJECT_NOT_FOUND,
+      'OBJECT_NOT_FOUND',
       404,
       `Object '${objectName}' named in '${param}' is not served to you, so nothing was read.`,
       { object: objectName, param },
@@ -147,7 +147,7 @@ async function judgeTarget(
   const bad = await readGuard(target);
   if (bad === undefined) return;
   throw refusal(
-    StandardErrorCode.enum.PERMISSION_DENIED,
+    'PERMISSION_DENIED',
     403,
     `${reachedBy} reaches object '${target}', which this door does not serve you: ${bad}. `
       + 'Nothing was read. Remove it from the request.',
@@ -175,7 +175,7 @@ export async function judgeQueryExpand(
     const target = targetOf(def);
     if (!target) {
       throw refusal(
-        StandardErrorCode.enum.INVALID_FIELD,
+        'INVALID_FIELD',
         400,
         def === undefined
           ? `Unknown field '${name}' in 'expand' on object '${objectName}'. 'expand' takes the object's own `
@@ -215,7 +215,7 @@ export async function judgeRelatedLists(
       const links = Object.keys(fields).filter((name) => targetOf(fields[name]) === objectName);
       if (links.length !== 1) {
         throw refusal(
-          StandardErrorCode.enum.INVALID_FIELD,
+          'INVALID_FIELD',
           400,
           links.length === 0
             ? `Object '${entry.object}' has no field you can read that points at '${objectName}', so it has no `
@@ -230,7 +230,7 @@ export async function judgeRelatedLists(
       const def = Object.prototype.hasOwnProperty.call(fields, field) ? fields[field] : undefined;
       if (targetOf(def) !== objectName) {
         throw refusal(
-          StandardErrorCode.enum.INVALID_FIELD,
+          'INVALID_FIELD',
           400,
           `'${field}' on '${entry.object}' is not a lookup, master-detail, user or tree field that points at `
             + `'${objectName}'. Nothing was read.`,
