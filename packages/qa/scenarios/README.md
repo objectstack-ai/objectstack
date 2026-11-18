@@ -139,12 +139,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering, a count of the options it offers — `2 metrics`,
-  「2 个指标」 — and a year a time word or 年 marks are no figure, unless a counted noun follows it: `for 2031
-  orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
+  or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
   says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
   say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
-  `list_datasets` answer offered.
+  `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 2.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -402,8 +403,11 @@ npx @objectstack/scenarios help                                      # the comma
 - **Dataset questions** (`orchestrate.ts`, `scorecard.ts`): a card's `run.datasetQuestions` are asked after its
   questions and before its operations, as the admin, each a fresh session honouring `--ask-repeats`, and graded by
   `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
-  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
-  fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
+  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back rev 2 1/2 ·
+  fallback-labelled 1/1)`) only on a card that declares them. A grader graded past its first rule revision is named
+  with it (`rev 2`; the tally's `byGrader` entry carries `revision`), so a round graded before a rule change, which
+  shows none, is not read like for like with one after; a replay (`--driver recorded:F`) grades with the rules as
+  they are now. A run on a build whose app serves no datasets answers
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
@@ -482,10 +486,25 @@ npx @objectstack/scenarios help                                      # the comma
   measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
   scorecard's author rows show every authoring turn's `resultSubtype`, the turns it took of its cap
   (`error_max_turns · 300/300 turns`) and its elapsed time.
-- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+- **Seed** (`seed.ts`, `loadSeedRows` in `orchestrate.ts`): rows go in as the admin through the platform's own seed
+  path, never the data API: the runner installs one data-only package whose `data[]` holds the card's rows (keyed on
+  the card's own `id`, so a lookup value names the row seeded under it), through the managed install door. The
+  platform's seed loader writes them as established facts: a build's `state_machine` rule (its `initialStates` entry
+  check) does not judge them, so a claim the card states as already `paid` loads as the card states it. Every other
+  validation rule and every hook still judges each row, and a refused row is recorded with its object, id and the
+  loader's message (`seed.refused`; the seed door names no error code). **Seed rows fire no record-triggered flow**,
+  where the data API's insert used to fire a build's "on create" automation on each one. No card relies on that: every
+  truth is computed from the seed's own values (`truth.ts` refuses one the seed does not determine), and the four cards
+  that ask for record-triggered flows (`asset_lifecycle`, `requisition_to_receipt`, `service_desk`, `travel_expense`)
+  seed the values such a flow produces (a ticket's group, SLA policy and breach flag, a line's over-standard flag, the
+  statuses) explicitly. An operation's own write still goes through the agent's door and fires the build's automation.
+  A restore puts a removed seeded row back the same way. A lookup's target loads before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
-  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). That second pass sets only these
+  deferred cycle lookups: `data[]` carries a persona's user id (`owner_id`, a `user` field) as sent, and patching it
+  again would put a user-door update, with its update triggers and hooks, back on every seed row.
+  The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
   the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its

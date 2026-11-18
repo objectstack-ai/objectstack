@@ -77,6 +77,7 @@ export interface CoverageIssue {
     | 'position'
     | 'permission'
     | 'book'
+    | 'mapping'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -388,6 +389,9 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // `books.<b>.groups.<key>.label`) — the title and section titles of a docs
   // sidebar, reported as `i18n/missing-book` (#26690).
   book: 'book',
+  // A named import mapping's label (`mappings.<m>.label`) — the name the
+  // import wizard offers it by, reported as `i18n/missing-mapping` (#34939).
+  mapping: 'mapping',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -414,6 +418,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   position: 'Position',
   permission: 'Permission set',
   book: 'Book',
+  mapping: 'Import mapping',
   metadataForm: 'Metadata form',
 };
 
@@ -461,6 +466,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   position: 'positions',
   permission: 'permission sets',
   book: 'doc books',
+  mapping: 'import mappings',
   metadataForm: 'metadata forms',
 };
 

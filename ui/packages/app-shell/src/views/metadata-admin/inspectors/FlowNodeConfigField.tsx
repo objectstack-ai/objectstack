@@ -11,6 +11,7 @@ import { isUnsetFieldValue, unsetNoticeApplies } from './flow-node-config.js';
 import type { FlowConfigField, InactiveRetainedKind } from './flow-node-config.js';
 import { t, tFormat } from '../i18n.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
+import { useObjectDisplayName } from './ObjectPicker.js';
 import { WIDGETS, OBJECTUI_SECRET_MASK } from '../widgets.js';
 import {
   InspectorNumberField,
@@ -124,6 +125,8 @@ function FieldValueMapField({
 }: FlowKeyValueFieldProps & { objectName: string; byLabel: boolean; locale?: string }) {
   // The same field source the reference picker's `object-field` kind reads.
   const { fields } = useObjectFields(objectName || undefined);
+  // The hint names the object by its label, not its machine name.
+  const objectLabel = useObjectDisplayName(objectName || undefined);
   const keyOptions = React.useMemo(
     () =>
       fields.map((f) => ({
@@ -141,7 +144,7 @@ function FieldValueMapField({
       keysByLabel={byLabel}
       keyHint={
         objectName
-          ? tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectName })
+          ? tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectLabel })
           : t('engine.inspector.fieldMap.chooseObject', locale)
       }
     />
@@ -214,10 +217,12 @@ function TriggeringRecordTarget({
   disabled?: boolean;
   locale?: string;
 }) {
+  // The sentence names the object by its label, not its machine name.
+  const objectLabel = useObjectDisplayName(objectName);
   if (isTriggeringRecordFilter(value)) {
     return (
       <p className="text-[11px] leading-snug text-muted-foreground" data-testid="flow-triggering-record-target">
-        {tFormat('engine.inspector.flowNode.triggeringRecord.active', locale, { object: objectName })}
+        {tFormat('engine.inspector.flowNode.triggeringRecord.active', locale, { object: objectLabel })}
       </p>
     );
   }
@@ -235,7 +240,7 @@ function TriggeringRecordTarget({
         {t('engine.inspector.flowNode.triggeringRecord.use', locale)}
       </Button>
       <p className="text-[11px] leading-snug text-muted-foreground">
-        {tFormat('engine.inspector.flowNode.triggeringRecord.hint', locale, { object: objectName })}
+        {tFormat('engine.inspector.flowNode.triggeringRecord.hint', locale, { object: objectLabel })}
       </p>
     </div>
   );

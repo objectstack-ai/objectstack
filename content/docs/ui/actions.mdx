@@ -72,7 +72,10 @@ export default defineStack({
 
 Self-contained logic ships inside the metadata and runs in the server sandbox
 — signature `(input, ctx)`, with `ctx.api.object(name)` for data access, a
-5-second default timeout, and declared `capabilities`:
+5-second default timeout, and declared `capabilities`. `input` and `ctx` are the
+wrapper's parameters, so a body must not declare them again: `const input = …`
+does not compile, and `os validate` / `os build` / the publish door refuse it
+(`action-body-does-not-compile`):
 
 ```typescript
 export const MarkDoneAction = defineAction({

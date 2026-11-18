@@ -186,6 +186,14 @@
  * id, one group keyed `all`) is what the tree serves where a package authors
  * no book of that name, so its keys resolve too.
  *
+ * ── Import mappings ──────────────────────────────────────────────────────
+ *
+ * `mappings.<name>` resolves against `Mapping.name`, the name
+ * `translateMapping` looks a served mapping up by, with the reports verdict:
+ * a name no package of this stack declares is an orphan,
+ * `translation-target-unknown` (`error`). The one leaf key below the name is
+ * the schema's `label` (strict).
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -231,7 +239,7 @@
  * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
  * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
  * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349),
- * `positions` and `permissions`, `reports`, and `books`.
+ * `positions` and `permissions`, `reports`, `books`, and `mappings`.
  *
  * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
  * answer different questions — what a sibling DECLARES, and what this package
@@ -591,6 +599,8 @@ interface Universe {
   permissionSets: Set<string>;
   /** Report names (`Report.name`) a `reports.<name>` key may name. */
   reports: Set<string>;
+  /** Import-mapping names (`Mapping.name`) a `mappings.<name>` key may name. */
+  mappings: Set<string>;
   /**
    * Book name (`Book.name`) → the group `key`s a `books.<name>.groups.<key>`
    * key may name; the implicit per-package book included (#26690).
@@ -1780,6 +1790,8 @@ function buildUniverse(stack: AnyRec): Universe {
   const permissionSets = namesOf('permissions');
   // `reports` carries disposition `concat` too, so a sibling's reports resolve.
   const reports = namesOf('reports');
+  // `mappings` carries disposition `concat` too, so a sibling's mappings resolve.
+  const mappings = namesOf('mappings');
 
   // ── Doc books: the names `books.<name>` may name, and their group keys (#26690) ──
   //
@@ -1821,6 +1833,7 @@ function buildUniverse(stack: AnyRec): Universe {
     positions,
     permissionSets,
     reports,
+    mappings,
     books,
     pages,
   };
@@ -2314,11 +2327,12 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         });
       }
 
-      // ── positions.<name> / permissions.<name> / reports.<name> ────────
+      // ── positions.<name> / permissions.<name> / reports.<name> / mappings.<name> ──
       const namedItemGroups = [
         { group: 'positions', noun: 'position', known: universe.positions, hint: "Match the key to a position's `name`, or drop it." },
         { group: 'permissions', noun: 'permission set', known: universe.permissionSets, hint: "Match the key to a permission set's `name`, or drop it." },
         { group: 'reports', noun: 'report', known: universe.reports, hint: "Match the key to a report's `name`, or drop it." },
+        { group: 'mappings', noun: 'import mapping', known: universe.mappings, hint: "Match the key to an import mapping's `name`, or drop it." },
       ] as const;
       for (const { group, noun, known, hint } of namedItemGroups) {
         for (const name of Object.keys(asRecord(rawData[group]))) {

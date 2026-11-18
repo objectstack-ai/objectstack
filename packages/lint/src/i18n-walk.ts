@@ -152,6 +152,7 @@
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
  *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
+ *   mappings.<mapping>.label                (a named import mapping's label)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -262,6 +263,7 @@ export interface ExpectedEntry {
     | 'position'
     | 'permission'
     | 'book'
+    | 'mapping'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1806,6 +1808,9 @@ export function collectExpectedEntries(
   // ── Doc books (`books.<name>.…`) ──────────────────────────────────
   walkBooks(config, out);
 
+  // ── Import mappings (`mappings.<name>.label`) ─────────────────────
+  walkMappings(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -2155,6 +2160,25 @@ function walkBooks(config: any, out: ExpectedEntry[]): void {
       if (typeof key !== 'string' || key.length === 0) continue;
       pushEntry(out, ['books', name, 'groups', key, 'label'], group.label, 'book');
     }
+  }
+}
+
+// ─── Import mappings (`mappings.<name>.label`) ──────────────────────────
+
+/**
+ * Emit a named import mapping's label: `mappings.<mapping>.label`, the key
+ * `translateMapping` reads. The import wizard offers a mapping by this label.
+ * The label is optional on the schema, so it is recorded with
+ * {@link pushOptional}; a mapping's `fieldMapping` is column and field names,
+ * not copy, and has no key.
+ */
+function walkMappings(config: any, out: ExpectedEntry[]): void {
+  const mappings: any[] = Array.isArray(config?.mappings) ? config.mappings : [];
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object') continue;
+    const name = mapping.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
   }
 }
 
