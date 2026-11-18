@@ -330,6 +330,42 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
         expect(JSON.stringify(await staff.bridge.listObjects())).toBe(JSON.stringify(readable));
     });
 
+    /**
+     * [#35137] `fieldVisibilityOf`, the two answers `query_records` and
+     * `get_record` name withheld fields from: the served schema (the same
+     * projection `describe_object` serves) and the security service's readable
+     * answer, both asked as this request's caller. The tool layer names a field
+     * the first shows and the second leaves out
+     * (`packages/mcp/src/query-records-withheld-fields.test.ts`).
+     */
+    const withheldBy = (v: { served: readonly string[]; readable: readonly string[] }) =>
+        v.served.filter((name) => !v.readable.includes(name));
+
+    it('withheld fields: an exempt author whose schema shows the denied field has it withheld from reads', async () => {
+        const { bridge, describe: described } = await readBoth(PERSONAS.author);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toEqual(described.fields.map((f: any) => f.name));
+        expect(visibility.served).toContain(DENIED);
+        expect(visibility.readable).not.toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([DENIED]);
+    });
+
+    it('withheld fields: a member whose schema hides the denied field is never answered it', async () => {
+        const { bridge } = await readBoth(PERSONAS.member);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).not.toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([]);
+    });
+
+    it('withheld fields: CONTROL — an unrestricted member is withheld nothing, and no security service answers nothing', async () => {
+        const { bridge } = await readBoth(PERSONAS.staff);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([]);
+        const unsecured = await bridgeFor(kernelOver({ ...services, security: undefined }), PERSONAS.staff);
+        expect(await unsecured.bridge.fieldVisibilityOf(OBJ)).toBeUndefined();
+    });
+
     it('a member denied every field is refused on both doors, never served an object with no fields', async () => {
         const { bridge, describe: refused, meta } = await readBoth(PERSONAS.walled);
         expect(meta.status).toBe(503);
