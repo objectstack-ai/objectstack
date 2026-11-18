@@ -24,6 +24,8 @@
  * the object it was bound to and picks a fixed row.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
@@ -259,7 +261,7 @@ describe('objectui#11788 — the picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add recipient' }));
     await userEvent.click(within(row(0)).getByRole('combobox', { name: 'Recipient type' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Expression' }));
-    const box = within(row(0)).getByPlaceholderText('CEL, e.g. ownerId');
+    const box = within(row(0)).getByPlaceholderText('Formula, e.g. ownerId');
     fireEvent.change(box, { target: { value: '{ownerId}' } });
     expect(within(row(0)).getByRole('alert')).toBeInTheDocument();
     fireEvent.change(box, { target: { value: 'ownerId' } });

@@ -23,6 +23,8 @@
     "ai/ConversationMessage",
     "ai/ConversationSession",
     "ai/ConversationSummary",
+    "ai/DatasetNextStep",
+    "ai/DatasetNextStepDecision",
     "ai/DatasetProvenance",
     "ai/DatasetTermCandidate",
     "ai/DatasetTermMatch",

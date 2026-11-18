@@ -1641,6 +1641,9 @@ const pt = {
     },
     total: "Total",
     noDataSourceFor: "Sem fonte de dados para",
+    drillTooMany: 'Há registros demais relacionados a este valor para listá-los aqui. Restrinja os filtros do painel e tente novamente.',
+    drillUnavailable: 'Os registros deste valor não podem ser listados aqui.',
+    drillFailed: 'Não foi possível carregar os registros deste valor. Tente novamente mais tarde.',
     config: {
       breadcrumb: {
         dashboard: "Painel",
