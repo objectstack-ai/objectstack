@@ -126,6 +126,15 @@ import {
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+// [#35145] `expand` and `related`: the relation reads, judged before any read.
+import {
+  GET_RECORD_MAX_RELATED_LISTS,
+  QUERY_EXPAND_MAX_FIELDS,
+  RELATED_LIST_MAX_ROWS,
+  judgeQueryExpand,
+  judgeRelatedLists,
+  relatedListWhere,
+} from './mcp-relation-reads.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -228,6 +237,14 @@ export interface McpDataBridge {
       limit?: number;
       offset?: number;
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * [#35145] Reference fields of `object` to answer with the record each
+       * one names (`query_records`' `expand`), one level deep. The tool has
+       * judged every name and the read guard every target before it calls; the
+       * bridge resolves them through the engine's one expansion path, under
+       * each target's own permissions, row and field security.
+       */
+      expand?: string[];
     },
   ): Promise<unknown>;
   /**
@@ -3118,7 +3135,12 @@ export function registerObjectTools(
           // Names repeat (ruling 6867150851), so the text says to tell
           // namesakes apart by email.
           'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
+          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email. ' +
+          // [#35145] One level of forward relations in the same call.
+          `To read the records a lookup points at in the same call, pass expand: up to ${QUERY_EXPAND_MAX_FIELDS} of the ` +
+          'object\'s lookup, master-detail, user or tree fields, e.g. expand ["account","owner_id"]; each one comes back ' +
+          'as the record it names, under your permissions on that object. One level only; a field whose object you ' +
+          'may not read refuses the call.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -3159,14 +3181,27 @@ export function registerObjectTools(
               .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
               .optional()
               .describe('Sort order'),
+            expand: z
+              .array(z.string().min(1))
+              .min(1)
+              .max(QUERY_EXPAND_MAX_FIELDS)
+              .optional()
+              .describe(
+                `Up to ${QUERY_EXPAND_MAX_FIELDS} lookup / master-detail fields of this object to return as the record `
+                  + 'each one names, one level deep, e.g. ["account","owner_id"]',
+              ),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, where, fields, limit, offset, orderBy }) => {
+      async ({ objectName, where, fields, limit, offset, orderBy, expand }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
+          // [#35145] Every expanded field's target is judged by the read guard
+          // as `objectName` was, before anything is read; a refused one
+          // refuses the call (`judgeQueryExpand`).
+          const expanded = expand !== undefined ? await judgeQueryExpand(bridge, readGuard, objectName, expand) : undefined;
           // [#35138] A capped page says so: one row past the page is asked
           // for, and its coming back is the cap (`servedQueryPage`).
           const page = Math.min(limit ?? maxLimit, maxLimit);
@@ -3178,6 +3213,7 @@ export function registerObjectTools(
               limit: probed ? page + 1 : page,
               offset,
               orderBy,
+              ...(expanded !== undefined ? { expand: expanded } : {}),
             }),
             page,
             probed,
@@ -3312,23 +3348,72 @@ export function registerObjectTools(
       );
     }
 
+    // [#35145] A related list's row cap: never above the door's own page cap.
+    const relatedMaxRows = Math.min(RELATED_LIST_MAX_ROWS, maxLimit);
     server.registerTool(
       note('get_record'),
       {
-        description: 'Fetch a single record by id.',
+        description:
+          'Fetch a single record by id. ' +
+          // [#35145] A parent with its children in one call.
+          `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
+          'objects, e.g. an account with its deals and activities: related [{"object":"crm_opportunity"},' +
+          '{"object":"crm_activity","field":"account"}]. Name field when the child points at this object through ' +
+          `several fields. Each list holds at most ${relatedMaxRows} rows (limit), filtered only by the link to this ` +
+          'record, under your permissions on that object; fields and orderBy are that object\'s. The answer is then ' +
+          '{ record, related: [{ object, field, records, total, hasMore }] }; a list that carries "truncated": true ' +
+          'has more rows than came back. An object you may not read refuses the call.',
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
             recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            related: z
+              .array(
+                z
+                  .object({
+                    object: z.string().min(1).describe('A child object that points at this record'),
+                    field: z
+                      .string()
+                      .min(1)
+                      .optional()
+                      .describe('Its field that points at this record; needed only when it has several'),
+                    fields: z.array(z.string()).optional().describe('Field names to return (defaults to all)'),
+                    orderBy: z
+                      .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }).strict())
+                      .optional()
+                      .describe('Sort order'),
+                    limit: z
+                      .number()
+                      .int()
+                      .positive()
+                      .max(relatedMaxRows)
+                      .optional()
+                      .describe(`Max rows in this list (≤ ${relatedMaxRows}, the default)`),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(GET_RECORD_MAX_RELATED_LISTS)
+              .optional()
+              .describe(`Up to ${GET_RECORD_MAX_RELATED_LISTS} lists of child records that point at this record`),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, recordId }) => {
+      async ({ objectName, recordId, related }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
+        // A related list's refusal is the whole call's, rendered against the
+        // child object it was read on.
+        let refusedOn: string | undefined;
         try {
+          // [#35145] Every related object is judged by the read guard as
+          // `objectName` was, and each link field against the child as the
+          // caller is served it, before any record is read.
+          const plans = related !== undefined
+            ? await judgeRelatedLists(bridge, readGuard, objectName, related, relatedMaxRows)
+            : undefined;
           const record = await bridge.get(objectName, recordId);
           // A bridge that answers a miss with `null` (the stdio bridge, by
           // design) is refused with the repo's ONE not-found envelope, thrown
@@ -3338,9 +3423,36 @@ export function registerObjectTools(
           // `RECORD_NOT_FOUND` / 404. A missing id and an id the caller may not
           // read reach here as the same empty read, so they answer alike.
           if (record == null) throw recordNotFoundError(objectName, recordId);
-          return textResult(record);
+          if (plans === undefined) return textResult(record);
+          // [#35145] Each list is one `query_records` read of the child as the
+          // caller, filtered by the link to the record just read (so no list
+          // is read for a record the caller cannot see), capped the way a
+          // `query_records` page is: a probe row past the cap is `truncated`.
+          const parentId = (record as { id?: unknown }).id;
+          const linkId = typeof parentId === 'string' || typeof parentId === 'number' ? String(parentId) : recordId;
+          const lists = await Promise.all(plans.map(async (plan) => {
+            const probed = queryPageProbeFits(plan.limit, undefined);
+            let read: unknown;
+            try {
+              read = await bridge.query(plan.object, {
+                where: relatedListWhere(plan, linkId),
+                ...(plan.fields !== undefined ? { fields: plan.fields } : {}),
+                ...(plan.orderBy !== undefined ? { orderBy: plan.orderBy } : {}),
+                limit: probed ? plan.limit + 1 : plan.limit,
+              });
+            } catch (err) {
+              refusedOn ??= plan.object;
+              throw err;
+            }
+            const page = servedQueryPage(read, plan.limit, probed);
+            const answer = page !== null && typeof page === 'object' && !Array.isArray(page)
+              ? (page as Record<string, unknown>)
+              : { records: page };
+            return { ...answer, object: plan.object, field: plan.field };
+          }));
+          return textResult({ record, related: lists });
         } catch (err) {
-          return dataDoorErrorResult(err, 'get_record', objectName);
+          return dataDoorErrorResult(err, 'get_record', refusedOn ?? objectName);
         }
       },
     );

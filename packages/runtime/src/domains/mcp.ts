@@ -1187,6 +1187,10 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
+            // [#35145] `query_records`' `expand`: the names, which `findData`
+            // lowers, gates (`assertExpandTargetsExist`, `servedExpand`) and
+            // the engine expands in one batched read per field, as on REST.
+            if (Array.isArray(o?.expand) && o.expand.length > 0) query.expand = o.expand;
             return await callData('query', { object, query }, driver, envId, ec);
         },
         /**
