@@ -446,9 +446,12 @@ export const SkillSchema = lazySchema(() => strictObject({
    * restart, but its `prompts/get` answers it as unknown at once.
    *
    * Absent or `true`: offered as before, where the server serves the tools the
-   * skill binds (see `tools`). The key changes nothing else: the in-product
-   * agent runtime resolves, binds and activates the skill exactly as without
-   * it, and its `tools` / `surface` are validated as before.
+   * skill binds (see `tools`). The key changes nothing else at run time: the
+   * in-product agent runtime resolves, binds and activates the skill exactly as
+   * without it, and its `surface` is validated as before. One authoring verdict
+   * reads it: with `false`, `ai-skill-tool-unresolved` resolves `tools` without
+   * the MCP door's file tools (`MCP_FILE_TOOL_NAMES`), since no in-product turn
+   * registers them; every other name is checked as before.
    */
   mcpPrompt: z.boolean().optional().describe(
     'Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools',

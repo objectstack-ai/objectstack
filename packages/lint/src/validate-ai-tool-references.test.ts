@@ -57,9 +57,12 @@ describe('validate-ai-tool-references', () => {
     ]);
   });
 
-  it('checks the tools of a skill its owner keeps out of MCP (mcpPrompt: false) exactly as without the key (#34167)', () => {
-    // The opt-out narrows MCP prompt projection only: the binding is still the
+  it('checks the tools of a skill its owner keeps out of MCP (mcpPrompt: false) exactly as without the key, the MCP file tools aside (#34167)', () => {
+    // The opt-out narrows MCP prompt projection: the binding is still the
     // in-product agent's tool set, and still checked in both distributions.
+    // Its one effect on this rule is the MCP file tools, which resolve only for
+    // a skill offered over MCP (the #34948 control below); this fixture names
+    // none of them.
     const stack = (mcpPrompt?: boolean) => ({
       skills: [
         {
