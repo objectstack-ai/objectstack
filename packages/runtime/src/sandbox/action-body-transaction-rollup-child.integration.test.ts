@@ -86,6 +86,9 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       e.registerDriver(telemetry as any);
     }
     e.registerDriver(primary as any, true);
+    const begins = { count: 0 };
+    const begin = primary.beginTransaction.bind(primary);
+    (primary as any).beginTransaction = async (...a: unknown[]) => { begins.count += 1; return (begin as any)(...a); };
     await e.init();
     for (const o of [CLAIM, LINE, AUDIT, ACTIVITY]) e.registry.registerObject(o as any);
     await installDefaultOrganization(e as any);
@@ -101,7 +104,7 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
         ledger.push(`FAILED ${String((err as Error)?.message)}`);
       }
     }, { packageId: 'rux' } as any);
-    return { e, ledger, primary, telemetry };
+    return { e, ledger, primary, telemetry, begins };
   }
 
   async function throughActionsDoor(e: ObjectQL) {
@@ -111,6 +114,10 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
     const objectDef = { name: 'rux_claim', actions: [action] };
     const ql: any = {
       executeAction: vi.fn(async (_o: string, _a: string, ctx: any) => handler!(ctx)),
+      // The door builds the body's `ctx.api` from the engine's own scoped
+      // context (`buildActionApi`), as on a real boot, so the body's
+      // `ctx.api.transaction` drives the real begin/commit trio.
+      createContext: (ec: any) => e.createContext(ec),
       getSchema: (n: string) => (n === objectDef.name ? objectDef : undefined),
       registry: { getObject: (n: string) => (n === objectDef.name ? objectDef : undefined), getItem: () => undefined },
       find: vi.fn(async () => []),
@@ -131,8 +138,10 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
   for (const split of [false, true]) {
     const layout = split ? 'beside a telemetry datasource' : 'on one datasource';
     it(`${layout}: the body answers 200 inside the bound, the lines and the roll-up land, and every ledger write succeeds`, async () => {
-      const { e, ledger } = await boot(split);
+      const { e, ledger, begins } = await boot(split);
       const { response, elapsed } = await throughActionsDoor(e);
+      // Precondition: the body really opened a driver transaction.
+      expect(begins.count).toBe(1);
 
       expect(response.status, JSON.stringify(response.body)).toBe(200);
       expect(elapsed).toBeLessThan(WALL_CLOCK_BOUND_MS);
