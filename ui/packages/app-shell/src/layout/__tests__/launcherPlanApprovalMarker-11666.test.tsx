@@ -2,12 +2,13 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectui#11666 — both chat launchers (the console FAB and the ChatDock edge
+ * objectui#11666 — both chat launchers (the console's top-bar robot, which
+ * replaced the floating button in objectstack#34608, and the ChatDock edge
  * launcher Studio uses) carry a marker while a proposed plan awaits the user's
  * approval, with a translated accessible name, and nothing otherwise.
  *
  * The launchers read the assistant bus, which a mounted chat publishes to
- * (`publishPlanApprovalPending`; the ChatPane → bus → FAB path is pinned in
+ * (`publishPlanApprovalPending`; the ChatPane → bus → launcher path is pinned in
  * `AiChatPage.planApprovalReachesLaunchers-11666.test.tsx`). The marker text is
  * exposed as the button's accessible DESCRIPTION: a button's children are
  * presentational, so a name on the dot itself would reach no assistive tech.
@@ -18,7 +19,8 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
-import { ConsoleChatbotFab } from '../ConsoleChatbotFab';
+import { AssistantTopBarButton } from '../AssistantTopBarButton';
+import { ChatDockControlProvider, type ChatDockControl } from '../chatDockControl';
 import { ChatDockLauncher } from '../ChatDock';
 import { publishPlanApprovalPending } from '../../assistant/assistantBus';
 
@@ -35,12 +37,18 @@ const EN_MARKER = 'A proposed plan is waiting for your approval';
 // the bus reads as '' — the owner every reading below is published for.
 const ME = undefined;
 
+const CONTROL: ChatDockControl = { expanded: false, fullWindow: false, toggle: () => {}, open: () => {} };
+
 const LAUNCHERS = [
   {
-    name: 'console FAB',
-    testId: 'console-chatbot-fab',
-    markerTestId: 'console-chatbot-fab-plan-pending',
-    element: <ConsoleChatbotFab appLabel="Workspace" onOpenDock={() => {}} />,
+    name: 'top-bar robot',
+    testId: 'topbar-ai-assistant',
+    markerTestId: 'topbar-ai-assistant-plan-pending',
+    element: (
+      <ChatDockControlProvider value={CONTROL}>
+        <AssistantTopBarButton />
+      </ChatDockControlProvider>
+    ),
   },
   {
     name: 'ChatDock launcher',

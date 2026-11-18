@@ -59,7 +59,11 @@ function metaValue(world: World): MetadataContextValue {
 }
 
 const adapterFor = (saveItem: ReturnType<typeof vi.fn>) =>
-  ({ getClient: () => ({ meta: { saveItem } }) }) as unknown as React.ComponentProps<typeof AdapterCtx.Provider>['value'];
+  ({
+    getClient: () => ({ meta: { saveItem } }),
+    // objectstack#35054 — a navigation write starts from the stored app (the layers read).
+    getAuthoredItem: async (_type: string, name: string) => (name === crm.name ? crm : null),
+  }) as unknown as React.ComponentProps<typeof AdapterCtx.Provider>['value'];
 
 /** Every navigation array the writer PUT, flattened to its entries. */
 const writtenEntries = (saveItem: ReturnType<typeof vi.fn>) =>

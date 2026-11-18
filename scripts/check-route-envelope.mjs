@@ -1104,6 +1104,7 @@ const DISPATCHER_DOMAINS = {
     handBuilt: 2,
     note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
   },
+  'mcp-authoring.ts': { handBuilt: 0 },
   // The "new similar" target rule both clone doors share (ADR-0146 D3/D6):
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },
@@ -1449,7 +1450,7 @@ const PLUGIN_ROUTE_MODULES = {
 
   // [#16569] FIRST AUDIT — swept in by the walk, verdict conformant. The module
   // rebuilds better-auth's `/organization/list-user-invitations` endpoint in place
-  // so the DECLARED `requireEmailVerificationOnInvitation` is honoured, and it
+  // so the listing's verified-address rule is plugin-auth's own, and it
   // BUILDS exactly ONE body: `return ctx.json(pendingInvitations)`. The argument
   // is an IDENTIFIER, so the counters read it as relayed — the same deliberate
   // blindness `inbound-rate-limit.ts` sits behind on surface 4 — and what it names

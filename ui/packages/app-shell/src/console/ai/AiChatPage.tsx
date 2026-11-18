@@ -56,10 +56,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  useIsMobile,
   cn,
 } from '@object-ui/components';
-import { Bug, Check, ChevronDown, Eye, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRightOpen, Share2 } from 'lucide-react';
+import { Bug, Check, ChevronDown, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRightOpen, Share2 } from 'lucide-react';
 import {
   ChatbotEnhanced,
   useObjectChat,
@@ -118,6 +117,9 @@ import {
 } from '@object-ui/plugin-chatbot/core';
 
 import { AppHeader } from '../../layout/AppHeader.js';
+import { readBuilderHandoffState, type BuilderHandoffState } from '../../layout/chatDockTarget.js';
+import { useChatDockControl, useOpenAssistant } from '../../layout/chatDockControl.js';
+import { markPreviewExit, usePreviewDrafts } from '../../preview/PreviewModeContext.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
@@ -127,9 +129,15 @@ import {
   type ShortcutLabelTranslate,
 } from '../../chrome/advertisedShortcuts.js';
 import { fetchPendingDraftCount } from '../../preview/draftStatus.js';
+import { appPackageOf } from '../../preview/usePendingDrafts.js';
 import { draftPreviewPath } from '../../preview/draftSurface.js';
-import { emitMetadataRefresh, publishPlanApprovalPending, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
-import { getRuntimeConfig, isAiStudioEnabled } from '../../runtime-config.js';
+import {
+  emitCanvasInvalidate,
+  emitMetadataRefresh,
+  publishPlanApprovalPending,
+  subscribeMetadataRefresh,
+} from '../../assistant/assistantBus.js';
+import { getRuntimeConfig, getUpgradeUrl, isAiStudioEnabled } from '../../runtime-config.js';
 import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
@@ -147,7 +155,7 @@ import { useReconcileOnError } from '../../hooks/useReconcileOnError.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { chatConversationScope, chatProductOfAgent } from '../../hooks/chatScope.js';
 import { ConversationsSidebar } from './ConversationsSidebar.js';
-import { LiveCanvas } from './LiveCanvas.js';
+import { mainAreaDraftMove, type MainAreaDraftTarget } from './mainAreaDraft.js';
 import { artifactStudioPath } from './artifactStudioPath.js';
 import { studioChangesReviewTarget } from '../../views/studio-design/studioChangesLink.js';
 import { BuildDebugDrawer } from './BuildDebugDrawer.js';
@@ -402,6 +410,39 @@ interface PackageBearingMessage {
     builderHandoff?: { packageId?: string };
   }>;
 }
+/**
+ * objectstack#34610 — what the LAST turn drafted, read off its own tool
+ * results: the newest draft review after the last user message, or null when
+ * the turn drafted nothing. `items` are what it drafted; `packageId` is the
+ * review's (absent when the producer named none); `materialized` is
+ * ADR-0045's in-turn build. Exported for tests.
+ */
+export function turnDraftPackage(
+  messages: readonly {
+    role?: string;
+    toolInvocations?: ReadonlyArray<{
+      draftReview?: { packageId?: string; materialized?: boolean; items?: ReadonlyArray<{ type: string; name: string }> };
+    }>;
+  }[],
+): { packageId?: string; materialized?: boolean; items: ReadonlyArray<{ type: string; name: string }> } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === 'user') return null;
+    const tools = message.toolInvocations ?? [];
+    for (let j = tools.length - 1; j >= 0; j--) {
+      const dr = tools[j].draftReview;
+      if (dr?.items && dr.items.length > 0) {
+        return {
+          items: dr.items,
+          ...(dr.packageId ? { packageId: dr.packageId } : {}),
+          ...(dr.materialized ? { materialized: true } : {}),
+        };
+      }
+    }
+  }
+  return null;
+}
+
 export function deriveBoundPackageId(
   messages: readonly PackageBearingMessage[],
   editPackageId: string | undefined,
@@ -508,9 +549,12 @@ export function agentEmptyState(
               app: editContext.appLabel,
             })
           : t('console.ai.empty.editApp.titleGeneric', { defaultValue: 'Edit this app' }),
-        description: t('console.ai.empty.editApp.description', {
+        // objectstack#34608 item 4 — the maker's one composer answers data
+        // questions too (build is a data superset, cloud#1673), so the empty
+        // state offers both: asking about the app's data, and changing it.
+        description: t('console.ai.empty.editApp.askOrChangeDescription', {
           defaultValue:
-            'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         }),
       };
     }
@@ -555,23 +599,17 @@ const CHATS_COLLAPSED_STORAGE_KEY = 'ai-chats-collapsed';
 export interface CollapsibleChatsList {
   /** Whether the desktop conversations list is currently hidden. */
   collapsed: boolean;
-  /** User-driven collapse/expand; persists the preference and takes manual control. */
+  /** User-driven collapse/expand; persists the preference. */
   toggle: () => void;
-  /** Wire to the preview pane: auto-tucks the list when it opens, restores on close. */
-  handleCanvasOpenChange: (open: boolean) => void;
 }
 
 /**
  * State for the collapsible desktop conversations list. Exported for tests.
+ * `toggle()` flips it and PERSISTS the preference (localStorage).
  *
- * Two drivers, one rule — never fight the user:
- *  - **Manual** `toggle()` flips it and PERSISTS the preference (localStorage),
- *    and marks the user as having taken control.
- *  - **Auto** `handleCanvasOpenChange(open)` tucks the list away when the Live
- *    Canvas preview opens (the chat + preview split is tight) and restores it on
- *    close — but ONLY if the auto-collapse is what hid it. A manual toggle (or a
- *    list the user already collapsed) is never overridden, and auto-collapse is
- *    transient (not persisted).
+ * objectstack#34610 — the Live Canvas split that used to tuck the list away
+ * while a preview was open is gone (the draft is the main area now), so the
+ * user's toggle is the only driver.
  */
 export function useCollapsibleChatsList(): CollapsibleChatsList {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -581,10 +619,7 @@ export function useCollapsibleChatsList(): CollapsibleChatsList {
       return false;
     }
   });
-  const autoCollapsedRef = useRef(false);
-
   const toggle = useCallback(() => {
-    autoCollapsedRef.current = false; // an explicit toggle is the user taking control
     setCollapsed((prev) => {
       const next = !prev;
       try {
@@ -596,182 +631,7 @@ export function useCollapsibleChatsList(): CollapsibleChatsList {
     });
   }, []);
 
-  const handleCanvasOpenChange = useCallback((open: boolean) => {
-    if (open) {
-      setCollapsed((prev) => {
-        if (!prev) {
-          autoCollapsedRef.current = true;
-          return true;
-        }
-        return prev; // already collapsed (manual) — leave it, don't claim it
-      });
-    } else if (autoCollapsedRef.current) {
-      autoCollapsedRef.current = false;
-      setCollapsed(false);
-    }
-  }, []);
-
-  return { collapsed, toggle, handleCanvasOpenChange };
-}
-
-const CHAT_PANE_WIDTH_STORAGE_KEY = 'ai-chat-pane-width';
-/** Default chat-column width (px) when the preview opens. */
-const CHAT_PANE_DEFAULT_WIDTH = 480;
-/** Chat column never narrower than this. */
-const CHAT_PANE_MIN_WIDTH = 360;
-/** Preview pane always keeps at least this much room (caps how wide chat can grow). */
-const CHAT_PREVIEW_MIN_WIDTH = 420;
-/** Keyboard resize step (px) when the divider is focused. */
-const CHAT_PANE_KEYBOARD_STEP = 24;
-
-/**
- * Clamp a desired chat-column width so neither pane collapses: at least
- * `min`, and never so wide that the preview drops below `previewMin`. Pure +
- * exported for tests. `containerWidth <= 0` (unmeasured) skips the upper bound.
- */
-export function clampChatPaneWidth(
-  desired: number,
-  opts: { min: number; previewMin: number; containerWidth: number },
-): number {
-  const upper = opts.containerWidth > 0 ? Math.max(opts.min, opts.containerWidth - opts.previewMin) : Infinity;
-  return Math.min(Math.max(desired, opts.min), upper);
-}
-
-/**
- * True when a container cannot hold the chat and the preview side by side at
- * their minimums (`CHAT_PANE_MIN_WIDTH + CHAT_PREVIEW_MIN_WIDTH`). The pane
- * then previews the way a phone does (#2481) instead of pushing the preview
- * past the container's edge, as the console dock at a 1024 px window did.
- * Pure + exported for tests. `containerWidth <= 0` (unmeasured) is not narrow.
- */
-export function isTooNarrowForSplit(containerWidth: number): boolean {
-  return containerWidth > 0 && containerWidth < CHAT_PANE_MIN_WIDTH + CHAT_PREVIEW_MIN_WIDTH;
-}
-
-interface ResizableChatPane {
-  /** Current chat-column width in px (clamped). */
-  width: number;
-  /** True while a drag is in progress (for cursor/overlay styling). */
-  dragging: boolean;
-  /** Ref for the split container — measures available width to bound the preview. */
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  /** Start a pointer drag from the divider. */
-  onHandlePointerDown: (e: React.PointerEvent) => void;
-  /** Keyboard resize (←/→) when the divider is focused. */
-  onHandleKeyDown: (e: React.KeyboardEvent) => void;
-  /** Reset to the default width (double-click the divider). */
-  reset: () => void;
-  /** The container is too narrow for the split (`isTooNarrowForSplit`), measured whether or not it is open. */
-  tooNarrow: boolean;
-}
-
-/**
- * Draggable width for the chat column when the Live Canvas preview is open
- * (ChatGPT/Claude-style split). Width persists; drags and keyboard nudges are
- * clamped against the live container so the preview always keeps room, and a
- * ResizeObserver re-clamps when the window shrinks. All DOM reads happen in
- * handlers/effects, never during render.
- */
-export function useResizableChatPane(active: boolean): ResizableChatPane {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState<number>(() => {
-    try {
-      const saved = Number(localStorage.getItem(CHAT_PANE_WIDTH_STORAGE_KEY));
-      return Number.isFinite(saved) && saved > 0 ? saved : CHAT_PANE_DEFAULT_WIDTH;
-    } catch {
-      return CHAT_PANE_DEFAULT_WIDTH;
-    }
-  });
-  const [dragging, setDragging] = useState(false);
-
-  const clampToContainer = useCallback(
-    (desired: number) =>
-      clampChatPaneWidth(desired, {
-        min: CHAT_PANE_MIN_WIDTH,
-        previewMin: CHAT_PREVIEW_MIN_WIDTH,
-        containerWidth: containerRef.current?.clientWidth ?? 0,
-      }),
-    [],
-  );
-
-  const persist = useCallback((w: number) => {
-    try {
-      localStorage.setItem(CHAT_PANE_WIDTH_STORAGE_KEY, String(Math.round(w)));
-    } catch {
-      /* storage disabled — width just won't persist */
-    }
-  }, []);
-
-  // Re-clamp when the available width changes (window resize, sidebar collapse),
-  // so a previously-saved wide chat can't starve the preview.
-  useEffect(() => {
-    if (!active) return;
-    const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setWidth((w) => clampToContainer(w)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [active, clampToContainer]);
-
-  // Whether the split fits at all. Read from the same container in both
-  // presentations and observed even while the split is closed, so the answer
-  // never depends on which presentation is showing: the container's width does
-  // not change when the pane switches, so there is no threshold to oscillate on.
-  // A layout effect, so a narrow container never paints the split first.
-  const [tooNarrow, setTooNarrow] = useState(false);
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const read = () => setTooNarrow(isTooNarrowForSplit(el.clientWidth));
-    read();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(read);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const onHandlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = width; // state is the style source, so it == the rendered width
-      setDragging(true);
-      const onMove = (ev: PointerEvent) => setWidth(clampToContainer(startWidth + (ev.clientX - startX)));
-      const onUp = (ev: PointerEvent) => {
-        const final = clampToContainer(startWidth + (ev.clientX - startX));
-        setWidth(final);
-        persist(final);
-        setDragging(false);
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-      };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-    },
-    [clampToContainer, persist, width],
-  );
-
-  const onHandleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      const delta = e.key === 'ArrowLeft' ? -CHAT_PANE_KEYBOARD_STEP : e.key === 'ArrowRight' ? CHAT_PANE_KEYBOARD_STEP : 0;
-      if (!delta) return;
-      e.preventDefault();
-      setWidth((w) => {
-        const next = clampToContainer(w + delta);
-        persist(next);
-        return next;
-      });
-    },
-    [clampToContainer, persist],
-  );
-
-  const reset = useCallback(() => {
-    const next = clampToContainer(CHAT_PANE_DEFAULT_WIDTH);
-    setWidth(next);
-    persist(next);
-  }, [clampToContainer, persist]);
-
-  return { width, dragging, containerRef, onHandlePointerDown, onHandleKeyDown, reset, tooNarrow };
+  return { collapsed, toggle };
 }
 
 export type AiChatShortcut = 'toggle-list' | 'new-chat';
@@ -860,32 +720,9 @@ export function resolveCollapseToDockTarget(
  *  render would churn the pane's `initialMessages` identity for no reason. */
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
 
-/**
- * objectui#12493 — the ADR-0057 P4 Builder handoff ("Open in Builder →" on the
- * `ask` surface) travels as react-router NAVIGATION STATE, never as a URL
- * parameter. A URL can be written by anyone and opened by a signed-in user in
- * one click; the build surface sends its seeded first message with no further
- * user action, so a URL-borne prompt would let a link author (and, with
- * `autoPublishAiBuilds`, publish) metadata as that user. Navigation state can
- * only be set by this app's own in-app `navigate()` call.
- */
-interface BuilderHandoffState {
-  /** The build prompt the `ask` agent handed off; sent once as the build surface's first message. */
-  handoffPrompt?: string;
-  /** The source `ask` conversation id, forwarded as the build agent's first-turn context (cloud#817). */
-  parentConversationId?: string;
-}
-
-/** Reads the handoff from `location.state`; anything that is not a non-empty string is absent. */
-function readBuilderHandoffState(state: unknown): BuilderHandoffState {
-  if (!state || typeof state !== 'object') return {};
-  const record = state as Record<string, unknown>;
-  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-  return {
-    handoffPrompt: text(record.handoffPrompt),
-    parentConversationId: text(record.parentConversationId),
-  };
-}
+// objectui#12493 — the ADR-0057 P4 Builder handoff travels as navigation state
+// (or an in-memory drawer call), never in a URL: `BuilderHandoffState` and its
+// reader live with the drawer's target grammar (objectstack#34608).
 
 export interface PendingFirstMessage {
   content: string;
@@ -1529,11 +1366,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   const [shareOpen, setShareOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [mobileChatsOpen, setMobileChatsOpen] = useState(false);
-  const {
-    collapsed: chatsCollapsed,
-    toggle: toggleChatsCollapsed,
-    handleCanvasOpenChange,
-  } = useCollapsibleChatsList();
+  const { collapsed: chatsCollapsed, toggle: toggleChatsCollapsed } = useCollapsibleChatsList();
   // Keyboard shortcuts (ChatGPT/Claude parity): ⌘⇧O new chat, ⌘⇧S toggle list.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1856,7 +1689,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
             showDebug={agentHasCapability(agents, activeAgent, 'debug')}
-            onCanvasOpenChange={handleCanvasOpenChange}
           />
         </main>
       </div>
@@ -1951,8 +1783,14 @@ interface ChatPaneProps {
   onDebug?: () => void;
   /** Show the Build Doctor button — true only for build-agent conversations. */
   showDebug?: boolean;
-  /** Reports the Live Canvas preview opening/closing so the page can auto-tuck the chats list. */
-  onCanvasOpenChange?: (open: boolean) => void;
+  /**
+   * objectstack#34725 — the host draws the panel's one title bar itself (the
+   * Studio right slot: 属性 | AI 助手, History, widen, Close), so the pane
+   * omits its own header row: the agent switcher, the app chip, Share and the
+   * Build Doctor button. The host then offers Share where it chooses.
+   * @default false
+   */
+  hideHeader?: boolean;
 }
 
 export function ChatPane({
@@ -1982,7 +1820,7 @@ export function ChatPane({
   onShare,
   onDebug,
   showDebug,
-  onCanvasOpenChange,
+  hideHeader = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -2016,15 +1854,19 @@ export function ChatPane({
   // own packageId, else this surface's edit package (`?package=` only scopes the
   // surface; it sends nothing). cloud#817: also carry THIS (ask) thread's id so
   // the Builder's first turn starts with the ask conversation as context.
+  //
+  // objectstack#34608 — inside the console's drawer this retargets the drawer
+  // in place; under no drawer host it navigates to `/ai/build` as before.
+  const openAssistant = useOpenAssistant();
   const openBuilder = useCallback(
     (handoff: { prompt: string; packageId?: string }) => {
       const pkg = handoff.packageId || editPackageId;
       const state: BuilderHandoffState = {};
       if (handoff.prompt) state.handoffPrompt = handoff.prompt;
       if (conversationId) state.parentConversationId = conversationId;
-      navigate(`/ai/build${pkg ? `?package=${encodeURIComponent(pkg)}` : ''}`, { state });
+      openAssistant({ agent: 'build', packageId: pkg }, state);
     },
-    [navigate, editPackageId, conversationId],
+    [openAssistant, editPackageId, conversationId],
   );
 
   // cloud#1658 — land the user on the record an `open_record` hand-off names.
@@ -2097,29 +1939,6 @@ export function ChatPane({
     [navigate, location],
   );
 
-  // ── ADR-0037 Live Canvas ────────────────────────────────────────────────
-  // When a build session drafts an `app`, open the split-view canvas: the
-  // drafted app rendered as-if-published (`?preview=draft`) beside the chat.
-  // Per-artifact signals coalesce (800 ms) into one pane refresh so a
-  // whole-app build doesn't trigger an invalidation storm.
-  // objectui#12968 — `path`: a drafted page / view / object surface to show
-  // instead of the app's landing (`draftPreviewPath`, `onPreviewDraft` below).
-  const [canvasApp, setCanvasApp] = useState<
-    { name: string; segment?: string; materialized: boolean; path?: string } | null
-  >(null);
-  const [canvasRefreshKey, setCanvasRefreshKey] = useState(0);
-  // #2481 — a phone can't do the beside-chat split (chat's fixed min-width +
-  // the preview together overflow the viewport, and the resize handle is
-  // desktop-only). So under `md` the canvas is OPT-IN and FULL-SCREEN: the
-  // build streams in the (full-width) chat as usual; when the user taps Preview
-  // the canvas takes over the screen, and closing returns to the chat. This
-  // flag is that overlay's open state — distinct from `canvasApp` (which only
-  // means a preview is AVAILABLE), so an auto-drafted app never covers the chat.
-  const isMobile = useIsMobile();
-  const [mobileCanvasOpen, setMobileCanvasOpen] = useState(false);
-  useEffect(() => {
-    if (!canvasApp) setMobileCanvasOpen(false);
-  }, [canvasApp]);
   // cloud#797 Excel→App: the attached spreadsheet the user can load real rows
   // from (into a built object) via ExcelImportBar. Set when a sheet is sent,
   // cleared on import/dismiss. `dataSource` drives the wizard's schema + import.
@@ -2151,70 +1970,17 @@ export function ChatPane({
     [dataSource],
   );
   const [pendingSheet, setPendingSheet] = useState<File | null>(null);
-  const canvasTimerRef = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (canvasTimerRef.current) window.clearTimeout(canvasTimerRef.current);
-  }, []);
-  // Tell the page when the preview pane opens/closes so it can tuck the chats
-  // list away for the (tight) chat + preview split, and restore it after.
-  const canvasOpen = canvasApp !== null;
-  useEffect(() => {
-    onCanvasOpenChange?.(canvasOpen);
-  }, [canvasOpen, onCanvasOpenChange]);
-  // Draggable chat ↔ preview split (active only while the preview is open).
-  const split = useResizableChatPane(canvasOpen);
+  // The pane's root, measured by the composer-draft handoff below.
+  const paneRef = useRef<HTMLDivElement | null>(null);
   // objectstack#33674 — what is typed into the composer before this pane knows
   // its conversation outlives the id-keyed remount. See useComposerDraftHandoff.
   const noteComposerInput = useComposerDraftHandoff({
     hostStash: pendingFirstMessageRef,
-    containerRef: split.containerRef,
+    containerRef: paneRef,
     chatApi,
     conversationId,
     requestedConversationId,
   });
-  // A pane too narrow for the split (the console dock at a laptop width, the
-  // Studio copilot's slot) previews the way a phone does: full-width chat, the
-  // pill, the full-surface overlay. Every phone switch below reads this.
-  const phonePreview = isMobile || split.tooNarrow;
-  const handleDraftArtifacts = useCallback((artifacts: Array<{ type: string; name: string }>, appSegment?: string) => {
-    const app = artifacts.find((a) => a.type === 'app');
-    // Route the preview on the app's package id (ADR-0048), not its name.
-    if (app) setCanvasApp((prev) => prev ?? { name: app.name, segment: appSegment, materialized: false });
-    if (canvasTimerRef.current) window.clearTimeout(canvasTimerRef.current);
-    canvasTimerRef.current = window.setTimeout(() => setCanvasRefreshKey((k) => k + 1), 800);
-  }, []);
-  // ADR-0045: the build finished and was materialized (real tables + data,
-  // app unlisted). Switch the open canvas from the draft overlay to the REAL
-  // app URL — the reload that follows shows live rows in every list.
-  const handleBuildMaterialized = useCallback((appName: string) => {
-    setCanvasApp((prev) =>
-      prev && prev.name === appName && !prev.materialized
-        ? { ...prev, materialized: true } // keep the package-id segment
-        : prev ?? { name: appName, materialized: true },
-    );
-  }, []);
-  // The chat's build card's own answer per built app (its label and whether it
-  // says the app is live), keyed by the app's machine name. The canvas header
-  // reads it instead of deriving a publish state of its own, so the two can
-  // never disagree, and it follows the card when the build is published.
-  const [buildResults, setBuildResults] = useState<Record<string, { label?: string; live: boolean }>>({});
-  const handleBuildResult = useCallback(
-    ({ appName, label, live }: { appName: string; label?: string; live: boolean }) => {
-      setBuildResults((prev) => {
-        const cur = prev[appName];
-        if (cur && cur.label === label && cur.live === live) return prev;
-        return { ...prev, [appName]: { ...(label ? { label } : {}), live } };
-      });
-    },
-    [],
-  );
-  const canvasBuild = canvasApp ? buildResults[canvasApp.name] : undefined;
-  // A different conversation is a different build session — close the pane.
-  useEffect(() => {
-    setCanvasApp(null);
-    setBuildResults({});
-  }, [conversationId]);
-
   const activeAgentLabel = useMemo<string>(() => {
     const found = agents.find((a) => a.name === activeAgent);
     return localizeAgentLabel(t, activeAgent, found?.label ?? activeAgent ?? t('console.ai.assistant'));
@@ -2293,6 +2059,10 @@ export function ChatPane({
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
+        // The language this console renders in, so a reply that names a card
+        // control names it as the card draws it. Only `Accept-Language` reaches
+        // the server otherwise; the server validates the value itself.
+        uiLocale: language,
       },
     },
     initialMessages: hydrated,
@@ -2408,20 +2178,6 @@ export function ChatPane({
     }),
     [t],
   );
-
-  // ADR-0037: refresh the live preview when a turn finishes while the canvas is
-  // open. The per-artifact `onDraftArtifacts` signal covers a build streaming in,
-  // but an incremental edit (add a field, rename) can land without growing the
-  // de-duped artifact set — so its draft never reached the iframe and the pane
-  // (and its "Changes (N)" count) went stale until a manual reload. Bumping on
-  // the loading falling-edge guarantees the preview reflects every change.
-  const prevLoadingRef = useRef(false);
-  useEffect(() => {
-    if (prevLoadingRef.current && !isLoading && canvasApp) {
-      setCanvasRefreshKey((k) => k + 1);
-    }
-    prevLoadingRef.current = isLoading;
-  }, [isLoading, canvasApp]);
 
   const hitl = useHitlInChat({
     messages: runtimeMessages,
@@ -2675,9 +2431,12 @@ export function ChatPane({
   // change in <app>" + change-oriented starters, instead of the from-scratch
   // magic-flow guidance. Computed here (not earlier) so it can read the app name.
   const editing = isBuildSurface && Boolean(editPackageId);
+  // objectstack#34608 item 4 — bound to an app, the maker's starters lead with
+  // two data questions before the change-oriented ones.
   const suggestions = useMemo<string[] | undefined>(() => {
     if (hydrated.length > 0) return undefined;
-    return buildAgentSuggestions(activeAgent, activeAgentLabel, t, editing);
+    const starters = buildAgentSuggestions(activeAgent, activeAgentLabel, t, editing);
+    return editing ? [...editAppDataSuggestions(t), ...starters] : starters;
   }, [hydrated.length, activeAgent, activeAgentLabel, t, editing]);
   const emptyState = useMemo(
     () => agentEmptyState(t, activeAgent, editing ? { appLabel: editAppLabel } : undefined),
@@ -2701,6 +2460,145 @@ export function ChatPane({
     if (!isBuildSurface || !canBind || !boundPackageId || editPackageId || isLoading) return;
     onPackageBound?.(boundPackageId);
   }, [isBuildSurface, canBind, boundPackageId, editPackageId, isLoading, onPackageBound]);
+
+  // ── objectstack#34610 — the draft is the main area ─────────────────────────
+  // The build runs in the console's drawer, and what it builds shows in the
+  // page beside it (ADR-0057 Amendment A3, ADR-0037 as amended): no nested
+  // preview. Under a drawer host (`useChatDockControl`, the console and Home
+  // shells) the main area moves to the app, in the regime the build is in
+  // (ADR-0045): the real unpublished app for a materialized build or an app
+  // not published yet, `?preview=draft` for changes to a published app. With
+  // no drawer host (the Studio copilot, whose design surface already shows
+  // the drafts) nothing moves; only the per-artifact refresh below runs.
+  const dockControl = useChatDockControl();
+  const showsMainArea = dockControl !== null;
+  const mainAreaInPreview = usePreviewDrafts();
+  // An app the registry lists as materialized-but-unpublished (ADR-0045)
+  // takes no draft overlay: its changes materialize into it directly, and in
+  // preview mode its own Publish bar would yield to an empty draft bar.
+  const unpublishedApp = useCallback(
+    (segment: string) =>
+      (metadataApps ?? []).some(
+        (a) => (a._packageId === segment || a.name === segment) && (a as { _unpublished?: unknown })._unpublished === true,
+      ),
+    [metadataApps],
+  );
+  // Only a turn THIS pane streamed moves the main area. The chat reports a
+  // reopened conversation's drafts and materialized builds on mount too, and
+  // opening an old thread from the history must not navigate the page.
+  const liveTurnRef = useRef(false);
+  useEffect(() => {
+    if (isLoading) liveTurnRef.current = true;
+  }, [isLoading]);
+  // Keyed by the conversation: another conversation is another build session,
+  // and its target (none yet) is not this one's.
+  const [mainAreaState, setMainAreaState] = useState<{
+    conversationId: string | undefined;
+    target: MainAreaDraftTarget;
+  } | null>(null);
+  const mainAreaTarget =
+    mainAreaState && mainAreaState.conversationId === conversationId ? mainAreaState.target : null;
+  const shownTargetRef = useRef<MainAreaDraftTarget | null>(null);
+  // Move the main area to the latest target. Entering draft mode on the page
+  // the user is on is a query change and happens at once; a move to another
+  // page waits for the turn to end (A1: the main area keeps its page until
+  // the build binds, and the bind lands when the turn does), so a stream in
+  // flight is never cut by a shell switch.
+  useEffect(() => {
+    if (!showsMainArea || !mainAreaTarget || shownTargetRef.current === mainAreaTarget) return;
+    const move = mainAreaDraftMove(mainAreaTarget, location, mainAreaTarget.segment === activeAppPackageId);
+    if (move && !move.replace && isLoading) return;
+    shownTargetRef.current = mainAreaTarget;
+    if (!move) return;
+    if (move.leavesPreview) markPreviewExit();
+    navigate(move.to, { replace: move.replace });
+  }, [showsMainArea, mainAreaTarget, location, activeAppPackageId, isLoading, navigate]);
+  const showAppInMainArea = useCallback(
+    (packageId: string, opts: { materialized?: boolean; path?: string } = {}) => {
+      // An edit to a code-shipped app is drafted into its customization pair
+      // (ADR-0146): the app it shows in is the pair's base.
+      const segment = appPackageOf(packageId);
+      const materialized = opts.materialized === true || unpublishedApp(segment);
+      setMainAreaState({
+        conversationId,
+        target: {
+          segment,
+          ...(materialized ? { materialized: true } : {}),
+          ...(opts.path && !materialized ? { path: opts.path } : {}),
+        },
+      });
+    },
+    [unpublishedApp, conversationId],
+  );
+  // ADR-0037 Phase 2 — refresh in place per artifact: each drafted artifact is
+  // announced on the assistant bus, and every metadata tree in preview mode
+  // (the main area's) refetches that type. Coalesced (~200 ms) by type, so a
+  // whole-app build is not an invalidation storm.
+  const invalidateTimerRef = useRef<number | null>(null);
+  const pendingInvalidationsRef = useRef<Map<string, { type: string; name: string }>>(new Map());
+  useEffect(
+    () => () => {
+      if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
+    },
+    [],
+  );
+  const queueInvalidations = useCallback((artifacts: ReadonlyArray<{ type: string; name: string }>) => {
+    for (const a of artifacts) {
+      if (!pendingInvalidationsRef.current.has(a.type)) pendingInvalidationsRef.current.set(a.type, a);
+    }
+    if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
+    invalidateTimerRef.current = window.setTimeout(() => {
+      const batch = [...pendingInvalidationsRef.current.values()];
+      pendingInvalidationsRef.current.clear();
+      for (const inv of batch) emitCanvasInvalidate(inv);
+    }, 200);
+  }, []);
+  const handleDraftArtifacts = useCallback(
+    (artifacts: Array<{ type: string; name: string }>, appSegment?: string) => {
+      queueInvalidations(artifacts);
+      // The app the draft belongs to: the drafted set's own package, else the
+      // package this conversation is bound to (an edit drafts no `app`).
+      // Unbound (a new build before its package exists), the page stays.
+      const segment = appSegment ?? boundPackageId;
+      if (liveTurnRef.current && segment) showAppInMainArea(segment);
+    },
+    [boundPackageId, showAppInMainArea, queueInvalidations],
+  );
+  // ADR-0045: the build materialized — the real, unlisted app.
+  const handleBuildMaterialized = useCallback(
+    (appName: string, opts?: { appSegment?: string }) => {
+      if (liveTurnRef.current) showAppInMainArea(opts?.appSegment ?? appName, { materialized: true });
+    },
+    [showAppInMainArea],
+  );
+  // A finished turn refreshes the main area once more (and every pending
+  // count): an incremental edit can land without growing the drafted set, so
+  // the per-artifact signal above does not always fire for it.
+  //
+  // objectstack#34610 — for the same reason a finished turn that drafted
+  // shows its app in the main area itself: an edit that re-drafts an artifact
+  // the conversation already listed (the object a build made, edited in the
+  // next turn) never reaches `handleDraftArtifacts`, and read live it left the
+  // main area out of draft mode with the edit pending.
+  const prevLoadingRef = useRef(false);
+  useEffect(() => {
+    const ended = prevLoadingRef.current && !isLoading;
+    prevLoadingRef.current = isLoading;
+    if (!ended) return;
+    if (liveTurnRef.current) {
+      const drafted = turnDraftPackage(messages);
+      const segment = drafted?.packageId ?? (drafted ? boundPackageId : undefined);
+      if (drafted && segment) {
+        showAppInMainArea(segment, drafted.materialized ? { materialized: true } : {});
+        // …and refreshes what it drafted, once the main area is in draft
+        // mode (the coalescing delay outlasts the move).
+        queueInvalidations(drafted.items);
+      }
+    }
+    if (shownTargetRef.current) emitMetadataRefresh();
+    // Re-runs on the other deps find no turn end (`prevLoadingRef` already
+    // holds the current value), so only the end of a turn acts.
+  }, [isLoading, messages, boundPackageId, showAppInMainArea, queueInvalidations]);
 
   // objectui#12724 — a finished build STAYS on the conversation. The
   // built-moment transition (objectui#5799) used to move the thread into the
@@ -2845,7 +2743,7 @@ export function ChatPane({
             // to the Select when many custom agents would overflow the header.
             <Tabs
               value={activeAgent}
-              onValueChange={(name) => navigate(`/ai/${agentRouteName(name)}`)}
+              onValueChange={(name) => openAssistant({ agent: name })}
             >
               <TabsList
                 className="h-7 gap-0.5 p-0.5"
@@ -2868,7 +2766,7 @@ export function ChatPane({
           ) : (
             <Select
               value={activeAgent}
-              onValueChange={(name) => navigate(`/ai/${agentRouteName(name)}`)}
+              onValueChange={(name) => openAssistant({ agent: name })}
               disabled={agentsLoading}
             >
               <SelectTrigger
@@ -2940,7 +2838,7 @@ export function ChatPane({
                   className="text-xs"
                   onSelect={() => {
                     if (pkg.id !== boundPackageId) {
-                      navigate(`/ai/build?package=${encodeURIComponent(pkg.id)}`);
+                      openAssistant({ agent: 'build', packageId: pkg.id });
                     }
                   }}
                 >
@@ -2953,7 +2851,7 @@ export function ChatPane({
               <DropdownMenuItem
                 data-testid="ai-build-package-option-new"
                 className="text-xs"
-                onSelect={() => navigate('/ai/build?new=1')}
+                onSelect={() => openAssistant({ agent: 'build', fresh: true })}
               >
                 <SparklesIcon className="size-3 shrink-0" />
                 {t('console.ai.newApp', { defaultValue: 'New app' })}
@@ -3001,55 +2899,27 @@ export function ChatPane({
     </div>
   );
 
-  // The beside-chat split needs room for both panes: on a phone, or in a pane
-  // narrower than that (`phonePreview`), the chat keeps full width and the
-  // canvas becomes a full-surface overlay instead (see #2481 below).
-  const desktopSplit = canvasApp !== null && !phonePreview;
-
-  // objectui#5694 — the standing unpublished-changes affordance: shown while
-  // the bound package has pending drafts, so the publish entry point survives
-  // scrolling (the inline card button does not). It renders nothing when the
-  // count is 0 or the conversation is unbound.
+  // objectui#5694 — the standing unpublished-changes line: shown while the
+  // bound package has pending drafts, so it survives scrolling. It renders
+  // nothing when the count is 0 or the conversation is unbound.
   // objectui#12965 — not drawn in the package's own Studio: there the Studio
   // top bar's 变更 and 发布 and the applied card's 查看变更并发布 are the ways
   // to review and publish (objectui#12725's ruled artboard draws no bar).
+  // objectstack#34610 — it publishes nothing: it points to the shell's draft
+  // bar, offers to show the draft when the main area is elsewhere, and shows
+  // the receipt of a publish from that bar.
   const pendingDraftsBar =
     isBuildSurface && !onBoundPackageStudio ? (
-      <PendingDraftsBar packageId={boundPackageId} idle={!isLoading} />
+      <PendingDraftsBar
+        packageId={boundPackageId}
+        idle={!isLoading}
+        draftBarShown={mainAreaInPreview && Boolean(boundPackageId && appPackageOf(boundPackageId) === activeAppPackageId)}
+        onShowDraft={showsMainArea && boundPackageId ? () => showAppInMainArea(boundPackageId) : undefined}
+      />
     ) : null;
 
-  // #2481 — on a phone a built app is previewed full-screen, on request: the
-  // pill below offers it, and closing the overlay brings the pill back.
-  // objectui#13068 — the pill is a row of the composer's own area, like the
-  // drafts bar (objectui#12978). It used to float (`absolute bottom-24`) over
-  // the chat, and on a phone that box sat on the input's first line.
-  // The rows share one column, pill above bar, from the moment a preview is
-  // available until it goes away, so opening and closing the overlay never
-  // remounts the bar (its count would re-read and blink). That column exists
-  // only then: without a preview the slot holds the bar alone, as before, and
-  // stays empty, taking no space, while the bar renders nothing.
-  const mobilePreviewAvailable = canvasApp !== null && phonePreview;
-  const promptHeaderRows = mobilePreviewAvailable ? (
-    <div className="flex w-full flex-col items-center gap-2">
-      {!mobileCanvasOpen ? (
-        <Button
-          size="sm"
-          onClick={() => setMobileCanvasOpen(true)}
-          data-testid="ai-chat-mobile-preview-open"
-          className="gap-1.5 rounded-full shadow-lg"
-        >
-          <Eye className="h-4 w-4" />
-          {t('console.ai.previewApp', { defaultValue: 'Preview app' })}
-        </Button>
-      ) : null}
-      {pendingDraftsBar}
-    </div>
-  ) : (
-    pendingDraftsBar ?? undefined
-  );
-
   return (
-    <div ref={split.containerRef} className="relative flex min-h-0 flex-1 px-0">
+    <div ref={paneRef} className="relative flex min-h-0 flex-1 px-0">
       {/* Excel→App (cloud#797): float the real-data import affordance above the
           chat when a spreadsheet was attached. Absolute so it doesn't disturb
           the chat/canvas flex layout; the ImportWizard it opens is a modal. */}
@@ -3059,7 +2929,6 @@ export function ChatPane({
             <ExcelImportBar
               file={pendingSheet}
               dataSource={dataSource}
-              defaultObjectName={canvasApp?.name}
               onDone={() => setPendingSheet(null)}
             />
           </div>
@@ -3075,22 +2944,17 @@ export function ChatPane({
           and the summary truncates as it was written to. */}
       <div
         data-chat-column
-        className={
-          desktopSplit
-            ? 'flex min-h-0 shrink-0 justify-center'
-            : 'flex min-h-0 min-w-0 flex-1 justify-center'
-        }
-        style={desktopSplit ? { width: split.width } : undefined}
+        className="flex min-h-0 min-w-0 flex-1 justify-center"
       >
       <ChatbotEnhanced
         className="min-h-0 flex-1 bg-background md:max-w-5xl"
-        // The paywall exit. Wired only when this runtime named an upstream
-        // cloud — an undefined `onUpgrade` renders NO upgrade button, which is
-        // the honest state for a runtime with no control plane behind it
-        // (objectui#7253).
+        // The paywall exit: the control plane's declared upgrade entry when
+        // served (objectstack#34622), else its origin. Neither ⇒ an undefined
+        // `onUpgrade` renders NO upgrade button, which is the honest state for
+        // a runtime with no control plane behind it (objectui#7253).
         onUpgrade={
-          cloudConsoleUrl()
-            ? () => window.open(cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
+          (getUpgradeUrl() ?? cloudConsoleUrl())
+            ? () => window.open(getUpgradeUrl() ?? cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
             : undefined
         }
         onOpenBuilder={openBuilder}
@@ -3134,15 +2998,15 @@ export function ChatPane({
         packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
-        headerSlot={headerSlot}
-        // objectui#12978 — the drafts bar and, on a phone, the preview pill
-        // (`promptHeaderRows` above) are rows of the composer's own area, in
+        headerSlot={hideHeader ? undefined : headerSlot}
+        // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
+        // of the composer's own area, in
         // flow above the input. The bar used to float (`absolute bottom-20`)
         // over the chat, and on the full-page chat that put it over the
         // input's first line, hiding the placeholder and the first typed line;
         // in flow, the conversation gives up the room instead, at every width,
         // here and in the console dock, which mounts this same pane.
-        promptHeaderSlot={promptHeaderRows}
+        promptHeaderSlot={pendingDraftsBar ?? undefined}
         messages={shownMessages}
         placeholder={
           activeAgent
@@ -3267,7 +3131,7 @@ export function ChatPane({
         // dock, which the build's binding resumes). The package id is the
         // canvas segment (one package = one app).
         onDesignBuiltApp={(_appName, appSegment) => {
-          const pkg = appSegment ?? canvasApp?.segment;
+          const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
           navigate(`/studio/${encodeURIComponent(pkg)}/interfaces`);
         }}
@@ -3277,7 +3141,7 @@ export function ChatPane({
         // Automations, dashboard/page/view/app → Interfaces). Returns null for
         // types with no direct-edit home (seed/dataset) → rendered as text.
         getArtifactAction={(artifact, appSegment) => {
-          const path = artifactStudioPath(appSegment ?? canvasApp?.segment, artifact);
+          const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);
           return path ? () => navigate(path) : null;
         }}
         // Live lifecycle truth for draft cards: the server's pending count per
@@ -3374,6 +3238,11 @@ export function ChatPane({
             return false;
           }
         }}
+        // objectstack#34610 — the cards draw no Publish: the screen's one is
+        // the shell's bar (the draft bar or the unpublished-app bar; in
+        // Studio, its top bar), and the drafts line above points to it.
+        // `onPublishDrafts` stays for auto-publish and the Published badge.
+        publishFromShellBar
         // objectui#12894 — the applied card's two doors (handlers above). With
         // the review door wired, the card offers 查看变更并发布 in place of its
         // inline Publish; 撤销 is drawn only while the adapter is up.
@@ -3420,7 +3289,7 @@ export function ChatPane({
         surfaceContextLabel={
           surfaceContext?.artifact
             ? t('console.ai.discussing', {
-                defaultValue: 'Discussing: {{target}}',
+                defaultValue: 'Viewing: {{target}}',
                 target:
                   surfaceArtifactLabel ||
                   `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`,
@@ -3444,107 +3313,36 @@ export function ChatPane({
         // app automatically the moment the agent finishes — no manual click; the
         // user refreshes and sees it live WITH data. Same governed endpoint.
         autoPublishDrafts={getRuntimeConfig().features.autoPublishAiBuilds}
-        // ADR-0037 Live Canvas: open/refresh the draft-preview pane as the
-        // agent's artifacts land; Preview buttons deep-link the same route.
+        // objectstack#34610 — each drafted artifact refreshes the main area in
+        // place (ADR-0037 Phase 2) and, in a turn this pane streams, moves it
+        // to the app (handlers above).
         onDraftArtifacts={handleDraftArtifacts}
-        onPreviewDraftApp={(appName, opts) => {
-          setCanvasApp({ name: appName, segment: opts?.appSegment, materialized: opts?.materialized === true });
-          // #2481 — a Preview tap is an explicit request to SEE it, so on a
-          // phone open the full-screen overlay (desktop shows the split pane).
-          if (phonePreview) setMobileCanvasOpen(true);
-        }}
-        // objectui#12968 (objectstack#24324 ruling A) — any other draft's
-        // Preview: the Live Canvas opens the affected surface (a page, the
-        // object's list on a view, the object's default list) in draft
-        // preview, at the path `draftPreviewPath` builds from the drafted
-        // items in the app routed at the package id (ADR-0048).
-        onPreviewDraft={(items, { appSegment }) => {
-          setCanvasApp({
-            name: appSegment,
-            segment: appSegment,
-            materialized: false,
-            path: draftPreviewPath(items, appSegment),
-          });
-          if (phonePreview) setMobileCanvasOpen(true);
-        }}
-        // ADR-0045: build materialized → canvas leaves the draft overlay for
-        // the real (unlisted) app; the reload shows live seed rows.
+        // A draft card's Preview puts the main area on what it drafted: the
+        // app (`onPreviewDraftApp`), or the affected surface — a page, the
+        // object's list on a view, the object's default list — at the path
+        // `draftPreviewPath` builds in the app routed at the package id
+        // (objectui#12968, ADR-0048). With no main area to move (the Studio
+        // copilot, whose canvas shows the drafts) the cards draw no Preview.
+        onPreviewDraftApp={
+          showsMainArea
+            ? (appName, opts) =>
+                showAppInMainArea(opts?.appSegment ?? appName, { materialized: opts?.materialized === true })
+            : undefined
+        }
+        onPreviewDraft={
+          showsMainArea
+            ? (items, { appSegment }) => showAppInMainArea(appSegment, { path: draftPreviewPath(items, appSegment) })
+            : undefined
+        }
+        // ADR-0045: build materialized → the main area shows the real
+        // (unlisted) app, whose own bar publishes it.
         onBuildMaterialized={handleBuildMaterialized}
-        onBuildResult={handleBuildResult}
         // objectui#11666 — mirrored onto the assistant bus (effect above).
         onPlanApprovalPendingChange={onPlanApprovalPendingChange}
         previewDraftLabel={t('console.ai.previewDraft', { defaultValue: 'Preview' })}
         data-testid="ai-chat-panel"
       />
       </div>
-      {desktopSplit ? (
-        <>
-          {/* Draggable divider — resize the chat ↔ preview split. */}
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('console.ai.resizeSplit', { defaultValue: 'Resize chat and preview' })}
-            tabIndex={0}
-            onPointerDown={split.onHandlePointerDown}
-            onKeyDown={split.onHandleKeyDown}
-            onDoubleClick={split.reset}
-            data-testid="ai-chat-split-handle"
-            className={cn(
-              'group relative hidden w-1.5 shrink-0 cursor-col-resize touch-none select-none md:block',
-              'focus:outline-none',
-            )}
-          >
-            {/* Hit area is wider than the visible line for easier grabbing. */}
-            <span aria-hidden className="absolute inset-y-0 -left-1.5 -right-1.5" />
-            <span
-              aria-hidden
-              className={cn(
-                'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors',
-                'group-hover:bg-primary/60 group-focus-visible:bg-primary',
-                split.dragging && 'bg-primary',
-              )}
-            />
-          </div>
-          <LiveCanvas
-            appName={canvasApp!.name}
-            appLabel={canvasBuild?.label}
-            live={canvasBuild?.live}
-            appSegment={canvasApp!.segment}
-            materialized={canvasApp!.materialized}
-            path={canvasApp!.path}
-            refreshKey={canvasRefreshKey}
-            onClose={() => setCanvasApp(null)}
-          />
-          {/* While dragging, an overlay above the canvas iframe keeps pointer
-              events flowing to the window listeners (an iframe would otherwise
-              swallow them) and shows the resize cursor everywhere. */}
-          {split.dragging ? <div className="fixed inset-0 z-50 cursor-col-resize" data-testid="ai-chat-split-overlay" /> : null}
-        </>
-      ) : null}
-      {/* #2481 — MOBILE preview. The beside-chat split has no room on a phone,
-          nor in a pane too narrow for it (`phonePreview`), so the canvas is opt-in and full-screen: the pill above the composer
-          (`promptHeaderRows`) offers it (build streams uninterrupted in the
-          chat), and tapping it — or a Preview button on a draft card — takes
-          over the screen. Closing the overlay returns to the chat with the
-          preview still one tap away. */}
-      {canvasApp && phonePreview && mobileCanvasOpen ? (
-        <div
-          className="absolute inset-0 z-30 flex flex-col bg-background"
-          data-testid="ai-chat-mobile-canvas"
-        >
-          <LiveCanvas
-            appName={canvasApp.name}
-            appLabel={canvasBuild?.label}
-            live={canvasBuild?.live}
-            appSegment={canvasApp.segment}
-            materialized={canvasApp.materialized}
-            path={canvasApp.path}
-            refreshKey={canvasRefreshKey}
-            // Close returns to the chat; the pill re-offers the preview.
-            onClose={() => setMobileCanvasOpen(false)}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -3611,6 +3409,18 @@ function editAppSuggestions(t: TranslationFn): string[] {
     t('console.ai.suggestions.editApp.addSampleData', {
       defaultValue: 'Fill the existing objects with realistic sample records so I can demo the app.',
     }),
+  ];
+}
+
+/**
+ * objectstack#34608 item 4 — the data-question starters the build agent offers
+ * beside its edit chips when bound to an app: the maker's composer answers data
+ * questions too. Reuses the data agent's own strings.
+ */
+export function editAppDataSuggestions(t: TranslationFn): string[] {
+  return [
+    t('console.ai.suggestions.dataChat.recentRecords', { defaultValue: 'List the 5 most recently created records.' }),
+    t('console.ai.suggestions.dataChat.recordCounts', { defaultValue: 'Count records for each object.' }),
   ];
 }
 

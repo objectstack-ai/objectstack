@@ -207,10 +207,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
   rule: 'view/layout-without-binding',
   covers: 'what each view type renders without its block',
   paragraphs: [
-    'Six list-view types read their layout from a config block named after the type: `kanban`, ' +
-      '`calendar`, `gantt`, `timeline`, `map` and `tree`. A view of one of them with no block parses ' +
-      'and publishes clean, but the surface the author asked for is not the one that renders. What ' +
-      'renders instead differs by type, as read from the renderer below; the rule is a warning on all six.',
+    'Seven list-view types read their layout from a config block named after the type: `kanban`, ' +
+      '`calendar`, `gantt`, `timeline`, `map`, `tree` and `timesheet`. A view of one of them with no ' +
+      'block parses and publishes clean, but the surface the author asked for is not the one that ' +
+      'renders. What renders instead differs by type, as read from the renderer below; the rule is a ' +
+      'warning on all seven.',
     '`calendar`: no date axis, and the renderer does not invent one. objectui\'s `ListView.tsx` ' +
       'calendar branch forwards only the bindings the view declared, so `getCalendarConfig` ' +
       '(`ObjectCalendar.tsx`) resolves `null` and the view renders its "Calendar configuration ' +
@@ -241,6 +242,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
       'authoring reports success. For `tree` a block is not the whole story either: every `tree` key ' +
       'is optional, and a tree with no resolvable parent pointer renders flat — that is ' +
       '`view/tree-without-parent-field`.',
+    '`timesheet`: objectui\'s `ListView.tsx` timesheet branch hands the block to `ObjectTimesheet` ' +
+      '(`@object-ui/plugin-timesheet`) as declared, and its `resolveTimesheetConfig` resolves `null` ' +
+      'without all three keys, so the view renders its "Timesheet configuration required" screen ' +
+      'instead of a grid, on any object. Declare `timesheet.rowFields`, `timesheet.dateField` and ' +
+      '`timesheet.valueField`, the three keys `TimesheetConfigSchema` requires.',
     'A `gallery` view is not judged: no `gallery` key is required, and its fallback mis-titles ' +
       'cards rather than emptying the view.',
   ],
@@ -700,6 +706,37 @@ const DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 // ── Security posture (`validate-security-posture.ts`) ──────────────────────
 
+const DATASET_MEMBER_NO_VOCABULARY_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-member-no-vocabulary',
+  covers: 'what a member with no synonyms and no description loses',
+  paragraphs: [
+    'A dataset member (a measure or a dimension) carries its business vocabulary in two optional keys: ' +
+      '`synonyms`, the words a person types for it in a question, and `description`, one or two sentences ' +
+      'saying what it is in business terms. When an assistant is asked a business question it matches the ' +
+      'words of the question against each member\'s `name`, `label` and `synonyms`, and reads the ' +
+      '`description` to choose between members and to explain the number it returns.',
+    'A member that declares neither answers only to its own name and label. A person who asks for ' +
+      '"revenue" where the measure is labelled "Total Amount", or who asks in another language, matches ' +
+      'nothing, and the assistant falls back to a plain object query: a number no dataset governs, for a ' +
+      'metric this dataset does govern. Every check stays green and every dashboard still draws, so nothing ' +
+      'else reports the loss.',
+    'Reported once per member that has neither key. A `synonyms` list with at least one non-blank word, or a ' +
+      'non-blank `description` (a string, or an inline locale map with one non-blank value), is enough to ' +
+      'silence it; writing both is the complete form.',
+    'To fix it, write the words a person types, in the language your users ask in. Synonyms are matched and ' +
+      'never translated, so every language goes in the one list (`synonyms: [\'revenue\', \'sales\', \'营收\']`), ' +
+      'and a list is not keyed by locale. Write the `description` as a plain business definition, what the ' +
+      'number counts and what it leaves out, never as an instruction to a model; it is display text and is ' +
+      'translated like `label`.',
+    'One word names one member: within a dataset a synonym may not equal another member\'s name, label or ' +
+      'synonym, compared with case, width, spacing, `_` and `-` folded, and the dataset schema refuses one ' +
+      'that does. Give the shared word to the member people most often mean by it.',
+    'The rule is advisory and stays a warning, at `os validate`, `os build`, `os lint` and on the save ' +
+      'response of the metadata publish door. A dataset that only feeds charts, and that nobody asks ' +
+      'questions of, loses nothing by leaving both keys out.',
+  ],
+};
+
 const SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION: RuleExplanation = {
   rule: 'security-controlled-by-parent-ambiguous-relation',
   covers: 'why a controlled_by_parent object takes exactly one master',
@@ -1045,6 +1082,14 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'holders, declare `readable: true` on it in the sets they hold. A set that holds Modify All on the ' +
       'parent must drop that bit first, because Modify All makes the entry inert. If the set may see ' +
       'the child data, grant the read on the child instead.',
+    'If the pair is meant, say so on the set: `fields: { \'<object>.<summary>\': { readable: true, ' +
+      'rollupSourceUnreadableReason: \'<why holders of this set read the total>\' } }`. That one finding, ' +
+      'for this set and this column, is then reported as a note that quotes the reason, so `--strict` passes ' +
+      'and a reviewer still sees the pair and why it stands. Another set reading the same column, another ' +
+      'column of the same set and the row-scope note are judged as before. The runtime does not read the key, ' +
+      'but the entry that carries it is an ordinary declaring entry and votes `readable: true` in the field ' +
+      'merge: on a set that had no entry for the column, adding one restores the column for holders whose ' +
+      'other sets mask it. A blank reason, or a reason beside `readable: false`, is refused.',
   ],
 };
 
@@ -1416,6 +1461,27 @@ const ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
     'The readonly rule on the same body (`action-api-update-readonly-when-field`) skips an unparseable ' +
       'body rather than guess at what the unread part wrote, so this finding is the one that describes ' +
       'the problem.',
+  ],
+};
+
+const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-does-not-compile',
+  covers: 'the wrapper an action body is compiled in',
+  paragraphs: [
+    'An action body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (input, ctx) => { … })` and calls it with the action\'s params and its context, so the ' +
+      'statements share a scope with two parameters the author never wrote. A source that is valid on its ' +
+      'own can fail to compile there, and then every run of the action fails, on every door, before any ' +
+      'statement runs.',
+    'The common case is declaring a parameter again: `const input = ctx.input || {}` or `let ctx = …` is a ' +
+      'redeclaration, a SyntaxError. Read the params as `input` (they are also `ctx.input`), or give the ' +
+      'local another name. `var input = …` is not a redeclaration and compiles.',
+    'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+      'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
+      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
+      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
+      'action answers a 500 that names the action and the compile error.',
   ],
 };
 
@@ -2388,9 +2454,10 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       '`config.objectName`, and a time-relative sweep queries the exact name in `config.timeRelative.object`. ' +
       'Names match exactly — `app_candidate`, not `candidate` — so when no object answers to that name the ' +
       'flow never fires, or the sweep matches nothing, and the runtime says nothing about it.',
-    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
-      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
-      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+    'The rule asks whether this stack defines the object, counting the objects of the packages its ' +
+      'manifest declares in `dependencies` when the artifact carries them. One it does not define may be ' +
+      'declared by another installed package, which a build of this stack cannot see, so the finding is a ' +
+      'warning and can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
       'not judged. Of the findings that say a flow never fires, it is the only one that stays advisory: ' +
       'the others are settled by contracts this repository ships. At the runtime publish gate a write that ' +
       'names no package gets it as a save advisory, judged against the live object registry.',
@@ -2418,10 +2485,11 @@ const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       'scope before the run exists, so a name no object answers to refuses every start that supplies ' +
       'the input. Names match exactly — `app_candidate`, not `candidate`. Every door that starts the flow ' +
       'by name enforces the declaration.',
-    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
-      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
-      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
-      'not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
+    'The rule asks whether this stack defines the object, counting the objects of the packages its ' +
+      'manifest declares in `dependencies` when the artifact carries them. One it does not define may be ' +
+      'declared by another installed package, which a build of this stack cannot see, so the finding is a ' +
+      'warning and can be ignored when such a package declares the object; a `sys_` name is a platform ' +
+      'object and is not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
       'never runs.',
     'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
       'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
@@ -4018,7 +4086,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
       '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
-      '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
+      '`timeline`, `gallery`, `map`, `tree` or `timesheet` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
@@ -4028,7 +4096,8 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
-      '`gantt.objectField` stops every bar opening its record. A warning where one decoration ' +
+      '`gantt.objectField` stops every bar opening its record, and every `timesheet` binding is written ' +
+      'into each record a typed cell creates. A warning where one decoration ' +
       'drops and the rest renders — an optional colour, title, tooltip or cover binding, or a stale ' +
       '`hiddenFields` or `fieldOrder` entry, which hides or orders nothing.',
     LIST_VIEW_HEAD_ONLY,
@@ -4291,7 +4360,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'set\'s `name` that a package of this stack declares. `reports.NAME` a report\'s `name` that ' +
       'a package of this stack declares. `books.BOOK` a doc book\'s `name` that a package of this ' +
       'stack declares, or a package id (its implicit book), and `.groups.KEY` a group `key` that ' +
-      'book declares, not its label.',
+      'book declares, not its label. `mappings.MAPPING` an import mapping\'s `name` that a ' +
+      'package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -4304,7 +4374,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
       '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included; ' +
-      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included. A ' +
+      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included; ' +
+      '`resultDialog.columns.PATH.COLUMN` and `preflight.columns.PATH.COLUMN` a `format: \'table\'` ' +
+      'field\'s literal `path`, then the literal `path` of one of its `columns`. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
     'Not judged: a platform object in the registry, an object this stack only extends through ' +
       '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
@@ -5484,13 +5556,16 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
   rule: 'ai-skill-tool-unresolved',
   covers: 'how a skill tool name resolves, and why it only warns',
   paragraphs: [
-    // The three sources and the wildcard are held to the rule by its test, each one silencing it.
+    // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; and the materialised action tools, one `action_<name>` per declarative ' +
-      'action in `stack.actions` or any object\'s `actions` (ADR-0109: the default path declares no ' +
-      'tool record at all). A trailing-wildcard entry (`action_*`, `crm_*`) resolves when any member ' +
-      'of that universe starts with its prefix.',
+      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
+      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
+      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
+      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
+      '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
+      '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
       '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +
@@ -5624,7 +5699,7 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
   ],
 };
 
-// ── Seed datasets (`validate-seed-replay-safety.ts`, `validate-seed-state-machine.ts`) ──
+// ── Seed datasets (`validate-seed-state-machine.ts`) ──
 
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
@@ -5659,26 +5734,6 @@ const ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION: RuleExplanation = {
       'intended; a target this stack does not declare is an organization\'s own queue and is not judged.',
     'Advisory (`info`): the shape mirrors `approval-approvers-may-resolve-empty`, and the engine never ' +
       'refuses an insert on a rule\'s account.',
-  ],
-};
-
-const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
-  rule: 'seed-insert-mode-duplicates-on-replay',
-  covers: 'why a seed dataset must be safe to replay',
-  paragraphs: [
-    'Seeds are replayed, not applied once: every `data` dataset is loaded again on each dev-server ' +
-      'boot and each package re-publish, so a dataset\'s mode must be idempotent. `mode: \'insert\'` ' +
-      'is the one that is not: the loader\'s insert path writes every record unconditionally, with no ' +
-      'existing-row check, so the table grows by the dataset\'s size on every restart (three rows, ' +
-      'then six, then nine).',
-    // The modes are held to the rule by its test, each one silent.
-    'The fix line names the idempotent modes, `ignore` (skip rows that already exist) and `upsert` ' +
-      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field ' +
-      '(`externalId: \'code\'`), ' +
-      'or a composite list of fields for a join or junction table with no single natural key ' +
-      '(`[\'team\', \'project\']`).',
-    'A warning, not a refusal: an insert seed loads and works on a fresh database, and the defect ' +
-      'shows only from the second boot on.',
   ],
 };
 
@@ -6227,6 +6282,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
   [DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [DATASET_MEMBER_NO_VOCABULARY_EXPLANATION.rule]: DATASET_MEMBER_NO_VOCABULARY_EXPLANATION,
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
@@ -6256,6 +6312,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -6407,7 +6464,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
-  [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
   [ACTION_NO_PLACEMENT_EXPLANATION.rule]: ACTION_NO_PLACEMENT_EXPLANATION,

@@ -31,6 +31,7 @@ import {
   type InternalFieldResolvingEngine,
 } from './internal-field-readback.js';
 import { decodeOrganizationMetadataOnRead } from './organization-metadata-decode.js';
+import { endResetTokensOnCredentialWrite, type ResetTokenCache } from './credential-change-ends-reset-tokens.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -888,6 +889,19 @@ export function createObjectQLAdapterFactory(
   // the callback directly, and a driver without `beginTransaction` follows
   // the engine's ADR-0119 D1 warn-once degrade.
   let wrappedAdapter: unknown = null;
+  // The host's `secondaryStorage` and the verification store's identifier
+  // setting, read off the options better-auth builds this adapter with
+  // (below): a credential write ends the reset tokens' cache entries with
+  // their rows, and is refused where identifiers are not kept plain
+  // (`credential-change-ends-reset-tokens.ts`).
+  let resetTokenCache: ResetTokenCache | undefined;
+  let resetTokenIdentifierStorage: unknown;
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      cache: resetTokenCache,
+      internalFieldEngine,
+      identifierStorage: resetTokenIdentifierStorage,
+    });
   const engineWithTx = rawDataEngine as unknown as {
     transaction?<T>(
       cb: (trxCtx: unknown, info: unknown) => Promise<T>,
@@ -953,6 +967,9 @@ export function createObjectQLAdapterFactory(
         // other object, unidentifiable pair, no existing row — and then this is a
         // plain insert, byte for byte as before. See `adopt-membership.ts` for
         // why the seam is here and what adoption does to the role.
+        // A password set on an account the user did not hold ends the user's
+        // other reset tokens first (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, row, [row]);
         const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
         const result = adopted ?? (await dataEngine.insert(objectName, row));
         if (factoryOptions.onRecordCreated && result && typeof result === 'object') {
@@ -1132,6 +1149,9 @@ export function createObjectQLAdapterFactory(
           record as Record<string, unknown>,
           patch as Record<string, unknown>,
         );
+        // A password change ends the account holder's other reset tokens
+        // before it lands (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, [record]);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         // [#16231] The payload carries the resolved `id` and no `where`, so
         // the engine dispatches `by-id` and answers the record or `null`. The
@@ -1169,6 +1189,10 @@ export function createObjectQLAdapterFactory(
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
         restoreUserInfoEndpointOnWrite(objectName, patch);
+        // `internalAdapter.updatePassword` is this door: the password change
+        // ends each targeted holder's other reset tokens before any row lands
+        // (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, records);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.
@@ -1290,6 +1314,10 @@ export function createObjectQLAdapterFactory(
   return (options: Parameters<typeof factory>[0]) => {
     const adapter = readEverySsoProviderRowWhenUnbounded(factory(options));
     wrappedAdapter = adapter;
+    const built = options as { secondaryStorage?: unknown; verification?: { storeIdentifier?: unknown } } | undefined;
+    const cache = built?.secondaryStorage as ResetTokenCache | undefined;
+    resetTokenCache = cache ?? undefined;
+    resetTokenIdentifierStorage = built?.verification?.storeIdentifier;
     return adapter;
   };
 }
@@ -1389,10 +1417,19 @@ function readEverySsoProviderRowWhenUnbounded<A extends {
  */
 export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
   const dataEngine = withSystemContext(rawDataEngine);
+  // A password write ends the account holder's other reset tokens before it
+  // lands, as the factory's does; this adapter is handed no secondary storage
+  // (`credential-change-ends-reset-tokens.ts`).
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      internalFieldEngine: rawDataEngine as unknown as InternalFieldResolvingEngine,
+    });
   return {
     create: async <T extends Record<string, any>>({ model, data, select: _select }: { model: string; data: T; select?: string[] }): Promise<T> => {
       const objectName = resolveProtocolName(model);
-      const result = await dataEngine.insert(objectName, normaliseIdentifierWrite(model, data));
+      const payload = normaliseIdentifierWrite(model, data);
+      await endResetTokens(objectName, payload, [payload]);
+      const result = await dataEngine.insert(objectName, payload);
       return result as T;
     },
 
@@ -1422,8 +1459,10 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const record = await dataEngine.findOne(objectName, { where: filter });
       if (!record) return null;
+      const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, [record]);
       const result = await dataEngine.update(objectName, {
-        ...normaliseIdentifierWrite(model, update),
+        ...patch,
         id: record.id,
       });
       return result ? result as T : null;
@@ -1434,6 +1473,7 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const records = await dataEngine.find(objectName, { where: filter });
       const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, records);
       for (const record of records) {
         await dataEngine.update(objectName, { ...patch, id: record.id });
       }

@@ -9957,12 +9957,12 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 //
 // ## Why ONE requested account is worse than it looks, which is the whole row
 //
-// `hotlong` is also the login the maintainer's own sessions run as, AND the
-// author of some governed PRs. A request addressed only to it either lands in
-// the account that made it, or cannot be made at all — GitHub answers a review
-// request naming the PR's own author with 422. Meanwhile the account the
-// maintainer actually reads is never asked. So "requested one of the two" is
-// not half a channel; on an approver-authored PR it is frequently zero.
+// (History: written while `GOVERNED_APPROVERS` held two accounts; since 2026-11-17 it is `os-zhuang` alone.)
+// `hotlong` was also the login seat sessions run as, AND the author of some
+// governed PRs. A request addressed only to it either landed in the account that
+// made it, or could not be made at all — GitHub answers a review request naming
+// the PR's own author with 422. The union below stays correct for any set size,
+// and the author-identity 422 still applies to a PR authored by an approver.
 //
 // ⇒ Coverage here is a UNION over three fields, and each term is load-bearing:
 //
@@ -16427,7 +16427,7 @@ export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
 //
 // ## Boundaries, pinned rather than described
 //
-// An authorized REVIEW (os-zhuang / hotlong) and the maintainer's own prose are
+// An authorized REVIEW (an account in `GOVERNED_APPROVERS`) and the maintainer's own prose are
 // out of this population TWICE: a review is a `/pulls/{n}/reviews` object this
 // row never reads, and neither carries a seat signature, so the structural gate
 // excludes them before anything else is consulted. ⛔ That is by construction
@@ -33171,7 +33171,7 @@ async function selfTest() {
     requested_reviewers: (extra.requested ?? []).map((login) => ({ login })),
     assignees: (extra.assigned ?? []).map((login) => ({ login })),
   });
-  const APP43 = ['os-zhuang', 'hotlong'];
+  const APP43 = ['os-zhuang', 'hotlong']; // an injected two-account set exercising the union, not the live roster
   const GOV43 = [{ id: 'adr', glob: 'docs/adr/**', what: 'architecture decision records', files: ['docs/adr/0121-x.md'] }];
   // The hand-off timing (the maintainer's 「审核通过才会推送给我审核」): every
   // legacy case below that expects a FINDING is driven with the hand-off DUE —
@@ -33274,7 +33274,7 @@ async function selfTest() {
   // an install that copied this sweeper WITHOUT the governed pair answers with
   // its own NOT MEASURED reason instead, which is the correct signal for it.
   const register43 = GOVERNED_REGISTER.available
-    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length >= 2}`
+    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length > 0}`
     : `NOT MEASURED — ${GOVERNED_REGISTER.reason}`;
   t43('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
   t43('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);

@@ -164,6 +164,7 @@ describe('the feed reads the objects the user’s apps list, in the query (objec
       tenantId: null,
       positions: [],
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       permissionSets: [],
       objects: { sys_activity: { allowRead: true }, crm_lead: { allowRead: true } },
       fields: {},

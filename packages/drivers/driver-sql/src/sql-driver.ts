@@ -175,7 +175,7 @@ import {
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
 // [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
 // what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
-import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, applyPublishedColumnChanges, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, relaxDeclaredNotNull, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, applyPublishedColumnChanges, backfillCanonicalBooleans, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewBooleanConvergence, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, relaxDeclaredNotNull, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 import type { ConcurrentIndexDeferral } from './pg-concurrent-index.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
@@ -407,6 +407,12 @@ export class SqlDriver implements IDataDriver {
       // engine keeps bucketing those zones in memory. TursoDriver is SQLite in
       // every mode and inherits `false` through this getter.
       zonedDateBucketing: this.isPostgres,
+      // [#33876] The filter compiler compiles a composed `ReadableIds` leaf
+      // to one nested subquery (ADR-0139 D3, `applyFilterCondition`), so the
+      // engine plans a nested-relation condition on a read verb as that leaf
+      // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
+      // (Turso's remote transport compiles the leaf with its own compiler).
+      readableIdsLeaf: true,
     };
   }
 
@@ -4957,6 +4963,26 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Converge one table's boolean columns on the integer storage form: legacy
+   * text `'true'` / `'false'` on SQLite becomes `1` / `0` (#34973). The
+   * contract is the docblock of `backfillCanonicalBooleans` in
+   * `sql-driver-schema-sync.ts`.
+   */
+  protected backfillCanonicalBooleans(table: string, tableExisted: boolean): Promise<void> {
+    const readBooleanFields = () => this.booleanFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalBooleans> = {
+      get booleanFields() { return readBooleanFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+    };
+    return backfillCanonicalBooleans.call(host, table, tableExisted);
+  }
+
+  /**
    * The `Field.datetime` (and audit) columns of `table` that MySQL still stores
    * as a legacy `TIMESTAMP`, with the nullability each must keep.
    *
@@ -5301,6 +5327,7 @@ export class SqlDriver implements IDataDriver {
       get deferredSchemaObjects() { return readDeferredSchemaObjects(); },
       get knex() { return readKnex(); },
       planDeclaredRenames: (...a) => this.planDeclaredRenames(...a),
+      previewBooleanConvergence: (...a) => this.previewBooleanConvergence(...a),
       previewDatetimeConvergence: (...a) => this.previewDatetimeConvergence(...a),
       previewTimeConvergence: (...a) => this.previewTimeConvergence(...a),
       rotationShardKey: (...a) => this.rotationShardKey(...a),
@@ -5381,6 +5408,24 @@ export class SqlDriver implements IDataDriver {
       get timeFields() { return readTimeFields(); },
     };
     return previewTimeConvergence.call(host, table, fields, existingColumns);
+  }
+
+  /**
+   * The work {@link backfillCanonicalBooleans} would do for `table`, measured,
+   * not performed (#34973): `normalize_boolean_storage` in `os migrate plan`.
+   * The contract is the docblock of `previewBooleanConvergence` in
+   * `sql-driver-schema-sync.ts`.
+   */
+  protected previewBooleanConvergence(table: string, existingColumns: Set<string>): Promise<PendingSchemaWork[]> {
+    const readBooleanFields = () => this.booleanFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof previewBooleanConvergence> = {
+      get booleanFields() { return readBooleanFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+    };
+    return previewBooleanConvergence.call(host, table, existingColumns);
   }
 
   /**
@@ -9757,6 +9802,7 @@ export class SqlDriver implements IDataDriver {
     rotationHost.install((driver) => ({
       assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
       get autoNumberFields() { return driver.autoNumberFields; },
+      backfillCanonicalBooleans: (...a) => driver.backfillCanonicalBooleans(...a),
       backfillCanonicalDatetimes: (...a) => driver.backfillCanonicalDatetimes(...a),
       backfillCanonicalJsonEncoding: (...a) => driver.backfillCanonicalJsonEncoding(...a),
       backfillCanonicalTimes: (...a) => driver.backfillCanonicalTimes(...a),

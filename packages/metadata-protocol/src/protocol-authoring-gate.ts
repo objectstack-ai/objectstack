@@ -52,6 +52,7 @@ import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-fiel
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import { withDisabledExtensionsFolded } from './metadata-diagnostics.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
@@ -627,7 +628,10 @@ export async function judgeRuntimeAuthoringRules(
         name: evt.name,
         state: evt.state,
         body: evt.body,
-        objects,
+        // [#34901] A `view` write judges its field names against the STORAGE
+        // fold ({@link withDisabledExtensionsFolded}); every other type keeps
+        // the served objects.
+        objects: singular === 'view' ? withDisabledExtensionsFolded(this.engine?.registry, objects) : objects,
         permissions,
         books,
         datasets,
@@ -710,11 +714,51 @@ function packagedRuleCopyRefusalOf(
     };
 }
 
+/** The members {@link draftPublishJudgement} and {@link draftPublishVerdict} read. */
+type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'>;
+
+/**
+ * [#34818] What publishing a stored draft would answer: the refusal's issues
+ * ({@link draftPublishVerdict}'s answer) and, beside them, the gate's
+ * ADVISORIES — the findings a publish that passes returns on its 2xx, which the
+ * console otherwise sees only after the publish, in a toast. One judgement, so
+ * the two halves come from the same run of the same rules.
+ */
+export interface DraftPublishJudgement {
+    refusals: RuntimeAuthoringIssue[];
+    advisories: RuntimeAuthoringIssue[];
+}
+
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
 export async function draftPublishVerdict(
-    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'>,
+    this: DraftVerdictHost,
     draft: { type: string; name: string; body: unknown; packageId: string | null },
 ): Promise<RuntimeAuthoringIssue[]> {
+    return (await draftPublishJudgement.call(this, draft)).refusals;
+}
+
+/**
+ * The body of `ObjectStackProtocolImplementation#draftPublishJudgement` (#34818):
+ * {@link draftPublishVerdict}'s judgement with the gate's ADVISORIES beside its
+ * refusal — what a publish that passes would still say about the draft, which
+ * the publish returns on its 2xx and the draft read folds into
+ * `_diagnostics.warnings` (`withPublishAdvisories`), so a flow designer shows the
+ * publish checks before Publish is pressed. One run of the same rules;
+ * `userTextLocales` picks the language of the advisories' user sentences and
+ * nothing else.
+ */
+export async function draftPublishJudgement(
+    this: DraftVerdictHost,
+    draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+        /**
+         * [#34818] The locales the advisories' user sentences are composed in
+         * (`GetMetaItemRequestSchema.userTextLocales`, stated by the draft read
+         * doors). Absent ⇒ `en`. Selects a language, never a verdict.
+         */
+        userTextLocales?: readonly (string | undefined)[];
+    },
+): Promise<DraftPublishJudgement> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
     // The closure "Publish all" judges this draft against: its package's other
     // drafts, collected by the batch door's own collector from the batch door's
@@ -742,6 +786,7 @@ export async function draftPublishVerdict(
         ...(channel
             ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: draft.body }) }
             : {}),
+        ...(draft.userTextLocales !== undefined ? { userTextLocales: draft.userTextLocales } : {}),
     });
     const issues = (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
     // [#27444 · ADR-0129 D2] The namespace-prefix rule is not a gate rule: the
@@ -778,5 +823,5 @@ export async function draftPublishVerdict(
             severity: 'error',
         });
     }
-    return told.length > 0 ? [...told, ...issues] : issues;
+    return { refusals: told.length > 0 ? [...told, ...issues] : issues, advisories: verdict.advisories };
 }

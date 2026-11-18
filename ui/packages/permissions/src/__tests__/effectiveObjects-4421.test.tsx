@@ -38,6 +38,7 @@ function response(objects: MePermissionsAuthenticatedResponse['objects']): MePer
     userId: 'u1',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: ['account_clerk'],
     objects,

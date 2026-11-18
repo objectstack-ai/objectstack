@@ -91,7 +91,7 @@ function makeDataSource() {
   };
 }
 
-async function openPicker(columns: string[]): Promise<void> {
+async function openPicker(columns: string[], extra: { compact?: boolean } = {}): Promise<void> {
   const dataSource = makeDataSource();
   // Labelled, as the showcase's columns (derived from its `highlightFields`) are.
   const lookupColumns = columns.map((field) => ({ field, label: FIELDS[field].label }));
@@ -102,6 +102,7 @@ async function openPicker(columns: string[]): Promise<void> {
       // Read-only: the picker only reads, so the write members stay absent.
       dataSource={dataSource as never}
       field={{ reference: 'showcase_account', displayField: 'name', lookupColumns } as never}
+      {...extra}
     />,
   );
   await act(async () => {
@@ -399,5 +400,36 @@ describe('LookupField picker popover: bound to the room it is given (objectstack
   it('leaves room for the edge mark when the keyboard scrolls an option into view', async () => {
     await openPicker(['name', 'status']);
     expect(screen.getByRole('listbox').classList.contains('scroll-py-6')).toBe(true);
+  });
+});
+
+describe('LookupField picker popover: wide enough to read an option, never wider than the screen (objectstack#34601)', () => {
+  /**
+   * The width contract, as classes: jsdom has no layout. The trigger width
+   * stays the width, an 18rem floor keeps option names readable when the
+   * trigger is a narrow line-item grid cell, and the room Radix reports caps
+   * both the panel and the floor, so a narrow screen never puts the panel past
+   * its edge. The pixels were read in Chromium; the pull request records them.
+   */
+  const WIDTH = [
+    'w-[var(--radix-popover-trigger-width)]',
+    'min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))]',
+    'max-w-(--radix-popover-content-available-width)',
+  ];
+
+  it('floors a compact (grid-cell) trigger\'s popover at 18rem and caps it at the available width', async () => {
+    await openPicker(['name', 'status'], { compact: true });
+    const popover = screen.getByTestId('lookup-popover');
+    for (const cls of WIDTH) {
+      expect(popover.classList.contains(cls), `popover lacks ${cls}`).toBe(true);
+    }
+  });
+
+  it('gives a full-size trigger the same floor and cap', async () => {
+    await openPicker(['name', 'status']);
+    const popover = screen.getByTestId('lookup-popover');
+    for (const cls of WIDTH) {
+      expect(popover.classList.contains(cls), `popover lacks ${cls}`).toBe(true);
+    }
   });
 });

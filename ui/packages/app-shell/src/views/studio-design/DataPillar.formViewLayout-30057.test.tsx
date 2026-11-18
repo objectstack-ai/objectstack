@@ -285,7 +285,10 @@ describe('the Form tab lays out the form the app opens (objectstack#30057)', () 
     await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details']));
 
     await userEvent.click(screen.getByRole('button', { name: 'Preview' }));
-    const frame = within(await screen.findByTestId('data-form-preview-frame'));
+    const previewFrame = await screen.findByTestId('data-form-preview-frame');
+    // The section navigation (#34605) repeats each section name above the form: read inside the form.
+    await waitFor(() => expect(previewFrame.querySelector('form')).not.toBeNull());
+    const frame = within(previewFrame.querySelector('form') as HTMLElement);
     expect(await frame.findByText('Basic info')).toBeInTheDocument();
     expect(frame.getByText('Money details')).toBeInTheDocument();
     expect(frame.queryByText('Designer group')).toBeNull();

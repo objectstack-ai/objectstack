@@ -1137,7 +1137,7 @@
       "title": "MCP serves the governed datasets: list_datasets lists each dataset this caller may query with its members and reports which terms match which member, and query_dataset answers rows with provenance, a row count and a truncation fact, never SQL",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1157,13 +1157,14 @@
         "call query_dataset { datasetName: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'], dimensions: ['status'] } }",
         "the same with selection.limit: 1",
         "query_dataset { datasetName: 'qa_no_such_dataset', selection: { measures: ['invoice_count'] } }",
-        "query_dataset { dataset: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'] } }; then { datasetName: 'showcase_invoice_metrics', measures: ['invoice_count'] }"
+        "query_dataset { dataset: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'] } }; then { datasetName: 'showcase_invoice_metrics', measures: ['invoice_count'] }",
+        "a near miss: list_datasets { terms: ['invoice'] }; then list_datasets { terms: ['invoices'] }"
       ],
       "acceptance": [
         {
           "clause": "a keyed session lists both tools, each described with the selection rule the model reads",
           "oracle": "network",
-          "verify": "tools/list names list_datasets and query_dataset; the list_datasets description says one match on a measure wins and several matches ask the user (packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions; packages/mcp/src/mcp-http-tools.ts#registerDatasetTools)",
+          "verify": "tools/list names list_datasets and query_dataset; the list_datasets description says one match on a measure wins, several matches ask the user, and a word with candidates asks the same way and is never a match (packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions; packages/mcp/src/mcp-http-tools.ts#registerDatasetTools)",
           "evidence": "the two tool entries"
         },
         {
@@ -1175,7 +1176,7 @@
         {
           "clause": "terms are matched after normalization against name, label and synonym, and each match names its member",
           "oracle": "network",
-          "verify": "the invoice entry's matches hold { term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' } and { term: 'status', member: 'dimensions.status', matchedOn: 'name' }; qa_no_word matches nothing anywhere (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm; packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermMatchSchema)",
+          "verify": "the invoice entry's matches hold { term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' } and { term: 'status', member: 'dimensions.status', matchedOn: 'name' }; qa_no_word matches nothing anywhere, and the answer carries no `candidates` key (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm; packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermMatchSchema)",
           "evidence": "the matches arrays"
         },
         {
@@ -1207,6 +1208,12 @@
           "oracle": "test",
           "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
+        },
+        {
+          "clause": "a term that matches nothing is answered with candidates: members near it that this caller may read, offered for a question and never a match; a term that matches has none",
+          "oracle": "network",
+          "verify": "terms ['invoice']: no dataset's matches holds the term, and `candidates` holds { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.invoice_count' }, each entry a pointer to a member the same answer lists, at most 5 per term. terms ['invoices']: the label match of step 2 and no `candidates` key (packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermCandidateSchema; packages/services/service-analytics/src/dataset-term-matcher.ts#findDatasetTermCandidates)",
+          "evidence": "both answers' matches and candidates"
         }
       ],
       "negative": [
@@ -1219,7 +1226,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
+        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/services/service-analytics/src/__tests__/dataset-term-matcher.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
       },
       "source": [
         "docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md D2 and D3",
@@ -1242,6 +1249,12 @@
           "date": "2026-11-15",
           "change": "acceptance[7].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-17",
+          "change": "a near-miss step and its clause: list_datasets answers a term that matched nothing with `candidates` (ADR-0149 D3 amendment note), and qa_no_word carries none; the description clause names the candidates row; automated.ref names the candidate pins. Card #34763",
+          "ref": "#34763"
         }
       ]
     },

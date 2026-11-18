@@ -1,5 +1,269 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.6.0
+
+### Minor Changes
+
+- 9a7f8c1: feat(objectql): a nested-relation condition on a read verb is an in-database subquery per relationship, up to three relationships, where that is provably the same read as the id read; analytics serves the dataset's own `filter` the same way
+  
+  Clause-②: yes (widening) — `{ account: { status: { $ne: 'cancelled' } } }` on `find`, `findOne`, `count` and `aggregate` (and so every analytics face that hands the engine the nested form) is served whatever the number of matching related records on a driver that compiles the subquery (the SQL drivers; the in-memory driver evaluates it in process), where more than 1,000 answered `INVALID_FILTER` / 400. The related read is planned through its whole pipeline as the caller and its final `where` becomes the subquery's scope; related-object read restrictions the planned read observes are carried into the subquery, or the hop falls back to the id read (the related object read as the caller, then `$in`, under the 1,000 cap). A relation key inside the condition may now carry a condition of its own, down to ADR-0071's three relationships (`{ contact: { account: { region: { name: 'NA' } } } }`), where a second level answered `INVALID_FILTER` / 400; each hop is that object's own read, and a fourth relationship is refused by name. On the analytics engine-aggregate path a dotted `where` leaf through up to three relationships (`order.customer.tier`), and a cross-object leaf in a compiled dataset's own definition-level `filter`, reach the engine as that nested condition, where both answered `INVALID_FIELD` / 400. Still the id read, under the 1,000 cap: a related object on another datasource, a federated related object, a driver that compiles no subquery (MongoDB, OData), a related object an object-scoped middleware or an `afterFind` hook shapes, a related object read under different driver options than the outer object (decided before planning where the registry answers it: the two objects' tenancy class under a walled posture), a related read that a middleware answers itself, a multi-valued relation and the `update` / `delete` verbs. A hop that falls back after planning dispatches the related read twice: its middleware chain and `beforeFind` hooks run for the planned read and again for the id read. A per-measure `filter` carrying a cross-object leaf stays refused. The SQL echo of a dataset `filter` carrying a served cross-object leaf refuses `INVALID_FILTER` / 400 where it refused `INVALID_FIELD` / 400; neither printed a statement.
+  Metadata-protocol: added — a compiled dataset's definition-level `filter` (`@objectstack/service-analytics`) now accepts a cross-object leaf on the engine-aggregate path, where it answered `INVALID_FIELD` / 400: a new accepted value for a dataset author.
+  Skills-docs: `content/docs/protocol/objectql/query-syntax.mdx` and `content/docs/kernel/contracts/data-engine.mdx` describe the subquery, the three-relationship limit, where the id read and its cap still apply and which drivers compile the subquery. `skills/objectstack-query` still says "up to 1000 related ids" and one level for every relation; that is now stricter than the engine for a single-valued relation on a read verb (a follow-up skills-only change, governed).
+- 2068e03: feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+  
+  An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
+  
+  - Before: an `en` request was not treated as the authored language, walked the fallback chain (`zh-CN`) ahead of the inline text and was served the Chinese bundle row, unless the stack also declared `fallbackLocale: 'en'`.
+  - Now: an `en` request answers the English inline label; a `zh-CN` request answers the `zh-CN` row; any other locale walks the declared fallback chain exactly as before.
+  
+  `AppPlugin` threads the declared `i18n.sourceLocale` into the i18n service, and every metadata-document translation (the REST metadata reads, a formula's `label()`, an email template's `option` hole, analytics select-option labels and the upload-link page) passes `getSourceLocale()`, else `getDefaultLocale()`, as `ResolveOptions.defaultLocale`. A stack that declares no `sourceLocale` is served exactly as before. A `fallbackLocale: 'en'` added only to work around this can stay; it is no longer needed for the `en` request.
+  
+  Writing your own i18n provider: implement `setSourceLocale` to receive the declaration and `getSourceLocale` to report it, answering `undefined` when nothing was declared — never `defaultLocale`; the serving layer does that collapse itself.
+
+### Patch Changes
+
+- 54f8e16: fix(analytics): a dimension through a lookup is one `LEFT JOIN … GROUP BY` on SQL drivers, so it no longer answers 500 past the bind limit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /analytics/query` with a dimension through a lookup (`opportunity.stage` on a line-item cube) answered `500 DATABASE_ERROR` once the rows pointed at more distinct related records than the database binds parameters for: SQLite refused with `too many SQL variables`, PostgreSQL with a bind count overflow. The ObjectQL analytics path grouped the base rows by the foreign key, then read the related object with `id IN (every distinct key)` and re-bucketed the answer in the service.
+  
+  On the SQL driver (every dialect, and the WASM SQLite driver) the same query is now one statement. The base aggregate `LEFT JOIN`s the related rows the caller may read and groups by the attribute in the database, with no id list and no bound-parameter ceiling. The related rows are the related object's own aggregate, planned as the caller, the read the old path ran without its id list. Its CRUD gate, read middlewares, row scope and field-level gate all apply, and the tenant wall bounds the joined table. The base read is still judged as grouped by the lookup field itself, so a caller who may not read that field is refused exactly as before. A line whose related record is missing, unreadable, in another tenant or not set still counts under `(restricted)`, as before. Every bucket and measure is the one the old path answered.
+  
+  The request is an engine-internal read option, so nothing a client sends changes and the public `groupBy` still refuses a dotted path. The in-memory driver, MongoDB, OData and Turso keep the old path for this dimension, unchanged.
+- d635555: Clause-②: yes (widening)
+  Metadata-protocol: added — `supports.zonedDateBucketing` is a new key a driver author can write on `DriverCapabilities` (`DriverConfig.capabilities`), recorded in `packages/spec/authorable-surface/data.json`.
+  Skills-docs: follow-up #34597
+  
+  PostgreSQL now buckets a non-UTC reference timezone in the database (ADR-0053 Phase 2 D2 as amended). A dashboard grouped by day, week, month, quarter or year in a zone such as `Asia/Taipei` or `Europe/Berlin` no longer pulls every scoped row into the application on PostgreSQL: the bucket is computed by `to_char((col)::timestamptz AT TIME ZONE $zone, …)` with the zone bound, DST-correct, and its labels equal the in-memory ones. A `Field.date` keeps its calendar day under every zone.
+  
+  - `@objectstack/spec`: new driver capability bit `supports.zonedDateBucketing`, and `DriverAggregateQuery` (a `DriverQuery` plus `timezone`), the query `IDataDriver.aggregate` receives. Additive; existing drivers keep compiling and keep today's path.
+  - `@objectstack/objectql`: `engine.aggregate` resolves the request's `timezone` through the runtime first. A name that resolves to `UTC` (`Etc/UTC`, `GMT`, `Zulu`) takes the native UTC path; an area/location name (`CST` resolves to `America/Chicago`) is pushed down as the resolved name to a driver that declares the bit; anything else stays in memory, as before.
+  - `@objectstack/driver-sql`: declares the bit on PostgreSQL only. SQLite (no tz database), MySQL, SQL Server and Oracle keep the in-memory path. A zoned `aggregate()` call made directly against a dialect without the bit is refused `NOT_IMPLEMENTED`/501, and a zone string that is not its own resolved area/location name is refused `INVALID_QUERY`/400, instead of being read as UTC.
+  - `@objectstack/service-analytics`: the `/analytics/sql` dry-run refusal for a non-UTC zone now says the query is bucketed in the database or in memory depending on the driver.
+- b4ce310: fix(service-analytics)!: `query_dataset` refuses measures and dimensions the dataset does not declare, naming the members the caller may use
+  
+  Clause-②: no (narrowing) — query_dataset stops accepting measures and dimensions the dataset does not declare; one CONTRACT_REVIEW_TIER review owed before the queue
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` and `content/docs/**` teach no raw field or ad-hoc `count` through `query_dataset`; the MCP-served skill text (`packages/mcp/src/skill-md.ts`) already says `selection` takes members "by the names `list_datasets` gives", which is what is now enforced.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime tool input refusal: no metadata key, value or stored row changes, so `os migrate meta` has nothing to rewrite; a caller picks a declared member instead -->
+  
+  **BREAKING** for an AI or MCP client that sends `query_dataset` (the dataset AI tool, ADR-0149) a measure or dimension the saved dataset does not declare. Such a selection used to be answered: the analytics service minted an aggregate for an undeclared measure (`count` counted rows, a raw field such as `amount` was summed, `amount_sum` likewise) and grouped by a raw field named as a dimension, and the answer's `provenance` then cited that ad-hoc aggregate as a governed metric of the dataset. ADR-0149 makes the dataset the one declared definition, so a member outside it is now refused before anything is read.
+  
+  - A name in `selection.measures`, `selection.dimensions` or a `selection.timeDimensions` entry's `dimension` that is not one of the dataset's own `measures[].name` / `dimensions[].name` is refused `400 INVALID_FIELD` with `member`, `param` and `cube` (the dataset's name), the envelope the service's member-level refusals already answer. A `<dataset>.`-qualified spelling is not a listed name and is refused the same way; use the bare name `list_datasets` lists.
+  - The refusal names the measures and dimensions THIS caller may use (what `list_datasets` lists for it), never a withheld member or one over an `internal` field, so the model can pick one, or fall back to the object query tools and say that no governed metric was used (非指标口径, the ADR-0149 D3 fallback).
+  - Unchanged: a missing or hidden dataset is still `404 NOT_FOUND` first; a declared member the caller may not read is still the service's own `403 PERMISSION_DENIED`; field-level permissions apply as before. The REST door (`POST /analytics/dataset/query`), dashboards and reports do not go through this tool and are not changed.
+  - `query_dataset`'s tool description now states the rule, so a model reads it before it calls.
+- d01f399: fix(service-analytics)!: the native SQL strategy evaluates a cross-object `where` leaf on an existing parent, so a detail row with no parent is not selected, as on the engine path and `/data`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answer is an aggregate over a cross-object filter, which now leaves out the detail rows with no parent, as the engine path and the /data nested-relation filter already did: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a reader of an analytics answer served by the native SQL strategy (a cube or dataset query with no bucketed time dimension, on a SQL datasource) that reads a related object's field through a relationship path (`'order.status'`) in any of the three filter positions one compile serves: the query's `where`, a measure's own `filter` (its conditional aggregate) and the dataset's own `filter`:
+  
+  - FROM: a detail row whose relation field is empty, or names no existing record, was selected by `$ne`, `$nin`, `$notContains`, `$null: true`, `$eq: null`, `$exists: false` and `$empty: true` on the related field, because the `LEFT JOIN` read every related column of such a row as NULL. So the same widget answered a different total once a time bucket sent it to the engine path. TO: such a leaf is evaluated on an existing parent (the last hop's `id = id` is conjoined to it, through every hop of the path: TRUE for an existing parent, UNKNOWN for none, so a `$not` cannot flip it), and outside `$not` no such row is selected by those operators. Under one `$not` the native answer is the one it gave before. Under two, `{ $not: { $not: { 'order.status': { $null: true } } } }`, the two negations now cancel and the answer is the un-negated condition's, so such a row is no longer selected there either, where it was before. The native, engine and `/data` answers agree on those operators.
+  
+  **Not moved.** A parent that exists with no value in the field still satisfies `$ne`, `$nin`, `$notContains` and `$null: true`. A positive operator (`$eq` a value, `$in`, `$gt`, `$contains`, …) selected no such row before either, and its statement is unchanged. A leaf on the base relation field itself (`{ order: { $null: true } }`) reads no join and is unchanged. One native-path answer still selects such a row, unchanged by this release: under one `$not`, any condition a missing value does not satisfy, such as a comparison with a value (`{ $not: { 'order.status': 'open' } }`) or a presence test (`$null: false`, `$exists: true`, `$ne: null`, `$empty: false`), a shape the engine path refuses; write `$ne` / `$nin` inside the condition instead.
+  
+  The fix for an author who wants the rows with an empty relation: OR the base relation field in, `{ $or: [{ 'order.status': { $ne: 'open' } }, { order: { $null: true } }] }`. A row naming a record that no longer exists is not brought back by it, on either path.
+- 6091b64: feat(objectql): a nested-relation condition, and an analytics dimension through a lookup, are refused up front with a stable 400 on a driver that compiles no semi-join (MongoDB, OData), decided by the new `DriverCapabilities.readableIdsLeaf` bit
+  
+  Clause-②: yes (narrowing) — narrowed: on a driver that does not declare `DriverCapabilities.readableIdsLeaf` (MongoDB, OData, a third-party driver), a nested-relation condition beneath a single-valued relation on `find`, `findOne`, `count` or `aggregate` is refused `INVALID_FILTER` / 400 before anything is read, where it read the related ids first and answered up to 1,000 related matches (past 1,000 it was already refused `INVALID_FILTER` / 400, never truncated); an analytics dimension through a lookup on such a driver is refused `INVALID_QUERY` / 400 before anything is read, where it was served by reading the related records for the grouped ids. Widened: a driver that declares the bit is served by the planned semi-join whatever its name.
+  Metadata-protocol: added
+  Skills-docs: follow-up #33875 — skills/objectstack-query/SKILL.md (its nested-relation row still promises the capped id read on every driver; MongoDB and OData now refuse it)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata key, accepted value or metadata type is removed, renamed or re-shaped: the one protocol change is the new optional `DriverCapabilities.readableIdsLeaf`, which a driver declares. What moves is a runtime answer on drivers that do not declare it, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose data lives on MongoDB, OData or a third-party driver that does not declare `readableIdsLeaf`. The fix:
+  
+  - FROM `find('opportunity', { where: { account: { region: 'NA' } } })` TO two reads: `find('account', { where: { region: 'NA' }, fields: ['id'] })`, then `find('opportunity', { where: { account: { $in: ids } } })`. The same for `findOne`, `count` and `aggregate`.
+  - FROM an analytics dimension `opportunity.stage` on a line cube TO a dimension on the lookup field itself (`opportunity`), then a read of `opportunity` for `stage` by those ids.
+  - FROM an analytics `where` naming a field through a lookup (`opportunity.stage`), or a dataset whose own `filter` does, TO a filter on the lookup field itself (`opportunity` `$in` the ids read from `opportunity` with that condition): the analytics service hands such a leaf to the engine as the same nested-relation condition, so on these drivers it is refused `INVALID_FILTER` / 400 the same way.
+  - FROM a row-level read scope that holds such a condition (a field through a single-valued relation) TO one on the relation field itself (`account` `$in` the ids it may read): on these drivers an analytics query under the former is refused before anything is read with the withheld `READ_SCOPE_COMPILE_FAILED` / 500, the answer a read scope the engine cannot run already gets.
+  - A third-party driver whose filter compiler composes the leaf declares `supports.readableIdsLeaf: true` and keeps serving both.
+  
+  **`DriverCapabilities.readableIdsLeaf`** (`@objectstack/spec`) is a new optional capability bit: the driver's filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf. `driver-sql` declares it on every dialect (`SqliteWasmDriver` and `TursoDriver` inherit it), and so does `driver-memory`. MongoDB and OData do not. Absence means `false`.
+  
+  **Where the engine reads it.** A nested-relation condition beneath a single-valued relation on a read verb (`{ account: { region: 'NA' } }` on `find`, `findOne`, `count` or `aggregate`) is planned as one in-database subquery on a driver that declares the bit, as before. On a driver that does not, the engine now refuses the condition before it plans or reads anything: `INVALID_FILTER` / 400, naming the driver and the two-step route (read the related object with that condition, then match the relation field against its ids with `$in`). Until now such a read fell back to reading the related ids first: up to 1,000 related matches were served, and past 1,000 the filter was refused `INVALID_FILTER` / 400. A multi-valued relation and the `where` of `update` / `delete` keep that capped id read on every driver. The engine's filter judge (`IObjectQLEngine.judgeFilter`) answers the same refusal from the driver's declared capabilities, without calling it, so a caller that asks the judge first (the analytics read-scope merge does) gets execution's verdict; an engine that routes the object to no driver does not judge it.
+  
+  **The analytics dimension through a lookup** (`opportunity.stage` on a line cube, `@objectstack/service-analytics` on the ObjectQL face) is decided by the same bit. On a driver without it the query is refused before anything is read: `INVALID_QUERY` / 400, naming the driver and the route (group by the lookup field itself, then read the related object for its attribute by those ids). Until now it was served by reading the related ids. On a driver that declares the bit, the SQL drivers keep the one joined statement and `driver-memory` and Turso keep the id-expand, unchanged.
+- 898655a: fix(service-analytics)!: the dataset query door refuses measures and dimensions the dataset does not declare, as `query_dataset` does
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: follow-up #34328 — `skills/**` teach dataset selections by the dataset's declared measures and dimensions (objectstack-ui: a report selects `rows` and `values` "from that dataset"), which the door now enforces; they do not yet say that a compare widget's date key must be the name of a declared date dimension, and that teaching is carried by #34328; `content/docs/data-modeling/analytics.mdx` and `content/docs/ui/dashboards.mdx` state the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime request refusal: no metadata key, value or stored row changes shape, so `os migrate meta` has nothing to rewrite; authored and save-gated dashboards, reports and charts bind only declared members in their measures and dimensions (`widget-measure-unknown`, `chart-measure-unknown` and their dimension twins refuse anything else at build and at save); one class is not save-gated: a dashboard compare widget whose date-range field is not also the name of a declared dimension sends that field as an undeclared time dimension; when that field is the dataset object's own, its remedy is to declare a date dimension named after it, and when it is a related record's dotted field it is a break with no in-dataset remedy, because no dimension name can carry a dot -->
+  
+  **BREAKING** for a caller of `POST /api/v1/analytics/dataset/query` (and each query of `/analytics/dataset/query/batch`), or of `AnalyticsService.queryDataset` in process, that names a measure or dimension the dataset does not declare. Such a selection used to be answered: the analytics service minted an aggregate for an undeclared measure (`count` counted rows, a raw field such as `amount` was summed, `amount_sum` likewise, a `<dataset>.revenue` spelling was resolved) and grouped by a raw field named as a dimension or a time dimension, so a dashboard tile could show a number labelled as a dataset metric that the dataset never defines. ADR-0021 makes the dataset a declarative, closed surface, and the AI tool `query_dataset` already refused these members; every face of a dataset query now reads the dataset the same way.
+  
+  - A name in `selection.measures`, `selection.dimensions` or a `selection.timeDimensions` entry's `dimension` that is not one of the dataset's own `measures[].name` / `dimensions[].name`, spelled exactly so, is refused `400 INVALID_FIELD` before anything is read; the REST body is `{ code, message }`, and in process the thrown error also carries `member`, `param` and `cube` (the dataset's name). This applies to a saved `datasetName` and to an inline `dataset`, which is judged against its own `measures` and `dimensions`.
+  - The refusal names every undeclared member, the measures and dimensions THIS caller may use (never a withheld member or one over an `internal` field), and the fix: use one of those, or declare the member on the dataset and query it by that name. That fix is not offered for a compare window's date key that no dimension can be named (below), because it cannot apply to it.
+  - A declared member over a field the object does not have is still refused `400 INVALID_FIELD`; on the dataset door its message now points at the member's declared field (point it at one of the object's fields, or remove the member) instead of the cube door's hint that undeclared members are inferred or allowed. The cube door's message is unchanged.
+  - **A dashboard compare widget can be refused by this change, and no save gate catches it yet.** A widget with `compareTo` sends its date window, the dashboard's `dateRange` filter included, as a `timeDimensions` entry named after the filtered field (`dateRange.field`, `created_at` by default). The date-range field resolves against the object, not the dataset, so a dashboard that passes every save and publish check is refused when that field is not also the name of a date dimension the dataset declares. A census of the dashboards authored in this repository found none in this class; a dashboard saved at runtime or by a third party has no such guarantee. When the date-range field is a field of the dataset's own object, the refusal names the remedy in its message: declare a date dimension named after it (over that field). When it is a related record's field — a dotted `relationship.field` such as `account.signed_at`, which a dashboard filter may name and which a dataset query used to answer through the dataset's `include` — this is a break with no in-dataset remedy: a dimension name is a snake_case identifier with no dot, so no declaration can carry that key, and declaring a dimension over the path under another name does not help, because the widget still sends the window under the dotted name. The refusal says so, tells the author to declare nothing for that key, and names what the comparison needs: a date field of the dataset's own object that a declared date dimension names. The renderer mapping a dotted date key onto a declared dimension over that path is carried by #34350.
+  - Unchanged: a missing dataset is still `404 NOT_FOUND` first; a caller who may not read the dataset's object still gets the read refusal (`403`), never a member list; a declared member over a field the caller may not read is still `403 PERMISSION_DENIED`; `runtimeFilter` keys are fields, not members, and are judged as before. The cube query (`POST /api/v1/analytics/query`) is not a dataset and keeps its ad-hoc members.
+- e3ef29f: fix(service-analytics)!: on the native SQL strategy, an empty `$nin` on a related field no longer selects a detail row with no parent, as on the engine path and `/data`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answer is an aggregate over a cross-object filter written with an empty $nin, which now leaves out the detail rows with no parent, as the engine path and the /data nested-relation filter already did: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a reader of an analytics answer served by the native SQL strategy (a cube or dataset query with no bucketed time dimension, on a SQL datasource) whose filter reads a related object's field through a relationship path with an empty list, `{ 'order.status': { $nin: [] } }`, in any of the three filter positions one compile serves: the query's `where`, a measure's own `filter` and the dataset's own `filter`:
+  
+  - FROM: the empty `$nin` folded to the constant TRUE (`1 = 1`), so it selected every detail row, including one whose relation field is empty or names no existing record. The same widget answered a different total once a time bucket sent it to the engine path, which leaves such rows out.
+  - TO: it is evaluated on an existing parent, like every other operator on a related field: the last hop's `id = id` (TRUE for an existing parent, UNKNOWN for none) takes the place of the constant, through every hop of the path. It selects every detail row whose related record exists, including one whose field has no value. The native, engine and `/data` answers agree.
+  
+  **Not moved.** An empty `$nin` on the queried object's own field is still the constant TRUE, and its statement is unchanged. An empty `$in` selects no row on either path, as before. Under `$not` an empty `$nin` on a related field selected no row and still selects none.
+  
+  The fix for an author who wants the rows with an empty relation: OR the base relation field in, `{ $or: [{ 'order.status': { $nin: [] } }, { order: { $null: true } }] }`. A row naming a record that no longer exists is not brought back by it, on either path.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- 44c7a4a: feat(analytics): `list_datasets` offers `candidates` for a term that matched nothing, and the selection text says to ask about them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A business word that equalled no member's name, label or synonym used to get nothing back, so an AI went straight to the object query tools even when a listed measure was obviously what the user meant (`invoice` beside the measure labelled `Invoices`).
+  
+  `list_datasets` now fills the `candidates` member the spec already declares: for each term with no match in any listed dataset, the members near it, as `{ term, dataset, member }` pointers to members listed in the same answer.
+  
+  - **Near** means that, after the same normalization the matcher uses, one of the member's names, labels (any locale) or synonyms contains the term, or the term contains it, with both at least two characters (code points) long. `金额` is near `合同金额` and the reverse. No edit distance, stems or embeddings.
+  - **Only what the caller may read.** Candidates come from the datasets and members the answer lists. A member over a field the caller cannot read, a member over an `internal` field, and a dataset the caller may not query are never offered.
+  - **Never beside a match.** A term with a match anywhere in the answer has no candidates. What counts as a match is unchanged.
+  - **Listing order, capped.** Terms in the order sent (a repeated term is offered once), then datasets in the order listed, then each dataset's measures before its dimensions. At most `LIST_DATASETS_MAX_CANDIDATES_PER_TERM` (5) per term, with no marker for the cut. When nothing is offered the key is absent, never an empty list.
+  
+  The `list_datasets` tool description and the `initialize` selection rule the HTTP MCP server sends now say: each word that matches exactly one measure is computed, and two such words are two metrics computed both; one word matching several measures is a question for the user; a word with `candidates` is the same question, listing each candidate's label, dataset label and description, and a candidate is never picked or treated as a match; no match and no candidates falls back to the object tools, saying the answer is not from a governed metric.
+- 6932cb8: feat(analytics): `list_datasets` answers `nextStep` and `query_dataset` answers `sourceLine`, written by the platform in the caller's language
+  
+  Clause-②: yes (widening: the dataset tools' answers now carry `nextStep` and `sourceLine`, `@objectstack/service-analytics` exports `DATASET_NEXT_STEP_PRECEDENCE`, and the `list_datasets` / `query_dataset` descriptions and the MCP `initialize` rule gain the follow-`nextStep`, cite-`sourceLine` instructions)
+  Metadata-protocol: none
+  
+  The dataset tools now fill the two members the spec declares (`DatasetNextStepSchema`, `QueryDatasetOutputSchema.sourceLine`, `@objectstack/spec/ai`). Until now the decision "one match answers, several ask, near ones are offered, none falls back" and the citation line were left for each AI client to work out from `matches`, `candidates` and `provenance`; a model handed a finished sentence copies it, and one that builds it from parts often does not.
+  
+  - **`nextStep` on `list_datasets`, whenever `terms` were sent.** `decision` is the case of the ADR-0149 D3 rule the words are in, counted in measures: one measure equals the word ⇒ `one_measure`; more than one, in one dataset or several ⇒ `several_measures`; no match but `candidates` ⇒ `candidates_only`; otherwise `no_measure`, which includes a word that equals only a dimension. `terms` names every word sent (once each, in order) that is in the reported case. `note` is that case as a finished sentence: the measure and the names to query for `one_measure`; each member by its label and its dataset's label for `several_measures` and `candidates_only`, with "ask the user, do not pick"; the object query tools for an unknown word, and "ask which number" for a word that is only a grouping (both, when a `no_measure` answer holds one of each).
+  - **Words a `one_measure` or `candidates_only` answer leaves out are still named.** A `one_measure` `note` gives the measure word's query and then names each other word: one with candidates together with those candidates (label and dataset label) and "ask before using it"; an unknown one with its labelled fallback to the object query tools; a grouping word as that grouping. A `candidates_only` `note` asks about the candidates and names each unknown word with its labelled fallback and each grouping-only word the same way. Two words that equal the same measure are told it is one metric.
+  - **Precedence among mixed cases.** One answer reports one case, the first of `several_measures`, `one_measure`, `candidates_only`, `no_measure`. A word that matches only a dimension never outranks a measure match: `["营收", "销售阶段"]` reports `one_measure` for `营收`. The order is exported as `DATASET_NEXT_STEP_PRECEDENCE` from `@objectstack/service-analytics`, and the tool description and the MCP `initialize` rule name it.
+  - **A partial answer says so.** With `partial: true` the answer still carries `nextStep`, computed from what it lists, and `note` ends by saying the catalogue was incomplete, that a measure missing from it may exist, and to repeat the `warning`.
+  - **`sourceLine` on `query_dataset`.** The answer's `provenance` as one line to cite: each measure's label and the dataset's label, then each dimension's label (`指标：营收（数据集：销售分析）；维度：阶段`). `provenance` is unchanged and stays the structured source. The REST dataset door's answer is not changed.
+  - **Only what the caller may see.** Both sentences are composed from the answer being served: a member over a field the caller cannot read, an `internal` member and a dataset the caller may not query never appear in either.
+  - **Language.** The request's locale, else the workspace default, else English, the ladder every platform-composed sentence follows (`userTextLocalesOf`, read from the caller's execution context). Sentences are written in English, Simplified Chinese, Traditional Chinese and Japanese; another language takes the next rung. The HTTP and stdio MCP doors hand the executor the same execution context, so a caller reads the same sentence on either when both doors carry the same locale (the stdio door has no request locale, so there the workspace default or English decides).
+  
+  `@objectstack/mcp`: the `initialize` selection rule now tells the client to follow `nextStep`'s note, names the precedence, and says to cite `sourceLine`. Both tools pass the two members through unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

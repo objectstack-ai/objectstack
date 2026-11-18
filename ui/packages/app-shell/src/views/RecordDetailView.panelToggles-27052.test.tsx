@@ -274,12 +274,13 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
   it.each([
     ['an object that is not worked', PRODUCT],
     ['an object that is only another object\'s `master_detail` parent', PRICE_BOOK],
-  ])('%s opens with the right column too, 动态 first', async (_name, object) => {
+  ])('%s opens with the right column too, 动态 last (objectstack#34590)', async (_name, object) => {
     const { container } = renderPage({ object });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(shown(container)).toBe('details right');
     expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelector('[data-record-column="right"]')?.firstElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
+    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+    expect(container.querySelector('[data-record-column="right"]')?.lastElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
   });
 
   it('⌘⇧, flips ⊟; with a text field focused it does nothing; ⌘⇧. is not the page\'s any more', async () => {

@@ -11,7 +11,7 @@
 - 项目指令只有一行:`pm-dispatch <席位> [<席位>…]`,如 `pm-dispatch 总监`、`pm-dispatch ui skills`。
 - 首词恒为技能目录名 `pm-dispatch`;⛔ 不用 `fleet`,它已是 bot 与中继的名字。
 - 席位词 = 中文名或车道文件名:总监 = `director.md`,分诊 = `triage.md`,L2 或复核 = `l2-review.md`。
-- 其余席位词同 `lanes/` 下文件名(去 `.md`,全集即该目录),如 ui、server、cloud、objectstack。
+- 其余席位词同 `lanes/` 下文件名(去 `.md`,全集即该目录),如 ui、cloud;验证 = `qa`+`eval` 一席。
 - 一车道多席:协调者取 🟢 行写本账号的那一席;无则取空席;再无则问维护者一次。
 - 其余一切住本文:⛔ 不往项目里贴模板;⛔ 不在账号层复制技能。
 

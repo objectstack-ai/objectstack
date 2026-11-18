@@ -15,8 +15,8 @@ import { enObjects } from './en.objects.generated.js';
  *   - `apps.setup.label` / `description`
  *   - `apps.setup.navigation.<id>.label` for every group AND leaf
  *   - `dashboards.system_overview.*`
- *   - `datasets.<name>.{measures,dimensions}.<member>.label` for the System
- *     Overview's datasets
+ *   - `datasets.<name>.{measures,dimensions}.<member>.{label,description}` for
+ *     the System Overview's datasets
  *
  * Object-level labels (Users, Roles, Audit Logs, …) are owned by the
  * sys_* object schemas themselves and translated separately.
@@ -73,7 +73,6 @@ export const en: TranslationData = {
         nav_connect_agent: { label: 'Connect an AI Assistant' },
 
         // Apps / Marketplace
-        nav_packaged_actions: { label: 'Packaged Actions' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
         nav_cloud_connection: { label: 'Cloud Connection' },
@@ -271,17 +270,62 @@ export const en: TranslationData = {
   // The copy the System Overview draws from its DATASETS rather than from the
   // board: the caption under each metric tile is the selected measure's label,
   // and a table or chart over a dimension is headed by the dimension's label.
-  // Mirrors `dashboards/system.datasets.ts` verbatim; keyed
-  // `datasets.<name>.{measures,dimensions}.<member>.label`, and served on the
-  // analytics query, which localizes the saved definition before it runs.
+  // Each member's `description` (ADR-0149 D1) is the business definition the
+  // dataset AI tools list beside it. Mirrors `dashboards/system.datasets.ts`
+  // verbatim; keyed `datasets.<name>.{measures,dimensions}.<member>.{label,description}`,
+  // and served wherever the saved definition is localized before it is read.
+  // The members' `synonyms` have no key here: they are match input in every
+  // language at once, never translated (ADR-0149 D1).
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Users' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Organizations' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Sessions' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Installations' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Users',
+          description: 'The number of user accounts on record, active or not.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Organizations',
+          description: 'The number of organizations on record; each one keeps its own members, data and settings.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Sessions',
+          description: 'The number of sign-in sessions on record, one per sign-in from a browser or device.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Installations',
+          description: 'The number of package installations on record, one per package installed.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Action' }, user_id: { label: 'User' } },
-      measures: { event_count: { label: 'Events' } },
+      dimensions: {
+        action: {
+          label: 'Action',
+          description: 'The kind of action an audit log entry records, such as create, update, delete, login or a configuration change.',
+        },
+        user_id: {
+          label: 'User',
+          description: 'The user who performed the audited action; entries the platform writes itself are grouped under System.',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Events',
+          description: 'The number of audit log entries; each records one action taken in the system, by a user or by the platform itself.',
+        },
+      },
     },
   },
 

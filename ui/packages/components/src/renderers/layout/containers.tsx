@@ -67,7 +67,7 @@ import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
 import { useObjectLabel, useSafeFieldLabel, useObjectTranslation, useSafeTranslate, createSafeTranslation, pickLocalized, useDisplayLocale, resolveBuiltInLanguage } from '@object-ui/i18n';
-import { MoreHorizontal, RefreshCw } from 'lucide-react';
+import { Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 
 /**
  * The one authorable key the three thin containers publish — `page:section`,
@@ -1802,7 +1802,8 @@ function recordPictureUrl(value: unknown): string | undefined {
 
 /**
  * The buttons a phone's bottom action bar holds before its `⋯`
- * (objectstack#27058): the primary action and one more. The record page v4
+ * (objectstack#27058): on an editable record, Edit and the primary action
+ * (objectstack#34595); else the primary action and one more. The record page v4
  * header row's cap is the primary, two more and the `⋯`; at 390 px the second
  * of those folds into the `⋯`.
  */
@@ -1847,10 +1848,10 @@ export interface PageHeaderActionsProps {
    * Where the row is drawn (objectstack#27058). `row` (the default) is the
    * header's own action row. `bar` is a phone's bottom action bar: the primary
    * action, one more and the `⋯`, each button sharing the bar's width. In the
-   * bar the host's Edit is one of the record's actions like any other: it
-   * takes a slot after the page's own actions, and folds into the `⋯` when
-   * they fill the bar. The page's `mobileMaxVisible` still sets the budget
-   * when it declares one.
+   * bar the host's Edit takes a slot like any other button, but the first
+   * one (objectstack#34595): on an editable record the bar is Edit, the
+   * primary action, then the `⋯` holding the rest. The page's
+   * `mobileMaxVisible` still sets the budget when it declares one.
    */
   face?: 'row' | 'bar';
 }
@@ -2372,8 +2373,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       : readActionEntryParamValues({ ...rest, params: rawParams }, rest.type || rest.actionType, 'page:header');
     if (!record || typeof record !== 'object') {
       const dropsObjectParams = rawParams != null && !Array.isArray(rawParams) && values === undefined;
-      void execute(dropsObjectParams ? rest : action);
-      return;
+      return execute(dropsObjectParams ? rest : action);
     }
     const dispatch: any = { ...rest };
     if (Array.isArray(rawParams)) {
@@ -2382,8 +2382,37 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     } else {
       dispatch.params = { ...(values || {}), _rowRecord: record };
     }
-    void execute(dispatch);
+    return execute(dispatch);
   }, [record, execute]);
+
+  // An action whose click is still in flight — the launch that opens its
+  // dialog, or the run itself — is busy: `aria-busy`, a spinner in place of
+  // its icon, and a further click does nothing until the click's promise
+  // settles, fulfilled or rejected. A click that returns no promise is never
+  // busy. The ref is the guard and the only one on an inline button, which
+  // stays focusable while busy (`aria-disabled`, never native `disabled`) so a
+  // dialog the click opened can hand focus back to it on close. The state is
+  // what draws the face.
+  const pendingActionKeysRef = React.useRef<Set<string>>(new Set());
+  const [pendingActionKeys, setPendingActionKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  const runHeaderAction = React.useCallback((action: any, key: string) => {
+    if (pendingActionKeysRef.current.has(key)) return;
+    const outcome: unknown = typeof action.onClick === 'function'
+      ? action.onClick()
+      : dispatchHeaderAction(action);
+    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return;
+    pendingActionKeysRef.current.add(key);
+    setPendingActionKeys(new Set(pendingActionKeysRef.current));
+    const settle = () => {
+      pendingActionKeysRef.current.delete(key);
+      setPendingActionKeys(new Set(pendingActionKeysRef.current));
+    };
+    Promise.resolve(outcome).then(settle, (err: unknown) => {
+      settle();
+      // A failed click stays loud: the button is the promise's last holder.
+      console.error(`[page:header] action "${String(action?.name ?? action?.id ?? key)}" failed`, err);
+    });
+  }, [dispatchHeaderAction]);
 
   const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
   const renderHeaderActions = () => {
@@ -2500,17 +2529,22 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // the `⋯`'s destructive band, never inline as a red button.
     //
     // The phone's bottom bar (objectstack#27058) has room for its budget and
-    // no more, so there the host's buttons queue after the page's own actions
-    // for the same slots (the primary keeps the first), and what does not fit
-    // folds into the `⋯` with them.
+    // no more, so there every button queues for the same slots and what does
+    // not fit folds into the `⋯`. The queue is the bar's order
+    // (objectstack#34595): the host's buttons first — on an editable record
+    // that is its Edit, the record's base action, which the row never folds
+    // either — then the primary, then the page's other actions. So the
+    // default budget of two draws [Edit][primary][⋯] however many actions
+    // the page declares. A destructive host action is not a host button (see
+    // `isHostButton`): it still always folds.
     const authoredButtons = ranked.filter((a) => !isHostAction(a));
     const barQueue = barFace
-      ? [...(primaryAction ? [primaryAction] : []), ...authoredButtons, ...ranked.filter(isHostButton)]
+      ? [...ranked.filter(isHostButton), ...(primaryAction ? [primaryAction] : []), ...authoredButtons]
           .filter((a, i, all) => all.indexOf(a) === i)
       : [];
-    const inlineAuthored = new Set<unknown>(barFace ? barQueue.slice(0, maxVisible) : authoredButtons.slice(0, maxVisible));
+    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, maxVisible));
     const inlineActions = barFace
-      ? ranked.filter((a) => inlineAuthored.has(a))
+      ? barQueue.slice(0, maxVisible)
       : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
     const foldedButtons = barFace
       ? [
@@ -2621,9 +2655,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       const variant =
         action === primaryAction ? 'default' : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
+      const actionKey = action.name || action.id || `header-action-${idx}`;
+      const pending = pendingActionKeys.has(actionKey);
       const disabled = isActionDisabled(action);
       const icon = typeof action.icon === 'string' ? action.icon : null;
-      const actionKey = action.name || action.id || `header-action-${idx}`;
       const disabledReason = disabledReasonFor(action);
       const reasonId = `${disabledReasonIdBase}-reason-${idx}`;
       const pressed = pressedFor(action);
@@ -2633,6 +2668,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           variant={variant}
           size={size}
           disabled={disabled}
+          aria-disabled={pending && !disabled ? true : undefined}
+          aria-busy={pending || undefined}
           aria-describedby={disabledReason ? reasonId : undefined}
           aria-pressed={pressed}
           // The pressed face: Shadcn's toggle-on colours, keyed off the
@@ -2641,17 +2678,14 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           className={cn(
             'gap-2',
             barFace && 'h-11 min-w-0 flex-1',
+            pending && 'cursor-progress opacity-50',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
           )}
-          onClick={() => {
-            if (typeof action.onClick === 'function') {
-              void action.onClick();
-              return;
-            }
-            dispatchHeaderAction(action);
-          }}
+          onClick={() => runHeaderAction(action, actionKey)}
         >
-          {icon && <LazyIcon name={icon} className="h-4 w-4" />}
+          {pending
+            ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
+            : icon && <LazyIcon name={icon} className="h-4 w-4" />}
           <span className={barFace ? 'truncate' : undefined}>{label}</span>
         </Button>
       );
@@ -2715,7 +2749,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               )}
               {overflowActions.map((action, idx) => {
                 const label = resolveLabel(action);
-                const disabled = isActionDisabled(action);
+                const itemKey = action.name || action.id || `overflow-action-${idx}`;
+                const pending = pendingActionKeys.has(itemKey);
+                const disabled = isActionDisabled(action) || pending;
                 const icon = typeof action.icon === 'string' ? action.icon : null;
                 const isDestructive = isDestructiveAction(action);
                 // objectui#11811 — the same reason as the inline button, but
@@ -2729,28 +2765,26 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
                 const disabledReason = disabledReasonFor(action);
                 const labelId = `${disabledReasonIdBase}-more-label-${idx}`;
                 const reasonId = `${disabledReasonIdBase}-more-reason-${idx}`;
-                const itemKey = action.name || action.id || `overflow-action-${idx}`;
                 return (
                   <React.Fragment key={itemKey}>
                   {idx === firstDestructiveIdx && idx > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem
                     disabled={disabled}
+                    aria-busy={pending || undefined}
                     aria-labelledby={disabledReason ? labelId : undefined}
                     aria-describedby={disabledReason ? reasonId : undefined}
                     onSelect={(e) => {
                       e.preventDefault();
-                      if (typeof action.onClick === 'function') {
-                        void action.onClick();
-                        return;
-                      }
-                      dispatchHeaderAction(action);
+                      runHeaderAction(action, itemKey);
                     }}
                     className={cn(
                       'gap-2',
                       isDestructive && 'text-destructive focus:text-destructive focus:bg-destructive/10'
                     )}
                   >
-                    {icon && <LazyIcon name={icon} className="h-4 w-4" />}
+                    {pending
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
+                      : icon && <LazyIcon name={icon} className="h-4 w-4" />}
                     {disabledReason ? (
                       <span className="flex min-w-0 flex-col">
                         <span id={labelId}>{label}</span>

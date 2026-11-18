@@ -67,6 +67,7 @@ import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycle
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
+import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
 // Audit provenance renders as the one-line <RecordMetaFooter>; the other
@@ -75,7 +76,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
 import { placedHeaderActions } from '@object-ui/types';
-import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
+import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
@@ -1799,6 +1800,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // row's, else a related-list row's explicit `recordId`, else this
         // page's own for an action on this page's object — and the params bag.
         const doorObject = action.objectName ?? objectName;
+        const subjectId = rowRecord?.id
+          ?? (action as { recordId?: unknown }).recordId
+          ?? (doorObject === objectName ? pureRecordId : undefined);
+        // A non-2xx answer, from the door or from the target. objectstack#34706 —
+        // an invitation accept refused for an unverified address hands over to
+        // the verification-mail screen, as `useConsoleActionRuntime`'s api
+        // handler does; the screen owns the messaging, so no toast.
+        const refused = (res: { status: number }, json: unknown): ActionResult => {
+          if (isAcceptNeedsVerifiedEmail(json)) {
+            navigate(invitationVerifyEmailPromptPath(user?.email, subjectId));
+            return { success: false };
+          }
+          return apiActionRefusalResult(res, json, `HTTP ${res.status}`, language);
+        };
         if (isSameOriginApiTarget(targetStr) && action.name
             && findDeclaredApiAction(objects, doorObject, action.name, targetStr)) {
           const door = await sendApiActionThroughDoor({
@@ -1806,13 +1821,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             baseUrl,
             action,
             objectName: doorObject!,
-            recordId: rowRecord?.id
-              ?? (action as { recordId?: unknown }).recordId
-              ?? (doorObject === objectName ? pureRecordId : undefined),
+            recordId: subjectId,
             params,
           });
           if (!door.answered) return door.result;
-          if (!door.res.ok) return apiActionRefusalResult(door.res, door.json, `HTTP ${door.res.status}`, language);
+          if (!door.res.ok) return refused(door.res, door.json);
           const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
           if (!answer.ok) return { success: false, error: answer.error };
           if (action.refreshAfter === true) notifyViewChanged();
@@ -1919,7 +1932,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         if (!res.ok) {
           let errBody: any = null;
           try { errBody = await res.json(); } catch { /* response body not JSON */ }
-          return apiActionRefusalResult(res, errBody, `HTTP ${res.status}`, language);
+          return refused(res, errBody);
         }
         const data = await res.json().catch(() => ({}));
         if (action.refreshAfter === true) notifyViewChanged();
@@ -2028,7 +2041,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objectName, objectDef, objects, pureRecordId, pageRecord, authFetch, activeOrganization, language]);
+  }, [dataSource, objectName, objectDef, objects, pureRecordId, pageRecord, authFetch, activeOrganization, language, navigate, user?.email]);
 
   // Client-side modal transport: `type:'modal'` actions open here (Dialog /
   // Sheet / Drawer by `placement`) and render arbitrary SchemaNode content.
@@ -4459,7 +4472,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         testId="object-not-found"
         icon={Database}
         title={t('empty.objectNotFound')}
-        description={t('empty.objectNotFoundDescription', { name: objectName })}
+        description={t('console.objectView.objectNotFoundDescription', { objectName })}
         actions={<BackToHomeButton testId="object-not-found-home" />}
       />
     );
@@ -4707,6 +4720,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       } as any);
     }
     if (affordances.edit) {
+      const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
       // Single primary Edit CTA → opens the full record form. Inline editing
       // is no longer a standalone header button; it is entered by
       // double-clicking a field (or its hover pencil) in the record body,
@@ -4752,7 +4766,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // edit form is a third reason for the same off, explained beside the
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
-        disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
+        disabled: editOff,
+        // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
+        // first slot is its primary place, and an action that cannot be
+        // pressed never holds it: whichever of the three reasons above turns
+        // this Edit off, it moves into the bar's `⋯` (still drawn, still
+        // off), and the first usable action takes the slot. The approval band
+        // states the lock, and the `editLockedByState` badge the state lock.
+        // The desktop row keeps it greyed in place for every reason, and an
+        // Edit that is on is untouched.
+        ...(phonePage && editOff ? { component: 'action:menu' } : {}),
         onClick: () => onEdit({ id: pureRecordId }, objectName),
       } as any);
     }
@@ -5001,9 +5024,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const drawnHighlightFields = drawnHighlightFieldsOf(renderedPage);
 
   // objectstack#26678 / objectstack#27524 — the page as its tier lays it out:
-  // the record header, then the details and the right column (动态, then the
-  // related panels), read off `renderedPage` itself so they hold exactly the
-  // blocks the tab strip would (pruning included). `null` for an authored
+  // the record header, then the details and the right column (the related
+  // panels, then 动态 last — objectstack#34590), read off `renderedPage`
+  // itself so they hold exactly the blocks the tab strip would (pruning
+  // included). `null` for an authored
   // page and for a page whose strip the partition cannot read, which is drawn
   // as written, tabs and all.
   const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(renderedPage) : null;
@@ -5460,7 +5484,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   marked menu; the approver's own bar is unchanged. While the
                   bar draws the request's Recall, it is the page's one Recall:
                   `onDrawnActionsChange` is how the page learns that and tells
-                  the DetailView band below to keep its lock badge only. */}
+                  the DetailView band below to keep its lock badge only.
+
+                  objectstack#34361 (ruling A) — for the approver themselves,
+                  `foldDecisions` draws one band: a status line naming the
+                  task, the step and the submitter, the decisions as the only
+                  buttons, and every other lever in one menu. The request page
+                  (`ApprovalDecisionPanel`) draws the same band. */}
               {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
@@ -5470,6 +5500,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
                   foldOverrides
+                  foldDecisions
                   onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}

@@ -69,9 +69,15 @@ import {
   lowerRelationSite,
   RELATION_FILTER_ID_CAP,
   relationFilterCapError,
+  relationReadDriverRefusal,
+  SEMI_JOIN_READ_VERBS,
   type RelationReplacement,
 } from './relation-filter-lowering.js';
-import { planRelationSemiJoinLeaf, RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
+import {
+  planRelationSemiJoinLeaf,
+  RELATION_SCOPE_PLAN,
+  type RelationScopePlan,
+} from './relation-semi-join.js';
 import type { EngineReadOptions } from './engine-top-level.js';
 import { aggregatedRowColumnClasses } from './having-filter.js';
 import { relationSitesOf, resolveThenLowerWhere, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
@@ -94,6 +100,11 @@ export interface QueryLoweringHost {
   find: ObjectQL['find'];
   /** `relation-semi-join.ts`'s `relationSemiJoinServes`, bound to the engine. */
   relationSemiJoinServes: (object: string, target: string) => boolean;
+  /**
+   * [#33876] The driver a read of `object` reaches — the engine's own
+   * `getDriver` — read for its `readableIdsLeaf` bit and its name.
+   */
+  relationReadDriver: (object: string) => { readonly name?: unknown; readonly supports?: unknown } | undefined;
 }
 
 /**
@@ -189,19 +200,22 @@ export async function resolveWhereTokens(
  * (`INVALID_FILTER` / 400, the two-step route in the words), never run over
  * a cut-off list.
  *
+ * **Refused up front on a driver that compiles no semi-join.** [#33876, the
+ * maintainer's ruling A on #33626's Q2] A single-valued relation condition on
+ * a read verb whose driver lacks the `DriverCapabilities.readableIdsLeaf` bit
+ * (MongoDB, OData) is refused before ANY related read is planned or run —
+ * every site is judged first — `INVALID_FILTER` / 400, naming the driver and
+ * the two-step route (`relationSemiJoinDriverRefusal`). It is not served by
+ * the id read: SQL first, and a driver that cannot run the subquery refuses
+ * with a stable code rather than keep a slower path built for parity
+ * (AGENTS.md Prime Directive #5). A multi-valued relation and a write verb's
+ * `where` keep the id read on every driver, as below.
+ *
  * Returns `where` by reference when it holds no condition — the common path
  * reads nothing and allocates nothing beyond one walk.
  */
-/**
- * The verbs whose `where` reaches the engine's executor boundary, where a
- * `ReadableIds` leaf is composed (ADR-0139 D2): a single-valued relation
- * condition is served as a semi-join there. A write verb's `where`
- * (`update`, `delete`) keeps the id read, under the cap.
- */
-const SEMI_JOIN_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
-
 export async function lowerRelationConditions<W>(
-  this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find' | 'relationSemiJoinServes'>,
+  this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find' | 'relationSemiJoinServes' | 'relationReadDriver'>,
   object: string,
   operation: string,
   where: W,
@@ -212,6 +226,12 @@ export async function lowerRelationConditions<W>(
   const sites = relationSitesOf(object, operation, where, schema, this.relatedSchemaOf);
   if (sites.length === 0) return where;
   const context = `${operation}('${object}')`;
+  // [#33876] Judged for every site before any related read is planned or
+  // run: on a read verb, a single-valued relation condition needs a driver
+  // that compiles the `ReadableIds` leaf, or it is refused here. The
+  // admission judge asks the same function (`judgeWhereAdmission`).
+  const driverRefusal = relationReadDriverRefusal(object, operation, sites, () => this.relationReadDriver(object));
+  if (driverRefusal !== undefined) throw driverRefusal;
   const replacements: RelationReplacement[] = [];
   // The id read the engine has always run for a relation condition: the
   // related object read as the caller, `id` only, one id past the cap.

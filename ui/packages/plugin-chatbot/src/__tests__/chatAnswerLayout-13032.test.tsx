@@ -334,3 +334,82 @@ describe('bold next to CJK full-width punctuation (objectstack#33723)', () => {
     expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('《书名》');
   });
 });
+
+/**
+ * objectstack#34609 — the plain surface in the console's ~420px assistant dock.
+ * Its gutter followed the VIEWPORT (`sm:px-0`), so on a desktop window the
+ * message list and the composer lost their side padding inside the dock.
+ *
+ * happy-dom evaluates no container query, so this suite pins the class
+ * contract: the plain root is an `@container`, the list and the composer share
+ * one container-keyed gutter, an assistant turn spans the narrow column, and a
+ * table draws inside its own horizontal scroll box.
+ */
+describe('the docked plain surface keeps one 16px gutter (objectstack#34609)', () => {
+  const FOUR_COLUMN_TABLE = [
+    'Open deals this quarter:',
+    '',
+    '| Account | Owner | Amount | Close date |',
+    '|:--|:--|:--|:--|',
+    '| Acme Corporation International | Jane Doe | $120,000.00 | 2026-12-31 |',
+    '| Globex Industrial Holdings | John Smith | $98,500.00 | 2026-12-15 |',
+  ].join('\n');
+
+  async function renderChat(surface: 'plain' | 'card') {
+    const messages = [
+      { id: 'u1', role: 'user', content: 'show me open deals' },
+      { id: 'a1', role: 'assistant', content: FOUR_COLUMN_TABLE },
+    ] as ChatbotEnhancedMessage[];
+    const view = render(
+      <ChatbotEnhanced surface={surface} placeholder="Ask…" onSendMessage={vi.fn()} messages={messages} />,
+    );
+    await waitFor(() => expect(view.container.querySelector('[data-streamdown="table"]')).not.toBeNull());
+    const { container } = view;
+    const assistant = container.querySelector('.is-assistant')!;
+    return {
+      root: container.firstElementChild!,
+      assistant,
+      user: container.querySelector('.is-user')!,
+      list: assistant.closest('.space-y-4')!,
+      /** The composer's own width box on the plain surface (null on the card surface). */
+      composer: container.querySelector('textarea')!.closest('.max-w-2xl'),
+    };
+  }
+
+  /** A viewport-breakpoint padding utility — the class of defect this card fixed. */
+  const VIEWPORT_GUTTER = /(^|\s)(sm|md|lg|xl|2xl):p[xlr]?-/;
+
+  it('keys the gutter of the message list and the composer to the chat\'s own width', async () => {
+    const { root, list, composer } = await renderChat('plain');
+    expect(root).toHaveClass('@container');
+    expect(composer).not.toBeNull();
+    for (const el of [list, composer!]) {
+      expect(el).toHaveClass('mx-auto', 'max-w-2xl', 'px-4', '@3xl:px-0');
+      expect(el.className).not.toMatch(VIEWPORT_GUTTER);
+    }
+  });
+
+  it('lets an assistant turn span the narrow column so it ends on the same gutter; the user bubble keeps its cap', async () => {
+    const { assistant, user } = await renderChat('plain');
+    expect(assistant).toHaveClass('max-w-full', '@3xl:max-w-[95%]');
+    expect(assistant).not.toHaveClass('max-w-[95%]');
+    expect(user).toHaveClass('max-w-[95%]');
+  });
+
+  it('draws a four-column table inside its own horizontal scroll box, within the answer', async () => {
+    const { assistant } = await renderChat('plain');
+    const table = assistant.querySelector('[data-streamdown="table"]')!;
+    expect(table.querySelectorAll('th')).toHaveLength(4);
+    const box = table.parentElement!;
+    expect(box).toHaveClass('overflow-x-auto');
+    expect(box.closest('[data-streamdown="table-wrapper"]')).not.toBeNull();
+  });
+
+  it('control: the card surface keeps its own chrome and bubble width', async () => {
+    const { root, list, assistant } = await renderChat('card');
+    expect(root).not.toHaveClass('@container');
+    expect(list).toHaveClass('px-4', 'py-3');
+    expect(list).not.toHaveClass('@3xl:px-0');
+    expect(assistant).toHaveClass('max-w-[95%]');
+  });
+});

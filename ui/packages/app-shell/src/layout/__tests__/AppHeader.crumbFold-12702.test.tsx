@@ -140,6 +140,7 @@ const AUTHOR: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

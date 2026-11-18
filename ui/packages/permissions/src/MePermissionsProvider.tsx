@@ -30,7 +30,7 @@ import { createDiscardProofCache } from './discardProofCache.js';
  * `@objectstack/spec/api` declares for it (objectstack#28508): an anonymous
  * `{ authenticated: false }`, or the authenticated body with `positions`,
  * `permissionSets`, `objects`, `fields`, the optional `systemPermissions` /
- * `tabPermissions`, and `hasAnyQueue`. It replaces a hand-written interface
+ * `tabPermissions`, `hasAnyQueue` and `objectsUsingQueues`. It replaces a hand-written interface
  * that had drifted from the wire: it read a `roles` key the server never
  * sends (the server's key is `positions`), so `roles` in this provider's
  * context was always empty.
@@ -578,6 +578,9 @@ export function MePermissionsProvider({
     // [objectstack#28508] The server's one has-queues boolean, verbatim;
     // `undefined` with no authenticated answer.
     hasAnyQueue: authed?.hasAnyQueue,
+    // [objectstack#34602] The server's per-object queue answer, verbatim;
+    // `undefined` with no authenticated answer.
+    objectsUsingQueues: authed?.objectsUsingQueues,
     isLoaded,
   }));
 

@@ -77,11 +77,13 @@ import {
 import { mapDataError } from '@objectstack/types';
 import {
   inProcessHostSurface,
+  resolveActionRefusal,
   resolveHookRefusal,
   resolveInProcessHookRefusal,
   type HookRefusalI18nSource,
 } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
+import { buildActionTextSurface, buildHookTextSurface } from './hook-text.js';
 import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
 import { deriveHookApi, openTransactionKind, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
 
@@ -90,9 +92,10 @@ interface FactoryOptions {
   appId: string;
   logger?: any;
   /**
-   * [#26170] Where a hook's declared refusal is translated: the `i18n`
-   * service, read at refusal time (see `resolveHookRefusal`). Absent, a
-   * declared refusal is answered with its declared message.
+   * [#26170] Where a hook's declared refusal — and, #34273, an action's — is
+   * translated: the `i18n` service, read at refusal time (see
+   * `resolveHookRefusal`, `resolveActionRefusal`). Absent, a declared refusal
+   * is answered with its declared message.
    */
   i18n?: HookRefusalI18nSource;
   /**
@@ -369,7 +372,7 @@ function buildTitleSurface(
 export function withInProcessHookTitle(
   handler: (ctx: any) => unknown,
   ql: unknown,
-  hook: string | Pick<Hook, 'name' | 'refusals'>,
+  hook: string | Pick<Hook, 'name' | 'refusals' | 'texts'>,
   opts: InProcessHookOptions = {},
 ): (ctx: any) => Promise<unknown> {
   const hookName = typeof hook === 'string' ? hook : String(hook.name);
@@ -382,15 +385,24 @@ export function withInProcessHookTitle(
     const readTitle = async (field?: unknown): Promise<string | null> =>
       (await surface(field === undefined || field === null ? undefined : String(field), undefined)) ?? null;
     const title = catalogued ? inProcessHostSurface(readTitle) : readTitle;
+    // [#34374] The hook's declared texts, in the organization's language — the
+    // body's `ctx.text`, built by the same function.
+    const readText = buildHookTextSurface(
+      typeof hook === 'string' ? { name: hook } : (hook as Pick<Hook, 'name' | 'texts'>),
+      engineCtx,
+      { i18n: opts.i18n, getService: opts.getService, logger: opts.logger },
+    );
+    const text = catalogued ? inProcessHostSurface(readText) : readText;
     const view = new Proxy(engineCtx, {
       get: (target, prop) => {
         if (prop === 'title') return title;
+        if (prop === 'text') return text;
         const value = Reflect.get(target, prop);
         // [#33214] The host surfaces a handler calls: what they raise is the
         // platform's, never the handler's refusal.
         return catalogued && (prop === 'api' || prop === 'ql') ? inProcessHostSurface(value) : value;
       },
-      has: (target, prop) => prop === 'title' || Reflect.has(target, prop),
+      has: (target, prop) => prop === 'title' || prop === 'text' || Reflect.has(target, prop),
     });
     if (!catalogued) return handler(view);
     try {
@@ -405,6 +417,12 @@ export function withInProcessHookTitle(
 export interface InProcessHookOptions {
   /** The `i18n` service a declared refusal is translated through, read at refusal time. */
   i18n?: HookRefusalI18nSource;
+  /**
+   * [#34374] Kernel service lookup, read at call time — the `settings` and
+   * `i18n` services a declared text's organization language is read from.
+   * Absent: `ctx.text` answers the declared message.
+   */
+  getService?: (name: string) => unknown;
   logger?: { warn?: (...args: any[]) => void };
 }
 
@@ -536,6 +554,7 @@ export function hookBodyRunnerFactory(
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
         buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
+        buildHookTextSurface(hook, engineCtx, { i18n: opts.i18n, getService: opts.getService, logger: opts.logger }),
       );
       installBodyDoors(
         sandboxCtx,
@@ -589,7 +608,16 @@ export function hookBodyRunnerFactory(
 export function actionBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
-): (action: { name: string; body?: unknown; object?: string; type?: string; timeoutMs?: number }) =>
+): (action: {
+  name: string;
+  body?: unknown;
+  object?: string;
+  objectName?: string;
+  type?: string;
+  timeoutMs?: number;
+  refusals?: unknown;
+  texts?: unknown;
+}) =>
   | ((actionCtx: any) => Promise<unknown>)
   | undefined {
   return (action) => {
@@ -650,16 +678,23 @@ export function actionBodyRunnerFactory(
       // the body runs and before its sandbox context is built.
       const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
       if (subjectRefusal) throw subjectRefusal;
+      const doorCaller = actionDoorCaller(actionCtx);
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
+        // [#34374 PR2] The action's declared texts, in the organization's
+        // language — the hook body's `ctx.text`, built by the same core — for
+        // the door caller's organization, so every action door answers alike.
+        buildActionTextSurface(action, doorCaller.organizationId, {
+          i18n: opts.i18n, getService: opts.getService, logger: opts.logger,
+        }),
       );
       installBodyDoors(
         sandboxCtx,
         opts,
         { kind: 'action', name: action.name },
-        actionDoorCaller(actionCtx),
+        doorCaller,
         actionCtx?.executionContext?.transaction,
       );
       try {
@@ -677,8 +712,13 @@ export function actionBodyRunnerFactory(
         warnDiscardedRecordWrites(result, action.name, action.object, opts);
         return result.value;
       } catch (err: any) {
-        logBodyThrow(opts, { kind: 'action', name: action.name }, err);
-        throw err;
+        // [#34273] An action that declares `refusals` refuses by code only,
+        // exactly as a hook does: the body's throw is answered with the
+        // declared entry in the caller's locale, or refused loudly when the
+        // catalogue cannot answer it. Everything else leaves as thrown.
+        const answered = resolveActionRefusal(action, err, actionCtx, { i18n: opts.i18n, logger: opts.logger });
+        logBodyThrow(opts, { kind: 'action', name: action.name }, answered);
+        throw answered;
       }
     };
   };
@@ -1430,6 +1470,7 @@ function buildSandboxContext(
   ql: any,
   log: ScriptContext['log'],
   title?: ScriptContext['title'],
+  text?: ScriptContext['text'],
 ): ScriptContext {
   // `input` and `previous` are the engine's own spellings, and the only ones:
   // `HookContextSchema` (`packages/spec/src/data/hook.zod.ts`) declares neither a
@@ -1540,6 +1581,10 @@ function buildSandboxContext(
     // sites; widening the accessor to it is a separate capability call and is
     // deliberately not taken here — the ruling names hook bodies.
     title,
+    // [#34374] The hook's declared texts (the action face carries its own,
+    // #34374 PR2, `buildActionSandboxContext`), answered in the
+    // organization's language (`hook-text.ts`).
+    ...(text ? { text } : {}),
     // [#11552] Hook face only, both of them: an action is never one of N
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
@@ -1587,6 +1632,7 @@ function buildActionSandboxContext(
   actionCtx: any,
   ql: any,
   log: ScriptContext['log'],
+  text?: ScriptContext['text'],
 ): ScriptContext {
   // Action ctx convention (mirrors http-dispatcher.ts):
   //   { record, params, recordId, user, session, engine, services, ... }
@@ -1631,6 +1677,9 @@ function buildActionSandboxContext(
     // [#7448] Same removal as the hook face: neither action-context assembly
     // site (`../domains/actions.ts`, `../action-execution.ts`) writes `logger`.
     log,
+    // [#34374 PR2] The action's declared texts, answered in the
+    // organization's language (`hook-text.ts` `buildActionTextSurface`).
+    ...(text ? { text } : {}),
     crypto: globalThis.crypto,
   };
 }

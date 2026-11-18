@@ -9,8 +9,8 @@
  * Contract (mirrors `Action.resultDialog` in @objectstack/spec):
  *   - `spec.fields[]` selects what to render. Each entry has a dot `path`
  *     into `data` and an optional `format` (qrcode/code-list/secret/
- *     text/json). When `fields` is omitted, the dialog renders the whole
- *     payload as JSON. Entries whose `path` does not resolve in the payload
+ *     text/json/table; `table` with its `columns`, objectstack#33187). When
+ *     `fields` is omitted, the dialog renders the whole payload as JSON. Entries whose `path` does not resolve in the payload
  *     are skipped — the response shape varies per request (e.g. no
  *     `temporaryPassword` when the admin typed one), and a labelled
  *     `undefined` row would be noise.
@@ -33,6 +33,12 @@ import {
   DialogHeader,
   DialogTitle,
   Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
@@ -59,6 +65,14 @@ interface ActionResultDialogProps {
 }
 
 type FieldFormat = NonNullable<ResultDialogFieldSpec['format']>;
+/**
+ * A `table` column, as the runner's field spec derives it from the contract's
+ * answer-field row (objectstack#34391). Both callers hand the declared row
+ * through whole (the result dialog's localized spec spreads each row; the
+ * preflight panel's rows are the contract's own), so `columns` arrives as
+ * written.
+ */
+type AnswerTableColumn = NonNullable<ResultDialogFieldSpec['columns']>[number];
 
 function readPath(root: unknown, path: string): unknown {
   if (root == null) return undefined;
@@ -108,6 +122,9 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
       }))
       .filter(({ field, value }) => field.path === '' || value !== undefined);
   }, [spec, data]);
+  // A table of several columns does not fit the narrow reveal dialog; the
+  // dialog widens when it draws one.
+  const drawsTable = fields.some(({ field, value }) => field.format === 'table' && Array.isArray(value));
 
   return (
     <Dialog
@@ -121,7 +138,7 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
         // Block the X close button's intent too.
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
-        className="max-w-lg"
+        className={drawsTable ? 'max-w-3xl' : 'max-w-lg'}
       >
         <DialogHeader>
           <DialogTitle>
@@ -185,11 +202,12 @@ export function ResultField({
   // Type-guard each renderer rather than crash if the server returned an
   // unexpected shape (e.g. format=qrcode but value is undefined). We
   // degrade gracefully to JSON so the user can still recover the value.
+  // `table` draws an array (the contract: a value that is not an array draws
+  // as `json`, as `code-list` does); every other format is the contract's fit
+  // test, the one a table cell applies too.
   const safeFormat: FieldFormat = (() => {
-    if (format === 'qrcode' && typeof value !== 'string') return 'json';
-    if (format === 'code-list' && !Array.isArray(value)) return 'json';
-    if ((format === 'secret' || format === 'text') && typeof value !== 'string') return 'json';
-    return format;
+    if (format === 'table') return Array.isArray(value) ? 'table' : 'json';
+    return valueFitsFormat(format, value) ? format : 'json';
   })();
 
   return (
@@ -204,8 +222,149 @@ export function ResultField({
       {safeFormat === 'secret' ? <SecretBlock value={value as string} copyName={copyName} /> : null}
       {safeFormat === 'text' ? <TextBlock value={value as string} copyName={copyName} /> : null}
       {safeFormat === 'json' ? <JsonBlock value={value} copyName={copyName} /> : null}
+      {safeFormat === 'table' ? (
+        <TableBlock rows={value as unknown[]} columns={field.columns ?? []} label={label} />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Whether a present value fits a format the way the contract's renderer
+ * contract says (`resultDialog` in `@objectstack/spec`): `qrcode`, `secret`
+ * and `text` take a string, `code-list` an array of strings, `json` anything.
+ * A value that does not fit draws as JSON instead.
+ */
+function valueFitsFormat(format: Exclude<FieldFormat, 'table'>, value: unknown): boolean {
+  switch (format) {
+    case 'qrcode':
+    case 'secret':
+    case 'text':
+      return typeof value === 'string';
+    case 'code-list':
+      return Array.isArray(value) && value.every((item) => typeof item === 'string');
+    case 'json':
+      return true;
+  }
+}
+
+/** A plain object: the only element a column `path` is read in. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** One line of JSON text: how `json`, and any value that does not fit its format, draws in a cell. */
+function compactJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * `format: 'table'` (objectstack#34391): each element of the array is one row
+ * and each entry of `columns` one cell, in `columns` order, under a header
+ * that is the column's `label`, falling back to its `path`. A cell reads the
+ * column's dot `path` in the element; a path that resolves to nothing, or to
+ * `null`, draws an empty cell. An element that is not a plain object has no
+ * paths to read, so its row draws the element itself as compact JSON text in
+ * the first cell and leaves the others empty. `[]` draws the header row over
+ * an empty-state line.
+ */
+function TableBlock({
+  rows,
+  columns,
+  label,
+}: {
+  rows: unknown[];
+  columns: AnswerTableColumn[];
+  label: string | undefined;
+}) {
+  const { t, language } = useObjectTranslation();
+  const headers = columns.map((column) => resolveInlineI18nLabel(column.label, language) || column.path);
+  return (
+    <div className="max-h-96 overflow-auto rounded-md border" data-testid="result-table">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {columns.map((column, index) => (
+              <TableHead key={`${column.path}-${index}`}>{headers[index]}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={Math.max(columns.length, 1)} className="text-center text-sm text-muted-foreground">
+                {t('table.noRows')}
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((element, rowIndex) => (
+              <TableRow key={rowIndex}>
+                {columns.map((column, columnIndex) => {
+                  if (!isPlainObject(element)) {
+                    return (
+                      <TableCell key={`${column.path}-${columnIndex}`} className="align-top">
+                        {columnIndex === 0 ? <CompactJson value={element} /> : null}
+                      </TableCell>
+                    );
+                  }
+                  const cellName = label ? `${label}, ${headers[columnIndex]}` : headers[columnIndex]!;
+                  return (
+                    <TableCell key={`${column.path}-${columnIndex}`} className="align-top">
+                      <TableCellValue
+                        value={readPath(element, column.path)}
+                        format={column.format ?? 'text'}
+                        copyName={t('actions.resultDialog.copyFieldItem', { label: cellName, index: rowIndex + 1 })}
+                      />
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/**
+ * One cell of a table. Missing and `null` draw nothing; a value that fits the
+ * column's format draws in it; any other value, and every `json` cell, draws
+ * as compact JSON text. Inside a row a cell is compact: `text` and
+ * `code-list` draw the value alone, while `secret` keeps its mask and reveal
+ * toggle and `qrcode` its code, each with its copy button.
+ */
+function TableCellValue({
+  value,
+  format,
+  copyName,
+}: {
+  value: unknown;
+  format: Exclude<FieldFormat, 'table'>;
+  copyName: string;
+}) {
+  if (value === undefined || value === null) return null;
+  if (format === 'json' || !valueFitsFormat(format, value)) return <CompactJson value={value} />;
+  if (format === 'text') return <span className="break-words">{value as string}</span>;
+  if (format === 'secret') return <SecretBlock value={value as string} copyName={copyName} />;
+  if (format === 'qrcode') return <QrcodeBlock value={value as string} copyName={copyName} />;
+  return (
+    <ul className="space-y-0.5">
+      {(value as string[]).map((code, i) => (
+        <li key={`${i}-${code}`}>
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">{code}</code>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CompactJson({ value }: { value: unknown }) {
+  return <code className="break-all text-xs font-mono">{compactJson(value)}</code>;
 }
 
 function useCopy(value: string | undefined) {

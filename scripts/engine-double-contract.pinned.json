@@ -257,6 +257,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/build-probes-dataset-holders.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/meta-compile-cache.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -1612,6 +1617,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-translation-bundle.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2442,6 +2452,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-depends-on-33812.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2633,6 +2658,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-replay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3364,6 +3404,11 @@
     {
       "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-field-patch-bases.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -4417,6 +4462,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-security/src/get-metadata-readable-withheld-fields.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/get-queryable-fields.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4954,7 +5004,7 @@
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
@@ -5253,6 +5303,21 @@
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-package-scoped.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
       "verb": "update",
       "pinned": 1
     },

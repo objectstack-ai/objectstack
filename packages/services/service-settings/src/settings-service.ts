@@ -2276,7 +2276,9 @@ export class SettingsService {
    * is not servable is left out and named in `dropped`, by its key and why,
    * never by its value: the key is not an option-bearing key of the
    * namespace, the value is not one its option table admits, or `value` and
-   * `source` disagree about "none". The value is kept out of `dropped`
+   * `source` disagree about "none" (only `'environment'` may also carry a null
+   * value: in use, supplied by the host, named by no option; `'settings'`
+   * always names one). The value is kept out of `dropped`
    * because an entry this wrong may be carrying the very credential the rule
    * keeps off the page.
    */
@@ -2319,6 +2321,10 @@ export class SettingsService {
     if (source === 'none') {
       return value === null ? { served: { value: null, source } } : { why: "states a value under source 'none'" };
     }
+    // In use, supplied by the runtime's environment or host, and named by no
+    // option (a host's own mail transport). Only 'environment' may say this:
+    // what 'settings' resolves is always one of the options.
+    if (source === 'environment' && value === null) return { served: { value: null, source } };
     if (typeof value !== 'string' || table.judge(value) !== null) {
       return { why: 'states a value that is not one of its options' };
     }

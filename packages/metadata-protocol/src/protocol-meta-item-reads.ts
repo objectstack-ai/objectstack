@@ -25,7 +25,7 @@ import {
     packageScopedRefusalMessage,
     type PackageScopedRefusal,
 } from '@objectstack/core';
-import { isPairOf, itemDiscriminator } from '@objectstack/metadata-core';
+import { isPairOf, isSecurityCatalogType, itemDiscriminator } from '@objectstack/metadata-core';
 import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
@@ -37,7 +37,9 @@ import {
     type MetadataDiagnostics,
     computeViewReferenceDiagnostics,
     decorateMetadataItem,
+    withPublishAdvisories,
     withPublishVerdict,
+    viewLintObjectLookup,
     withViewLintWarnings,
 } from './metadata-diagnostics.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
@@ -54,6 +56,7 @@ import {
     declinesPackageLessRowAt,
     exactQualifierItem,
     isPackageLessRow,
+    notHeldByQualifierRefusal,
     refuseUnjudgeableByNameRead,
 } from './protocol-exact-qualifier.js';
 import { readThroughMetaCompileCache } from './meta-compile-cache.js';
@@ -327,21 +330,47 @@ export async function judgeBareActionRead(
  * the registry's first composite.
  *
  * Judge only: any answer the registry gives leaves the read to its layers,
- * exactly as before. A package-less entry in the registry's bare slot (a
- * hydrated or saved row, or a stamp-less registration) exempts the name from
- * the refusal, and the layers then read it as before: ⛔ they do not serve
- * that entry where the MetadataService holds a holder's copy, which answers
- * first (the holder registered last; the composed artifact rig of
- * runtime's `meta-disabled-holder-artifact-door.test.ts` pins it, measured and
- * unresolved). A package-less row only the store holds is no
+ * exactly as before. A package-less row only the store holds is no
  * exemption, because the layers below do not serve it for a `doc` and would
  * answer a holder by registration order again.
  *
+ * [#34248, ruling 6893582352] A package-less entry in the registry's bare
+ * slot (a stamp-less registration, or a hydrated or saved row stamped with
+ * the store's sentinel) exempts the name: it is the environment's own item,
+ * which answers first, as the registry and `MetadataFacade.get` serve it.
+ * That entry is returned when two or more enabled packages hold the name,
+ * because the layers must then serve it: the MetadataService keeps a doc by
+ * name alone, so its copy is the holder registered last, and it answered
+ * first ({@link bareDocServiceCopyDisplacesEntry}).
+ *
+ * @returns the environment's entry beside two or more enabled holders, else
+ *   `undefined` (no such entry, or a name one package or none holds).
  * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
  */
-export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): void {
-    const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
-    if (typeof registry?.resolveItem === 'function') registry.resolveItem('doc', name, null, member);
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): unknown {
+    const registry = host.engine?.registry as {
+        resolveItem?(type: string, name: string, caller: null, member?: string): unknown;
+        packageScopedHoldersOf?(type: string, name: string): string[] | undefined;
+    } | undefined;
+    if (typeof registry?.resolveItem !== 'function') return undefined;
+    const answer = registry.resolveItem('doc', name, null, member);
+    // The registry's answer naming no package is the exempting entry (or a
+    // name one package or none holds, which the count below leaves alone).
+    if (answer === undefined || answer === null || storedItemPackageId(answer) !== undefined) return undefined;
+    return (registry.packageScopedHoldersOf?.('doc', name) ?? []).length >= 2 ? answer : undefined;
+}
+
+/**
+ * [#34248, ruling 6893582352] Is the MetadataService's answer to a bare doc
+ * read a package's copy where the environment's own entry answers
+ * ({@link refuseAmbiguousBareDocRead}'s return)? Such a copy is declined at
+ * the service step, so the registry's bare slot, read first by `getItem`,
+ * serves the environment's entry. A package-less service copy is the
+ * environment's own and is kept.
+ */
+export function bareDocServiceCopyDisplacesEntry(environmentEntry: unknown, serviceCopy: unknown): boolean {
+    return environmentEntry !== undefined && serviceCopy !== undefined && serviceCopy !== null
+        && storedItemPackageId(serviceCopy) !== undefined;
 }
 
 /**
@@ -434,6 +463,58 @@ export function serviceCopyOfAnotherPackage(
     if (typeof registry?.getPackage !== 'function' || registry.getPackage(served) === undefined) return false;
     const installed = installedManifestsOfEngine(host.engine);
     return !isPairOf(served, packageId, installed) && !isPairOf(packageId, served, installed);
+}
+
+/**
+ * [ADR-0150 D3/D5, red line 2] The item the code layers (the artifact lookup
+ * and the registry) answer at an address naming a package (`?package=X`) of
+ * a type the exact qualifier does not judge: X's own item. Another package's
+ * item ({@link serviceCopyOfAnotherPackage}'s test, applied to the code
+ * layers' answer) is replaced by the registry's package slot for X.
+ *
+ * When X holds no item of the name, a read (`options.refuse`) is refused
+ * `409 not-held-by-qualifier` naming each package that holds it (ruling
+ * 6917064203 on #34398), as the exact qualifier refuses the covered types; X
+ * need not be an installed package. Any other caller (the save's credential
+ * carry-forward) gets nothing, so it carries nothing.
+ *
+ * Before, a package that holds no item of the name answered `getItem`'s last
+ * tier, the first composite across packages: another package's item, under
+ * X's envelope. Unchanged: an item bound to no package (the environment's
+ * entry, which answers first), an item stamped X, a customization pair's
+ * item, a stamp the registry does not know, and an `object`.
+ *
+ * ⛔ Not a security catalog type (`position`, `capability`; ADR-0131 D3):
+ * the registry keeps one package holder of such a name, resolved by name
+ * for the whole environment, so another package's address has no slot of
+ * its own to answer with. Its answer there stays the code layers' own.
+ *
+ * @throws {PackageScopedNameRefusedError} `not-held-by-qualifier` (with
+ *   `options.refuse`), when X holds no item of the name and another package does.
+ */
+export function registryAnswerAtAddress(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; packageId?: string },
+    item: unknown,
+    member: string | undefined,
+    isWantedMember: (candidate: unknown) => boolean,
+    options: { readonly refuse?: boolean } = {},
+): unknown {
+    if (!request.packageId || item === undefined || item === null || isSecurityCatalogType(request.type)) return item;
+    if (!serviceCopyOfAnotherPackage(host, request, item)) return item;
+    const scoped = host.engine?.registry as {
+        getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown;
+        packageScopedHoldersOf?(type: string, name: string): string[] | undefined;
+    } | undefined;
+    const own = typeof scoped?.getPackageScopedItem === 'function'
+        ? scoped.getPackageScopedItem(request.type, request.name, request.packageId, member)
+        : undefined;
+    if (own !== undefined && own !== null && isWantedMember(own)) return own;
+    if (options.refuse === true) {
+        const holders = (scoped?.packageScopedHoldersOf?.(request.type, request.name) ?? []).filter((holder) => holder !== request.packageId);
+        if (holders.length > 0) throw notHeldByQualifierRefusal(request.type, request.name, request.packageId, holders);
+    }
+    return undefined;
 }
 
 /** The same item: one object, or (a loader's fresh copy) the same JSON. */
@@ -565,6 +646,8 @@ export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServic
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
     // HERE, at each face's boundary, as {@link getMetaItems} folds.
@@ -634,9 +717,11 @@ export interface PrereadActiveRows {
     readonly rows: readonly StoredOverlayRow[];
 }
 
-export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishJudgement' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
     request = canonicalizeMetaRequestType(request);
@@ -712,8 +797,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
     // more enabled packages hold is refused here when the read names no
     // package, naming each, before any layer is read; the environment's own
-    // item still answers first ({@link refuseAmbiguousBareDocRead}).
-    if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
+    // item still answers first ({@link refuseAmbiguousBareDocRead}), [#34248]
+    // and the service step below declines a package's copy in its place.
+    const bareDocEnvironmentEntry = !request.packageId && request.type === 'doc'
+        ? refuseAmbiguousBareDocRead(host, request.name, member)
+        : undefined;
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
@@ -750,10 +838,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // ({@link withListViewFieldWarnings}), against the same objects.
     // Applied at every served exit of this read, the draft ones included; a
     // warning, so `valid` is left as the schema answered it. The execution
-    // face serves no `_diagnostics`.
+    // face serves no `_diagnostics`. [#34901] Each object is folded with
+    // every disabled package's `extend` contribution, as the save door folds
+    // it ({@link viewLintObjectLookup}): a name such a package adds is a
+    // stored field, not an unknown one.
     const serveViewLint = <T>(served: T): Promise<T> => (execution
         ? Promise.resolve(served)
-        : withViewLintWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
+        : withViewLintWarnings(request.type, served, viewLintObjectLookup(host.engine?.registry)));
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`
@@ -761,17 +852,23 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // promotion reads, and [#29557] converts for its verdict exactly as the
     // promotion does — never the governed, converted or redacted copy this
     // read serves. The execution face serves no `_diagnostics`.
+    // [#34818] …and, for a type whose editor shows them, what that publish
+    // would still SAY: the gate's advisories, folded into
+    // `_diagnostics.warnings` ({@link withPublishAdvisories}) in the user
+    // sentence the request's locales pick, from the same single judgement.
     const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
         const served = await serveViewLint(serveItem(resolved));
         if (execution || !served || typeof served !== 'object') return served;
-        const issues = await host.draftPublishVerdict({
+        const judgement = await host.draftPublishJudgement({
             type: request.type,
             name: request.name,
             body: storedRowDocument(row),
             packageId: row.package_id ?? null,
+            ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
         });
         const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
-        const after = withPublishVerdict(request.type, request.name, before, issues);
+        const refused = withPublishVerdict(request.type, request.name, before, judgement.refusals);
+        const after = withPublishAdvisories(request.type, request.name, refused, judgement.advisories);
         return after === before ? served : { ...served, _diagnostics: after };
     };
     // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
@@ -1214,7 +1311,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             if (fromService.data !== undefined && fromService.data !== null
                 && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
                     || await servedFromDisabledHolder(host, request.name, fromService.data)))
-                && !anotherPackagesCopy) {
+                && !anotherPackagesCopy
+                // [#34248] …or, at a bare doc read the environment's own entry
+                // answers beside two holders, a package's copy
+                // ({@link bareDocServiceCopyDisplacesEntry}): step 3 serves the entry.
+                && !bareDocServiceCopyDisplacesEntry(bareDocEnvironmentEntry, fromService.data)) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
@@ -1265,6 +1366,9 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // member wherever it sits (its own [#22877] note), and still answers a
     // bundle that ships no canonical member at all; a named member that no
     // layer holds answers nothing, so the door answers it as absent.
+    // [ADR-0150 D3/D5] Whether the answer below is the code layers' (the
+    // artifact lookup and the registry), judged at the end of step 3.
+    const reachedCodeLayers = item === undefined;
     if (item === undefined && wantedMember !== undefined) {
         const artifact = host.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
         if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
@@ -1319,6 +1423,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         if (item !== undefined && wantedMember !== undefined && memberAddress !== undefined) {
             item = host.registryMemberServedAt(request.type, request.name, memberAddress, item, member);
         }
+    }
+    // [ADR-0150 D3/D5, red line 2] …and the code layers' answer at such an
+    // address is the package's own item or nothing
+    // ({@link registryAnswerAtAddress}): a package that holds no item of the
+    // name answered `getItem`'s first composite, another package's item.
+    if (reachedCodeLayers && exactAddress === undefined) {
+        item = registryAnswerAtAddress(host, request, item, member, isWantedMember, { refuse: true });
     }
 
     // [#5840] The MetadataService half of the #5532 rule, and the last

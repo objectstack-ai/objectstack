@@ -293,7 +293,9 @@ describe('names who the pending step waits on (objectui#12482)', () => {
       expect(screen.getByTitle('position:sales_manager').textContent).toBe('Regional Sales Manager· Grace Hopper'),
     );
     expect(ensureType).toHaveBeenCalledWith('position');
-    expect(adapter.find.mock.calls.map(([object]) => object)).toEqual(['sys_user_position', 'sys_user']);
+    // The request's own thread is the activity card's read (objectstack#34588), not the directory's.
+    const directoryReads = adapter.find.mock.calls.map(([object]) => object).filter((object) => object !== 'sys_approval_action');
+    expect(directoryReads).toEqual(['sys_user_position', 'sys_user']);
     expect(panelText()).not.toContain('position:');
     expect(panelText()).not.toContain('positi…');
   });
@@ -306,7 +308,8 @@ describe('names who the pending step waits on (objectui#12482)', () => {
     });
     expect(screen.getByTitle('position:sales_manager').textContent).toBe('Sales Manager (served)');
     expect(ensureType).not.toHaveBeenCalled();
-    expect(adapter.find).not.toHaveBeenCalled();
+    // Only the request's own thread is read (the activity card, objectstack#34588).
+    expect(adapter.find.mock.calls.map(([object]) => object).filter((object) => object !== 'sys_approval_action')).toEqual([]);
   });
 
   it('CONTROL: an id nothing can name keeps the face the inbox sheet draws for it, the raw id on hover only', () => {
@@ -403,7 +406,7 @@ describe("a decided request's own decision comment is on the panel the reader la
     expect(comment.textContent).toContain('Split the claim by month');
   });
 
-  it('CONTROL: a pending request reads no thread and shows no decision comment', () => {
+  it('CONTROL: a pending request reads its thread once, for the activity card, and shows no decision comment (objectstack#34588)', async () => {
     timeline([{ id: 'a1', request_id: REQUEST.id, action: 'comment', actor_id: 'u1', comment: 'Looking into it' }]);
     render(
       <AdapterCtx.Provider value={{ find } as never}>
@@ -412,8 +415,9 @@ describe("a decided request's own decision comment is on the panel the reader la
         </RecordContextProvider>
       </AdapterCtx.Provider>,
     );
-    expect(screen.getByTestId('approval-decision-panel')).toBeTruthy();
-    expect(threadReads()).toHaveLength(0);
+    const activity = screen.getByTestId('approval-decision-activity');
+    await waitFor(() => expect(activity.textContent).toContain('Looking into it'));
+    expect(threadReads()).toHaveLength(1);
     expect(screen.queryByTestId('approval-decision-comment')).toBeNull();
   });
 

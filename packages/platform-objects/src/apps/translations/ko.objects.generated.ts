@@ -244,6 +244,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "완료",
           fields: {
             email: "이메일",
+            pendingAgain: "이미 대기 중",
             notApplied: "이미 대기 중이어서 적용되지 않음(레코드에서 설정하세요)",
             managerError: "관리자",
             "host.reason": "초대가 전송되지 않음"
@@ -267,6 +268,19 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "이미 대기 중, 다시 알림",
             "summary.failed": "추가되지 않음",
             rows: "행별 결과"
+          },
+          columns: {
+            rows: {
+              row: "행",
+              email: "이메일",
+              ok: "성공",
+              alreadyPending: "이미 대기 중, 다시 알림",
+              "host.notified": "호스팅 조직에 알림",
+              "host.reason": "알리지 않은 이유",
+              "error.message": "추가되지 않은 이유",
+              notApplied: "적용되지 않음(레코드에서 설정)",
+              managerError: "관리자"
+            }
           }
         }
       },

@@ -453,6 +453,62 @@ export const planGate = {
 A hook that declares no `refusals` refuses exactly as before: the thrown
 error's own `code`, `status` and message reach the caller.
 
+## Writing a sentence people read — `texts`
+
+A sentence a hook writes into a record — the subject of the follow-up task it
+opens, the summary it logs — is read by the whole organization. **Declare it**
+on the hook and ask for it by key: the runtime answers it in the
+**organization's** language, never the language of the person whose save fired
+the hook.
+
+```typescript
+export const leadFollowUp = {
+  name: 'lead_follow_up',
+  object: 'crm_lead',
+  events: ['afterUpdate'],
+  texts: {
+    follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] },
+  },
+  handler: async (ctx) => {
+    if (ctx.input.status !== 'qualified' || ctx.previous?.status === 'qualified') return;
+    const subject = await ctx.text('follow_up_subject', { lead: ctx.input.name });
+    await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.input.id });
+  },
+};
+```
+
+- **The organization's language.** The Localization setting when somebody set
+  it (Setup → Localization), else the app's `i18n.defaultLocale`. A hook a
+  person's save fires still writes in the organization's language — the record
+  is data everyone reads, not a message to that person.
+- **Translated first, filled after.** `ctx.text` picks
+  `hooks.<hook>.texts.<key>.message` in that language, then fills the `{{ }}`
+  holes from the `params` you pass. A text that declares `params` may write
+  `{{ name }}` holes over those names, with an optional known formatter; one
+  that declares none is plain text, and a hole in it is refused when the hook
+  is saved. A hole over another name is refused at save; logic, an unknown
+  formatter, an empty hole and `{{ amount | currency }}` with no code are
+  refused by `os validate`, `compile` and the publish gate.
+- **A missing translation never fails the hook.** With no translation, or no
+  language to pick, the declared `message` is written. A translation whose
+  holes do not render is dropped for the declared `message`, filled.
+- **An unreadable Localization setting rejects.** When the settings service
+  cannot be read, `ctx.text` rejects rather than write another language over
+  the organization's choice. Catch it if the hook should write anyway.
+- **Only declared text is translated.** A string the hook builds itself is
+  written as it is. A key `texts` does not declare is refused when the hook is
+  saved if the hook names it literally in `ctx.text('key')`, otherwise when the
+  hook runs, as a `500` that names the hook and the key.
+- **It works whichever way the hook is written** — a TypeScript `handler` and a
+  sandboxed `js` body get the same `ctx.text`. An `expression` body cannot ask
+  for one, so `texts` is refused there.
+- **Translated by key.** `os i18n extract` scaffolds
+  `hooks.<hook>.texts.<key>.message` and `os i18n check` counts it. See
+  [Translations](/docs/ui/translations).
+
+Rows a hook wrote before it declared the text keep their text: nothing is
+rewritten.
+
 ## Recipe — refuse overlapping time ranges
 
 Leave and overtime requests share one rule: two live records of the same owner

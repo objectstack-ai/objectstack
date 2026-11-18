@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
+import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
@@ -131,7 +132,6 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
-import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
@@ -148,6 +148,7 @@ import {
   type MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
+import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
@@ -169,6 +170,7 @@ import {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -1074,6 +1076,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
   },
+  // ADR-0149 D1 — a dataset measure or dimension with neither `synonyms` nor a
+  // `description` answers only to its own name and label, so a question asked
+  // in a user's own words (or in another language) matches nothing and is
+  // answered by an ungoverned object query. Advisory: the dataset is valid and
+  // draws every widget bound to it, and one that only feeds charts loses
+  // nothing. `parsed`, like the two dataset rules above, because the three read
+  // the same positions (`datasets[].dimensions[]` / `.measures[]`) and must be
+  // handed one document; `os lint` judges it on its unparsed stack, which the
+  // rule tolerates (it reads two optional keys and nothing a default fills).
+  //
+  // On the runtime publish door for the type that carries the declaration,
+  // `dataset`, and nothing else: another type's write would only re-judge a
+  // STORED dataset, which the differential cancels as a pre-existing
+  // condition. The rule reads the written dataset's own members and no other
+  // collection, so the per-write snapshot cannot invent a finding. One finding
+  // per member that lacks both keys, on the save response, never a refusal.
+  {
+    name: 'validateDatasetMemberVocabulary',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-member-vocabulary.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMemberVocabulary(stack),
+  },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
   // target must name a defined action, a `modal` target must name a declared
@@ -1314,9 +1342,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
     // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
     // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
-    // `validateAiToolReferences` resolves a skill's tools against a universe of
-    // three limbs — `stack.tools`, the platform registry and the materialised
-    // `action_<name>` family — and a per-write snapshot carries neither
+    // `validateAiToolReferences` resolves a skill's tools against `stack.tools`,
+    // the platform registry, the MCP door's file tools (for a skill offered
+    // over MCP) and the materialised `action_<name>` family — and a per-write
+    // snapshot carries neither
     // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
     // registers outside the registry is invisible to every static universe.
     // So at this door the member has no truthful `unresolved` verdict to give:
@@ -1825,18 +1854,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
   },
-  // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
-  // duplicates its table on every restart.
-  {
-    name: 'validateSeedReplaySafety',
-    tier: 'advisory',
-    input: 'parsed',
-    commands: ALL,
-    source: 'packages/lint/src/validate-seed-replay-safety.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateSeedReplaySafety(stack),
-  },
+  // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
+  // replay warning) is retired: `SeedMode` itself refuses `insert` and
+  // `replace` at parse (ruling 6942780880), so no stack this rule could flag
+  // gets past the schema.
   // framework#3433 follow-up — #3433 exempts seed writes from the
   // `state_machine` rule, so a seeded status the FSM does not declare is no
   // longer rejected at write time. Re-added at author time; advisory, because
@@ -2058,9 +2079,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         severity: f.severity ?? 'warning',
         rule: f.rule,
         where: f.where,
-        path: f.where,
+        // [#34818] A finding placed on a node carries its document path, so a
+        // draft's `_diagnostics` entry resolves onto that node; the rest keep
+        // `where` as before.
+        path: f.path ?? f.where,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the doors can
+        // render this finding in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // A credential typed as a LITERAL into a flow position every flow reader is
@@ -2479,6 +2506,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.fix ?? '',
       })),
   },
+  // An inline-edited relationship whose parent or child declares
+  // `enable.apiMethods` without `bulk` (`relationship/inline-edit-needs-bulk`).
+  // The parent's form saves the rows in one cross-object `/api/v1/batch`, which
+  // asks every object in it for `bulk`, so the form fills and then 405s on save.
+  // Registered rather than left in `lintDataModel`: it forecasts a refusal at run
+  // time, not a style nudge, so all three commands report it. Advisory: a
+  // warning that refuses nothing and never fails `os build`.
+  {
+    name: 'lintInlineEditBulk',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    run: (stack) =>
+      lintInlineEditBulk(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
   // ADR-0090 D7 — the security-domain publish linter. Every `error` rule mirrors
   // a runtime enforcement point (fail-closed OWD default, canonical enum, anchor
   // binding gate, vocabulary freeze), moving the failure from a runtime deny to
@@ -2828,6 +2880,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
+  },
+  // An L2 action body that does not compile in the wrapper the runtime runs it
+  // in (`(async (input, ctx) => { SOURCE })`, built from the same function the
+  // rule compiles inside). Such a body passed every author-time door and then
+  // failed every run, on every door; `const input = ctx.input || {}` is the
+  // shape an AI author writes, a redeclared parameter. Gating: no reading of
+  // the metadata behaves as written, because the body never starts. A
+  // regular-expression literal the host refuses is the one `warning` arm (the
+  // two engines' regular-expression dialects measurably differ; see the
+  // module). Across the runtime publish gate for `action` writes and for
+  // `object` writes, whose inline `actions[]` the same walk reads; the
+  // differential charges a write only with the bodies it adds. The rule loads
+  // no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateActionBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCompiles(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
   // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is

@@ -24,6 +24,7 @@ import { useLocalization, type useObjectLabel, type useObjectTranslation } from 
 import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { withUnpublishedObjectReads } from '../preview/unpublishedObjectReads.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
@@ -105,7 +106,6 @@ export function useObjectViewListRenderer({
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
-    handleListTotalChange,
     viewPanelFilters,
 }: {
     objectName: string | undefined;
@@ -153,8 +153,6 @@ export function useObjectViewListRenderer({
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
-    /** objectstack#27594 — the records the active view matched, for the title's count. */
-    handleListTotalChange: (total: number) => void;
     /**
      * objectstack#30073 — the active view's own conditions when the Filter
      * panel holds them as rows (a personal view, `personalViewPanelFilters`):
@@ -219,18 +217,29 @@ export function useObjectViewListRenderer({
     // publish). That is an empty list, not a fault: the wrapper answers it
     // empty and names the object, and the list says why it is empty. One
     // wrapper per source, so the list's fetch never sees a new data source.
+    //
+    // objectstack#34807 — the same wrapper answers the list's object definition
+    // with the draft-only fields marked (`readDraftPreviewObjectSchema`, read
+    // through the provider's overlay), so `ListView` keeps them out of the
+    // query and draws their columns empty. A new draft-aware `objectDef` (a
+    // field drafted) makes a new wrapper, so the list re-reads its definition.
     const previewDrafts = usePreviewDrafts();
+    const { getItem: getMetadataItem } = useMetadata();
+    const getMetadataItemRef = useRef(getMetadataItem);
+    getMetadataItemRef.current = getMetadataItem;
     const [unpublishedObjects, setUnpublishedObjects] = useState<ReadonlySet<string>>(() => new Set());
-    const unpublishedReadsRef = useRef(new WeakMap<object, DataSource>());
+    const unpublishedReadsRef = useRef(new WeakMap<object, { revision: unknown; wrapped: DataSource }>());
     const previewDataSource = useCallback((ds: DataSource): DataSource => {
         const cached = unpublishedReadsRef.current.get(ds);
-        if (cached) return cached;
-        const wrapped = withUnpublishedObjectReads(ds, (name) =>
-            setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
+        if (cached && cached.revision === objectDef) return cached.wrapped;
+        const wrapped = withUnpublishedObjectReads(
+            ds,
+            (name) => setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
+            (name) => getMetadataItemRef.current('object', name),
         );
-        unpublishedReadsRef.current.set(ds, wrapped);
+        unpublishedReadsRef.current.set(ds, { revision: objectDef, wrapped });
         return wrapped;
-    }, []);
+    }, [objectDef]);
 
     const renderListView = useCallback(({ schema: listSchema, dataSource: rawDs, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         const ds = previewDrafts && rawDs ? previewDataSource(rawDs) : rawDs;
@@ -969,6 +978,11 @@ export function useObjectViewListRenderer({
             // rather than the old permanently-truthy husk, which is what
             // keeps the gate from offering a chart nobody configured.
             chart: holdBlock('chart', viewDef.chart),
+            // The timesheet binding the view DECLARED, forwarded whole for
+            // the reason the chart block above is: `ListView`'s capability
+            // gate and `case 'timesheet'` read its three keys by name
+            // (objectstack#34382).
+            timesheet: holdBlock('timesheet', viewDef.timesheet),
 
         };
 
@@ -1017,7 +1031,6 @@ export function useObjectViewListRenderer({
                     handleRowClick(record, event);
                 }}
                 onRowsChange={handleListRowsChange}
-                onTotalChange={handleListTotalChange}
                 // objectstack#30850 — the page lives in the address (`uf__page`,
                 // replace): the list reads it and reports every move back.
                 page={listPage}
@@ -1090,7 +1103,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

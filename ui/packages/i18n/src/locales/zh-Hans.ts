@@ -201,6 +201,8 @@ const zh = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: '填写表单字段,然后提交或取消。',
+    sectionNav: '表单分组',
+    sectionNavErrors: '待修正字段：{{number}}',
     deniedDescription: '您没有此字段的编辑权限。',
     serverDefaultHint: '保存时自动设置。',
     requiredForAction: '执行「{{action}}」时必填。',
@@ -564,6 +566,7 @@ const zh = {
         '此视图已分组，但其数据源未实现 queryGroupHeaders，因此无法统计分组。移除分组即可显示记录。',
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
+      draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +962,8 @@ const zh = {
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
     groupingUnstoredRemove: '从分组中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 筛选或排序：它仅存在于草稿中，发布后才生效。',
+    withheldFieldsLeftOut: '未显示 {{fields}}，也未按其筛选、排序或分组：添加该字段的软件包已停用，启用后即恢复。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },
@@ -1243,6 +1248,8 @@ const zh = {
     writeStrippedUnknownReason: '以下字段未被服务端写入：{{fields}}',
     approvalPendingEditable: '审批中 · 可编辑',
     approvalPendingTooltip: '该记录有待审批的请求，但当前审批节点仍允许编辑',
+    approvalPending: '审批中',
+    approvalPendingNotEditableTooltip: '该记录有待审批的请求',
     approvalProgress: '审批 — 已通过 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '会签 — 已完成 {{got}} / 共 {{need}} 个组',
     approvalProgressLabel: '审批进度',
@@ -1602,6 +1609,9 @@ const zh = {
   dashboard: {
     total: '总计',
     noDataSourceFor: '没有可用的数据源：',
+    drillTooMany: '与该值关联的记录过多，无法在此列出。请缩小仪表盘筛选范围后重试。',
+    drillUnavailable: '无法在此列出该值对应的记录。',
+    drillFailed: '无法加载该值对应的记录，请稍后重试。',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -1961,6 +1971,10 @@ const zh = {
       launcherLabel: '应用启动台',
       menuLabel: '应用导航',
       menuEmpty: '此应用没有你可以打开的导航项。',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: '应用菜单栏',
+      searchMenu: '搜索菜单',
+      phoneBarHint: '点星标把菜单项固定到底部栏，底部栏显示前 4 个。',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新标签页打开',
       copyLink: '复制链接',
@@ -2065,6 +2079,7 @@ const zh = {
       view: '查看',
       confirm: '确认',
       cancel: '取消',
+      continue: '继续',
       prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
       organizationName: {
         title: '为组织命名',
@@ -2188,6 +2203,16 @@ const zh = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        publishFromBar_one: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        publishFromBar_other: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        showDraftToPublish: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraftToPublish_one: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraftToPublish_other: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraft: '查看草稿',
+        receipt: '已发布，改动已生效。',
+        dismissReceipt: '关闭',
         count: '有 {{count}} 项改动尚未发布——用户还看不到。',
         publish: '发布',
         published: '全部待发布改动已生效。',
@@ -2283,6 +2308,9 @@ const zh = {
           title: '正在编辑「{{app}}」',
           titleGeneric: '编辑此应用',
           description: '想改点什么？我会就地修改这个应用 —— 加字段、对象、视图或仪表盘，或调整已有内容。',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            '问数据，或者让我改这个应用 —— 可以问记录的计数、列表和汇总，也可以告诉我要改什么，我会就地修改：字段、对象、视图或仪表盘。',
         },
       },
       clearConversation: '清空',
@@ -2381,7 +2409,7 @@ const zh = {
       changesApplied: '已生效',
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
-      discussing: '正在讨论：{{target}}',
+      discussing: '正在看：{{target}}',
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -2484,11 +2512,16 @@ const zh = {
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手对话',
         resize: '调整对话宽度',
         collapse: '收起对话',
         maximize: '以完整页面打开',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: '历史',
+        backToChat: '返回对话',
+        expand: '展开',
+        restore: '还原为侧边栏',
         open: '打开助手',
         planAwaitingApproval: '有一个方案等待确认',
       },
@@ -2560,6 +2593,7 @@ const zh = {
       passwordsNote: '临时密码——仅显示一次，不会被保存。请立即保存；用户首次登录时必须修改。',
       passwordsMore: '更多条目已省略——请使用下载。',
       positionsHint: '岗位：可映射一列岗位机器名，多个用“;”分隔。每个岗位按 Setup 中指派岗位的同样规则分配；不存在或你无权指派的岗位会在该行报错，用户照常创建。',
+      managerHint: '上级：可映射一列每位用户的上级，填上级的邮箱(开启手机号登录时也可填手机号)。所有行导入后才关联上级，所以文件后面的上级也算数；找不到或无法关联的上级会在该行报错，用户照常创建。',
       passwordsDownload: '下载 CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -2615,7 +2649,7 @@ const zh = {
       expandToPage: '整页打开',
       openAsPage: '整页打开',
       objectNotFound: '未找到对象',
-      objectNotFoundDescription: '对象"{{objectName}}"在当前配置中不存在。',
+      objectNotFoundDescription: '对象"{{objectName}}"不存在，或者您无权访问它。',
       objectNotFoundHint: '请检查您的应用导航设置或从侧边栏选择其他对象。',
       objectPackageDisabled: '对象“{{objectName}}”所属的软件包已被禁用，因此当前不提供该对象。',
       filterOrGroupNotEditable: '该筛选条件在其他条件之外还含有一个「或」分组，筛选编辑器无法显示这种结构，因此此处只读。视图仍会应用它。',
@@ -2670,8 +2704,16 @@ const zh = {
       viewTypeChartDesc: '聚合的柱状/折线/饼状图。',
       viewTypeTree: '树形',
       viewTypeTreeDesc: '按父级字段把自引用记录嵌套成层级树。',
+      viewTypeTimesheet: '工时表',
+      viewTypeTimesheetDesc: '按行和星期逐格填写数值，每个已填格子对应一条记录。',
       parentField: '父级字段',
       parentFieldHelp: '指向同一对象的父级字段，决定树的层级（仅自引用字段可选）。',
+      timesheetRowField: '行字段',
+      timesheetRowFieldHelp: '表格的每一行对应该字段的一个取值，例如项目。',
+      timesheetDateField: '日期字段',
+      timesheetDateFieldHelp: '记录按该日期落在对应的星期列。',
+      timesheetValueField: '数值字段',
+      timesheetValueFieldHelp: '每个格子显示和编辑的数值，例如工时。',
       newView: '新视图',
       viewName: '名称',
       viewNameHelp: '机器标识（snake_case），根据标题自动生成，可自行修改。',
@@ -3003,6 +3045,10 @@ const zh = {
       missingToken: '验证链接缺少令牌。',
       emailMissing: '缺少邮箱地址',
       resendButton: '重新发送验证邮件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的邮箱地址尚未验证。请向 {{email}} 发送一封验证邮件，然后点击邮件中的链接以验证您的账户。',
+      sendButton: '发送验证邮件',
       resending: '发送中…',
       resent: '邮件已发送！请查看收件箱',
       resentSuccess: '验证邮件已发送！',
@@ -3261,7 +3307,7 @@ const zh = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中设计',
     editApp: '编辑应用',
-    openAppInStudio: '在 Studio 中查看应用',
+    openAppInStudio: '在 Studio 中查看 {{app}}',
     openAssistant: '打开{{name}}助手',
     offline: '离线',
     usersOnline: '当前在线用户',
@@ -3467,7 +3513,6 @@ const zh = {
   },
   empty: {
     objectNotFound: '未找到对象',
-    objectNotFoundDescription: '对象 “{{name}}” 的定义不存在。请检查配置或返回选择有效的对象。',
     interfacePageSourceMissing: '此界面页引用了 “{{name}}”，但该来源不可用。',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',
@@ -3534,6 +3579,10 @@ const zh = {
       pendingHere: '草稿预览 · 本页 {{count}} 项未发布',
       pendingHere_one: '草稿预览 · 本页 {{count}} 项未发布',
       pendingHere_other: '草稿预览 · 本页 {{count}} 项未发布',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
+      pendingInApp_one: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
+      pendingInApp_other: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
       // 魔法时刻提示：刚搭好的草稿因为种子/示例数据要发布后才载入，预览里
       // 仪表盘显示 0、列表显示“暂无内容”。直接说明，避免把空预览误当成搭坏了。
       sampleDataTitle: '示例数据将在发布后出现',
@@ -3555,7 +3604,7 @@ const zh = {
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副驾起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',
@@ -3663,7 +3712,8 @@ const zh = {
       securityBlockTitle: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
-      securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      securityBlockWhere: '请在对象的“设置 → 谁能看到哪些记录”中修改后重新发布。',
+      flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',
         owdAlias: '记录共享模型（sharingModel）不是规范取值，运行时会按 private 处理此对象。',
@@ -3674,6 +3724,8 @@ const zh = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: '这个应用还没发布过。它可以正常使用，但只有搭建者能看到。发布后你的用户才能看到它。',
       message: '未发布的应用 —— 功能完整，但只有构建者能看到。发布后即可让您的用户看到。',
       publish: '发布',
       publishing: '发布中…',
@@ -4017,6 +4069,8 @@ const zh = {
     viewApprovals: '查看审批',
     noPendingApprovals: '暂无待审批事项',
     openApprovalsInbox: '打开审批中心',
+    needsYou: '需要你处理',
+    viewApprovalDetails: '查看详情',
     badgeTotal: '共 {{total}} 项',
     badgeNotifications: '{{count}} 个未读主题',
     badgeNotifications_one: '{{count}} 个未读主题',
@@ -4614,12 +4668,23 @@ const zh = {
     openNextAfterDecision: '处理后打开下一条',
     queueDone: '这个列表里的待审请求已全部处理完。',
     snapshotAsSubmitted: '提交时的内容',
+    snapshotChanged: '已改动',
+    snapshotCurrentValue: '当前值',
+    snapshotOpenRecord: '打开记录',
+    snapshotCurrentUnreadable: '无法读取当前记录，提交后的改动无法标出。',
+    snapshotChildCurrent: '当前值：提交时未保存子表数据。',
+    progressTitle: '审批进度',
+    attachmentsTitle: '附件',
     attachmentChip: '附件',
     attachmentOpenFailed: '无法打开附件，请重试',
     approveOneTitle: '通过“{{title}}”？',
     approveOneBody: '将以你的身份通过该请求。如需填写审批意见或附件，请打开该请求处理。',
     flowOrigin: '流程发起',
     submittedByYou: '由你提交',
+    awaitingYourDecision: '待你审批',
+    stepNumber: '第 {{n}} 步',
+    submittedByName: '提交人 {{name}}',
+    moreDecisionActions: '更多审批操作',
     sortBy: '排序',
     sortRecent: '最新优先',
     sortOldest: '最早优先',

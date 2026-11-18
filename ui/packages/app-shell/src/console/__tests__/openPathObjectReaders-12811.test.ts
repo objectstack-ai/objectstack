@@ -105,6 +105,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/views/RecordFormPage.tsx': { kind: 'off', why: 'a record form route' },
   'packages/app-shell/src/views/SearchResultsPage.tsx': { kind: 'off', why: 'the search route: every searchable object' },
+  'packages/app-shell/src/views/approval-decision/SubmittedRecord.tsx': { kind: 'off', why: "the approval request page's child tables: the record's owned children from every object" },
   'packages/app-shell/src/views/global-search-renderer.tsx': {
     kind: 'action',
     why: 'the global search block reads every object only once the user types, after ensureType(\'object\') (objectui#12980)',

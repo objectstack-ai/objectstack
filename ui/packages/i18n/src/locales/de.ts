@@ -189,6 +189,8 @@ const de = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Füllen Sie die Formularfelder aus und senden Sie ab oder brechen Sie ab.",
+    sectionNav: "Formularabschnitte",
+    sectionNavErrors: "Zu korrigierende Felder: {{number}}",
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
@@ -581,6 +583,7 @@ const de = {
         "Diese Ansicht ist gruppiert, aber ihre Datenquelle implementiert queryGroupHeaders nicht, daher können die Gruppen nicht gezählt werden. Entfernen Sie die Gruppierung, um die Datensätze anzuzeigen.",
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
+      draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -932,6 +935,8 @@ const de = {
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
     groupingUnstoredRemove: "Aus Gruppierung entfernen",
+    draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
+    withheldFieldsLeftOut: "Nicht angezeigt, gefiltert, sortiert oder gruppiert nach {{fields}}: Das Paket, das das Feld hinzufügt, ist deaktiviert. Es kehrt zurück, sobald das Paket aktiviert wird.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },
@@ -1377,6 +1382,8 @@ const de = {
     writeStrippedUnknownReason: "Vom Server nicht übernommen: {{fields}}",
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
+    approvalPending: "In Genehmigung",
+    approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
     approvalProgressLabel: "Genehmigungsfortschritt",
@@ -1586,6 +1593,9 @@ const de = {
     },
     total: "Gesamt",
     noDataSourceFor: "Keine Datenquelle verfügbar für",
+    drillTooMany: 'Mit diesem Wert sind zu viele Datensätze verknüpft, um sie hier aufzulisten. Schränken Sie die Dashboard-Filter ein und versuchen Sie es erneut.',
+    drillUnavailable: 'Die Datensätze hinter diesem Wert können hier nicht aufgelistet werden.',
+    drillFailed: 'Die Datensätze hinter diesem Wert konnten nicht geladen werden. Versuchen Sie es später erneut.',
     config: {
       breadcrumb: {
         dashboard: "Dashboard",
@@ -1918,10 +1928,21 @@ const de = {
       passwordsNote: "Temporäre Passwörter — einmalig angezeigt, nie gespeichert. Speichern Sie sie jetzt; jeder Benutzer muss seines bei der ersten Anmeldung ändern.",
       passwordsMore: "Weitere Einträge ausgelassen — bitte den Download verwenden.",
       positionsHint: "Positionen: Ordnen Sie eine Spalte mit Maschinennamen von Positionen zu, mehrere durch Semikolon (;) getrennt. Jede wird wie in Setup zugewiesen; ein Name, den es nicht gibt oder den Sie nicht zuweisen dürfen, wird in seiner Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
+      managerHint: "Vorgesetzte: Ordnen Sie eine Spalte mit der vorgesetzten Person jedes Benutzers zu, per E-Mail-Adresse (oder Telefonnummer, wenn die Telefon-Anmeldung aktiv ist). Vorgesetzte werden verknüpft, wenn alle Zeilen angelegt sind, daher zählt auch eine Person weiter unten in der Datei; eine Person, die nicht gefunden oder nicht verknüpft werden kann, wird in ihrer Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
       passwordsDownload: "CSV herunterladen",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_one: '{{count}} unveröffentlichte Änderung. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_other: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        showDraftToPublish: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_one: '{{count}} unveröffentlichte Änderung. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_other: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraft: 'Entwurf anzeigen',
+        receipt: 'Veröffentlicht. Ihre Änderungen sind live.',
+        dismissReceipt: 'Schließen',
         count: "{{count}} Änderung(en) sind noch nicht veröffentlicht — Benutzer können sie nicht sehen.",
         publish: "Veröffentlichen",
         published: "Alle ausstehenden Änderungen sind live.",
@@ -2017,6 +2038,9 @@ const de = {
           title: "„{{app}}“ wird bearbeitet",
           titleGeneric: "Diese App bearbeiten",
           description: "Was möchten Sie ändern? Ich passe diese App direkt an — ein Feld, Objekt, eine Ansicht oder ein Dashboard hinzufügen oder Vorhandenes anpassen.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Fragen Sie nach den Daten dieser App – Anzahlen, Listen und Zusammenfassungen – oder sagen Sie mir, was ich ändern soll, und ich passe die App direkt an: ein Feld, ein Objekt, eine Ansicht oder ein Dashboard.",
         },
       },
       clearConversation: "Leeren",
@@ -2156,7 +2180,7 @@ const de = {
       changesApplied: "Angewendet",
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
-      discussing: "Thema: {{target}}",
+      discussing: "Angezeigt: {{target}}",
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2204,11 +2228,16 @@ const de = {
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
-        title: "Assistent",
+        title: "KI-Assistent",
         description: "KI-Assistent-Chat",
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
         maximize: "Als ganze Seite öffnen",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Verlauf",
+        backToChat: "Zurück zum Chat",
+        expand: "Erweitern",
+        restore: "Seitenleiste wiederherstellen",
         open: "Assistent öffnen",
         planAwaitingApproval: "Ein vorgeschlagener Plan wartet auf Ihre Freigabe",
       },
@@ -2310,6 +2339,7 @@ const de = {
       view: "Anzeigen",
       confirm: "Bestätigen",
       cancel: "Abbrechen",
+      continue: "Fortsetzen",
       prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
       organizationName: {
         title: "Organisation benennen",
@@ -2496,8 +2526,16 @@ const de = {
       },
       viewTypeTree: "Baum",
       viewTypeTreeDesc: "Selbstreferenzierende Datensätze über ein übergeordnetes Feld zu einer Hierarchie verschachteln.",
+      viewTypeTimesheet: "Zeiterfassung",
+      viewTypeTimesheetDesc: "Eine Zahl pro Zeile und Wochentag eingeben; jede ausgefüllte Zelle ist ein Datensatz.",
       parentField: "Übergeordnetes Feld",
       parentFieldHelp: "Das Feld, das auf den übergeordneten Datensatz (dasselbe Objekt) verweist und die Hierarchie definiert. Nur selbstreferenzierende Felder kommen infrage.",
+      timesheetRowField: "Zeilenfeld",
+      timesheetRowFieldHelp: "Jede Zeile des Rasters ist ein Wert dieses Felds, etwa ein Projekt.",
+      timesheetDateField: "Datumsfeld",
+      timesheetDateFieldHelp: "Datensätze werden dem Wochentag dieses Datums zugeordnet.",
+      timesheetValueField: "Wertfeld",
+      timesheetValueFieldHelp: "Die Zahl, die jede Zelle anzeigt und bearbeitet, etwa Stunden.",
       viewName: "Name",
       viewNameHelp: "Technischer Schlüssel (snake_case). Wird aus dem Titel automatisch gefüllt — bei Bedarf anpassen.",
       viewNameRequired: "Geben Sie einen Schlüssel ein (Kleinbuchstaben, Ziffern, Unterstrich). Bei nicht-lateinischen Titeln wird er nicht automatisch gefüllt.",
@@ -2526,7 +2564,7 @@ const de = {
       expandToPage: "Als ganze Seite öffnen",
       openAsPage: "Als ganze Seite öffnen",
       objectNotFound: "Objekt nicht gefunden",
-      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert in der aktuellen Konfiguration nicht.",
+      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert nicht, oder Sie haben keinen Zugriff darauf.",
       objectNotFoundHint: "Überprüfen Sie Ihre App-Navigationseinstellungen oder wählen Sie ein anderes Objekt aus der Seitenleiste.",
       objectPackageDisabled: "Das Objekt „{{objectName}}“ gehört zu einem deaktivierten Paket und wird daher nicht bereitgestellt.",
       filterOrGroupNotEditable: "Dieser Filter enthält neben anderen Bedingungen eine ODER-Gruppe, die der Filter-Editor nicht darstellen kann, daher ist er hier schreibgeschützt. Die Ansicht wendet ihn weiterhin an.",
@@ -2681,6 +2719,10 @@ const de = {
       launcherLabel: "App-Launcher",
       menuLabel: "App-Navigation",
       menuEmpty: "Diese App hat keine Navigationseinträge, die Sie öffnen können.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "App-Menüleiste",
+      searchMenu: "Menü durchsuchen",
+      phoneBarHint: "Markieren Sie einen Eintrag mit dem Stern, um ihn in die untere Leiste zu legen. Die Leiste zeigt die ersten vier.",
       itemMenu: "Weitere Aktionen für {{name}}",
       openInNewTab: "In neuem Tab öffnen",
       copyLink: "Link kopieren",
@@ -2921,6 +2963,10 @@ const de = {
       missingToken: "Im Bestätigungslink fehlt ein Token.",
       emailMissing: "E-Mail-Adresse fehlt",
       resendButton: "Bestätigungs-E-Mail erneut senden",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ihre E-Mail-Adresse ist noch nicht bestätigt. Senden Sie einen Bestätigungslink an {{email}} und klicken Sie dann auf den Link, um Ihr Konto zu bestätigen.",
+      sendButton: "Bestätigungs-E-Mail senden",
       resending: "Sende…",
       resent: "E-Mail gesendet! Überprüfen Sie Ihren Posteingang",
       resentSuccess: "Bestätigungs-E-Mail gesendet!",
@@ -3195,7 +3241,7 @@ const de = {
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "App im Studio ansehen",
+    openAppInStudio: "{{app}} im Studio ansehen",
   },
   home: {
     build: {
@@ -3386,7 +3432,6 @@ const de = {
   },
   empty: {
     objectNotFound: "Objekt nicht gefunden",
-    objectNotFoundDescription: "Definition des Objekts „{{name}}“ fehlt. Überprüfen Sie Ihre Konfiguration oder navigieren Sie zurück.",
     interfacePageSourceMissing: "Diese Interface-Seite verweist auf „{{name}}“, das nicht verfügbar ist.",
     pageNotFound: "Seite nicht gefunden",
     pageNotFoundDescription: "Die Seite „{{name}}“ wurde nicht gefunden. Sie wurde möglicherweise entfernt oder umbenannt.",
@@ -3766,6 +3811,8 @@ const de = {
     viewApprovals: "Genehmigungen anzeigen",
     noPendingApprovals: "Keine ausstehenden Genehmigungen",
     openApprovalsInbox: "Genehmigungs-Posteingang öffnen",
+    needsYou: "Wartet auf Ihre Aktion",
+    viewApprovalDetails: "Details anzeigen",
     badgeTotal: "{{total}} insgesamt",
     badgeNotifications: "{{count}} ungelesene Themen",
     badgeNotifications_one: "{{count}} ungelesenes Thema",
@@ -4365,12 +4412,23 @@ const de = {
     openNextAfterDecision: 'Nach der Entscheidung die nächste öffnen',
     queueDone: 'In dieser Liste sind keine offenen Anfragen mehr.',
     snapshotAsSubmitted: 'Wie eingereicht',
+    snapshotChanged: 'Geändert',
+    snapshotCurrentValue: 'Aktueller Wert',
+    snapshotOpenRecord: 'Datensatz öffnen',
+    snapshotCurrentUnreadable: 'Der aktuelle Datensatz kann nicht gelesen werden, daher sind Änderungen nach der Einreichung nicht markiert.',
+    snapshotChildCurrent: 'Aktuelle Zeilen: Die Einreichung speichert keine untergeordneten Zeilen.',
+    progressTitle: 'Genehmigungsfortschritt',
+    attachmentsTitle: 'Anhänge',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',
     approveOneTitle: '„{{title}}“ genehmigen?',
     approveOneBody: 'Die Anfrage wird mit Ihrer Identität genehmigt. Um einen Kommentar oder Anhang hinzuzufügen, öffnen Sie die Anfrage.',
     flowOrigin: 'Vom Flow gestartet',
     submittedByYou: 'Von Ihnen eingereicht',
+    awaitingYourDecision: 'Wartet auf Ihre Genehmigung',
+    stepNumber: 'Schritt {{n}}',
+    submittedByName: 'Eingereicht von {{name}}',
+    moreDecisionActions: 'Weitere Genehmigungsaktionen',
     sortBy: 'Sortieren',
     sortRecent: 'Neueste zuerst',
     sortOldest: 'Älteste zuerst',
@@ -4546,6 +4604,10 @@ const de = {
       pendingHere: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
       pendingHere_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung auf dieser Seite',
       pendingHere_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
     },
     changes: {
       title: 'Ausstehende Änderungen',
@@ -4562,7 +4624,7 @@ const de = {
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       fieldOrderChanged: 'Feldreihenfolge geändert',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Assistent entworfen hat',
       draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
@@ -4670,7 +4732,8 @@ const de = {
       securityBlockTitle: 'Veröffentlichen wird abgelehnt — {{count}} Element(e) benötigen zuerst eine Entscheidung',
       securityBlockTitle_one: 'Veröffentlichen wird abgelehnt — {{count}} Element benötigt zuerst eine Entscheidung',
       securityBlockTitle_other: 'Veröffentlichen wird abgelehnt — {{count}} Elemente benötigen zuerst eine Entscheidung',
-      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Datensatzfreigabe und veröffentlichen Sie erneut.',
+      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Wer welche Datensätze sehen kann und veröffentlichen Sie erneut.',
+      flowChecksTitle: 'Vor dem Veröffentlichen: Die Veröffentlichungsprüfung meldet Folgendes',
       securityRule: {
         owdUnset: 'Es ist keine Basis für die Datensatzfreigabe (sharingModel) deklariert. Die Laufzeit greift auf private zurück, aber die Basis muss eine bewusste Entscheidung sein.',
         owdAlias: 'Die Basis für die Datensatzfreigabe (sharingModel) ist kein kanonischer Wert, daher behandelt die Laufzeit das Objekt als private.',
@@ -4681,6 +4744,8 @@ const de = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Diese App ist noch nicht veröffentlicht. Sie funktioniert, aber nur Builder können sie sehen. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       message: 'Unveröffentlichte App — voll funktionsfähig, aber nur für Builder sichtbar. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       publish: 'Veröffentlichen',
       publishing: 'Wird veröffentlicht…',

@@ -1206,6 +1206,50 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   );
 
   /**
+   * The opening fill (objectstack#35050): a create form that opened with this
+   * lookup already holding a record — a related list's New pre-linking its
+   * parent, a URL prefill, a form view default — fills the declared targets
+   * from that record, as a pick of it would have. Nobody picked it, so the
+   * form's other values are all ones it opened with or the user typed: the
+   * pick rule runs with no earlier pick and without `overwrite`, and only an
+   * empty target fills.
+   *
+   * The record is the one hydration reads for the chip's label (an expanded
+   * reference value is its own record), so the fill costs no second read. It
+   * runs once per opening value, and not at all once the field holds anything
+   * else: from then on a pick fills, by the pick rule. The opening record is
+   * kept as this widget's earlier pick, so the next pick replaces what it
+   * filled exactly as it replaces what a pick filled.
+   */
+  const openingValue = props.openingValue;
+  const openingFilledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autofillPairs?.length || !onAutofill) return;
+    const opening = normalizeId(openingValue);
+    if (opening == null || opening === '' || typeof opening === 'object') return;
+    const key = String(opening);
+    if (openingFilledRef.current === key) return;
+    const held = normalizeId(value);
+    if (held == null || String(held) !== key) {
+      openingFilledRef.current = key;
+      return;
+    }
+    const expanded = value != null && typeof value === 'object' ? value : parseReferenceObjectString(value);
+    const row: Record<string, unknown> | undefined =
+      expanded ?? hydratedRecords.find((r) => String(recordValue(r, idField)) === key);
+    if (!row) return;
+    openingFilledRef.current = key;
+    setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
+    const patch = declaredLookupAutofillPatch(
+      autofillPairs.map(({ target, source }) => ({ target, source })),
+      row,
+      resolvedDependentValues,
+      null,
+    );
+    if (Object.keys(patch).length > 0) onAutofill(patch, { opening: true });
+  }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues]);
+
+  /**
    * Commit a pick. `row` is the record `option` was built from.
    *
    * The row is kept so the pick's label resolves synchronously and durably,
@@ -1507,9 +1551,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         // A macrotask runs after Radix's focus-return layout effects, so focus is
         // safely back on the still-mounted field trigger before the Dialog opens.
         await new Promise((r) => setTimeout(r, 0));
+        // The new record is seeded with the `dependsOn` values this picker
+        // filters by (objectstack#35050), so the record the user makes is
+        // one the scoped picker lists. A picker with no cascade seeds nothing.
         const result: any = await execute({
           type: 'modal',
-          modal: { objectName: referenceTo, mode: 'create' },
+          modal: {
+            objectName: referenceTo,
+            mode: 'create',
+            ...(dependentFilter ? { initialValues: { ...dependentFilter } } : {}),
+          },
         } as any);
         if (result?.success && result.data) {
           const opt = recordToOption(result.data, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
@@ -1527,7 +1578,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       if (!dataSource || !label) return;
       setCreating(true);
       try {
-        const created = await (dataSource as any).create(referenceTo, { [displayField]: label });
+        const created = await (dataSource as any).create(referenceTo, { ...(dependentFilter ?? {}), [displayField]: label });
         const opt = recordToOption(created, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
         handleSelect(opt, created);
       } catch (err) {
@@ -1536,7 +1587,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setCreating(false);
       }
     },
-    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms],
+    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter],
   );
 
   /**
@@ -1954,9 +2005,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         {/* The popover never runs past the room Radix reports on the side it
             opens to, and goes to the side with more room when its whole list
             does not fit (Radix's default flip, kept): the search row keeps its
-            height and the list takes what is left (objectstack#34362). */}
+            height and the list takes what is left (objectstack#34362).
+            Across, it is as wide as its trigger but never narrower than 18rem,
+            so an option name stays readable when the trigger is a narrow
+            line-item grid cell; and never wider than the room Radix reports,
+            so on a narrow screen it stays inside the viewport. The floor is
+            itself capped by that room (`min()`), because a min-width larger
+            than the max-width would win over it. Radix's default shift keeps
+            a widened panel on screen when the trigger sits at the right edge
+            (objectstack#34601). */}
         <PopoverContent
-          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] flex-col p-0"
+          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))] max-w-(--radix-popover-content-available-width) flex-col p-0"
           align="start"
           data-testid="lookup-popover"
         >

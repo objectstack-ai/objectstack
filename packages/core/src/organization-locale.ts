@@ -114,3 +114,85 @@ export async function resolveOrganizationLocale(
   const declared = appDefaultLocale(input.i18n);
   return declared ? { locale: declared, source: 'app-default' } : undefined;
 }
+
+/**
+ * The settings service's refusal of a namespace or key nobody REGISTERED —
+ * `SETTINGS_UNKNOWN_NAMESPACE` / `SETTINGS_UNKNOWN_KEY`, as `@objectstack/objectql`'s
+ * home-localization bridge reads them.
+ */
+function isUnregisteredSetting(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return code === 'SETTINGS_UNKNOWN_NAMESPACE' || code === 'SETTINGS_UNKNOWN_KEY';
+}
+
+/**
+ * [ruling 6913660232, review 6924979595 S1] The settings door a WRITER of
+ * organization-language text hands {@link resolveOrganizationLocale} (through
+ * {@link readOrganizationTextLocale}): an
+ * unregistered `localization.locale` is answered as not set, so the next rung
+ * (the app's declared default) answers. A host that loads no `localization`
+ * manifest has no setting anybody could have set. Any other throw still
+ * propagates: the setting may exist and could not be read, and the writer
+ * fails rather than store another language over it.
+ *
+ * Shared by every writer of such text — the flow record write
+ * (`@objectstack/service-automation`) and a hook's or action's declared text
+ * (`ctx.text`, `@objectstack/runtime`, #34374) — and kept apart from the
+ * reader itself, so the seed loader's rung 1 keeps propagating every throw.
+ */
+function treatUnregisteredLocaleSettingAsUnset(settings: unknown): unknown {
+  const door = settings as { get?: unknown } | null | undefined;
+  if (!door || typeof door.get !== 'function') return settings;
+  const get = door.get as (namespace: string, key: string, ctx?: { tenantId?: string }) => Promise<unknown>;
+  return {
+    async get(namespace: string, key: string, ctx?: { tenantId?: string }) {
+      try {
+        return await get.call(settings, namespace, key, ctx);
+      } catch (err: unknown) {
+        if (isUnregisteredSetting(err)) return undefined;
+        throw err;
+      }
+    },
+  };
+}
+
+/**
+ * The organization's language for a sentence the platform WRITES into a record
+ * on the organization's behalf — the one reading every such writer shares:
+ * the flow record write's text field (`@objectstack/service-automation`) and a
+ * hook's or action's declared text (`ctx.text`, `@objectstack/runtime`,
+ * #34374). {@link resolveOrganizationLocale} over the `settings` and `i18n`
+ * services, both looked up at QUESTION time (a service registered after the
+ * caller bound is still found), with an unregistered Localization setting
+ * answered as not set. `undefined`: no rung answered, write the authored text.
+ * A settings read that throws rejects.
+ *
+ * NOT a second reading of the setting: rung 1 here IS
+ * {@link readOrganizationLocaleSetting}, reached through
+ * {@link resolveOrganizationLocale}. What this adds over that reader, for a
+ * writer only, and why the seed loader keeps calling that reader bare:
+ *
+ *  | the setting answers…                         | `readOrganizationLocaleSetting` | this                  |
+ *  | set (`source !== 'default'`)                 | the value                       | the value             |
+ *  | the `source: 'default'` placeholder          | `undefined`                     | the app default       |
+ *  | no settings service                          | `undefined`                     | the app default       |
+ *  | `SETTINGS_UNKNOWN_NAMESPACE` / `…_KEY`       | rejects                         | the app default       |
+ *  | any other throw                              | rejects                         | rejects               |
+ *
+ * — rung 2 (the app's declared `i18n.defaultLocale`), an unregistered setting
+ * read as not set, and both services looked up at question time by name.
+ */
+export async function readOrganizationTextLocale(
+  getService: ((name: string) => unknown) | undefined,
+  organizationId: string | undefined,
+): Promise<string | undefined> {
+  let settings: unknown;
+  let i18n: unknown;
+  try { settings = getService?.('settings'); } catch { settings = undefined; }
+  try { i18n = getService?.('i18n'); } catch { i18n = undefined; }
+  return (await resolveOrganizationLocale({
+    settings: treatUnregisteredLocaleSettingAsUnset(settings),
+    i18n,
+    organizationId,
+  }))?.locale;
+}

@@ -189,6 +189,8 @@ const ja = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "フォームの項目を入力してから、送信またはキャンセルしてください。",
+    sectionNav: "フォームのセクション",
+    sectionNavErrors: "修正が必要な項目: {{number}}",
     deniedDescription: "このフィールドを編集する権限がありません。",
     serverDefaultHint: "保存時に自動で設定されます。",
     requiredForAction: "「{{action}}」の実行に必須です。",
@@ -581,6 +583,7 @@ const ja = {
         "このビューはグループ化されていますが、データソースが queryGroupHeaders を実装していないため、グループの件数を数えられません。レコードを表示するにはグループ化を解除してください。",
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
+      draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -932,6 +935,8 @@ const ja = {
     removeGroup: "削除",
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
     groupingUnstoredRemove: "グループ化から削除",
+    draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
+    withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
   },
@@ -1438,6 +1443,8 @@ const ja = {
     writeStrippedUnknownReason: "次の項目はサーバーで反映されませんでした: {{fields}}",
     approvalPendingEditable: "承認中 · 編集可能",
     approvalPendingTooltip: "このレコードには承認待ちのリクエストがありますが、このステップでは編集できます",
+    approvalPending: "承認中",
+    approvalPendingNotEditableTooltip: "このレコードには承認待ちのリクエストがあります",
     approvalProgress: "承認 — {{need}} 件中 {{got}} 件",
     approvalProgressGroups: "合議 — {{need}} グループ中 {{got}} グループ",
     approvalProgressLabel: "承認の進捗",
@@ -1586,6 +1593,9 @@ const ja = {
     },
     total: "合計",
     noDataSourceFor: "データソースが利用できません：",
+    drillTooMany: 'この値に関連するレコードが多すぎるため、ここには一覧表示できません。ダッシュボードのフィルターを絞り込んでから再度お試しください。',
+    drillUnavailable: 'この値に対応するレコードはここでは一覧表示できません。',
+    drillFailed: 'この値に対応するレコードを読み込めませんでした。しばらくしてから再度お試しください。',
     config: {
       breadcrumb: {
         dashboard: "ダッシュボード",
@@ -1918,10 +1928,21 @@ const ja = {
       passwordsNote: "仮パスワード — 一度だけ表示され、保存されません。今すぐ保存してください。各ユーザーは初回サインイン時に変更する必要があります。",
       passwordsMore: "以降のエントリは省略されました — ダウンロードをご利用ください。",
       positionsHint: "役職：役職のマシン名の列をマッピングできます（複数は「;」で区切ります）。各役職は Setup と同じルールで割り当てられます。存在しない役職や割り当て権限のない役職はその行にエラーとして表示され、ユーザーは作成されます。",
+      managerHint: "上司：各ユーザーの上司を示す列をマッピングできます（メールアドレス、電話番号ログインが有効な場合は電話番号）。上司はすべての行の取り込み後に関連付けられるため、ファイルの後方にいる上司も有効です。見つからない、または関連付けできない上司はその行にエラーとして表示され、ユーザーは作成されます。",
       passwordsDownload: "CSV をダウンロード",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        publishFromBar_one: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        publishFromBar_other: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        showDraftToPublish: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraftToPublish_one: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraftToPublish_other: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraft: '下書きを表示',
+        receipt: '公開しました。変更が反映されました。',
+        dismissReceipt: '閉じる',
         // {{detail}} はランタイムが返すメッセージ列なので、中間コロンは全角
         // (exportFailed などと同じ。単一トークンの値なら半角)。
         count: "未公開の変更が {{count}} 件あります — ユーザーには表示されません。",
@@ -2019,6 +2040,9 @@ const ja = {
           title: "「{{app}}」を編集中",
           titleGeneric: "このアプリを編集",
           description: "何を変更しますか？このアプリをその場で変更します — 項目、オブジェクト、ビュー、ダッシュボードの追加や、既存部分の調整ができます。",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "このアプリのデータについて質問するか（件数、一覧、要約）、変更したい点を伝えてください。項目、オブジェクト、ビュー、ダッシュボードをその場で変更します。",
         },
       },
       clearConversation: "クリア",
@@ -2158,7 +2182,7 @@ const ja = {
       changesApplied: "適用済み",
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
-      discussing: "話題: {{target}}",
+      discussing: "表示中: {{target}}",
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -2206,11 +2230,16 @@ const ja = {
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
-        title: "アシスタント",
+        title: "AI アシスタント",
         description: "AI アシスタントのチャット",
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
         maximize: "フルページで開く",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "履歴",
+        backToChat: "チャットに戻る",
+        expand: "展開",
+        restore: "サイドパネルに戻す",
         open: "アシスタントを開く",
         planAwaitingApproval: "提案されたプランが承認待ちです",
       },
@@ -2312,6 +2341,7 @@ const ja = {
       view: "表示",
       confirm: "確定",
       cancel: "キャンセル",
+      continue: "続ける",
       prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
       organizationName: {
         title: "組織に名前を付ける",
@@ -2498,8 +2528,16 @@ const ja = {
       },
       viewTypeTree: "ツリー",
       viewTypeTreeDesc: "親項目によって自己参照レコードを階層に入れ子にします。",
+      viewTypeTimesheet: "タイムシート",
+      viewTypeTimesheetDesc: "行と曜日ごとに数値を入力します。入力済みのセルが1件のレコードです。",
       parentField: "親項目",
       parentFieldHelp: "階層を定義する親レコード（同一オブジェクト）を指す項目です。自己参照の項目のみ指定できます。",
+      timesheetRowField: "行の項目",
+      timesheetRowFieldHelp: "グリッドの各行はこの項目の値（例: プロジェクト）に対応します。",
+      timesheetDateField: "日付項目",
+      timesheetDateFieldHelp: "レコードはこの日付の曜日列に配置されます。",
+      timesheetValueField: "数値項目",
+      timesheetValueFieldHelp: "各セルに表示・編集する数値（例: 時間）です。",
       viewName: "名前",
       viewNameHelp: "マシンキー（snake_case）。タイトルから自動入力されます — 必要に応じて編集してください。",
       viewNameRequired: "キーを入力してください（英小文字、数字、アンダースコア）。ラテン文字以外のタイトルでは自動入力されません。",
@@ -2528,7 +2566,7 @@ const ja = {
       expandToPage: "フルページで開く",
       openAsPage: "フルページで開く",
       objectNotFound: "オブジェクトが見つかりません",
-      objectNotFoundDescription: "オブジェクト「{{objectName}}」は現在の設定に存在しません。",
+      objectNotFoundDescription: "オブジェクト「{{objectName}}」は存在しないか、アクセスする権限がありません。",
       objectNotFoundHint: "アプリのナビゲーション設定を確認するか、サイドバーから別のオブジェクトを選択してください。",
       objectPackageDisabled: "オブジェクト「{{objectName}}」が属するパッケージは無効になっているため、提供されていません。",
       filterOrGroupNotEditable: "このフィルターには他の条件と並んで OR グループが含まれており、フィルターエディターでは表示できないため、ここでは読み取り専用です。ビューには引き続き適用されます。",
@@ -2683,6 +2721,10 @@ const ja = {
       launcherLabel: "アプリランチャー",
       menuLabel: "アプリナビゲーション",
       menuEmpty: "このアプリには開けるナビゲーション項目がありません。",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "アプリのメニューバー",
+      searchMenu: "メニューを検索",
+      phoneBarHint: "星を付けた項目が下部バーに表示されます（先頭の 4 件）。",
       itemMenu: "{{name}} のその他の操作",
       openInNewTab: "新しいタブで開く",
       copyLink: "リンクをコピー",
@@ -2923,6 +2965,10 @@ const ja = {
       missingToken: "確認リンクにトークンがありません。",
       emailMissing: "メールアドレスがありません",
       resendButton: "確認メールを再送信",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "メールアドレスはまだ確認されていません。{{email}} に確認リンクを送信し、リンクをクリックしてアカウントを確認してください。",
+      sendButton: "確認メールを送信",
       resending: "送信中…",
       resent: "メールが送信されました！受信箱を確認してください",
       resentSuccess: "確認メールが送信されました！",
@@ -3197,7 +3243,7 @@ const ja = {
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
     editApp: "アプリを編集",
-    openAppInStudio: "Studio でアプリを表示",
+    openAppInStudio: "Studio で {{app}} を表示",
   },
   home: {
     build: {
@@ -3388,7 +3434,6 @@ const ja = {
   },
   empty: {
     objectNotFound: "オブジェクトが見つかりません",
-    objectNotFoundDescription: "オブジェクト「{{name}}」の定義が見つかりません。設定を確認するか、有効なオブジェクトを選択してください。",
     interfacePageSourceMissing: "このインターフェースページは「{{name}}」を参照していますが、利用できません。",
     pageNotFound: "ページが見つかりません",
     pageNotFoundDescription: "ページ「{{name}}」が見つかりません。削除または名前変更された可能性があります。",
@@ -3768,6 +3813,8 @@ const ja = {
     viewApprovals: "承認を表示",
     noPendingApprovals: "承認待ちはありません",
     openApprovalsInbox: "承認ボックスを開く",
+    needsYou: "あなたの対応が必要",
+    viewApprovalDetails: "詳細を表示",
     badgeTotal: "合計 {{total}} 件",
     badgeNotifications: "未読トピック {{count}} 件",
     badgeNotifications_one: "未読トピック {{count}} 件",
@@ -4367,12 +4414,23 @@ const ja = {
     openNextAfterDecision: '決定後に次を開く',
     queueDone: 'このリストの保留中のリクエストはすべて処理済みです。',
     snapshotAsSubmitted: '申請時の内容',
+    snapshotChanged: '変更あり',
+    snapshotCurrentValue: '現在の値',
+    snapshotOpenRecord: 'レコードを開く',
+    snapshotCurrentUnreadable: '現在のレコードを読み取れないため、申請後の変更は表示されません。',
+    snapshotChildCurrent: '現在の値：申請時の明細行は保存されていません。',
+    progressTitle: '承認の進捗',
+    attachmentsTitle: '添付ファイル',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
     approveOneBody: 'あなたの名義でこのリクエストを承認します。コメントや添付を付ける場合は、リクエストを開いて操作してください。',
     flowOrigin: 'フロー起動',
     submittedByYou: 'あなたが提出',
+    awaitingYourDecision: 'あなたの承認待ち',
+    stepNumber: 'ステップ {{n}}',
+    submittedByName: '申請者 {{name}}',
+    moreDecisionActions: 'その他の承認操作',
     sortBy: '並び替え',
     sortRecent: '新しい順',
     sortOldest: '古い順',
@@ -4548,6 +4606,10 @@ const ja = {
       pendingHere: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
       pendingHere_one: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
       pendingHere_other: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
+      pendingInApp_one: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
+      pendingInApp_other: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
     },
     changes: {
       title: '保留中の変更',
@@ -4564,7 +4626,7 @@ const ja = {
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
       fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
+      draftedByCopilot: 'AI アシスタントが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
@@ -4672,7 +4734,8 @@ const ja = {
       securityBlockTitle: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
-      securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      securityBlockWhere: 'オブジェクトの「設定 → 誰がどのレコードを見られるか」で修正してから、もう一度公開してください。',
+      flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',
         owdAlias: 'レコード共有のベースライン（sharingModel）が正規の値ではないため、ランタイムはこのオブジェクトを private として扱います。',
@@ -4683,6 +4746,8 @@ const ja = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'このアプリはまだ公開されていません。動作はしますが、表示できるのはビルダーだけです。公開するとユーザーに表示されます。',
       message: '未公開のアプリ — 機能はすべて使えますが、ビルダーにしか表示されません。公開するとユーザーに表示されます。',
       publish: '公開',
       publishing: '公開中…',

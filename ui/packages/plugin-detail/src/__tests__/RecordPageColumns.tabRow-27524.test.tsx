@@ -8,9 +8,9 @@
 
 /**
  * objectstack#27524, Targets 8 and 9 — the record page's tab row, through
- * `RecordPageColumns`: 「概览」, then 动态, then the related panels in the
- * reader's arrangement with their counts, the hidden panels' tabs at the end
- * of the dropdown; and the enlarged state as the active tab — the header and
+ * `RecordPageColumns`: 「概览」, then the related panels in the reader's
+ * arrangement with their counts, then 动态 last (objectstack#34590), the hidden
+ * panels' tabs at the end of the dropdown; and the enlarged state as the active tab — the header and
  * the row stay as they are, the full face is drawn below the row, 「概览」
  * returns. The block renderer is stubbed, so what is measured is the page's
  * own composition; the row's width rule is pinned in `RecordTabRow-27524`.
@@ -67,7 +67,7 @@ beforeEach(() => RelatedCountStore._reset());
 afterEach(() => cleanup());
 
 describe('the record page tab row (objectstack#27524, Target 8)', () => {
-  it('sits at the bottom of the header: 概览, 动态, then the panels in the reader\'s order', () => {
+  it('sits at the bottom of the header: 概览, the panels in the reader\'s order, then 动态 (objectstack#34590)', () => {
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
     const { container } = render(
       <RecordPageColumns
@@ -78,7 +78,8 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
         onEnlargeRelated={vi.fn()}
       />,
     );
-    expect(tabIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'call.lead_id', 'task.lead_id', 'note.parent_id']);
+    // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
+    expect(tabIds()).toEqual(['overview', 'call.lead_id', 'task.lead_id', 'note.parent_id', RECORD_PAGE_TIMELINE_PANEL]);
     expect(activeTab()).toBe('overview');
     expect(document.querySelector('[data-record-tab="overview"]')?.textContent).toBe('Overview');
     // After the header nodes, before the page's columns.
@@ -100,7 +101,8 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
         onEnlargeRelated={vi.fn()}
       />,
     );
-    expect(tabIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'task.lead_id', 'call.lead_id']);
+    // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
+    expect(tabIds()).toEqual(['overview', 'task.lead_id', 'call.lead_id', RECORD_PAGE_TIMELINE_PANEL]);
     expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+1');
   });
 
@@ -163,7 +165,8 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
 
   it('is drawn in the stack too: the narrow face keeps the row, not a tab tier', () => {
     render(<RecordPageColumns tier="stack" columns={columnsOf()} onEnlargeRelated={vi.fn()} />);
-    expect(tabIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, ...DEFAULT]);
+    // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
+    expect(tabIds()).toEqual(['overview', ...DEFAULT, RECORD_PAGE_TIMELINE_PANEL]);
     expect(document.querySelector('[data-record-columns-shown="details"]')).not.toBeNull();
   });
 });

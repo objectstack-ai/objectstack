@@ -969,17 +969,26 @@ export const SettingsNamespacePayloadSchema = lazySchema(() => z.object({
    * this says what is in use, which may come from elsewhere: the AI runtime
    * detects a provider from its own boot environment when nothing is saved.
    * Absent, or a key absent from it, means not stated (unknown), which is not
-   * `source: 'none'`. Only `value` and `source` are served, and `value` is
-   * always one of the key's options, never a credential.
+   * `source: 'none'`. Only `value` and `source` are served, and a non-null
+   * `value` is always one of the key's options, never a credential.
+   * `value` is null in two cases: nothing is in use (`source: 'none'`), or
+   * something is in use that the runtime's boot environment or host supplied
+   * and no option names (`source: 'environment'`, e.g. a mail transport the
+   * host application hands over). So whether something is in use is read from
+   * `source` alone, never from `value === null`; `source: 'settings'` always
+   * names an option.
    */
   live: z
     .record(
       z.string(),
       z.object({
-        value: z.string().nullable().describe("The option in use; null exactly when source is 'none'"),
+        value: z
+          .string()
+          .nullable()
+          .describe("The option in use; null when source is 'none', or when source is 'environment' and no option names what is in use. Read in-use from source, never from a null value"),
         source: z
           .enum(['settings', 'environment', 'none'])
-          .describe("Where the running system took it from: these settings, its own boot environment, or nothing in use"),
+          .describe("Where the running system took it from: these settings, its own boot environment or host, or nothing in use"),
       }),
     )
     .optional()

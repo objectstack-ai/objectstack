@@ -11,17 +11,25 @@ forgot to thread the acting session.
 
 This page is **the authority** for the population that control acts on: every
 write call site on the application surface, what object it targets, and what
-execution context it threads. The figures below are generated, not written —
+execution context it threads. Its figures are generated, not written —
 rebuilt from the tree by `scripts/tenant-audit-census.mjs`, and
 `scripts/check-tenant-audit-census.mjs` fails the build when what is committed
 and what the tree says disagree.
 
-The per-site rows live next door, in
-`docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`, and are written by
-the same command. The split is the one `packages/spec`'s strictness ledger
-already uses and is there for the same reason: this page has prose worth
-preserving and the row table has none, so the table is regenerated whole while
-the page keeps a small generated region for the figures its prose reasons about.
+The per-site rows and every package's totals live next door, one shard per
+package under `docs/audits/2026-08-tenant-audit-write-call-sites.counts/`
+(indexed by `docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`), and
+are written by the same command. The split is the one `packages/spec`'s
+strictness ledger already uses and is there for the same reason: this page has
+prose worth preserving and the row tables have none, so the tables are
+regenerated whole while the page keeps a small generated region.
+
+⛔ **This page states no live population figure, and no committed file states a
+total across packages.** Every branch that adds a write call site would rewrite
+such a total, so any two of them would conflict on it.
+`node scripts/check-tenant-audit-census.mjs` prints the census totals on every
+run instead, from the census it has just taken. The figures quoted in the
+history below are dated and are never regenerated.
 
 ## ⚠️ Why this page exists at all
 
@@ -89,12 +97,12 @@ under `{ context: { isSystem: true } }`, that alone subtracted a real engine
 write from this population while the census printed the type text and said the
 subtraction was probably wrong. The same door rule is now read off the type text
 itself, so an unnamed type that states a write door places its site. That is
-what moved this page's population from 225 to 227; nothing about the two sites
-changed, only whether this instrument could see them.
+what moved this page's population from 225 to 227 on 2026-09-18; nothing about
+the two sites changed, only whether this instrument could see them.
 
 **The expensive failure direction is a keyword.** Sites whose receiver the author
-typed `any` have no type to read, and there are 67 of them — just over a fifth
-of the population, concentrated in exactly the seed and bootstrap paths this
+typed `any` have no type to read — a sizeable share of the population (the gate
+prints how many), concentrated in exactly the seed and bootstrap paths this
 control exists for. Scoring an unreadable receiver as "not an engine" would have
 dropped every one of them silently, with a clean exit and a smaller number that
 reads exactly like a smaller truth. So `any` is not a classification here: it goes
@@ -107,12 +115,11 @@ Tenancy itself is enabled *by default* — `isTenancyDisabled()` reads
 `tenancy.enabled === false` and nothing else — so the object registry only has to
 find the opt-outs. Across 117 declared objects — the dated, ⛔ unenforced
 corpus-scale figure below — exactly two opt out (`sys_api_key`,
-`sys_sso_provider`), and exactly one write call site on this surface targets
-either — `plugin-auth`'s legacy client-secret migration writes
-`sys_sso_provider` under an elevated context. That is the
-`declares tenancy off` row below reading **1** rather than 0: the object is
-outside this control's reach by its own declaration, not by the census failing
-to see the write.
+`sys_sso_provider`). The write call sites on this surface that target either —
+`plugin-auth`'s legacy client-secret migration, writing `sys_sso_provider` under
+an elevated context, among them — are what the `declaring tenancy off` total
+counts, and it is not 0 for a reason: the object is outside this control's
+reach by its own declaration, not by the census failing to see the write.
 
 A **declared object** here is a top-level object declaration in a
 `*.object.ts(x)` file — `export const X = ObjectSchema.create({ name: … })` —
@@ -132,12 +139,12 @@ are reported as `undecidable` rather than assumed either way.
 
 The same holds twice over for the context. An options argument spelled as a
 literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
-forwarding shim cannot, and **59 of the 325 sites are spelled that way**. A
-context resolved from an inline literal or a local `const` can be tested for
-`isSystem`; one arriving from a helper call cannot.
+forwarding shim cannot, and a sizeable share of the sites are spelled that way
+(the gate prints how many). A context resolved from an inline literal or a local
+`const` can be tested for `isSystem`; one arriving from a helper call cannot.
 
-⇒ **A third of this population is undecidable in one dimension or another, and
-that is reported rather than smoothed over.** A census that quietly guessed on
+⇒ **A large part of this population is undecidable in one dimension or another,
+and that is reported rather than smoothed over.** A census that quietly guessed on
 those sites would publish a number in the one direction this page cannot survive
 — claiming completeness while short — and a gate seeded from it would then hold
 the page to it.
@@ -153,15 +160,17 @@ literal's named properties looking for `isSystem` and returned "not elevated"
 when the loop ended — so `{ ...SYSTEM_CTX }` was scored **decidably NOT
 elevated** while every `SYSTEM_CTX` in the tree is `{ isSystem: true, … }`. It
 also never unwrapped `as const`, so a bare `context: SYSTEM_CTX` read as
-undecidable. Fixing both moved **51 sites' verdicts**: 45 from undecidable to
-elevated, and 6 from *decidably not elevated* to *elevated* — an inversion, on a
-security-relevant classification. The count of decidably-not-elevated sites is
-now **0**: nothing on this surface threads a context that provably lacks the flag.
+undecidable. Fixing both, on 2026-08-31, moved **51 sites' verdicts**: 45 from
+undecidable to elevated, and 6 from *decidably not elevated* to *elevated* — an
+inversion, on a security-relevant classification. That fix left no site on this
+surface threading a context that provably lacked the flag; the gate prints
+today's count of decidably-not-elevated sites.
 
 **"No tenant context" counted sites it had not read.** An options argument the
 walker could not parse was folded into the same bucket as one it had read and
-found empty. That published **71 sites "carrying no tenant context at all"**
-when 12 said so and 59 were simply unread — an over-claim in the *alarming*
+found empty. When it was caught (2026-08-31, at a population of 215 sites), that
+published **84 sites "carrying no tenant context at all"** when 17 said so and
+67 were simply unread — an over-claim in the *alarming*
 direction, on the very figure this page tells other cards to cite. `carries` is
 now three-valued, and an unreadable argument can never contribute to the
 provable count.
@@ -170,8 +179,8 @@ provable count.
 typed with an inline type literal that spells `insert` / `update` with an
 `object: string` first parameter were subtracted from the population — by the
 same instrument that printed their type text on every run and called the
-subtraction probably wrong. Placing them moved the population **225 → 227** and
-the elevated count **106 → 108**. ⭐ It moved the provable yield surface
+subtraction probably wrong. Placing them, on 2026-09-18, moved the population
+**225 → 227** and the elevated count **106 → 108**. ⭐ It moved the provable yield surface
 (`9`) **not at all**: both sites thread an elevated context, and one of them
 targets a tenancy-opt-out object. The repair is to the denominator and to what
 this page can be read as having examined — ⛔ not to the count anything cites as
@@ -195,12 +204,12 @@ Four figures were carried forward from the lost census. They are **control input
 for this re-derivation, not targets**, and this instrument was not shaped to
 reproduce them. Where it disagrees, it disagrees on the page:
 
-| carried figure | where it survives | this census |
-| :--- | :--- | ---: |
-| 175 write call sites | quoted in the merged changeset | **325** |
-| 24 carrying no tenant context | quoted in the merged changeset | **3** provable and tenancy-enabled; **32** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **227 of 325** decidable, **98** undecidable |
-| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 184 decidably elevated, 0 decidably not, 129 undecidable |
+| carried figure | where it survives | this census — read it from the gate's output |
+| :--- | :--- | :--- |
+| 175 write call sites | quoted in the merged changeset | `Write call sites` |
+| 24 carrying no tenant context | quoted in the merged changeset | the `cite:` line — provable and tenancy-enabled — plus the unreadable, tenancy-enabled sites beside it |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | `Object name statically decidable` and `Object name chosen at run time` |
+| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: the decidably elevated, decidably non-elevated and undecidable-elevation figures |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
 **The differences are not reconciled, and deliberately so.** The old census's
@@ -210,54 +219,37 @@ be stated is what this instrument counts, which is written above and re-runnable
 at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
-one, and both are counted in the generated tables below: the 67 sites reached
-through an erased (`any`) receiver, and the 86 that name their object through a
-`const` rather than inline. An instrument that read either the way a person does
-would report a smaller number and would not say so.
+one, and both are counted in every package shard and in the gate's output: the
+sites reached through an erased (`any`) receiver, and the ones that name their
+object through a `const` rather than inline. An instrument that read either the
+way a person does would report a smaller number and would not say so.
 
 The fourth row is the one worth flagging to anyone citing it. **The 135 / 77%
 figure has no surviving corroboration anywhere in the tree.** This census reads
-184 of 325 (57%) as decidably elevated, with 129 more whose elevation is a
-run-time fact — so the claim is neither confirmed nor refuted, and the honest
-answer is that a static reading cannot settle it.
+a decidably elevated share and a remainder whose elevation is a run-time fact
+(the gate prints both), and the remainder is large enough that the claim is
+neither confirmed nor refuted — the honest answer is that a static reading
+cannot settle it.
 
-⇒ **Cite `3 / 325`, and say what it is**: the sites whose options argument was
-READ and holds no tenant context, against a decidably tenancy-enabled object.
-That is the control's provable yield surface. ⛔ Do not cite it as "the sites
-without tenant context" — **32 further sites** have an options argument this
-cannot read, and they are neither in nor out.
+⇒ **Cite the gate's `cite:` line, and say what it is**: the sites whose options
+argument was READ and holds no tenant context, against a decidably
+tenancy-enabled object, out of every write call site. That is the control's
+provable yield surface. ⛔ Do not cite it as "the sites without tenant context"
+— **further sites** have an options argument this cannot read, and they are
+neither in nor out.
 
 {/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}
 
 ## The measurement
 
-| what | count |
-| :--- | ---: |
-| write call sites on the application surface | **325** |
-| …whose object name is statically decidable | 227 |
-| …whose object name is chosen at run time | 98 |
-| …against an object with tenancy ENABLED | 220 |
-| …against an object that declares tenancy off | 7 |
-| threading a tenant context | 254 |
-| PROVABLY carrying none (options read, no context key) | **12** |
-| …of those, against a decidably tenancy-enabled object | **3** |
-| options argument UNREADABLE — may or may not carry one | 59 |
-| …of those, against a decidably tenancy-enabled object | 32 |
-| threading a decidably ELEVATED (`isSystem`) context | 184 |
-| threading a context that is decidably NOT elevated | 0 |
-| threading a context whose elevation is a run-time fact | 129 |
-
-| how the instrument reached the site | count |
-| :--- | ---: |
-| receiver carried a readable engine type | 258 |
-| receiver erased, placed by the object NAME | 57 |
-| receiver erased, placed by an `object: string` PARAMETER | 5 |
-| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
-
-| object name spelled inline | 141 |
-| object name spelled through a `const` | 86 |
-| object name is an `object: string` parameter | 10 |
-| object name is some other run-time expression | 88 |
+⛔ This page states no population figure, and no committed file states a total
+across packages: two branches that each add a write call site would both
+rewrite it. The figures live per package — one shard per package under
+[`docs/audits/2026-08-tenant-audit-write-call-sites.counts/`](https://github.com/objectstack-ai/objectstack/tree/main/docs/audits/2026-08-tenant-audit-write-call-sites.counts),
+each holding that package's totals and every one of its sites — and
+`node scripts/check-tenant-audit-census.mjs` prints the census totals on every
+run, from the census it has just taken. `node scripts/tenant-audit-census.mjs`
+prints the same summary without checking anything.
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -266,35 +258,27 @@ subtraction is DEFENSIBLE when this census can name why: the receiver is a `node
 builtin, a value it watched being constructed, a language global, a type THIS
 corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.
 
-⚠️ Counted below are the subtractions it can name no such fact for — the
-receiver carries a declared type the engine type index does not hold, and that
-index is built from TRACKED sources only, deliberately. An untracked, generated
-or dependency-owned declaration is one this census never saw, and «never saw it»
-must not be spelled the same way as «read it, not an engine».
+⚠️ Counted in every package shard are the subtractions it can name no such fact
+for — the receiver carries a declared type the engine type index does not hold,
+and that index is built from TRACKED sources only, deliberately. An untracked,
+generated or dependency-owned declaration is one this census never saw, and
+«never saw it» must not be spelled the same way as «read it, not an engine».
 
 ⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
 receiver whose declared type THIS TOOL derived and then could not read back —
 the source parsed, the re-serialisation of it did not, so the door rule could
 never be read off it. That is a fault in this tool rather than a fact about the
-corpus, and it is the one row here that also fails the gate.
+corpus, and it is the one arm here that also fails the gate.
 
-| what | count |
-| :--- | ---: |
-| write calls subtracted with no defensible reason | **1** |
-| …whose declared type text states an engine door anyway | **0** |
-
-⛔ The second row is **0 by construction**, not a tally that happens to be low.
-An inline type literal stating a write door has no name for the engine type index
-to be keyed on, so the door rule is read off the type text itself and the site is
-PLACED — it is in the population above rather than subtracted here. A non-zero
-value on that row means a door-shaped receiver reached the subtraction anyway.
-
-Every one of them is listed, by receiver and by the type text that could not be
-placed, in [`docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`](https://github.com/objectstack-ai/objectstack/blob/main/docs/audits/2026-08-tenant-audit-write-call-sites.counts.md).
+⛔ A shard's door-shaped count is **0 by construction**, not a tally that happens
+to be low. An inline type literal stating a write door has no name for the engine
+type index to be keyed on, so the door rule is read off the type text itself and
+the site is PLACED — it is in the population rather than subtracted. A non-zero
+value there means a door-shaped receiver reached the subtraction anyway.
 
 The corpus walked is every tracked non-test source under `packages/services/`
 and `packages/plugins/`; calls to a same-named method on something that is not
-a data engine were subtracted. Every site is listed in
+a data engine were subtracted. The method behind the shards is in
 [`docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`](https://github.com/objectstack-ai/objectstack/blob/main/docs/audits/2026-08-tenant-audit-write-call-sites.counts.md),
 regenerated by the same command.
 
@@ -302,18 +286,19 @@ regenerated by the same command.
 
 ⛔ These four describe the CORPUS this census walked, not the population it
 certifies, and the gate deliberately does not hold them to the tree — a source
-file arriving anywhere under the two roots moves them while every verdict above
+file arriving anywhere under the two roots moves them while every verdict
 holds still. They are required to be HERE and to say WHEN they were true;
-their values are not compared. The reasoning, and the measurement behind it,
-are in `scripts/check-tenant-audit-census.mjs`.
+their values are not compared, and `--write` keeps them as committed until
+`--write --refresh-scale` re-measures them. The reasoning, and the measurement
+behind it, are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-17 at `94a0d2d44`.
+Measured on 2026-11-16 at `94cb58c3d`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1192 |
-| engine-shaped types recognised | 144 |
+| tracked non-test sources scanned | 1186 |
+| engine-shaped types recognised | 142 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 327 |
+| same-named calls subtracted as non-engine | 323 |
 
 {/* END GENERATED: tenant-audit-census */}

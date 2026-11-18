@@ -62,7 +62,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 }));
 
 import { useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
-import { FirstRunChecklist } from '../FirstRunChecklist';
+import { FirstRunChecklist, type FirstRunChecklistPlacement } from '../FirstRunChecklist';
 import { __resetBootPainted } from '../../../loadLocales';
 import type { Specifier } from '../types';
 
@@ -149,6 +149,8 @@ function freshLocalization(): Record<string, ReturnType<typeof resolved>> {
 
 let localizationValues = freshLocalization();
 let mailValues: Record<string, ReturnType<typeof resolved>> = { provider: resolved('smtp') };
+// The mail page's `live` statement, when the test serves one.
+let mailLive: Record<string, unknown> | null = null;
 let putRefusal: unknown = null;
 // Manifests listed beside localization and mail (the `ai` one, for the built-in AI row), and the `ai` page.
 let extraManifests: unknown[] = [];
@@ -169,7 +171,9 @@ function routeFetch() {
     if (url === '/api/settings/localization' && method === 'GET') {
       return ok({ manifest: LOCALIZATION_MANIFEST, values: localizationValues });
     }
-    if (url === '/api/settings/mail' && method === 'GET') return ok({ manifest: MAIL_MANIFEST, values: mailValues });
+    if (url === '/api/settings/mail' && method === 'GET') {
+      return ok({ manifest: MAIL_MANIFEST, values: mailValues, ...(mailLive ? { live: mailLive } : {}) });
+    }
     if (url === '/api/settings/localization' && method === 'PUT') {
       if (putRefusal) {
         return { ok: false, status: 400, statusText: 'Bad Request', json: async () => putRefusal } as unknown as Response;
@@ -194,6 +198,7 @@ function permissionsPayload(systemPermissions: string[] | undefined): MePermissi
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},
@@ -205,12 +210,16 @@ const ADMIN = ['setup.access', 'setup.write', 'manage_platform_settings'];
 const MEMBER = ['setup.access'];
 
 /** No default for `systemPermissions`: "not reported" must stay apart from the admin set. */
-function renderChecklist(systemPermissions: string[] | undefined, language = 'en') {
+function renderChecklist(
+  systemPermissions: string[] | undefined,
+  language = 'en',
+  placement?: FirstRunChecklistPlacement,
+) {
   return render(
     <MemoryRouter>
       <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
         <MePermissionsProvider initialPermissions={permissionsPayload(systemPermissions)}>
-          <FirstRunChecklist />
+          <FirstRunChecklist placement={placement} />
         </MePermissionsProvider>
       </I18nProvider>
     </MemoryRouter>,
@@ -241,6 +250,7 @@ beforeEach(() => {
   localStorage.clear();
   localizationValues = freshLocalization();
   mailValues = { provider: resolved('smtp') };
+  mailLive = null;
   putRefusal = null;
   extraManifests = [];
   aiPayload = null;
@@ -681,6 +691,16 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
     expect(within(r).getByText('DeepSeek (OpenAI-compatible), detected from the server environment.')).toBeTruthy();
   });
 
+  it('handed over by the host and named by no option (environment, null): done, and says the platform manages it (objectstack#34749)', async () => {
+    serveAi({ value: null, source: 'environment' }, null);
+    renderChecklist(ADMIN);
+    await showDone();
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('true');
+    expect(within(r).getByText('The AI provider, its model and credentials are managed by the platform.')).toBeTruthy();
+    expect(within(r).queryByText(/detected from the server environment/)).toBeNull();
+  });
+
   it('a saved provider the running system does not use is not done: live decides, not values', async () => {
     serveAi({ value: null, source: 'none' }, 'openai');
     renderChecklist(ADMIN);
@@ -1013,6 +1033,17 @@ describe('the host profile: a managed environment adds the first-app and first-r
     expect(row('mail').getAttribute('data-done')).toBe('true');
   });
 
+  it("managed, the host's own transport (live provider environment, null) with nothing saved: mail is drawn, done (objectstack#34749)", async () => {
+    MANAGED();
+    mailLive = { provider: { value: null, source: 'environment' } };
+    SHELL.apps = [SETUP_APP];
+    activityAdapter([]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    await showDone();
+    expect(row('mail').getAttribute('data-done')).toBe('true');
+  });
+
   it('managed, every required row done and no record yet: the checklist draws nothing', async () => {
     MANAGED();
     localizationValues = {
@@ -1039,5 +1070,74 @@ describe('the host profile: a managed environment adds the first-app and first-r
     renderChecklist(ADMIN, 'zh');
     expect(within(await screen.findByTestId('first-run-checklist-row-first_app')).getByText('放进第一个应用')).toBeTruthy();
     expect(within(await screen.findByTestId('first-run-checklist-row-first_record')).getByText('添加第一条记录')).toBeTruthy();
+  });
+});
+
+describe('on a phone, after the apps, the card starts folded to one line (objectstack#34596)', () => {
+  const card = () => screen.getByTestId('first-run-checklist');
+  const progress = () => screen.getByTestId('first-run-checklist-progress').textContent;
+
+  it('one line: the title, the progress and Continue; no row is drawn and nothing is written', async () => {
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await waitFor(() => expect(progress()).toBe('0 of 5 done'));
+    expect(card().getAttribute('data-folded')).toBe('true');
+    expect(within(card()).getByText('Get your system ready')).toBeTruthy();
+    expect(within(card()).queryAllByRole('listitem')).toHaveLength(0);
+    const go = screen.getByTestId('first-run-checklist-continue');
+    expect(go.textContent).toBe('Continue');
+    expect(go.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('first-run-checklist-dismiss')).toBeNull();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('Continue opens the card in place with every row; the fold control closes it to one line again', async () => {
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    fireEvent.click(await screen.findByTestId('first-run-checklist-continue'));
+    expect(card().getAttribute('data-folded')).toBe('false');
+    expect(await screen.findByTestId('first-run-checklist-row-invite')).toBeTruthy();
+    const fold = screen.getByTestId('first-run-checklist-fold');
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(fold.getAttribute('aria-controls')).toBe(screen.getByRole('list').id);
+    expect(screen.getByTestId('first-run-checklist-dismiss')).toBeTruthy();
+    expect(progress()).toBe('0 of 5 done');
+
+    fireEvent.click(fold);
+    expect(card().getAttribute('data-folded')).toBe('true');
+    expect(screen.queryByTestId('first-run-checklist-row-invite')).toBeNull();
+    expect(progress()).toBe('0 of 5 done');
+  });
+
+  it('folding changes no completion rule: the folded line counts what the card counts, and a set workspace draws nothing', async () => {
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await waitFor(() => expect(progress()).toBe('3 of 5 done'));
+    cleanup();
+
+    AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }, { id: 'm_2' }]);
+    mailValues = { provider: resolved('smtp', 'global'), smtp_host: resolved('mx', 'global'), from_email: resolved('a@b.co', 'global') };
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await settle();
+    await waitFor(() => expect(AUTH.getMembers).toHaveBeenCalled());
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('zh: Continue reads in the reader language', async () => {
+    renderChecklist(ADMIN, 'zh', 'afterApps');
+    expect((await screen.findByTestId('first-run-checklist-continue')).textContent).toBe('继续');
+  });
+
+  it('CONTROL: above the page the card is drawn whole, with no Continue and no fold control', async () => {
+    renderChecklist(ADMIN, 'en', 'top');
+    expect(await screen.findByTestId('first-run-checklist-row-invite')).toBeTruthy();
+    expect(card().getAttribute('data-folded')).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-continue')).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-fold')).toBeNull();
   });
 });

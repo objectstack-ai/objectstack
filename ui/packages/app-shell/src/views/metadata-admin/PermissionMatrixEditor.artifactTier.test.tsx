@@ -51,6 +51,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -185,7 +189,7 @@ describe('PermissionMatrixEditPage — the ARTIFACT tier locks an env-scope over
     expect(screen.getByLabelText('a_account Read')).toBeDisabled();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
     const row = screen.getByText('Account').closest('tr')!;
-    for (const n of ['R', 'CRUD', 'All', 'None']) {
+    for (const n of ['Read only', 'Read & write', 'All', 'None']) {
       expect(within(row).getByRole('button', { name: n })).toBeDisabled();
     }
   });
@@ -276,7 +280,7 @@ describe('PermissionMatrixEditPage — MUST NOT CHANGE: what the artifact tier m
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     expect(screen.getByLabelText('a_account Read')).toBeEnabled();
     const row = screen.getByText('Account').closest('tr')!;
-    for (const n of ['R', 'CRUD', 'All', 'None']) {
+    for (const n of ['Read only', 'Read & write', 'All', 'None']) {
       expect(within(row).getByRole('button', { name: n })).toBeEnabled();
     }
     expect(lockBadge()).toBeNull();
@@ -399,7 +403,7 @@ describe('PermissionMatrixEditPage — the artifact verdict asks ADR-0010 proven
     expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled();
     expect(screen.getByLabelText('a_account Read')).toBeEnabled();
     const row = screen.getByText('Account').closest('tr')!;
-    for (const n of ['R', 'CRUD', 'All', 'None']) {
+    for (const n of ['Read only', 'Read & write', 'All', 'None']) {
       expect(within(row).getByRole('button', { name: n })).toBeEnabled();
     }
     expect(lockBadge()).toBeNull();

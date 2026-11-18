@@ -964,6 +964,8 @@ export class AppPlugin implements Plugin {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
+            // [#34273] An action's declared refusal is translated as a hook's is.
+            i18n: hookRefusalI18nReader(ctx),
             getService: (name) => ctx.getService(name),
         }));
         if (installed !== false) {
@@ -1959,8 +1961,8 @@ export class AppPlugin implements Plugin {
         // just contributed and every dataset lands twice. `mergeSeedDatasets`
         // is a plain `push` with no de-duplication, so both copies reach the
         // shared registry, the inline loader and every later per-org replay:
-        // for a `mode: 'insert'` dataset that is the row applied twice per
-        // boot, not merely doubled work.
+        // for a dataset whose key matches no row yet, that is the row applied
+        // twice per boot, not merely doubled work.
         const manifest = this.bundle.manifest || this.bundle;
         if (manifest && Array.isArray(manifest.data) && manifest.data !== this.collections.data) {
             seedDatasets.push(...manifest.data);
@@ -2061,8 +2063,9 @@ export class AppPlugin implements Plugin {
                      const seedLoader = new SeedLoaderService(
                          ql, md, loggerRef, seedLoaderOptionsFor(ctx, options?.reseed === true ? 'reseed' : 'honour'),
                      );
-                     const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-                     const request = SeedLoaderRequestSchema.parse({
+                     // [#34613] `loadStored`: a stored dataset declaring a
+                     // retired `mode` is refused alone; the rest load.
+                     const result = await seedLoader.loadStored({
                          seeds: datasetsNow,
                          config: {
                              // [#30081] No mode of its own: each dataset's
@@ -2084,7 +2087,6 @@ export class AppPlugin implements Plugin {
                              ...(seedLocale ? { locale: seedLocale.locale } : {}),
                          },
                      });
-                     const result = await seedLoader.load(request);
                      // [#23354] The rows this replay landed on, for the
                      // organization's owner-bind claim (`seededRecordIds` with
                      // this organization): it hands over these rows and no
@@ -2162,11 +2164,12 @@ export class AppPlugin implements Plugin {
                   const metadata = ctx.getService('metadata') as IMetadataService | undefined;
                   if (metadata) {
                       const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
-                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       // [#16595] `Seed.locale`'s producer on the DEFAULT boot
                       // path — see {@link resolveSeedLocale}.
                       const seedLocale = this.resolveSeedLocale();
-                      const request = SeedLoaderRequestSchema.parse({
+                      // [#34613] `loadStored`: a stored dataset declaring a
+                      // retired `mode` is refused alone; the rest load.
+                      const result = await seedLoader.loadStored({
                           seeds: normalizedDatasets,
                           config: {
                               // [#30081] No mode of its own: a replay on a
@@ -2179,7 +2182,6 @@ export class AppPlugin implements Plugin {
                               ...(seedLocale ? { locale: seedLocale } : {}),
                           },
                       });
-                      const result = await seedLoader.load(request);
                       // [#34458] A person the seed names who does not exist yet
                       // (the first admin) left a NULL; the handoff below
                       // resolves it once a `sys_user` row is inserted.
@@ -2650,13 +2652,14 @@ export class AppPlugin implements Plugin {
                     return;
                 }
                 const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
-                const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                 // [#16595] `Seed.locale`'s producer on the dev hot-reload
                 // path. Resolved from the BOOT bundle, not from `payload`: a
                 // reload re-parses the artifact's metadata collections, and
                 // `i18n` is an envelope key that does not travel in it.
                 const seedLocale = this.resolveSeedLocale();
-                const request = SeedLoaderRequestSchema.parse({
+                // [#34613] `loadStored`: a stored dataset declaring a retired
+                // `mode` is refused alone; the rest load.
+                const result = await seedLoader.loadStored({
                     seeds,
                     config: {
                         // [#30081] No mode of its own — the spec default applies.
@@ -2664,7 +2667,6 @@ export class AppPlugin implements Plugin {
                         ...(seedLocale ? { locale: seedLocale } : {}),
                     },
                 });
-                const result = await seedLoader.load(request);
                 const { totalInserted, totalUpdated, totalErrored } = result.summary;
                 ctx.logger.info(
                     `[Seeder] Hot-reload seeded new object(s) ${fresh.join(', ')}: ` +

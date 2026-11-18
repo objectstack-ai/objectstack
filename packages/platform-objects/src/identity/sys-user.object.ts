@@ -509,11 +509,14 @@ export const SysUser = ObjectSchema.create({
         title: 'User Added',
         acknowledge: 'Done',
         // Each field is skipped when its path is absent from the answer:
-        // `notApplied` only on a re-add of a person still pending, `managerError`
-        // only when no manager was linked, `host.reason` only when the hosting
-        // organisation was not told.
+        // `pendingAgain` only on a re-add of a person still pending (the door
+        // answers it only then, so no `false` row is drawn on a fresh add),
+        // `notApplied` only on such a re-add that sent grants or a manager,
+        // `managerError` only when no manager was linked, `host.reason` only
+        // when the hosting organisation was not told.
         fields: [
           { path: 'email', label: 'Email', format: 'text' },
+          { path: 'pendingAgain', label: 'Already pending', format: 'json' },
           { path: 'notApplied', label: 'Already pending, so not applied (set these on the record)', format: 'json' },
           { path: 'managerError', label: 'Manager', format: 'text' },
           { path: 'host.reason', label: 'Invitation not sent', format: 'text' },
@@ -548,11 +551,32 @@ export const SysUser = ObjectSchema.create({
       resultDialog: {
         title: 'Import Finished',
         acknowledge: 'Done',
+        // `rows` is the door's per-row report (plugin-auth
+        // `ImportSsoUserRowResult`), drawn as a table: one row per CSV line, a
+        // cell per answer member. A member a row does not carry draws an empty
+        // cell: `alreadyPending` and `host` only on a row that was added,
+        // `error` only on one that was not, `notApplied` only on a re-add that
+        // sent columns, `managerError` only when no manager was linked.
         fields: [
           { path: 'summary.added', label: 'Added', format: 'text' },
           { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
           { path: 'summary.failed', label: 'Not added', format: 'text' },
-          { path: 'rows', label: 'Result per row', format: 'json' },
+          {
+            path: 'rows',
+            label: 'Result per row',
+            format: 'table',
+            columns: [
+              { path: 'row', label: 'Row', format: 'json' },
+              { path: 'email', label: 'Email' },
+              { path: 'ok', label: 'Succeeded', format: 'json' },
+              { path: 'alreadyPending', label: 'Already pending, told again', format: 'json' },
+              { path: 'host.notified', label: 'Hosting organization told', format: 'json' },
+              { path: 'host.reason', label: 'Why not told' },
+              { path: 'error.message', label: 'Not added because' },
+              { path: 'notApplied', label: 'Not applied (set these on the record)', format: 'code-list' },
+              { path: 'managerError', label: 'Manager' },
+            ],
+          },
         ],
       },
     },

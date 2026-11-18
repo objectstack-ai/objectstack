@@ -461,24 +461,16 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  *
  * @throws The ADR-0112 refusal `resolveArtifactPackageOrder` raises for a
  *   `packages` that is not an array, `null` included (`INVALID_ARTIFACT_PACKAGES`), a malformed
- *   `packages[]` entry, a package with no usable id, or a duplicate package.
- *   It is the same refusal `ObjectQLPlugin`'s `manifest` service already
- *   raises on the same artifact during boot. Resolving collections out of an
+ *   `packages[]` entry, a package with no usable id, a duplicate package, or
+ *   packages inside one artifact that depend on each other in a cycle
+ *   (`CYCLIC_ARTIFACT_PACKAGES`, with `details.cycle`). It is the same
+ *   refusal `ObjectQLPlugin`'s `manifest` service already raises on the same
+ *   artifact during boot. Resolving collections out of an
  *   artifact the loader would refuse is not a quieter outcome, it is a
  *   different answer to what the artifact contains.
  * @throws `MIXED_ARTIFACT_COLLECTION_SHAPE` (ADR-0112, 422) — this module's own
  *   refusal — when one collection key is declared in the array form by one
  *   source and in the record form by another.
- * @throws ⚠️ `resolvePluginOrder`'s dependency-CYCLE error, propagated through
- *   `resolveArtifactPackageOrder` when two packages inside one artifact depend
- *   on each other. Unlike the three refusals above it is a BARE `Error`: it
- *   carries no `code` and no `status`, so a caller matching on `err.code` /
- *   `err.status` does not match it and falls through to its generic branch.
- *   That is `resolveArtifactPackageOrder`'s own contract — reached identically
- *   by `ObjectQLPlugin`'s manifest service today — and enveloping it would
- *   change that function's behaviour for every caller, which is not this
- *   module's call to make. Recorded here so a caller writing a `catch` knows
- *   the third shape exists.
  */
 export function resolveArtifactCollections<T>(artifact: T): T {
     if (artifact === null || typeof artifact !== 'object') return artifact;

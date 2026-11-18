@@ -40,7 +40,7 @@ function envelope(
 ): MePermissionsResponse {
   // [objectstack#28508] The anonymous body is `{ authenticated: false }` and nothing else.
   if (!authenticated) return { authenticated: false };
-  return { authenticated: true, userId: 'u1', tenantId: null, positions: [], permissionSets: [], objects, fields, hasAnyQueue: false };
+  return { authenticated: true, userId: 'u1', tenantId: null, positions: [], permissionSets: [], objects, fields, hasAnyQueue: false, objectsUsingQueues: [] };
 }
 
 function checkFieldUnder(perms: MePermissionsResponse): PermissionContextValue['checkField'] {

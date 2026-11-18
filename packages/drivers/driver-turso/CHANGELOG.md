@@ -1,5 +1,167 @@
 # @objectstack/driver-turso
 
+## 18.6.0
+
+### Patch Changes
+
+- 479d1e4: feat(driver-sql, driver-turso): schema sync builds the `(created_at, id)` and `(owner_id)` indexes without a declaration
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Schema sync now builds two indexes on system columns that no object has to declare:
+  
+  - `(created_at, id)`, named `idx_<table>_created_at_id`, on every table that has both columns. This is the default list order, `created_at desc, id desc`. Without the index, every default-ordered page sorted all of its filtered rows. On PostgreSQL 16 with 1M rows, the admin list statement takes 1.3 ms instead of 317 ms.
+  - `(owner_id)`, named `idx_<table>_owner_id`, on an object whose fields include a single-valued `owner_id`. This is the column a private-OWD read filters on. An object with no `owner_id` gets no such index.
+  
+  Both indexes are non-unique. They follow the #31882 rule for reference columns. If a declared index's key already starts with the same columns, it serves instead, and no second index is built. If an author declares the same key, it gets the same name, so the two converge. On an existing database, `os migrate plan` lists each missing index as a `safe` `create_index`. The next sync builds it, and on PostgreSQL it is built `CONCURRENTLY`. A second sync makes no changes. An existing table that has no `created_at` column gets no default-order index and no error line.
+  
+  Turso's remote face (`libsql://`) now builds the full implicit set too: these two keys and the #31882 reference-column indexes. Until now it built only declared indexes, so the drift plan on a remote database showed a `create_index` for each implicit index after every sync.
+  
+  On SQLite, the index does not speed up a default-ordered page yet. While the engine adds the empty controlled-by-parent chain to the query, the SQLite planner still sorts in a temporary B-tree. When the query has no chain, the same page takes 0.16 ms instead of 1.6 s at 1M rows.
+  
+  Widening: `@objectstack/driver-sql` now exports `implicitReferenceIndexes` from its main entry. Its arguments take an optional `physicalColumns` set, and when one is given, a key over a column the table lacks is left out.
+- 0ac112f: feat(spec, objectql, driver-sql, driver-turso): a per-measure aggregation filter runs in SQL on driver-sql, behind one declared driver capability (#33698)
+  
+  Clause-②: yes (widening: one optional DriverCapabilities bit)
+  Metadata-protocol: semantic
+  
+  **The capability.** `DriverCapabilities` (`@objectstack/spec/data`) gains one optional boolean, `aggregationFilter`: the driver's `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the answers the engine's in-memory aggregation gives, except that text compares by the database collation (see the last paragraph). Absence means `false`. A driver that declares nothing keeps exactly the path it had.
+  
+  **What runs where.**
+  
+  - `engine.aggregate` sends an aggregate whose measures carry a `filter` to `driver.aggregate` only when the driver declares `aggregationFilter: true` and has the method. Every other driver keeps the in-memory path: `find()` for the scoped rows, then the filter and the aggregate in the engine. A non-UTC timezone with a date bucket still forces the in-memory path, as before.
+  - `driver-sql` declares the bit and compiles each filtered measure as a conditional aggregate, the predicate from the same where compiler a `where` uses: `sum(CASE WHEN (pred) THEN amount END)`, the same for `avg`, `min`, `max`; `count(CASE WHEN (pred) THEN 1 END)` for a count of rows (no `ELSE 0`, which `count` would count); `count(CASE WHEN (pred) THEN field END)` for a count of a field; `count(distinct CASE WHEN (pred) THEN field END)` for `count_distinct`. A group the filter empties answers `0` for `sum` and the counts and `null` for `avg`, `min` and `max`, as before. The tenant wall and the read scope stay on the statement's own `where`, so a measure filter only narrows inside them. `SqliteWasmDriver` inherits the compile.
+  - `driver-turso` turns the bit off in remote mode, where the remote transport refuses the key; local and embedded-replica modes inherit driver-sql's compile.
+  - A direct `SqlDriver#aggregate` call with a measure filter now answers the filtered numbers instead of refusing `NOT_IMPLEMENTED` / 501. The 501 remains only for a compiled predicate the driver cannot isolate, which no tested dialect produces.
+  
+  **What answers differently in memory.** A measure filter, a `having` clause and the in-memory `where` that plugin drivers use all go through one engine evaluator. In that evaluator a column holding no value (SQL NULL) now fails `$gt`, `$gte`, `$lt`, `$lte` and `$between`, as SQL does and as the spec says (null is not ordered). Before, NULL counted as `0` for numbers, so "count where amount ≤ 0" also counted every row with no amount, and `$between` matched a NULL column for any bounds. A `having` on an empty group's `avg`, `min` or `max` (which is `null`) likewise no longer passes an ordering test. `$eq`, `$ne`, `$in`, `$nin`, `$exists`, `$null`, `$empty` and a `null` comparand answer as before.
+  
+  **A measure filter the `where` compiler refuses now refuses on driver-sql.** Because driver-sql compiles a measure filter with the same where compiler, a filter that compiler refuses answers the same `400 INVALID_FILTER` its `where` twin answers. The recorded case is a `{ $field }` comparison between columns of different classes on an object with no audit fields (`created_at` against an image field): before, the engine evaluated it in memory and answered `200`; on driver-sql it now answers `400 INVALID_FILTER`, as `where` always did. A driver without the bit still evaluates it in memory and answers `200`.
+  
+  **Declared latitude: text compares by the database collation.** On driver-sql a measure filter now answers what the `where` of the same datasource answers, so text comparison in it follows the database collation, where the in-memory path compares text exactly. Ordering a non-temporal text column (`$gt` / `$lt` / `$between` on text) follows the collation everywhere; on a case- or accent-insensitive collation, equality and membership do too, so `stage $eq 'won'` also counts `Won` rows, as `where` already does. Measured: SQLite and PostgreSQL 16 agree with the in-memory path on every operator with a `C.UTF-8` collation; PostgreSQL 16 with an ICU `en-US` collation differs only in text ordering. MySQL, SQL Server and Oracle were not measured; the MySQL and SQL Server default collations are case-insensitive.
+- 69949ae: fix(driver-turso): Turso's remote face relaxes a NOT NULL column in place, so a package upgrade that makes a field optional reaches hosted databases
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On Turso's remote face (`libsql://`, every hosted tenant database), a `relax_not_null` drift entry is now applied. Until now it was skipped with "it needs the SQLite table rebuild, which the Turso REMOTE transport does not run". A package upgrade that declares `storage: { notNull: false }` on a column therefore left the column NOT NULL on a hosted database, and every save that left the field empty failed.
+  
+  The maintainer ruled how (decision record 6915086281 on #33724): the column is relaxed in place with libSQL's own column statement, `ALTER TABLE t ALTER COLUMN c TO c <definition>`, and no table rebuild runs.
+  
+  - **Only the NOT NULL clause changes.** The definition sent is the column's own, cut from the table's stored `CREATE TABLE` with only its `[CONSTRAINT name] NOT NULL [ON CONFLICT …]` clause removed. The type, the DEFAULT, and any CHECK, COLLATE, UNIQUE or REFERENCES clause stay byte for byte. No row is copied or revalidated.
+  - **Applied only on a read-back.** The statement is sent in one `write` batch with a check that the table's stored SQL now reads exactly as planned. If it reads any other way, the batch rolls back. The entry is reported `applied` only when the column then reads back nullable, with the type, the DEFAULT and the primary-key position it had before.
+  - **A refusal is reported, and nothing falls back.** A statement the database refuses, a stored definition the plan cannot read, or a read-back that differs is reported `skipped`, and the reason is logged. Measured on libSQL (SQLite 3.45.1): libSQL ends the old definition at the first comma after the column's name, so a column whose definition holds a comma (in a DEFAULT, a CHECK, a type width such as `NUMERIC(10, 2)`, or a comment) is refused that way, and a real `sqld` 0.24.33 refuses it the same way. It keeps its NOT NULL, the table is left byte-identical, and the logged reason says the definition holds a comma. The maintainer accepted this limit (decision record 6922037129 on #33724): no table rebuild is added for such a column. Columns this face creates are `TEXT`, `INTEGER` or `REAL` with no DEFAULT and no width, so they are never in it.
+  
+  The same three acts reach the relax as before: a managed install or upgrade of a package that declares `storage: { notNull: false }` on the column, the publish of an environment-authored object, and `os migrate apply`. A boot still never alters a column (ADR-0113 D5). On the remote face, `TursoDriver.applyMigrationEntries` now applies a `relax_not_null` entry, and `TursoDriver.driftApplyLimit('relax_not_null')` answers `null` where it answered the table-rebuild sentence. So `os migrate plan` and the apply's listing show a relax on a remote database with no transport limit, and count one fewer change they cannot apply.
+  
+  A tightened NOT NULL, a dropped DEFAULT, and the type and width entries keep their answer on this face: skipped, because they need the table rebuild. The statement does not revalidate existing rows, so it is never used to tighten. A local SQLite file keeps the existing table rebuild for every column entry.
+- 374bad3: fix(driver-turso): a remote (hosted) connection now reports its database work in Server-Timing `db`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In remote mode, `TursoDriver` sends its statements through `@libsql/client` directly, so the knex query events that feed Server-Timing `db` never fired: every hosted environment answered `db;dur=0;desc="0 queries"`, and the admin-only `X-OS-Debug-Timing-Detail` header was missing for lack of samples. Each `execute` and each `batch` round trip of the remote transport is now counted into the ambient request collector under the same `db` mark the local face produces (a batch counts once, as one round trip). With detail capture on, each sample records the statement's parametrized SQL, and a batch is labelled `batch(N): <first statement>`; bindings are never recorded. Outside a request scope the statement runs as before, with one lookup added. Local and embedded-replica connections keep their knex-based counting unchanged, and the disclosure gate (admin-only per request, global mode via `OS_SERVER_TIMING`) is unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [bb3c163]
+- Updated dependencies [479d1e4]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [23c42c4]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/driver-sql@18.6.0
+  - @objectstack/observability@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

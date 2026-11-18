@@ -196,6 +196,8 @@ const es = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Complete los campos del formulario y luego envíe o cancele.",
+    sectionNav: "Secciones del formulario",
+    sectionNavErrors: "Campos por corregir: {{number}}",
     deniedDescription: "No tienes permiso para editar este campo.",
     serverDefaultHint: "Se establece automáticamente al guardar.",
     requiredForAction: "Obligatorio para ejecutar «{{action}}».",
@@ -596,6 +598,7 @@ const es = {
         "Esta vista está agrupada, pero su origen de datos no implementa queryGroupHeaders, por lo que no se pueden contar los grupos. Quite la agrupación para mostrar los registros.",
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
+      draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -962,6 +965,8 @@ const es = {
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
     groupingUnstoredRemove: "Quitar de la agrupación",
+    draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
+    withheldFieldsLeftOut: "Sin mostrar, filtrar, ordenar ni agrupar por {{fields}}: el paquete que lo añade está desactivado. Vuelve cuando se activa el paquete.",
     inlineEditShort: "Edición en línea",
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
   },
@@ -1419,6 +1424,8 @@ const es = {
     writeStrippedUnknownReason: "No aplicado por el servidor: {{fields}}",
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
+    approvalPending: "En aprobación",
+    approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progreso de la aprobación",
@@ -1640,6 +1647,9 @@ const es = {
     },
     total: "Total",
     noDataSourceFor: "Sin fuente de datos para",
+    drillTooMany: 'Hay demasiados registros relacionados con este valor para mostrarlos aquí. Acota los filtros del panel e inténtalo de nuevo.',
+    drillUnavailable: 'Los registros de este valor no se pueden mostrar desde aquí.',
+    drillFailed: 'No se pudieron cargar los registros de este valor. Inténtalo de nuevo más tarde.',
     config: {
       breadcrumb: {
         dashboard: "Panel de control",
@@ -1974,10 +1984,23 @@ const es = {
       passwordsNote: "Contraseñas temporales — se muestran una sola vez y nunca se almacenan. Guárdelas ahora; cada usuario debe cambiar la suya en el primer inicio de sesión.",
       passwordsMore: "Se han omitido más entradas — use la descarga.",
       positionsHint: "Puestos: asigne una columna con nombres de máquina de puestos, varios separados por «;». Cada uno se asigna como en Setup; un nombre que no existe o que usted no puede asignar se informa en su fila, y el usuario se crea igualmente.",
+      managerHint: "Responsable: asigne una columna con el responsable de cada usuario, por dirección de correo (o número de teléfono si el inicio de sesión por teléfono está activo). Los responsables se vinculan cuando todas las filas están dentro, así que cuenta también uno que aparece más abajo en el archivo; un responsable que no se encuentra o no se puede vincular se informa en su fila, y el usuario se crea igualmente.",
       passwordsDownload: "Descargar CSV",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_one: '{{count}} cambio sin publicar. Publícalo desde la barra del borrador de arriba.',
+        publishFromBar_many: '{{count}} de cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_other: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        showDraftToPublish: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_one: '{{count}} cambio sin publicar. Muestra el borrador para revisarlo y publicarlo.',
+        showDraftToPublish_many: '{{count}} de cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_other: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraft: 'Mostrar borrador',
+        receipt: 'Publicado. Tus cambios ya están activos.',
+        dismissReceipt: 'Cerrar',
         count: "{{count}} cambio(s) aún no se han publicado — los usuarios no pueden verlos.",
         publish: "Publicar",
         published: "Todos los cambios pendientes están activos.",
@@ -2075,6 +2098,9 @@ const es = {
           title: "Editando «{{app}}»",
           titleGeneric: "Editar esta aplicación",
           description: "¿Qué desea cambiar? Modifico esta aplicación sobre la marcha — añadir un campo, un objeto, una vista o un panel, o ajustar lo que ya existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pregunta por los datos de esta app —recuentos, listas y resúmenes— o dime qué cambiar y modificaré la app al momento: un campo, un objeto, una vista o un panel.",
         },
       },
       clearConversation: "Borrar",
@@ -2220,7 +2246,7 @@ const es = {
       changesApplied: "Aplicado",
       changesDrafted: "Guardado como borrador",
       changesFailed: "No aplicado",
-      discussing: "Tratando: {{target}}",
+      discussing: "Viendo: {{target}}",
       changeVerb: {
         createObject: "Crear objeto",
         addField: "Añadir campo",
@@ -2268,11 +2294,16 @@ const es = {
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
-        title: "Asistente",
+        title: "Asistente de IA",
         description: "Chat con el asistente de IA",
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
         maximize: "Abrir como página completa",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Historial",
+        backToChat: "Volver al chat",
+        expand: "Expandir",
+        restore: "Restaurar panel lateral",
         open: "Abrir el asistente",
         planAwaitingApproval: "Un plan propuesto espera su aprobación",
       },
@@ -2376,6 +2407,7 @@ const es = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
       organizationName: {
         title: "Asigne un nombre a su organización",
@@ -2562,8 +2594,16 @@ const es = {
       },
       viewTypeTree: "Árbol",
       viewTypeTreeDesc: "Anida los registros autorreferenciados en una jerarquía mediante un campo principal.",
+      viewTypeTimesheet: "Hoja de horas",
+      viewTypeTimesheetDesc: "Introduce un número por fila y día de la semana; cada celda rellena es un registro.",
       parentField: "Campo principal",
       parentFieldHelp: "El campo que apunta al registro principal (mismo objeto) y define la jerarquía. Solo son válidos los campos autorreferenciados.",
+      timesheetRowField: "Campo de fila",
+      timesheetRowFieldHelp: "Cada fila de la cuadrícula es un valor de este campo, como un proyecto.",
+      timesheetDateField: "Campo de fecha",
+      timesheetDateFieldHelp: "Los registros se colocan en el día de la semana de esta fecha.",
+      timesheetValueField: "Campo de valor",
+      timesheetValueFieldHelp: "El número que cada celda muestra y edita, como las horas.",
       viewName: "Nombre",
       viewNameHelp: "Clave técnica (snake_case). Se rellena automáticamente a partir del título — edítela si lo desea.",
       viewNameRequired: "Introduzca una clave (minúsculas, números, guion bajo). No se rellena automáticamente con títulos no latinos.",
@@ -2592,7 +2632,7 @@ const es = {
       expandToPage: "Abrir como página completa",
       openAsPage: "Abrir como página completa",
       objectNotFound: "Objeto no encontrado",
-      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe en la configuración actual.",
+      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe o no tiene acceso a él.",
       objectNotFoundHint: "Verifique la configuración de navegación de su aplicación o seleccione un objeto diferente en la barra lateral.",
       objectPackageDisabled: "El objeto \"{{objectName}}\" pertenece a un paquete deshabilitado, por lo que no se está sirviendo.",
       filterOrGroupNotEditable: "Este filtro tiene un grupo O junto a otras condiciones, que el editor de filtros no puede mostrar, así que aquí es de solo lectura. La vista lo sigue aplicando.",
@@ -2751,6 +2791,10 @@ const es = {
       launcherLabel: "Lanzador de aplicaciones",
       menuLabel: "Navegación de la aplicación",
       menuEmpty: "Esta aplicación no tiene entradas de navegación que puedas abrir.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Barra de menú de la aplicación",
+      searchMenu: "Buscar en el menú",
+      phoneBarHint: "Marca una entrada con la estrella para ponerla en la barra inferior. La barra muestra las cuatro primeras.",
       itemMenu: "Más acciones para {{name}}",
       openInNewTab: "Abrir en nueva pestaña",
       copyLink: "Copiar enlace",
@@ -2991,6 +3035,10 @@ const es = {
       missingToken: "Falta un token en el enlace de verificación.",
       emailMissing: "Falta la dirección de correo",
       resendButton: "Reenviar correo de verificación",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Su correo aún no está verificado. Envíe un enlace de verificación a {{email}} y luego haga clic en el enlace para verificar su cuenta.",
+      sendButton: "Enviar correo de verificación",
       resending: "Enviando…",
       resent: "¡Correo enviado! Revise su bandeja de entrada",
       resentSuccess: "¡Correo de verificación enviado!",
@@ -3265,7 +3313,7 @@ const es = {
     aiAssistant: "Asistente de IA",
     designInStudio: "Diseñar en Studio",
     editApp: "Editar aplicación",
-    openAppInStudio: "Ver la aplicación en Studio",
+    openAppInStudio: "Ver {{app}} en Studio",
   },
   home: {
     build: {
@@ -3460,7 +3508,6 @@ const es = {
   },
   empty: {
     objectNotFound: "Objeto no encontrado",
-    objectNotFoundDescription: "Falta la definición del objeto \"{{name}}\". Verifique su configuración o navegue hacia atrás.",
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",
@@ -3846,6 +3893,8 @@ const es = {
     viewApprovals: "Ver aprobaciones",
     noPendingApprovals: "Sin aprobaciones pendientes",
     openApprovalsInbox: "Abrir bandeja de aprobaciones",
+    needsYou: "Requiere su acción",
+    viewApprovalDetails: "Ver detalles",
     badgeTotal: "{{total}} en total",
     badgeNotifications: "{{count}} temas sin leer",
     badgeNotifications_one: "{{count}} tema sin leer",
@@ -4465,12 +4514,23 @@ const es = {
     openNextAfterDecision: 'Abrir la siguiente tras decidir',
     queueDone: 'No quedan solicitudes pendientes en esta lista.',
     snapshotAsSubmitted: 'Tal como se envió',
+    snapshotChanged: 'Modificado',
+    snapshotCurrentValue: 'Valor actual',
+    snapshotOpenRecord: 'Abrir registro',
+    snapshotCurrentUnreadable: 'No se puede leer el registro actual, así que los cambios posteriores al envío no se marcan.',
+    snapshotChildCurrent: 'Filas actuales: el envío no guarda las filas secundarias.',
+    progressTitle: 'Progreso de la aprobación',
+    attachmentsTitle: 'Adjuntos',
     attachmentChip: 'Adjunto',
     attachmentOpenFailed: 'No se pudo abrir el archivo adjunto: inténtalo de nuevo',
     approveOneTitle: '¿Aprobar «{{title}}»?',
     approveOneBody: 'Esto aprueba la solicitud con tu identidad. Para añadir un comentario o un adjunto, abre la solicitud.',
     flowOrigin: 'Iniciada por flujo',
     submittedByYou: 'Enviado por ti',
+    awaitingYourDecision: 'Pendiente de tu aprobación',
+    stepNumber: 'Paso {{n}}',
+    submittedByName: 'Enviado por {{name}}',
+    moreDecisionActions: 'Más acciones de aprobación',
     sortBy: 'Ordenar',
     sortRecent: 'Más recientes primero',
     sortOldest: 'Más antiguas primero',
@@ -4656,6 +4716,11 @@ const es = {
       pendingHere_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta página',
       pendingHere_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta página',
       pendingHere_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
     },
     changes: {
       title: 'Cambios pendientes',
@@ -4672,7 +4737,7 @@ const es = {
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
       fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
+      draftedByCopilot: 'Incluye cambios redactados por el asistente de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
       draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
@@ -4809,7 +4874,8 @@ const es = {
       securityBlockTitle_one: 'La publicación será rechazada: {{count}} elemento necesita una decisión primero',
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
-      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Quién puede ver qué registros y vuelva a publicar.',
+      flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',
         owdAlias: 'La base de uso compartido de registros (sharingModel) no es un valor canónico, así que el entorno de ejecución trata el objeto como private.',
@@ -4820,6 +4886,8 @@ const es = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Esta app aún no está publicada. Funciona, pero solo los creadores pueden verla. Publícala para que tus usuarios la vean.',
       message: 'Aplicación sin publicar — totalmente funcional, pero solo la ven los creadores. Publíquela para que sus usuarios la vean.',
       publish: 'Publicar',
       publishing: 'Publicando…',

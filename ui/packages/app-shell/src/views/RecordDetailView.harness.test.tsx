@@ -51,6 +51,7 @@ import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { PermissionProvider, MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { MetadataCtx } from '@object-ui/react';
 import { PageSchema as SpecPageSchema } from '@objectstack/spec/ui';
@@ -993,6 +994,7 @@ describe('RecordDetailView.setupManagedByChip-13385', () => {
       tenantId: null,
       positions: [],
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       permissionSets: [],
       ...(held === undefined ? {} : { systemPermissions: held }),
       objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
@@ -2720,5 +2722,92 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
     expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
     expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
+  });
+});
+
+// ── RecordDetailView.objectRouteAbsence-34740 ───────────────────────────────
+
+/**
+ * objectstack-ai/objectstack#34740 — the record route answers an object the
+ * reader cannot open with the same neutral sentence as the list, data and create
+ * routes (`objectRouteAbsence-34740.test.tsx`): `console.objectView.objectNotFoundDescription`,
+ * which neither asserts nor reveals whether the object exists. The server leaves
+ * a withheld object out of the served list exactly as it leaves out a missing
+ * name (ruling 6787890900), so both reach this view as absence.
+ */
+describe('RecordDetailView.objectRouteAbsence-34740', () => {
+  restoreAfterBlock();
+
+  const READABLE = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+  const WITHHELD = 'crm_lead';
+  const MISSING = 'no_such_object';
+  type Lang = 'en' | 'zh-CN';
+  const PACK: Record<Lang, 'en' | 'zh-Hans'> = { en: 'en', 'zh-CN': 'zh-Hans' };
+
+  function sentence(lang: Lang, objectName: string): string {
+    const pack = builtInLocales[PACK[lang]] as { console: { objectView: { objectNotFoundDescription: string } } };
+    return pack.console.objectView.objectNotFoundDescription.replace('{{objectName}}', objectName);
+  }
+
+  const metadata = {
+    objects: [READABLE], pages: [], loading: false, error: null,
+    refresh: async () => {}, invalidate: () => {},
+    ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
+  } as never;
+
+  async function faceText(lang: Lang, objectName: string): Promise<string> {
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => null,
+    };
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    expect(i18n.language).toBe(lang);
+    render(
+      <I18nProvider instance={i18n} persistLanguage={false}>
+        <MemoryRouter initialEntries={[`/apps/crm/${objectName}/record/r1`]}>
+          <MetadataCtx.Provider value={metadata}>
+            <NavigationProvider>
+              <Routes>
+                <Route
+                  path="/apps/:appName/:objectName/record/:recordId"
+                  element={<RecordDetailView dataSource={ds as never} objects={[READABLE] as never} onEdit={() => {}} />}
+                />
+              </Routes>
+            </NavigationProvider>
+          </MetadataCtx.Provider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    const text = (await screen.findByTestId('object-not-found')).textContent ?? '';
+    cleanup();
+    return text;
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200, json: async () => ({ data: [] }), text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each(['en', 'zh-CN'] as const)('%s: a withheld object and a missing name read the same sentence', async (lang) => {
+    const withheld = await faceText(lang, WITHHELD);
+    const missing = await faceText(lang, MISSING);
+    expect(withheld).toContain(sentence(lang, WITHHELD));
+    expect(missing).toContain(sentence(lang, MISSING));
+    expect(withheld.replaceAll(WITHHELD, 'NAME')).toBe(missing.replaceAll(MISSING, 'NAME'));
   });
 });

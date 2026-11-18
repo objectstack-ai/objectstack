@@ -833,6 +833,16 @@ const POSITIONS: Record<string, BlockPositions> = {
     scalars: { parentField: 'error', labelField: 'warning' },
     lists: { fields: 'warning' },
   },
+  timesheet: {
+    // [#34382] Every key is the grid's binding, and every one is WRITTEN: a
+    // typed cell creates a record carrying the row field values, the day and
+    // the value. A stale date field places no record on a day (an empty
+    // week); a stale value field sums nothing; a stale row field keys every
+    // record to one blank row. Each new record then writes the stale name and
+    // is refused at the door.
+    scalars: { dateField: 'error', valueField: 'error' },
+    lists: { rowFields: 'error' },
+  },
 };
 
 /**

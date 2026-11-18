@@ -30,7 +30,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
+// The harness loads these two inside a function body; paid here, during collection, not in a clocked window.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PermissionSetSchema } from '@objectstack/spec/security';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { MePermissionsResponseSchema } from '@objectstack/spec/api';
 import { bootStack, type VerifyStack } from './harness.js';
@@ -159,5 +163,122 @@ describe('[#28508] a plain member\'s /auth/me/permissions answers hasAnyQueue (a
     expect(off.status, await off.clone().text()).toBe(200);
     expect(await hasAnyQueueAs(stack, member)).toBe(false);
     await expectSysQueueRefused(stack, member);
+  });
+});
+
+// ─── [#34602] objectsUsingQueues: which objects use queues ───────────────────
+//
+// Through the same door, the per-object answer beside `hasAnyQueue`: the
+// objects on which the list's "In a queue" filter can find something — a
+// record sits in a queue now (no owner, a queue set), OR an active assignment
+// rule routes the object into a queue. Narrowed to what the caller may read.
+//
+// One boot. A declared queue and four objects:
+//   qobj_case     — a declared rule parks its new records in the queue  ⇒ named
+//   qobj_memo     — no rule, nothing queued at first; then a record is
+//                   parked by hand (no owner, a queue set)               ⇒ named after
+//   qobj_note     — no rule, an OWNED record with a queue left on it     ⇒ not named
+//   qobj_secret   — a record sitting in the queue, but the member may
+//                   not read the object                                  ⇒ named for the admin only
+// and one `ownership: 'org'` object, which carries no queue column at all.
+
+const QOBJ_QUEUE = 'qobj_desk';
+const qobjObject = (name: string, extra: Record<string, unknown> = {}) =>
+  ObjectSchema.create({
+    name,
+    label: name,
+    pluralLabel: name,
+    fields: { name: Field.text({ label: 'Name', required: true }) },
+    ...extra,
+  } as never);
+
+const qobjReader = PermissionSetSchema.parse({
+  name: 'qobj_member_default',
+  label: 'Queue objects fixture member (default)',
+  isDefault: true,
+  objects: {
+    qobj_case: { allowRead: true },
+    qobj_memo: { allowRead: true },
+    qobj_note: { allowRead: true },
+    qobj_catalog: { allowRead: true },
+  },
+});
+
+const stackWithQueueObjects = () =>
+  defineStack({
+    manifest: {
+      id: 'com.example.qobj-queue-objects',
+      namespace: 'qobj',
+      version: '0.0.1',
+      type: 'app',
+      name: 'Queue Objects Fixture',
+    },
+    objects: [
+      qobjObject('qobj_case'),
+      qobjObject('qobj_memo'),
+      qobjObject('qobj_note'),
+      qobjObject('qobj_secret'),
+      qobjObject('qobj_catalog', { ownership: 'org' }),
+    ],
+    queues: [{ name: QOBJ_QUEUE, label: 'Desk', members: [] }],
+    assignmentRules: [{
+      name: 'qobj_case_intake',
+      label: 'Case intake',
+      object: 'qobj_case',
+      entries: [{ name: 'all', assignTo: { type: 'queue', value: QOBJ_QUEUE } }],
+    }],
+    permissions: [qobjReader],
+  } as never);
+
+async function objectsUsingQueuesAs(stack: VerifyStack, token: string): Promise<{ tenantId: unknown; objects: unknown }> {
+  const res = await stack.apiAs(token, 'GET', '/auth/me/permissions');
+  expect(res.status).toBe(200);
+  const raw: unknown = await res.json();
+  const parsed = MePermissionsResponseSchema.safeParse(raw);
+  expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+  const body = raw as { tenantId?: unknown; hasAnyQueue?: unknown; objectsUsingQueues?: unknown };
+  expect(body.hasAnyQueue).toBe(true);
+  return { tenantId: body.tenantId, objects: body.objectsUsingQueues };
+}
+
+describe('[#34602] /auth/me/permissions answers objectsUsingQueues through the real door', () => {
+  let stack: VerifyStack;
+  let admin: string;
+  let member: string;
+  let organizationId: string;
+
+  /** A record written as the platform writes one, in the member's organization. */
+  const systemInsert = (object: string, data: Record<string, unknown>) =>
+    stack.hooks.run(object, 'insert', { organization_id: organizationId, ...data }, { system: true });
+
+  beforeAll(async () => {
+    stack = await bootStack(stackWithQueueObjects());
+    admin = await stack.signIn();
+    member = await stack.signUp('qobj-member@verify.test');
+    organizationId = String((await objectsUsingQueuesAs(stack, member)).tenantId);
+  }, BOOT_TIMEOUT);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('a declared rule routing into a queue names its object before any record exists; nothing else is named', async () => {
+    expect((await objectsUsingQueuesAs(stack, member)).objects).toEqual(['qobj_case']);
+  });
+
+  it('an owned record with a queue left on it does not name its object: the filter would not return it', async () => {
+    await systemInsert('qobj_note', { name: 'owned', owner_id: (await stack.contextFor(admin)).userId, queue: QOBJ_QUEUE });
+    expect((await objectsUsingQueuesAs(stack, member)).objects).toEqual(['qobj_case']);
+  });
+
+  it('a record parked in a queue by hand names its object from the next read on', async () => {
+    await systemInsert('qobj_memo', { name: 'parked', owner_id: null, queue: QOBJ_QUEUE });
+    expect((await objectsUsingQueuesAs(stack, member)).objects).toEqual(['qobj_case', 'qobj_memo']);
+  });
+
+  it('an object the member may not read is named for the admin, never for the member', async () => {
+    await systemInsert('qobj_secret', { name: 'hidden', owner_id: null, queue: QOBJ_QUEUE });
+    expect((await objectsUsingQueuesAs(stack, member)).objects).toEqual(['qobj_case', 'qobj_memo']);
+    expect((await objectsUsingQueuesAs(stack, admin)).objects).toEqual(['qobj_case', 'qobj_memo', 'qobj_secret']);
   });
 });

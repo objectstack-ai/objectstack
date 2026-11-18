@@ -83,7 +83,7 @@ import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-joi
 import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
   RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
-  relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
+  relationGroupDriverRefusal, relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
 } from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -161,7 +161,7 @@ export class DeleteAndAggregateFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'delete');
+    this.enforceTransactionOrigin(object, driver, 'delete', options?.context?.transaction);
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -465,7 +465,7 @@ export class DeleteAndAggregateFacet {
         // so testing it for `=== false` here would read a signal this layer's
         // contract does not promise — #5138's argument, unchanged.
         priorRecord = await readPreImage(id);
-        if (!priorRecord) throw recordNotFoundError(object, id);
+        if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
         // Bound unconditionally now that the row is proven present.
         // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
         // still the reason the binding goes through it rather than around it.
@@ -947,6 +947,16 @@ export class DeleteAndAggregateFacet {
       // is read, so the caller's own path runs the doors below itself.
       const relationGroup = relationGroupByRequestOf(options);
       if (relationGroup !== undefined) {
+          // [#33876] A driver that compiles no `ReadableIds` leaf refuses the
+          // dimension outright, before the decline: the caller throws the
+          // error rather than serve its FK-expand.
+          const refusal = relationGroupDriverRefusal(
+              object, relationGroup, this.getDriver(object) as { readonly name?: unknown; readonly supports?: unknown } | undefined,
+          );
+          if (refusal !== undefined) {
+              relationGroup.outcome = { kind: 'refused', error: refusal };
+              return [];
+          }
           const reason = relationGroupRegistryDecline.call({
               getObjectSchema: (name: string) => this._registry.getObject(name),
               getDriver: (name: string) => this.getDriver(name) as { readonly name?: unknown; readonly aggregate?: unknown } | undefined,

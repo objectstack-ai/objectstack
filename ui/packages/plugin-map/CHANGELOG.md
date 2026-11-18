@@ -1,5 +1,50 @@
 # @object-ui/plugin-map
 
+## 18.6.0
+
+### Patch Changes
+
+- Updated dependencies [84e6bbb]
+- Updated dependencies [b019048]
+- Updated dependencies [39fa82b]
+- Updated dependencies [adccc24]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [5a75579]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [227ae36]
+- Updated dependencies [046c224]
+- Updated dependencies [4240719]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [646b13e]
+- Updated dependencies [0d0a088]
+- Updated dependencies [77b42a1]
+- Updated dependencies [2e29287]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [d83a275]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [aa5a7d0]
+- Updated dependencies [9c70c16]
+- Updated dependencies [81ea504]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [0584eb5]
+- Updated dependencies [ab44198]
+- Updated dependencies [94c9491]
+- Updated dependencies [7b7272f]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [db1a05c]
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/plugin-detail@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

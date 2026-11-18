@@ -16,8 +16,11 @@
  * objectstack ADR-0146 D11 then closed the package-less write onto a packaged
  * item (403 NOT_OVERRIDABLE, naming the base's `.custom` pair). The landing's
  * two strings now teach the route that is open: Customize or New similar,
- * saved in the package's `.custom` customization package. The permission hint
- * still names the environment overlay, because it says that overlay is refused.
+ * saved in the package's `.custom` customization package. objectstack#34715
+ * then replaced the two strings the landing renders with ones that say what
+ * the author can do and name no mechanism, the `.custom` package included.
+ * The permission hint still names the environment overlay, because it says
+ * that overlay is refused.
  *
  * ## The population
  *
@@ -30,10 +33,8 @@
  *
  * 1. No value of these keys, in any table that carries them, names the
  *    organization axis.
- * 2. No landing value names the environment overlay, and every landing value
- *    names the route that exists: the `.custom` package and the table's own
- *    Customize label, read from the same table, so the check speaks every
- *    language a table is written in.
+ * 2. No landing value names the environment overlay or the `.custom`
+ *    package.
  * 3. Lit control on the matchers: the permission hint names the environment
  *    overlay in every table. A table in a language neither pattern speaks
  *    fails here, so pins 1 and 2 cannot pass on it by matching nothing.
@@ -60,19 +61,17 @@ const readTables: (root: string) => Map<string, Map<string, string>> = readDesig
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 /**
- * The two strings `BuilderLanding` renders about a read-only package. The third
- * landing string, the overlay link's tooltip, retired with the link: the
- * landing no longer links into Setup (objectstack ADR-0146 D1, N-28).
+ * The two strings `BuilderLanding` renders about installed apps: the page's
+ * lead and the installed-apps hint (objectstack#34715). The overlay link's
+ * tooltip retired with the link: the landing no longer links into Setup
+ * (objectstack ADR-0146 D1, N-28).
  */
-const LANDING_KEYS = ['engine.studio.landing.description', 'engine.studio.landing.readonlyHint'] as const;
+const LANDING_KEYS = ['engine.studio.landing.lead', 'engine.studio.landing.appsHint'] as const;
 
 /** The hint `PermissionMatrixEditor` shows on a set a code package ships: it names the overlay it refuses. */
 const PERMISSION_HINT = 'perm.readOnly.artifact.hint';
 
 const KEYS = [...LANDING_KEYS, PERMISSION_HINT] as const;
-
-/** The Customize action's own label, read from each table beside the landing strings. */
-const CUSTOMIZE_ACTION = 'engine.studio.customize.action';
 
 /** The customization package a read-only package is paired with (objectstack ADR-0146 D3). */
 const CUSTOM_PAIR = /\.custom\b/u;
@@ -94,7 +93,7 @@ function tablesCarryingKeys(): Array<[string, Map<string, string>]> {
   return [...readTables(REPO_ROOT)].filter(([, table]) => KEYS.some((key) => table.has(key)));
 }
 
-describe('the read-only copy names no organization axis, and the landing offers no overlay (objectui#12171, objectstack#29489)', () => {
+describe('the read-only copy names no organization axis, and the landing offers no overlay (objectui#12171, objectstack#29489, objectstack#34715)', () => {
   it('reads the tables t() serves', () => {
     const read = tablesCarryingKeys();
     for (const locale of Object.keys(DECLARED_LOCALES)) {
@@ -121,22 +120,23 @@ describe('the read-only copy names no organization axis, and the landing offers 
     expect(offenders).toEqual([]);
   });
 
-  it('no landing value offers the environment overlay; each names Customize and the .custom package', () => {
+  it('no landing value offers the environment overlay or names the .custom package', () => {
     const offenders: string[] = [];
     for (const [name, table] of tablesCarryingKeys()) {
-      const customize = table.get(CUSTOMIZE_ACTION);
-      if (!customize) {
-        offenders.push(`${name} ${CUSTOMIZE_ACTION}: missing`);
-        continue;
-      }
       for (const key of LANDING_KEYS) {
-        const value = table.get(key) ?? '';
-        if (ENVIRONMENT_OVERLAY.test(value)) offenders.push(`${name} ${key} offers the overlay: ${value}`);
-        if (!CUSTOM_PAIR.test(value)) offenders.push(`${name} ${key} names no .custom package: ${value}`);
-        if (!value.includes(customize)) offenders.push(`${name} ${key} names no "${customize}": ${value}`);
+        const value = table.get(key);
+        if (value === undefined) offenders.push(`${name} ${key}: missing`);
+        else if (ENVIRONMENT_OVERLAY.test(value)) offenders.push(`${name} ${key} offers the overlay: ${value}`);
+        else if (CUSTOM_PAIR.test(value)) offenders.push(`${name} ${key} names the .custom package: ${value}`);
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('lit control: the mechanism pattern matches the retired landing copy it now keeps off the page', () => {
+    const retired = tablesCarryingKeys().map(([, table]) => table.get('engine.studio.landing.readonlyHint'));
+    expect(retired.filter((value) => value !== undefined).length).toBeGreaterThan(0);
+    for (const value of retired) if (value !== undefined) expect(value).toMatch(CUSTOM_PAIR);
   });
 
   it('lit control: the permission hint names the environment overlay in every table', () => {

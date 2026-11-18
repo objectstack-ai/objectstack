@@ -82,6 +82,7 @@ import { FILE_REFERENCE_TYPES, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/sp
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
+import { patchTranslationBundlesOf } from './meta-item-read-gate.js';
 import type { TransportScopedMetaRequest } from './meta-collection-routes.js';
 import type { RestServer } from './rest-server.js';
 import { earnedAnswerLogged } from './stale-summary-answer.js';
@@ -380,9 +381,16 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // authored. The public form must not be the
                                     // one surface still serving the packaged
                                     // string back at a tenant who renamed it.
+                                    // [#33952] …and a field slot a code package's
+                                    // `fieldPatches` wrote reads that package's own
+                                    // translations, then its text. Unlike those
+                                    // reads, no pair `.custom` rank sits above it
+                                    // here: this route passes no `pairBundle`.
+                                    const patchBundles = await patchTranslationBundlesOf(p, 'object', objectSchema?.name);
                                     objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
                                         ...this.translateOptionsFor(i18n, locale),
                                         packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
+                                        ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
                                     });
                                     // [#23497] The section headings. An anonymous
                                     // visitor cannot load the bundle client-side (the

@@ -203,6 +203,8 @@ const ar = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "املأ حقول النموذج ثم أرسل أو ألغِ.",
+    sectionNav: "أقسام النموذج",
+    sectionNavErrors: "حقول تحتاج إلى تصحيح: {{number}}",
     deniedDescription: "ليس لديك إذن لتعديل هذا الحقل.",
     serverDefaultHint: "يُعيَّن تلقائيًا عند الحفظ.",
     requiredForAction: "مطلوب لتنفيذ «{{action}}».",
@@ -627,6 +629,7 @@ const ar = {
         "هذا العرض مُجمَّع، لكن مصدر بياناته لا يطبّق queryGroupHeaders، لذا لا يمكن عدّ المجموعات. أزِل التجميع لعرض السجلات.",
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
+      draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1041,6 +1044,8 @@ const ar = {
     removeGroup: "إزالة",
     groupingUnstoredNotice: "لا يمكن تجميع هذه القائمة حسب {{fields}}: تُحسب القيمة عند العرض ولا تُخزَّن. تُعرض القائمة دون هذا التجميع.",
     groupingUnstoredRemove: "إزالة من التجميع",
+    draftOnlyQueryDropped: "لم تتم التصفية أو الفرز حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى النشر.",
+    withheldFieldsLeftOut: "لا يتم العرض أو التصفية أو الفرز أو التجميع حسب {{fields}}: الحزمة التي تضيف هذا الحقل معطلة. سيعود عند تفعيل الحزمة.",
     inlineEditShort: "تحرير مضمّن",
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
   },
@@ -1539,6 +1544,8 @@ const ar = {
     writeStrippedUnknownReason: "لم تُطبَّق من قِبل الخادم: {{fields}}",
     approvalPendingEditable: "قيد الموافقة · قابل للتعديل",
     approvalPendingTooltip: "يحتوي هذا السجل على طلب موافقة معلق، لكن هذه الخطوة لا تزال تسمح بالتعديل",
+    approvalPending: "قيد الموافقة",
+    approvalPendingNotEditableTooltip: "يحتوي هذا السجل على طلب موافقة معلق",
     approvalProgress: "الموافقات — {{got}} من {{need}}",
     approvalProgressGroups: "التوقيعات — {{got}} من {{need}} مجموعات",
     approvalProgressLabel: "تقدّم الموافقة",
@@ -1793,6 +1800,9 @@ const ar = {
     },
     total: "الإجمالي",
     noDataSourceFor: "لا مصدر بيانات لـ",
+    drillTooMany: 'السجلات المرتبطة بهذه القيمة كثيرة جدًا بحيث لا يمكن عرضها هنا. ضيّق عوامل تصفية لوحة المعلومات وحاول مرة أخرى.',
+    drillUnavailable: 'لا يمكن عرض السجلات الخاصة بهذه القيمة من هنا.',
+    drillFailed: 'تعذّر تحميل السجلات الخاصة بهذه القيمة. حاول مرة أخرى لاحقًا.',
     config: {
       breadcrumb: {
         dashboard: "لوحة القيادة",
@@ -2133,10 +2143,29 @@ const ar = {
       passwordsNote: "كلمات مرور مؤقتة — تُعرض مرة واحدة ولا تُخزَّن أبدًا. احفظها الآن؛ وعلى كل مستخدم تغيير كلمته عند أول تسجيل دخول.",
       passwordsMore: "تم حذف إدخالات إضافية — استخدم التنزيل.",
       positionsHint: "المناصب: اربط عمودًا بأسماء المناصب الآلية، ويُفصل بين عدة أسماء بـ \";\". يُسند كل منصب كما في Setup؛ والاسم غير الموجود أو الذي لا يحق لك إسناده يُبلَّغ عنه في صفه، ويُنشأ المستخدم رغم ذلك.",
+      managerHint: "المدير: اربط عمودًا بمدير كل مستخدم، بعنوان بريده الإلكتروني (أو رقم هاتفه عند تفعيل تسجيل الدخول بالهاتف). يُربط المديرون بعد إدخال جميع الصفوف، لذا يُحتسب المدير الوارد في موضع لاحق من الملف؛ والمدير الذي لا يُعثر عليه أو يتعذر ربطه يُبلَّغ عنه في صفه، ويُنشأ المستخدم رغم ذلك.",
       passwordsDownload: "تنزيل ملف CSV",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_zero: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_one: 'تغيير واحد غير منشور ({{count}}). انشره من شريط المسودة في الأعلى.',
+        publishFromBar_two: 'تغييران غير منشورين ({{count}}). انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_few: '{{count}} تغييرات غير منشورة. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_many: '{{count}} تغييرًا غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_other: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        showDraftToPublish: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_zero: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_one: 'تغيير واحد غير منشور ({{count}}). اعرض المسودة لمراجعته ونشره.',
+        showDraftToPublish_two: 'تغييران غير منشورين ({{count}}). اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_few: '{{count}} تغييرات غير منشورة. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_many: '{{count}} تغييرًا غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_other: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraft: 'عرض المسودة',
+        receipt: 'تم النشر. تغييراتك أصبحت مباشرة.',
+        dismissReceipt: 'إغلاق',
         count: "هناك {{count}} من التغييرات لم تُنشر بعد — لا يمكن للمستخدمين رؤيتها.",
         publish: "نشر",
         published: "جميع التغييرات المعلّقة فعّالة الآن.",
@@ -2240,6 +2269,9 @@ const ar = {
           title: "تحرير «{{app}}»",
           titleGeneric: "تحرير هذا التطبيق",
           description: "ما الذي تريد تغييره؟ سأعدّل هذا التطبيق في مكانه — إضافة حقل أو كائن أو عرض أو لوحة معلومات، أو تعديل ما هو موجود.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "اسأل عن بيانات هذا التطبيق — الأعداد والقوائم والملخصات — أو أخبرني بما تريد تغييره، وسأعدّل التطبيق في مكانه: حقل أو كائن أو عرض أو لوحة معلومات.",
         },
       },
       clearConversation: "مسح",
@@ -2403,7 +2435,7 @@ const ar = {
       changesApplied: "تم التطبيق",
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
-      discussing: "قيد المناقشة: {{target}}",
+      discussing: "قيد العرض: {{target}}",
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -2451,11 +2483,16 @@ const ar = {
       unavailableRetry: "إعادة المحاولة",
       unavailableHome: "العودة إلى الرئيسية",
       dock: {
-        title: "المساعد",
+        title: "مساعد الذكاء الاصطناعي",
         description: "محادثة مساعد الذكاء الاصطناعي",
         resize: "تغيير حجم المحادثة",
         collapse: "طي المحادثة",
         maximize: "فتح كصفحة كاملة",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "السجل",
+        backToChat: "العودة إلى المحادثة",
+        expand: "توسيع",
+        restore: "استعادة اللوحة الجانبية",
         open: "فتح المساعد",
         planAwaitingApproval: "خطة مقترحة بانتظار موافقتك",
       },
@@ -2565,6 +2602,7 @@ const ar = {
       view: "عرض",
       confirm: "تأكيد",
       cancel: "إلغاء",
+      continue: "متابعة",
       prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تؤكد.",
       organizationName: {
         title: "سمِّ مؤسستك",
@@ -2751,8 +2789,16 @@ const ar = {
       },
       viewTypeTree: "شجرة",
       viewTypeTreeDesc: "يرتّب السجلات ذاتية المرجعية في تسلسل هرمي عبر حقل أب.",
+      viewTypeTimesheet: "جدول الساعات",
+      viewTypeTimesheetDesc: "أدخل رقمًا لكل صف ويوم من أيام الأسبوع؛ كل خلية معبأة سجل واحد.",
       parentField: "الحقل الأب",
       parentFieldHelp: "الحقل الذي يشير إلى السجل الأب (الكائن نفسه) ويحدد التسلسل الهرمي. الحقول ذاتية المرجعية فقط هي المؤهلة.",
+      timesheetRowField: "حقل الصف",
+      timesheetRowFieldHelp: "كل صف في الشبكة قيمة واحدة لهذا الحقل، مثل مشروع.",
+      timesheetDateField: "حقل التاريخ",
+      timesheetDateFieldHelp: "توضع السجلات في عمود يوم الأسبوع المطابق لهذا التاريخ.",
+      timesheetValueField: "حقل القيمة",
+      timesheetValueFieldHelp: "الرقم الذي تعرضه كل خلية وتعدّله، مثل الساعات.",
       viewName: "الاسم",
       viewNameHelp: "مفتاح برمجي (snake_case). يُملأ تلقائيًا من العنوان — عدّله إن أردت.",
       viewNameRequired: "أدخل مفتاحًا (أحرف إنجليزية صغيرة وأرقام وشرطة سفلية). لا يُملأ تلقائيًا للعناوين غير اللاتينية.",
@@ -2781,7 +2827,7 @@ const ar = {
       expandToPage: "فتح كصفحة كاملة",
       openAsPage: "فتح كصفحة كاملة",
       objectNotFound: "الكائن غير موجود",
-      objectNotFoundDescription: "الكائن \"{{objectName}}\" غير موجود في الإعدادات الحالية.",
+      objectNotFoundDescription: "الكائن \"{{objectName}}\" غير موجود، أو ليس لديك صلاحية الوصول إليه.",
       objectNotFoundHint: "تحقق من إعدادات التنقل في تطبيقك أو اختر كائنًا آخر من الشريط الجانبي.",
       objectPackageDisabled: "الكائن \"{{objectName}}\" ينتمي إلى حزمة معطّلة، لذلك لا يتم تقديمه.",
       filterOrGroupNotEditable: "يحتوي هذا الفلتر على مجموعة «أو» إلى جانب شروط أخرى، ولا يستطيع محرر الفلاتر عرضها، لذا فهو للقراءة فقط هنا. لا يزال العرض يطبّقه.",
@@ -2955,6 +3001,10 @@ const ar = {
       launcherLabel: "مشغّل التطبيقات",
       menuLabel: "تنقّل التطبيق",
       menuEmpty: "لا توجد في هذا التطبيق عناصر تنقّل يمكنك فتحها.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "شريط قائمة التطبيق",
+      searchMenu: "البحث في القائمة",
+      phoneBarHint: "ضع نجمة على عنصر لإضافته إلى الشريط السفلي. يعرض الشريط أول أربعة عناصر.",
       itemMenu: "المزيد من الإجراءات لـ {{name}}",
       openInNewTab: "فتح في علامة تبويب جديدة",
       copyLink: "نسخ الرابط",
@@ -3195,6 +3245,10 @@ const ar = {
       missingToken: "رابط التحقق لا يحتوي على رمز.",
       emailMissing: "عنوان البريد الإلكتروني مفقود",
       resendButton: "إعادة إرسال بريد التحقق",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "لم يتم التحقق من بريدك الإلكتروني بعد. أرسل رابط التحقق إلى {{email}}، ثم انقر على الرابط للتحقق من حسابك.",
+      sendButton: "إرسال بريد التحقق",
       resending: "جارٍ الإرسال…",
       resent: "تم إرسال البريد! تحقق من صندوق الوارد",
       resentSuccess: "تم إرسال بريد التحقق!",
@@ -3469,7 +3523,7 @@ const ar = {
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
     editApp: "تعديل التطبيق",
-    openAppInStudio: "عرض التطبيق في Studio",
+    openAppInStudio: "عرض {{app}} في Studio",
   },
   home: {
     build: {
@@ -3679,7 +3733,6 @@ const ar = {
   },
   empty: {
     objectNotFound: "الكائن غير موجود",
-    objectNotFoundDescription: "تعريف الكائن \"{{name}}\" مفقود. تحقق من الإعداد أو ارجع للخلف.",
     interfacePageSourceMissing: "تشير صفحة الواجهة هذه إلى \"{{name}}\"، وهو غير متاح.",
     pageNotFound: "الصفحة غير موجودة",
     pageNotFoundDescription: "الصفحة \"{{name}}\" غير موجودة. ربما تم إزالتها أو إعادة تسميتها.",
@@ -4083,6 +4136,8 @@ const ar = {
     viewApprovals: "عرض الموافقات",
     noPendingApprovals: "لا توجد موافقات معلقة",
     openApprovalsInbox: "فتح صندوق الموافقات",
+    needsYou: "يتطلب إجراءً منك",
+    viewApprovalDetails: "عرض التفاصيل",
     badgeTotal: "{{total}} إجمالاً",
     badgeNotifications: "مواضيع غير مقروءة: {{count}}",
     badgeNotifications_zero: "مواضيع غير مقروءة: {{count}}",
@@ -4762,12 +4817,23 @@ const ar = {
     openNextAfterDecision: 'فتح التالي بعد اتخاذ القرار',
     queueDone: 'لا توجد طلبات معلقة أخرى في هذه القائمة.',
     snapshotAsSubmitted: 'كما قُدِّم',
+    snapshotChanged: 'تم التغيير',
+    snapshotCurrentValue: 'القيمة الحالية',
+    snapshotOpenRecord: 'فتح السجل',
+    snapshotCurrentUnreadable: 'تتعذر قراءة السجل الحالي، لذا لا تُعلَّم التغييرات التي تمت بعد الإرسال.',
+    snapshotChildCurrent: 'الصفوف الحالية: لا يحفظ الإرسال الصفوف الفرعية.',
+    progressTitle: 'تقدم الموافقة',
+    attachmentsTitle: 'المرفقات',
     attachmentChip: 'مرفق',
     attachmentOpenFailed: 'تعذّر فتح المرفق — يرجى المحاولة مرة أخرى',
     approveOneTitle: 'الموافقة على "{{title}}"؟',
     approveOneBody: 'ستتم الموافقة على الطلب بهويتك. لإضافة تعليق أو مرفق، افتح الطلب.',
     flowOrigin: 'بدأها التدفق',
     submittedByYou: 'مقدَّم منك',
+    awaitingYourDecision: 'بانتظار موافقتك',
+    stepNumber: 'الخطوة {{n}}',
+    submittedByName: 'مقدَّم من {{name}}',
+    moreDecisionActions: 'إجراءات موافقة أخرى',
     sortBy: 'ترتيب',
     sortRecent: 'الأحدث أولاً',
     sortOldest: 'الأقدم أولاً',
@@ -4983,6 +5049,14 @@ const ar = {
       pendingHere_few: 'معاينة المسودة · {{count}} تغييرات غير منشورة في هذه الصفحة',
       pendingHere_many: 'معاينة المسودة · {{count}} تغييرًا غير منشور في هذه الصفحة',
       pendingHere_other: 'معاينة المسودة · {{count}} تغيير غير منشور في هذه الصفحة',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_zero: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_one: 'معاينة المسودة · تغيير واحد غير منشور ({{count}}) في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_two: 'معاينة المسودة · تغييران غير منشورين ({{count}}) في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_few: 'معاينة المسودة · {{count}} تغييرات غير منشورة في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_many: 'معاينة المسودة · {{count}} تغييرًا غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_other: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
     },
     changes: {
       title: 'التغييرات المعلّقة',
@@ -5223,7 +5297,8 @@ const ar = {
       securityBlockTitle_few: 'سيتم رفض النشر — {{count}} عناصر بحاجة إلى قرار أولاً',
       securityBlockTitle_many: 'سيتم رفض النشر — {{count}} عنصرًا بحاجة إلى قرار أولاً',
       securityBlockTitle_other: 'سيتم رفض النشر — {{count}} عنصر بحاجة إلى قرار أولاً',
-      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← مشاركة السجلات، ثم انشر مرة أخرى.',
+      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← من يمكنه رؤية أي السجلات، ثم انشر مرة أخرى.',
+      flowChecksTitle: 'قبل النشر: سيُبلغ فحص النشر عمّا يلي',
       securityRule: {
         owdUnset: 'لم يُعرَّف أساس مشاركة السجلات (sharingModel). يعود وقت التشغيل إلى private، لكن يجب أن يكون الأساس قرارًا صريحًا.',
         owdAlias: 'أساس مشاركة السجلات (sharingModel) ليس قيمة قياسية، لذا يعامل وقت التشغيل الكائن على أنه private.',
@@ -5234,6 +5309,8 @@ const ar = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'هذا التطبيق غير منشور بعد. إنه يعمل، لكن لا يراه إلا المنشئون. انشره ليراه مستخدموك.',
       message: 'تطبيق غير منشور — يعمل بالكامل، لكن لا يراه سوى المنشئين. انشره ليصبح مرئياً لمستخدميك.',
       publish: 'نشر',
       publishing: 'جارٍ النشر…',

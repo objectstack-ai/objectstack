@@ -706,9 +706,14 @@ the caller and nested as a subquery; no dotted key; forward only: never a parent
 only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
 where ids are read, at most 1000 of them, refused past that,
 `INVALID_FILTER` / 400, never truncated; the subquery form is taken only on
-the related object's own datasource and on a driver that compiles it — the SQL
-drivers (every `driver-sql` dialect, Turso) compile it and the in-memory driver
-evaluates it in process; as the caller: the related object's row scope and field permissions
+the related object's own datasource; on a read verb it needs a driver that
+compiles it — the SQL drivers (every `driver-sql` dialect, Turso) compile it and
+the in-memory driver evaluates it in process, each declaring the
+`DriverCapabilities.readableIdsLeaf` bit, and on a driver without it (MongoDB,
+OData) a single-valued relation condition on a read verb is refused before
+anything is read, `INVALID_FILTER` / 400, naming the driver and the two-step
+route (a multi-valued relation and `update` / `delete` keep the capped id read
+there); as the caller: the related object's row scope and field permissions
 apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
 never an empty result.
 
@@ -717,7 +722,6 @@ of these cases:
 
 - a related object on another datasource;
 - a federated related object;
-- a driver that compiles no subquery (MongoDB, OData);
 - a related object whose reads an object-scoped middleware or an `afterFind` hook shapes;
 - a related object read under different driver options than the outer object (its tenant
   scope, most commonly) — decided before the related read is planned where the registry
@@ -1144,7 +1148,7 @@ const rows = await engine.aggregate('opportunity', {
 
 A `groupBy` entry may be an object carrying `dateGranularity`, which buckets a
 `date`/`datetime` column into uniform periods. The bucketed value is projected under
-the field name (or `alias`, on the in-memory path):
+the field name, or under `alias` when the node sets one (pushed down or in memory alike):
 
 ```typescript
 const revenueByMonth = await engine.aggregate('order', {

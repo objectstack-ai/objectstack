@@ -5054,7 +5054,8 @@ _context: HttpProtocolContext,
             // ⛔ NOT a blanket `startsWith('_')` strip, and deliberately not the
             // one `assemblePackageManifest` runs 300 lines up: the two paths
             // have opposite obligations, and the spec states both.
-            // `METADATA_READ_DECORATIONS` is `['_diagnostics', '_draft']` and
+            // `METADATA_READ_DECORATIONS` is the list of the read path's own
+            // annotations (`_diagnostics`, `_draft`, `_withheldFields`) and
             // its module says the ADR-0010 envelope (`_packageId`,
             // `_provenance`, …) is "deliberately NOT" a member — "the closed
             // metadata schemas allowlist them precisely so a served document

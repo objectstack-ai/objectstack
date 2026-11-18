@@ -442,7 +442,11 @@ const CONSOLE_MAIN = [
     'min-w-0',
     'overflow-auto',
   ]),
-  classByPattern(consoleLayoutSrc, CONSOLE_LAYOUT_FILE, /<AppShell[\s\S]*?className="([^"]+)"/, [
+  // The first string `ConsoleLayout` hands `AppShell` as `className`, written
+  // either as a literal or as the first argument of `cn(...)` (objectstack#34594
+  // adds a phone-only bottom padding as a second, conditional argument; it
+  // changes no width, so it is not reproduced here).
+  classByPattern(consoleLayoutSrc, CONSOLE_LAYOUT_FILE, /<AppShell[\s\S]*?className=(?:\{cn\(\s*)?["']([^"']+)["']/, [
     'overflow-x-hidden',
   ]),
 ].join(' ');

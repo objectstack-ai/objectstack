@@ -1,11 +1,13 @@
 # ADR-0155: The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table, not a capped id list; every grant counts
 
-**Status**: Proposed — 2026-11-15; questions ①–③ are open for the maintainer and are ⛔ not decided by this text:
-① the tenant scope of the subquery, ② what an evaluator that cannot run the leaf answers, ③ the leaf on a predicate
-update. Each is put under [Questions for the maintainer](#questions-for-the-maintainer) with its options, what each
-option costs and a recommendation, and every sentence of the Decision that depends on one says so. `docs/adr/` is
-Tier H (Prime Directive #14): the record lands on a `GOVERNED_APPROVERS` approval, and the execution cards under
-[Execution plan](#execution-plan-after-acceptance) are cut after acceptance and ⛔ never before it. **This record
+**Status**: Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③ (ruling record
+[`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787, verbatim:
+「三问都按 ADR 推荐」): ① **A**, the subquery carries no tenant scope; ② **the recommended column, row by row**, so no
+capped id list is kept anywhere; ③ **A**, the leaf's write form is admitted on a predicate `update` only. Each answer
+is recorded under [Questions for the maintainer](#questions-for-the-maintainer), beside the options it was chosen
+from, and every sentence of the Decision that depended on one now states it. `docs/adr/` is Tier H (Prime Directive
+#14): this edit lands on a `GOVERNED_APPROVERS` approval, and the execution cards under
+[Execution plan](#execution-plan-after-acceptance) are cut after it lands and ⛔ never before it. **This record
 declares; it implements nothing.**
 - **Date**: 2026-11-15
 - **Card**: [#33899](https://github.com/objectstack-ai/objectstack/issues/33899). It is the precondition of
@@ -30,19 +32,19 @@ declares; it implements nothing.**
   [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove).
 - **Revisits**: ADR-0139 D1's "⛔ No second leaf", for one more leaf and nothing else. This is the second record to do
   so (ADR-0147 is the first), and the prohibition stays the default: a new leaf needs a Tier H record of its own. It
-  answers ADR-0139's open item O4, which names this read. Three further places move only if the maintainer rules that
-  way: ADR-0139 D1's read-verbs sentence (under ③'s A); ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" (under
-  ②'s L or R2, each of which consults a driver declaration); and ADR-0111 D7's list of inert grants (under R2 alone).
+  answers ADR-0139's open item O4, which names this read. Three further places move, as the maintainer ruled: ADR-0139
+  D1's read-verbs sentence (③ ruled A); ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" (② ruled R2 on the
+  storage rows, which consults a driver declaration); and ADR-0111 D7's list of inert grants (② ruled R2).
   The dated pointer notes those records are owed are ⛔ not in this record's diff: they land with the governed edit
   that records the maintainer's rulings in this record's Status line
   ([O7](#open-items-not-blocking-acceptance-each-becomes-a-reading-on-its-card)).
 - **Leaves unchanged**: every authorable surface (no operator, no CEL function, no object, permission-set or
   sharing-rule key, and no stored predicate to migrate); `sys_record_share`'s columns; its write path (grant, revoke,
   rule materialisation, the organization stamp), the by-id gates and share-management authority, which move only
-  under one answer to ② and only on the objects that answer names; the owner match and its depth, the queue arm, the
-  source of the approval arm, the external floor, the guest denial, the phantom-anchor narrowing and the delegation
-  intersection; the outer read's tenant wall; `ReadableIds` and its consumers; ADR-0147's leaf and its floor. The
-  shared seam's recipient rule reads that leaf's anchor and changes nothing it carries
+  under ②'s R2, ruled for the storage rows, and only on the objects those rows name; the owner match and its depth,
+  the queue arm, the source of the approval arm, the external floor, the guest denial, the phantom-anchor narrowing
+  and the delegation intersection; the outer read's tenant wall; `ReadableIds` and its consumers; ADR-0147's leaf and
+  its floor. The shared seam's recipient rule reads that leaf's anchor and changes nothing it carries
   ([D4](#d4--the-engine-seam-and-what-is-built-once-with-adr-0147)).
 - **Consumers**: `@objectstack/spec` (the leaf's declaration, the comparand door's option, the conformance case-set,
   the `ISharingService` and `ISecurityService` prose), `@objectstack/objectql` (the door and the executor seam),
@@ -63,7 +65,7 @@ the consequence, and this record repeats its words and adds none: past 5,000 sha
 access, failing closed. The predicate-update scope (`packages/plugins/plugin-sharing/src/sharing-service.ts#buildWriteFilter`)
 reads the same way.
 
-This record proposes that the arm lower to one more engine-internal branded comparand, provisionally
+This record decides that the arm lower to one more engine-internal branded comparand, provisionally
 `SharedRecordIds`, which a SQL driver compiles in the list's own position:
 
 ```sql
@@ -77,20 +79,21 @@ of parameters where it bound one per grant. Below today's cap the visible set is
 is the corrected one. The owner match, the queue arm and the approval arm stay in the same filter as sibling
 disjuncts. No request can spell the leaf, and no author gains a spelling.
 
-Three things are the maintainer's and are put, not decided:
+Three things were the maintainer's, put with a recommendation each, and the maintainer ruled every one as recommended
+(ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600)):
 
-- **①** Whether the subquery carries a tenant scope. Today's grant read carries none. Recommended: none, which is
-  parity.
+- **①** Whether the subquery carries a tenant scope. Today's grant read carries none. Ruled: none, which is parity.
 - **②** What an evaluator that cannot run a subquery answers: MongoDB, OData, an object on another datasource, the
   analytics native-SQL compiler, the explainer, and with them one host class: a middleware or a find hook registered
-  for the grant table by name, which the subquery would read around. A materialised list, or a refusal. Recommended:
-  no list anywhere. The analytics compiler compiles the leaf and the explainer resolves it per record. On storage
-  that cannot run a subquery, share grants become unsupported: refused at the grant door and no longer counted, with
-  a visible trail. That takes away something that works there today, and
-  [Q2](#q2--an-evaluator-that-cannot-run-the-leaf) says exactly what. For the host class the recommendation is a
-  refusal at boot from the switch on, until the registration is removed.
-- **③** `buildWriteFilter` feeds a predicate `update`, and ADR-0139 D1 admits a leaf on read verbs only. Recommended:
-  admit this leaf's write form on `update`, and nowhere else.
+  for the grant table by name, which the subquery would read around. A materialised list, or a refusal. Ruled: no
+  list anywhere. The analytics compiler compiles the leaf and the explainer resolves it per record. On storage that
+  cannot run a subquery, share grants become unsupported: refused at the grant door and no longer counted, with a
+  visible trail. That takes away something that works there today, and
+  [Q2](#q2--an-evaluator-that-cannot-run-the-leaf) says exactly what. The host class is refused at boot from the
+  switch on, until the registration is removed, with no exemption for a registration that declares it skips system
+  reads.
+- **③** `buildWriteFilter` feeds a predicate `update`, and ADR-0139 D1 admits a leaf on read verbs only. Ruled: this
+  leaf's write form is admitted on `update`, and nowhere else.
 
 ## Provenance
 
@@ -112,6 +115,11 @@ Three things are the maintainer's and are put, not decided:
   same comment corrects constraint 1: "every arm stays in the same filter", not "inside the subquery".
 - **The ruling.** [`6895275749`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6895275749):
   「只做根治」, and the root fix starts with this record.
+- **The answers to ①–③.** The routing analysis
+  [`6938582405`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6938582405) on #33787 put the
+  three questions to the maintainer, who chose 「三问都按 ADR 推荐」 on 2026-11-17; ruling record
+  [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) records it: Q1 A ·
+  Q2 the recommended column · Q3 A.
 - **This card and its triage.** [#33899](https://github.com/objectstack-ai/objectstack/issues/33899); triage audit
   [`6896032788`](https://github.com/objectstack-ai/objectstack/issues/33899#issuecomment-6896032788) (lane, grade, and
   the standing principle quoted under Q2).
@@ -246,7 +254,7 @@ Name the set once, so every later sentence can point at it:
 - **G(object, user, levels)** is the set of `record_id` values over the `sys_record_share` rows with
   `object_name = object`, `recipient_type = 'user'`, `recipient_id = user`, a `record_id` that is neither NULL nor
   empty, and, where `levels` is given, an `access_level` in `levels`. It is read with system authority, with no
-  organization predicate (that half is ①), with no cap and no ordering.
+  organization predicate (① ruled A), with no cap and no ordering.
 - **The leaf denotes G, the whole of it.** Today's list is at most 5,000 members of G.
 - **Below the cap nothing changes.** Where a caller's rows number 5,000 or fewer, today's list is G, and every read
   and every predicate update answers the same rows before and after the switch, on every evaluator that evaluates
@@ -260,8 +268,11 @@ Name the set once, so every later sentence can point at it:
 - **An outer key of another type answers the same rows.** Where an object's `id` column is not a string, the subquery
   answers the rows today's list answers (O2). A refusal there would narrow this invariant on that object, so it is no
   driver card's to choose: a card that cannot keep the same rows stops, and the case goes to the maintainer under ②.
-- **Anything beyond that is a visibility change, and it is the maintainer's first.** That is why ①, ② and ③ are
-  questions: each has an answer that keeps this invariant and an answer that narrows it on purpose.
+- **Anything beyond that is a visibility change, and it is the maintainer's first.** That is why ①, ② and ③ were put
+  as questions: each had an answer that keeps this invariant and an answer that narrows it on purpose. ①'s A and ③'s
+  A keep it. ②'s ruled answer is the one visibility change made on purpose, and only where Q2's costs say: on the
+  storage rows that cannot run the leaf, which evaluate no leaf and so sit outside this invariant, share grants stop
+  counting.
 
 ### D1 — The leaf: its own brand, engine-internal, never authorable
 
@@ -274,8 +285,8 @@ Name the set once, so every later sentence can point at it:
   D1's reason for one leaf as this: one brand carries one meaning, so no composer has to ask which meaning it holds.
   This record keeps that reason the same way, by giving each further meaning a brand of its own.
 - **What it carries: the inputs of G and nothing else.** The object's name, the recipient's user id, and the admitted
-  access levels: none on the read form, which admits every level, and `WRITE_ACCESS_LEVELS` on the write form (③),
-  supplied by the producer so the level vocabulary keeps its one home. `recipient_type = 'user'` is fixed, not
+  access levels: none on the read form, which admits every level, and `WRITE_ACCESS_LEVELS` on the write form
+  (③ ruled A), supplied by the producer so the level vocabulary keeps its one home. `recipient_type = 'user'` is fixed, not
   carried. It carries no organization, no caller scope and no reading context. The inputs are ordinary enumerable
   properties, as `ReadableIds`' object name is, so two users' leaves never compare or serialise as equal; only the
   brand is non-enumerable. The rest of its representation is the spec card's.
@@ -287,12 +298,12 @@ Name the set once, so every later sentence can point at it:
 - **Position.** It is legal only as the `$in` comparand of `id` on the object it names: directly in that object's
   `where`, or inside the composed scope of a `ReadableIds` leaf whose parent is that object. There it composes under
   `$and`, `$or` and `$not` like any `$in`.
-- **Verbs.** `find`, `findOne`, `count` and `aggregate`, `where` only. Its write form on a predicate `update` is ③. On
-  `delete`, in a `having`, or at any other position, the engine refuses it loudly, as ADR-0139 D1 refuses a misplaced
-  `ReadableIds`.
+- **Verbs.** `find`, `findOne`, `count` and `aggregate`, `where` only, and its write form in the `where` of a predicate
+  `update` (③ ruled A). On `delete`, in a `having`, or at any other position, the engine refuses it loudly, as
+  ADR-0139 D1 refuses a misplaced `ReadableIds`.
 - **No request can spell it, and no author gains a spelling.** No operator joins
   `packages/spec/src/data/filter.zod.ts#VALID_AST_OPERATORS`, and there is no CEL function and no lint vocabulary.
-  One producer writes it: plugin-sharing's read-scope builder, and its write-scope builder under ③.
+  One producer writes it: plugin-sharing's read-scope builder, and its write-scope builder (③ ruled A).
 - **⛔ No `EXISTS`, no correlated form, no join.** It sits in the list's own position, so `find`, `count` and
   `aggregate` agree by construction, and a record matched by several grant rows is still one row.
 - **The name.** `SharedRecordIds` is provisional ([O1](#open-items-not-blocking-acceptance-each-becomes-a-reading-on-its-card)):
@@ -309,13 +320,13 @@ id IN (SELECT record_id FROM sys_record_share
        WHERE object_name = :object AND recipient_type = 'user' AND recipient_id = :user
          AND record_id IS NOT NULL AND record_id <> '')
 
--- the write form (③) adds one predicate inside the subquery
+-- the write form (③ ruled A) adds one predicate inside the subquery
          AND access_level IN (:levels)
 ```
 
 - **System authority.** No row-level security, org-wide default, sharing or field-level security applies to
   `sys_record_share` here. Today's read runs under `SYSTEM_CTX`, and the sharing service bypasses its own table.
-- **Tenant scope: ①.** Today's read carries none. Under the recommended answer the subquery carries none either: the
+- **Tenant scope: none (① ruled A).** Today's read carries none, and the subquery carries none either: the
   driver ⛔ does not apply `packages/drivers/driver-sql/src/sql-driver.ts#applyTenantScope` to it. The driver card
   records that absence against the driver's read-side chokepoint guard (`scripts/check-tenant-chokepoint.mjs`): an
   exemption citing this record if the guard reads the builder, a pin if it does not. So it reads as a decision and
@@ -327,7 +338,7 @@ id IN (SELECT record_id FROM sys_record_share
   Nothing de-duplicates, and nothing needs to.
 - **No cap, no ordering.** The `limit` is not raised and not made loud. It is gone, because nothing is materialised.
 - **Same datasource.** The subquery reads `sys_record_share` on the datasource the outer object is bound to. An object
-  bound to another one is in ②'s census: no driver evaluates a subquery across two.
+  bound to another one is in ②'s census, ruled R2 with R1 behind it: no driver evaluates a subquery across two.
 - **Index-backed** by `(object_name, recipient_type, recipient_id)`. Whether that index should also carry `record_id`
   is a measurement on the driver card (O3).
 - **Key comparison.** Both keys are strings on every table the platform manages (`id` a `varchar`, `record_id` a
@@ -355,9 +366,10 @@ After the switch the read scope is:
 - **The queue arm stays a sibling disjunct** over the object's own columns. ⛔ It is never moved into the share
   subquery, which cannot express it.
 - **The owner match is unchanged**, at every depth.
-- **The share disjunct is always present** on a sharing-scoped read, on every object ② leaves it on. Today it is
-  absent for a caller with no grant. An empty subquery admits nothing, so the rows are the same.
-- **The write scope** takes the same shape with the write form (③) and, as today, no approval arm. `delete` keeps
+- **The share disjunct is always present** on a sharing-scoped read, on every object ② leaves it on (R2, ruled for
+  the storage rows, takes it off theirs). Today it is absent for a caller with no grant. An empty subquery admits
+  nothing, so the rows are the same.
+- **The write scope** takes the same shape with the write form (③ ruled A) and, as today, no approval arm. `delete` keeps
   answering the owner match alone, and no leaf is ever written on it.
 - **A phantom-anchor object** keeps today's answers: on a read the approval ids or the deny sentinel, on a predicate
   write the deny sentinel, and no share arm on either.
@@ -373,7 +385,8 @@ After the switch the read scope is:
   `packages/spec/src/data/filter-comparand-shape.ts#ListComparandShapeOptions`: the engine's comparand door
   (`packages/objectql/src/filter-comparand-shape.ts#assertListComparandShapes`), and the analytics merges that hand a
   read scope on to the engine (`packages/services/service-analytics/src/read-scope-sql.ts#assertReadScopeComparandsRunnable`).
-  The engine's door admits this brand the same way. The analytics merges are a row of ②. ⛔ No other caller admits it.
+  The engine's door admits this brand the same way. The analytics merges are a row of ②, ruled to admit the brand.
+  ⛔ No other caller admits it.
 - **Pass-through.** At the executor boundary (`packages/objectql/src/engine.ts#composeReadableIdsAtBoundary`) there is
   nothing to compose. The seam checks position and verb (D1) and the recipient (next), and hands the leaf to the
   driver as it stands.
@@ -388,13 +401,14 @@ After the switch the read scope is:
   (D1), so the seam keeps the same rule by a check. The check compares, and ⛔ it never replaces the recipient (D1). It
   holds at every occurrence the seam descends to, on the write form as on the read form. It is the seam's rule alone:
   an in-process judge that is handed another principal's scope, as the explainer is, reaches no seam. Under ②'s
-  recommended answer the analytics native-SQL compiler compiles the leaf with no seam in front of it, and the seam's
+  ruled answer the analytics native-SQL compiler compiles the leaf with no seam in front of it, and the seam's
   position, verb and recipient checks hold there by construction: one strategy context, built per request
   (`packages/services/service-analytics/src/analytics-service.ts#callCtx`), asks for the scope under the request's
   context and issues the statement that carries it. That compiler compiles the leaf only where the seam would hand
   it to a driver. Where either of the two classes below applies, it declines the query to the engine strategy before
-  anything compiles, so the class gets the answer ② rules, at boot or from the seam after it. Each class has one
-  answer, and the seam's answer is this record's.
+  anything compiles, so the class gets the answer ② ruled for it, at boot or from the seam after it: R2 with R1
+  behind it for an object on another datasource, and R1 at boot, with the seam's refusal behind it, for the host
+  class. Each class has one answer, and the seam's answer is this record's.
 - **The same rule on ADR-0147's anchor, in full.** The seam is built once for both leaves (below), and it holds one
   rule for both: every identity named by a leaf that arrives composed is compared with what the reading context
   itself carries. This leaf names one, its recipient, and the context carries its user and its delegator (above).
@@ -422,16 +436,17 @@ After the switch the read scope is:
   kinds, treated alike: an object-scoped middleware (`packages/objectql/src/engine.ts#hasObjectMiddleware`), which is
   ADR-0139 D5.2's class, and a find hook, `beforeFind` or `afterFind`
   (`packages/objectql/src/engine.ts#registerHook`), which this record adds for this table. ⛔ The seam never reads
-  around either. What each class answers is ②, and each is a row of Q2's census. No package in this repository names
-  the table in either kind of registration on its own. plugin-audit registers its record-view hook for the objects a
+  around either. What each class answers is ②'s, as ruled, and each is a row of Q2's census. No package in this
+  repository names the table in either kind of registration on its own. plugin-audit registers its record-view hook for the objects a
   host opts in, so a host that opts this table in is in the class. That hook returns at once on a system read
   (`packages/plugins/plugin-audit/src/read-audit.ts#installReadAuditWriter`, through its record-view handler), which
   the grant read is.
   "Treated alike" holds for such a registration all the same: the seam and the boot check read a registration by the
   object it names, and nothing the engine holds says what a handler does on a system read. So this record keeps it
-  in the class. The other answer exempts a registration that declares it skips system reads, on a declaration the
-  engine enforces. Q2 prices both, in its host row and its cost list, and the maintainer rules which under ②. Hosts
-  outside this repository were not read, and O8's census looks for both kinds.
+  in the class. The other answer exempted a registration that declares it skips system reads, on a declaration the
+  engine enforces. Q2 priced both, in its host row and its cost list, and the maintainer ruled under ② that the class
+  is kept whole: a registration that declares it skips system reads stays in the class, and no such declaration is
+  added. Hosts outside this repository were not read, and O8's census looks for both kinds.
 - **The class's boundary: a registration that names no object.** A middleware registered with no `object` (or with
   `'*'`), and a find hook registered for no object, run on every read, today's grant read among them; from the switch
   on, the subquery does not run them. They are outside the second class, on the line ADR-0139 D5.2 draws for its
@@ -442,12 +457,14 @@ After the switch the read scope is:
   every host that runs such a plugin. The rule this record keeps for them: a sharing-scoped read answers the same
   rows before and after the switch on every host, or the host is told. The contract prose of plan step 1 and the
   switch card's changeset (plan step 6) tell it one thing: a narrowing of reads of `sys_record_share` registered for
-  that table by name is never read around, and the host gets the answer ② rules for the second class; a narrowing
+  that table by name is never read around, and the host gets the answer ② ruled for the second class (R1 at boot,
+  with the seam's refusal behind it); a narrowing
   that names no object is not run on the share arm. That line has a price, stated among Q2's costs: on a host whose
   registration names no object and changes a system read of the table, D-0's same rows rest on the telling alone.
   O8's census reads registrations that name no object as well, and records any that changes a system read of the
-  table; this record's own reading at `e9fb0987` (Provenance) found none in this repository. The maintainer rules
-  this boundary with Q2's host row.
+  table; this record's own reading at `e9fb0987` (Provenance) found none in this repository. The maintainer ruled
+  this boundary with Q2's host row, on the recommended line: a registration that names no object stays outside the
+  class, and the host is told.
 - **The refusal** is ADR-0139 D3's envelope wherever it occurs: status 500, `INTERNAL_ERROR`, a message naming the
   evaluator, the leaf and the remedy, logged at `error` once per evaluator
   (`packages/core/src/utils/readable-ids-driver-refusal.ts#refuseReadableIdsOnce` is the device). ⛔ It is not
@@ -455,21 +472,21 @@ After the switch the read scope is:
 
 **Built once.** The card records ADR-0147 as approved and unbuilt, and its Status line still reads `Proposed`. Both
 records add a leaf that is a branded `$in` comparand, arrives composed, and compiles to a fixed inner read of one
-platform table under system authority, behind a blank-id guard, with no tenant scope (ADR-0147 D-b; here, ①'s
-recommended answer). That is one mechanism:
+platform table under system authority, behind a blank-id guard, with no tenant scope (ADR-0147 D-b; here, ① ruled
+A). That is one mechanism:
 
 | Piece | Built |
 |:--|:--|
 | The brand, its factory and guard, its meaning, its producer | per leaf, never shared: one brand, one meaning |
 | The comparand door's admission of engine-internal comparands | once, as one option that names the brands it admits, not one flag per brand |
 | The executor seam's pass-through, its position and verb checks, its recipient rule, its descent into composed scopes | once. The recipient rule compares this leaf's recipient with the reading context's user and delegator, and ADR-0147's anchor, caller and organization together, with the anchor that context carries |
-| The fixed inner read: one table, one projected column, a closed set of bound equality and membership predicates, the blank-id guard, system authority, and the tenant scope each record rules for its leaf (none in ADR-0147 D-b; ① here) | once per evaluator (`driver-sql`, the Turso remote transport, `driver-memory`, and the analytics native compiler if ② rules that it compiles). Each leaf supplies its description, and no evaluator restates either leaf's predicate by hand |
+| The fixed inner read: one table, one projected column, a closed set of bound equality and membership predicates, the blank-id guard, system authority, and the tenant scope each record rules for its leaf (none in ADR-0147 D-b; none here, ① ruled A) | once per evaluator (`driver-sql`, the Turso remote transport, `driver-memory`, and the analytics native compiler, which ② ruled compiles it). Each leaf supplies its description, and no evaluator restates either leaf's predicate by hand |
 | What a leaf compiles to outside its subquery | per leaf. ADR-0147 ORs its caller arm in, and issues no subquery when no organization is active (its D-a and D-c). This leaf is the subquery alone |
 | The recognition of D4's two classes | once, in the seam. The analytics native compiler asks the seam's recognition before it compiles and restates none |
 | The refusal envelope and its once-per-evaluator log | once |
 | The conformance case-set | once, with a case per leaf |
-| A driver's declaration that it evaluates such leaves | once, if either record consults one. ADR-0147 D-d does. This record does under every answer to ② but R1 |
-| What an evaluator that cannot run a leaf answers | per leaf. ADR-0147 D-d states its own; this record's is ② |
+| A driver's declaration that it evaluates such leaves | once, if either record consults one. ADR-0147 D-d does. This record does: ② ruled R2 for the storage rows, which consults one |
+| What an evaluator that cannot run a leaf answers | per leaf. ADR-0147 D-d states its own; this record's is ② as ruled |
 
 - **Sequencing.** Whichever record's cards are cut first build the shared pieces in the two-leaf shape, and the other
   record's cards add their leaf on top. ⛔ Neither builds a private copy.
@@ -495,12 +512,13 @@ Three rows are not in question:
 
 `driver-memory`'s row is not the slower path Prime Directive 5 forbids. In-process evaluation is that driver's only
 way to answer anything, the engine's own suites run on it, and the card's plan builds it (item 7). The standing
-principle quoted under ② names memory beside MongoDB, so the maintainer may move this row under ② as well. Its cost
-there is that every suite which exercises record sharing on `driver-memory` moves to SQLite.
+principle quoted under ② names memory beside MongoDB, so the maintainer could have moved this row under ② as well. Its
+cost there was that every suite which exercises record sharing on `driver-memory` moves to SQLite. ② was ruled on its
+recommended column, which does not hold this row, so the row stands as stated here.
 
-The rest of the census is ②: `driver-mongodb`, `driver-odata`, a driver this repository does not ship, an object on
-another datasource, the analytics read-scope compilers, the explainer's record pass, and the host class D4
-recognises.
+The rest of the census is ②, ruled row by row in [Q2](#q2--an-evaluator-that-cannot-run-the-leaf): `driver-mongodb`,
+`driver-odata`, a driver this repository does not ship, an object on another datasource, the analytics read-scope
+compilers, the explainer's record pass, and the host class D4 recognises.
 
 ### D6 — What the switch must show
 
@@ -511,7 +529,7 @@ body; `6893239331` item 2):
   PostgreSQL, for the list total and for GET by id, with each arm exercised: owner, queue, approval and share.
 - **The corrected answer at the edge and above it.** At 5,001 and at 6,000 grants. 6,000 grants plus 1,000 owned
   records is 7,000 visible, and the 6,000th granted record answers 200.
-- **Both scopes**: the read scope, and the predicate-update scope as ③ is ruled.
+- **Both scopes**: the read scope, and the predicate-update scope, which carries the leaf's write form (③ ruled A).
 - **Ablated**, as the seat's constraint asks.
 - **The speed figure** is quoted as [What it costs](#what-it-costs) quotes it, and no wider.
 
@@ -529,6 +547,14 @@ This record adds two more:
 
 Each question states today's fact, the options, what each option costs, and a recommendation. Until the maintainer
 rules, a recommendation is not a decision, and no execution card is cut.
+
+**Ruled, all three, on 2026-11-17.** The maintainer chose the option 「三问都按 ADR 推荐」 on the decision card for
+#33787 (2026-11-17T08:25:25Z), whose text reads in full:
+「子查询不加租户墙；Mongo 等库上共享授权停用并响亮拒收，不留 id 列表；只在 update 上放行这个叶子。」. Ruling record
+[`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) records it against
+the routing analysis [`6938582405`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6938582405):
+Q1 A · Q2 the recommended column · Q3 A. Each section below keeps its options and their costs as the record of what
+was weighed, and ends with its ruling.
 
 ### Q1 — The tenant scope of the subquery
 
@@ -563,6 +589,11 @@ reason: the wall's only lawful effect on the inner read is redundancy, and anyth
 available as a decision of its own. If grants are to be walled by their stamp, that is ruled for every gate that reads
 them, with a migration reading, and not as a side effect of removing a cap.
 
+**Ruled A** (2026-11-17, ruling record
+[`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600), 「子查询不加租户墙」):
+the subquery carries no tenant scope, in parity with today's grant read (D-0, D2). B was not taken; walling grants by
+their stamp remains a decision of its own, for every gate that reads them.
+
 ### Q2 — An evaluator that cannot run the leaf
 
 **Today.** These evaluators receive an ordinary `id IN (list)` arm and answer it like any list, up to the cap. Nothing
@@ -575,7 +606,7 @@ Directive 5 states the rule in force (ruling record `6888468549`): "build a quer
 (JOIN or semi-join, aggregates in the database); memory and mongo refuse what they cannot run with a stable code; ⛔
 never a slower path built only for parity". ADR-0147 D-d chose the other way for its leaf, an exact-array floor.
 The principle names memory, and `driver-memory`'s row is decided in [D5](#d5--the-evaluator-census), outside the
-census below: the maintainer may move this row under ② as well, at the cost D5 states.
+census below: the maintainer may move this row under ② as well, at the cost D5 states. The ruling did not move it.
 
 **The three answers an evaluator can give.**
 
@@ -601,12 +632,13 @@ recognises second. It is here because the same three answers apply to it.
 | `driver-odata` (`packages/drivers/driver-odata/src/odata-driver.ts#refuseReadableIds`) | As above; the backend's own ceiling is its request length | As above | **R2**, with R1 behind it |
 | A driver this repository does not ship | As above, unless it declares that it evaluates the leaf | As above | **R2**, with R1 behind it |
 | An object bound to another datasource than `sys_record_share`. That includes a federated object that declares a real remote owner column, which keeps its shares today (`packages/plugins/plugin-sharing/src/sharing-service.ts#inertGrantReason`) | As above | As above | **R2**, with R1 behind it |
-| A host that registers an object-scoped middleware or a find hook for `sys_record_share` by name (D4's second class). Today's grant read runs the registration, and the subquery would not. No package in this repository names the table in one on its own, but a host that opts the table into plugin-audit's record-view auditing is in the class (D4), although that hook returns at once on a system read, which the grant read is. A registration that names no object is outside the class, and the host is told (D4's boundary) | The list is read through the engine, so the registration still runs and what works today keeps working, up to the bound. The SQL family keeps a list path for this class | **R1**: every sharing-scoped read and predicate update on that host fails with 500 until the registration is removed. For a host whose registration is that opt-in, removing it gives up record-view auditing of share rows. A boot check can name the registration, middleware or hook, and refuse the boot before any request is served. ADR-0139 D5's seventh-consumer note is the precedent, and it is keyed on what writes the leaf: the boot there refuses a `controlled_by_parent` detail whose master is in the middleware class, not the middleware alone. So the check lands with the switch (plan step 6) and refuses only where a producer writes the leaf: until then today's grant read still runs the registration, and nothing reads around it. A registration made after boot still meets the seam's refusal at read. **R2**: record sharing is unsupported on that host. No object takes a share arm, grants stop counting and are refused at both doors, and owner, queue and approval access is unchanged | **R1, at boot**, with the seam's refusal behind it, and the class kept whole (D4). The other answer exempts a registration that declares it skips system reads; its price is that declaration on hook registration, enforced by the engine. The maintainer rules which. The boundary is ruled with this row: the recommended line leaves a registration that names no object outside the class and tells the host (D4); the other line refuses at boot every host that has one, which includes every host running a platform plugin that registers one |
+| A host that registers an object-scoped middleware or a find hook for `sys_record_share` by name (D4's second class). Today's grant read runs the registration, and the subquery would not. No package in this repository names the table in one on its own, but a host that opts the table into plugin-audit's record-view auditing is in the class (D4), although that hook returns at once on a system read, which the grant read is. A registration that names no object is outside the class, and the host is told (D4's boundary) | The list is read through the engine, so the registration still runs and what works today keeps working, up to the bound. The SQL family keeps a list path for this class | **R1**: every sharing-scoped read and predicate update on that host fails with 500 until the registration is removed. For a host whose registration is that opt-in, removing it gives up record-view auditing of share rows. A boot check can name the registration, middleware or hook, and refuse the boot before any request is served. ADR-0139 D5's seventh-consumer note is the precedent, and it is keyed on what writes the leaf: the boot there refuses a `controlled_by_parent` detail whose master is in the middleware class, not the middleware alone. So the check lands with the switch (plan step 6) and refuses only where a producer writes the leaf: until then today's grant read still runs the registration, and nothing reads around it. A registration made after boot still meets the seam's refusal at read. **R2**: record sharing is unsupported on that host. No object takes a share arm, grants stop counting and are refused at both doors, and owner, queue and approval access is unchanged | **R1, at boot**, with the seam's refusal behind it, and the class kept whole (D4). The other answer exempts a registration that declares it skips system reads; its price is that declaration on hook registration, enforced by the engine. Ruled: the class kept whole, with no exemption. The boundary is ruled with this row, on the recommended line: the recommended line leaves a registration that names no object outside the class and tells the host (D4); the other line refuses at boot every host that has one, which includes every host running a platform plugin that registers one |
 | The analytics native-SQL compiler (`packages/services/service-analytics/src/read-scope-sql.ts#compileScopedFilterToSql`). Today it binds one parameter per `$in` member and refuses `ReadableIds` at entry | The cap, or an unbounded list, returns on this path | It declines the query to the engine strategy, as it does for `ReadableIds` (`packages/services/service-analytics/src/strategies/native-sql-strategy.ts#readScopeCarriesReadableIds`). With the leaf on every sharing-scoped read, that is nearly every member query on such an object, and the shapes only native SQL serves, such as a multi-hop join (`packages/services/service-analytics/src/strategies/cross-object-where.ts#UnservedCrossObjectReason`), are then refused | **Neither: it compiles the leaf**, where the seam would hand the leaf to a driver. It is SQL, and the leaf needs no composition. Where either of D4's two classes applies, it declines the query to the engine strategy before anything compiles, so the class gets the answer this table rules for it, at boot or from the seam after it. The price: for those objects and hosts the shapes only native SQL serves are refused |
 | The analytics engine strategy's merge and the dry-run SQL echo | not applicable | Unless its merge admits the brand (`packages/services/service-analytics/src/read-scope-sql.ts#assertReadScopeComparandsRunnable`), every query it serves on such an object is refused | **It admits the brand** and hands the scope to the engine, as it does `ReadableIds`. The echo prints the subquery the statement runs |
 | The explainer's record pass (`packages/plugins/plugin-security/src/explain-engine.ts#matchUnderDeclaredColumns`). Today it matches the list in process and publishes it as the sharing layer's `rowFilter` (`packages/spec/src/security/explain.zod.ts#ExplainRecordAttributionSchema`) | It materialises the caller's whole grant list for each explanation, and the published filter grows with it | The record pass matches the sharing read filter for every record-grained explanation, whatever the verb. So each one on such an object fails, on every driver, and with it the attachment and comment gates that ask the explainer for a parent record's by-id judgement | **Neither: it resolves the leaf at the record.** One indexed read under the fixed predicate, keyed by the record ids it judges, the read `checkEdit` makes for one |
 
-**What the recommended column costs, stated plainly.**
+**What the recommended column costs, stated plainly.** It is the column the maintainer ruled, so these are the costs
+the ruling accepts.
 
 - **On the four storage rows, share grants stop working at the switch.** Grants that count today, up to the cap, stop
   counting, and new ones are refused. It fails closed, and it must not be silent. The switch card owes a report at
@@ -626,12 +658,14 @@ recognises second. It is here because the same three answers apply to it.
   in the class all the same, because the engine reads registrations and not handlers. The other answer exempts a
   registration that declares it skips system reads. Such a host then starts and keeps its auditing, and the price is
   one more contract: a declaration on hook registration, which the engine enforces by not dispatching that hook on a
-  system read, and which the seam and the boot check read. The maintainer rules which, with the host row.
+  system read, and which the seam and the boot check read. Ruled with the host row: no exemption, and so no such
+  declaration; such a host pays this price.
 - **On a host with a registration that names no object and changes a system read of `sys_record_share`, D-0's same
   rows rest on the telling alone.** Under the recommended line nothing at run time refuses, reports or logs such a
   registration: the seam and the boot check read a registration by the object it names, and this one names none. A
   host that does not act on what plan steps 1 and 6 tell it can get an answer that differs from today's. The other
-  line refuses at boot every host with a registration that names no object (the host row). The maintainer rules which, with the host row.
+  line refuses at boot every host with a registration that names no object (the host row). Ruled with the host row:
+  the recommended line, so this price is accepted.
 - **It consults a driver declaration**, so ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" is revisited for
   this leaf as ADR-0147 D-d revisits it for its own, and ADR-0111 D7 gains an arm.
 - **A later compile lifts R2 for that evaluator** with no amendment here: a `$lookup` form on MongoDB (O9), or a
@@ -656,6 +690,23 @@ is stated: L is the one answer under which nothing that works today stops workin
 **Recommendation.** No list anywhere. The storage rows take **R2** with R1 behind it, the host row takes **R1** at
 boot from the switch on, the analytics compilers compile or admit, and the explainer resolves at the record. The
 maintainer may rule row by row.
+
+**Ruled: the recommended column, row by row** (2026-11-17, ruling record
+[`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600),
+「Mongo 等库上共享授权停用并响亮拒收，不留 id 列表」). No capped id list is kept anywhere: L is not taken, and an
+evaluator that cannot run the leaf refuses it.
+
+- `driver-mongodb`, `driver-odata`, a driver this repository does not ship, and an object bound to another datasource
+  than `sys_record_share`: **R2, with R1 behind it.**
+- The host class (a registration made for `sys_record_share` by name, middleware or find hook): **R1 at boot** from the
+  switch on, with the seam's refusal behind it, the class kept whole. There is **no** exemption for a registration
+  that declares it skips system reads. A registration that names no object stays outside the class, and the host is
+  told (D4's boundary).
+- The analytics native-SQL compiler **compiles the leaf**, declining to the engine strategy where either of D4's two
+  classes applies; the engine strategy's merge **admits the brand**, and the dry-run echo prints the subquery.
+- The explainer's record pass **resolves the leaf at the record.**
+
+`driver-memory` is not in this census; its row stands as [D5](#d5--the-evaluator-census) states it.
 
 ### Q3 — The leaf on a predicate update
 
@@ -695,13 +746,19 @@ one branch: every form of B contradicts one of them. What remains is that A chan
 and that is the maintainer's to change. The 10,000-row bound on an addressed predicate write stays where it is: this
 leaf adds no bound and removes none.
 
+**Ruled A** (2026-11-17, ruling record
+[`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600),
+「只在 update 上放行这个叶子」): the engine's verb rule admits this brand's write form in the `where` of a predicate
+`update`, and nowhere else. ADR-0139 D1's read-verbs sentence is revisited for this leaf alone; `ReadableIds`,
+ADR-0147's leaf and `delete` keep it as written. B and C were not taken.
+
 ## Consequences
 
 - **Positive.** Every grant counts on the SQL family, at any count. The cap and its silent cut are gone, not raised.
   A sharing-scoped operation issues no grant read of its own, its statement's parameters no longer grow with the
   grants, and a `controlled_by_parent` read no longer binds the list again inside the parent's subquery. The arm is
-  part of one statement, so `find`, `count` and `aggregate` agree by construction. For a predicate update each of
-  these holds under ③'s A; under B the write side keeps a list, and under C it still reads grants per operation.
+  part of one statement, so `find`, `count` and `aggregate` agree by construction. Each of these holds for a
+  predicate update too, which carries the leaf's write form (③ ruled A).
 - **Cost, named.** Spec gains one more branded comparand. The engine's door and seam and three evaluators gain its
   handling. Every sharing-scoped read carries an index-backed subquery, for a caller with no grant too, where today
   it carried one extra read and no arm. D6 pins that statement's plan and timing.
@@ -710,7 +767,7 @@ leaf adds no bound and removes none.
   answers a composition fault, and for this record's leaf, whose recipient is the reading context's user or its
   delegator, no flow read in this repository meets it. The flows that carry ADR-0147's anchor are read on the card
   that adds that leaf to the seam (plan step 2).
-- **Freshness.** The arm is read at statement time (D2). Under ③'s A, a predicate update's prior-row read and its
+- **Freshness.** The arm is read at statement time (D2). With ③ ruled A, a predicate update's prior-row read and its
   write are two statements, and each evaluates the share arm for itself, as each already evaluates the owner match
   for itself. Today's list is read once, before both.
 - **A public contract's answer changes kind.** `buildReadFilter` is a member of
@@ -720,7 +777,16 @@ leaf adds no bound and removes none.
   read (`packages/spec/src/contracts/security-service.ts#getReadFilter`), and that read must run under the context
   the scope was asked for, under one acting on behalf of that context's user, or under a system context. The spec
   card says both in the contracts' prose. Readers outside this repository were not read from this tree (O8).
-- **The evaluators under ②** change as the maintainer rules. The recommended answers' costs are stated there.
+- **The evaluators under ②** change as the maintainer ruled, on the recommended column. On `driver-mongodb`,
+  `driver-odata`, a driver this repository does not ship and an object on another datasource, share grants stop
+  counting at the switch and new ones are refused (R2), with a boot report and a changelog entry; owner, queue and
+  approval access is unchanged. A host that registers a middleware or a find hook for `sys_record_share` by name does
+  not boot from the switch on until it removes the registration (R1 at boot). The analytics compilers compile or
+  admit the leaf, and the explainer resolves it at the record. The costs are stated under
+  [Q2](#q2--an-evaluator-that-cannot-run-the-leaf).
+- **Three governed sentences elsewhere move** (Revisits): ADR-0139 D1's read-verbs sentence for this leaf (③ A),
+  ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" for this leaf's declaration (② R2), and ADR-0111 D7's list of
+  inert grants, which gains R2's arm.
 - **Each execution card declares its own Clause-②.**
 
 ## Alternatives considered
@@ -747,12 +813,12 @@ leaf adds no bound and removes none.
 - **The approval ids or the queue arm inside the subquery**: rejected (D3). Neither is a share row.
 - **Group, position or unit recipients evaluated in the subquery**: out of scope. Only `user` rows are enforced
   (ADR-0111 D7), and rule materialisation already expands the others into per-user rows.
-- **A tenant scope on the subquery**: that is ①'s option B.
+- **A tenant scope on the subquery**: that is ①'s option B, not taken (Q1 ruled A).
 
 ## Open items (not blocking acceptance; each becomes a reading on its card)
 
-- **O1** — Names. `SharedRecordIds`, and the driver declaration's name if ② consults one. The seat's call, fixed on
-  the spec card, and shared with ADR-0147's O1 where the declaration is shared.
+- **O1** — Names. `SharedRecordIds`, and the driver declaration's name (② as ruled consults one). The seat's
+  call, fixed on the spec card, and shared with ADR-0147's O1 where the declaration is shared.
 - **O2** — Key comparison. The subquery compares two columns where today a column meets bound strings. On the tables
   the platform manages both are strings. The driver card pins the comparison, type and collation, on every dialect
   `driver-sql` ships, and answers an outer key of another type with the same rows (D-0).
@@ -762,15 +828,17 @@ leaf adds no bound and removes none.
 - **O5** — `packages/plugins/plugin-sharing/src/sharing-service.ts#listShares` reads one record's grant rows at
   `limit: 500` with no notice. It serves the management listing and the explainer's share attribution, and no gate's
   verdict rests on it alone. It was noted on #33787 and is not filed, and it is not this record's.
-- **O6** — ADR-0147's floor and the SQL-first rule point different ways. This record does not revisit that one. If ②
-  is ruled a refusal, the two leaves differ on evaluators that cannot compile, and D4's table already builds for it.
+- **O6** — ADR-0147's floor and the SQL-first rule point different ways. This record does not revisit that one. ② is
+  ruled a refusal (R2 with R1 behind it), so the two leaves differ on evaluators that cannot compile, and D4's table
+  already builds for it.
 - **O7** — Pointer notes owed on acceptance, each dated and append-only: ADR-0139 D1 (one more leaf, and the
-  read-verbs sentence if ③ is ruled A); ADR-0139 O4 (answered); ADR-0139 D3 (under ②'s L or R2, each of which
-  consults a driver declaration); ADR-0111 D7 (only under R2); and a cross-reference from ADR-0147 D-a for the shared
+  read-verbs sentence: ③ ruled A); ADR-0139 O4 (answered); ADR-0139 D3 (② ruled R2, which consults a driver
+  declaration); ADR-0111 D7 (② ruled R2); and a cross-reference from ADR-0147 D-a for the shared
   seam and what its recipient rule checks on that record's anchor (D4). They land with the governed edit that records
   the maintainer's rulings in this record's Status line. The first acceptance criterion already requires that edit,
-  and the same rulings decide which notes are owed. None is in this record's diff, which adds this record and its
-  index row and edits no other record.
+  and the same rulings decide which notes are owed. When this record was first written (2026-11-15), its diff added
+  only this record and its index row and carried none of the notes. **Landed** (2026-11-17): all five, dated and
+  append-only, in the later edit that records the rulings in the Status line.
 - **O8** — Readers of `buildReadFilter` and of the security service's read filter outside this repository (the cloud
   repository's packages) were not read from this tree, and neither was any host that registers an object-scoped
   middleware or a find hook for `sys_record_share` by name (D4), an opt-in of that table into record-view auditing
@@ -778,7 +846,7 @@ leaf adds no bound and removes none.
   The census reads all three, and for each outside reader the context it runs its read under (Consequences).
   The seat that cuts the switch card produces the census, as a condition of cutting that card, and records it in
   the card's body: each tree it read, named by repository and commit, and what it found there. Under the host row's
-  recommended answer that card carries the boot check, so it is the first card that can refuse a boot, and the
+  ruled answer (R1 at boot) that card carries the boot check, so it is the first card that can refuse a boot, and the
   census precedes it.
 - **O9** — `driver-mongodb`: a `$lookup` form is unprototyped (shared with ADR-0139 O3 and ADR-0147 O2).
 
@@ -796,36 +864,42 @@ leaf adds no bound and removes none.
 ## Execution plan (after acceptance)
 
 The seats cut the cards after acceptance, in this order. Each card declares its own Clause-② and runs its own gates.
-The card sizes the whole program L, about 2.5–4k lines over 5–7 PRs, and ②'s rows add cards as they are ruled.
+The card sizes the whole program L, about 2.5–4k lines over 5–7 PRs, and ②'s rows, as ruled, add the cards step 5
+names.
 
 1. **Spec: the leaf.** The brand, its factory and guard beside `ReadableIds`; the comparand door's option; the fixed
    inner read's description; the conformance case-set; the `ISharingService` and `ISecurityService` prose. The
    `ISharingService` prose tells a host that a narrowing of reads of `sys_record_share` registered for that table by
-   name is never read around and gets the second class's answer, as ② is ruled, and that a narrowing which names no
-   object is not run on the share arm from the switch on (D4's boundary). The shared pieces take the two-leaf shape
+   name is never read around and gets the second class's answer as ② is ruled (R1 at boot, with the seam's refusal
+   behind it), and that a narrowing which names no object is not run on the share arm from the switch on (D4's
+   boundary). The shared pieces take the two-leaf shape
    (D4).
-2. **Engine: the seam.** Door admission, pass-through, the position rule, the verb rule (③ as ruled) and the
-   recipient rule, the two recognised classes (② as ruled), the descent into composed scopes, the refusal, and the
-   declaration's consult if ② rules one. The recipient rule is pinned on its four cases: the context's user, its
-   delegator, a system context, and any other recipient, which is refused. The cases of ADR-0147's anchor are pinned
-   on the card that adds that leaf to the seam: the reading context's own anchor; ADR-0147 D-c's context, the
+2. **Engine: the seam.** Door admission, pass-through, the position rule, the verb rule (③ ruled A: the write form
+   admitted in the `where` of a predicate `update`, nowhere else) and the recipient rule, the two recognised classes
+   (② as ruled: R2 with R1 behind it for an object on another datasource, R1 for the host class), the descent into
+   composed scopes, the refusal, and the consult of the driver declaration that R2 reads (② as ruled).
+   The recipient rule is pinned on its four cases: the context's user, its delegator, a system context, and any
+   other recipient, which is refused. The cases of ADR-0147's anchor are pinned on the card that adds that leaf to
+   the seam: the reading context's own anchor; ADR-0147 D-c's context, the
    delegator's rebuilt one, reading under the anchor it carries; a system context; and an anchor that differs in its
    caller or in its organization, or a context that carries none, each refused.
-3. **`driver-sql` and the Turso remote transport: the compile.** The subquery and its tenant scope (① as ruled), the
-   update path (③ as ruled), the pins per dialect, O2, O3, and D6's reading for a caller with no grant. Under ③'s
+3. **`driver-sql` and the Turso remote transport: the compile.** The subquery with no tenant scope (① ruled A), the
+   update path (③ ruled A), the pins per dialect, O2, O3, and D6's reading for a caller with no grant. With ③ ruled
    A this card pins the rows each of a predicate update's two statements answers, the prior-row read and the
    write, each evaluating the share arm for itself (Consequences, Freshness).
-4. **`driver-memory`: the in-process evaluation**, on reads and on the update path (③ as ruled).
-5. **The rest of the census, as ② is ruled**: the storage rows' refusal for this brand, the analytics compilers, the
-   explainer's record pass. The native compiler's card carries the recognition of D4's two classes and the decline to
-   the engine strategy. ⛔ No card up to here refuses a boot.
+4. **`driver-memory`: the in-process evaluation**, on reads and on the update path (③ ruled A).
+5. **The rest of the census, as ② is ruled**: the storage rows' refusal for this brand (R1, behind R2), the analytics
+   compilers (the native compiler compiles the leaf; the engine strategy's merge admits the brand), the explainer's
+   record pass (resolved at the record). The native compiler's card carries the recognition of D4's two classes and
+   the decline to the engine strategy. ⛔ No card up to here refuses a boot.
 6. **plugin-sharing: the switch.** The seat that cuts this card first produces O8's census and records it in the
    card's body; without the census the card is not cut. `buildReadFilter` and `buildWriteFilter` write the leaf, and
-   the approval ids become a disjunct of their own. Each tightening lands here, at the moment it takes effect: under
-   R2 the inert arm and its report, when those grants stop counting, and under the host row's recommended answer the
-   boot check, when a producer first writes the leaf. Its changeset tells a host what plan step 1's prose tells it: a
-   narrowing of reads of `sys_record_share` registered for that table by name is never read around and gets the
-   second class's answer, as ② is ruled, and one which names no object is not run on the share arm (D4's boundary).
+   the approval ids become a disjunct of their own. Each tightening lands here, at the moment it takes effect: R2's
+   inert arm and its report (② ruled R2 on the storage rows), when those grants stop counting, and the host row's
+   boot check (② ruled R1 at boot), when a producer first writes the leaf. Its changeset tells a host what plan step
+   1's prose tells it: a narrowing of reads of `sys_record_share` registered for that table by name is never read
+   around and gets the second class's answer as ② is ruled (R1 at boot), and one which names no object is not run on
+   the share arm (D4's boundary).
    The middleware also mirrors its scope under the AST's `filter` key, which the executor seam does not walk and no
    driver in this repository reads; the card stops mirroring the leaf there or pins that the key stays unread. The
    card carries D6's pins and the narrow figure, and #33787 ends with it. ⛔ It lands last: landed earlier, it hands

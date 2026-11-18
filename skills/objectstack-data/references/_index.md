@@ -11,7 +11,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Exports: DriverType, DriverDefinitionSchema, SchemaModeSchema, ExternalDatasourceSettingsSchema, DatasourceSchema
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema
-- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookRefusalSchema, HookEvent, HookSchema, HookContextSchema
+- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookRefusalSchema, HookTextSchema, HookEvent, HookSchema, HookContextSchema
 - `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
 - `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedColumnSchema, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
@@ -24,6 +24,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/column-apply-on.zod.ts` — Exports: ColumnApplyOnSchema
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
+- `node_modules/@objectstack/spec/src/data/declared-entry.zod.ts` — The declared-entry factory: one sentence a declaration hands over in the
 - `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.
@@ -58,7 +59,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/system/deploy-bundle.zod.ts` — Deploy Bundle Protocol
 - `node_modules/@objectstack/spec/src/system/translation.zod.ts` — Exports: LocaleSchema, FieldTranslationSchema, ActionResultDialogTranslationSchema, ObjectTranslationDataSchema, TranslationDataSchema
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionRefusalSchema
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.

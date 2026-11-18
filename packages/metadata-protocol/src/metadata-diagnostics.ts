@@ -454,6 +454,53 @@ export function withPublishVerdict(
     return verdict;
 }
 
+/**
+ * [#34818] The draft types whose served `_diagnostics.warnings` carry the gate's
+ * advisories ({@link withPublishAdvisories}). A type joins when its editor has a
+ * place that shows them on the element they name: the flow designer's Problems
+ * tab, its per-node badges and the publish drawer. Every other type's draft is
+ * served as before, its advisories still returned on the publish's 2xx.
+ */
+const DRAFT_ADVISORY_TYPES: ReadonlySet<string> = new Set(['flow']);
+
+/**
+ * Fold what publishing a draft would still SAY into the draft's `_diagnostics`:
+ * the runtime gate's advisories for the draft body (the findings a publish that
+ * passes returns on its 2xx), each as one `warnings[]` entry. The entry's
+ * `message` is the finding's user sentence (`userMessage`, composed in the
+ * read's `userTextLocales`) when the finding has one, else its developer
+ * `message`; its `path` is item-relative as for {@link withPublishVerdict}.
+ * Warnings never change `valid`. An advisory whose path and words a warning
+ * already carries is not repeated. Only for {@link DRAFT_ADVISORY_TYPES}; any
+ * other type, and no advisories, return `diagnostics` itself.
+ */
+export function withPublishAdvisories(
+    type: string,
+    name: string,
+    diagnostics: MetadataDiagnostics | undefined,
+    advisories: readonly RuntimeAuthoringIssue[],
+): MetadataDiagnostics | undefined {
+    if (advisories.length === 0 || !DRAFT_ADVISORY_TYPES.has(PLURAL_TO_SINGULAR[type] ?? type)) return diagnostics;
+    const findingKey = (entry: { path: string; message: string }) => JSON.stringify([entry.path, entry.message]);
+    const prior = diagnostics?.warnings ?? [];
+    const seen = new Set(prior.map(findingKey));
+    const added: Array<{ path: string; message: string }> = [];
+    for (const advisory of advisories) {
+        const entry = {
+            path: itemRelativeIssuePath(type, name, advisory.path),
+            message: typeof advisory.userMessage === 'string' && advisory.userMessage.trim() !== ''
+                ? advisory.userMessage
+                : advisory.message,
+        };
+        const key = findingKey(entry);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        added.push(entry);
+    }
+    if (added.length === 0) return diagnostics;
+    return { ...diagnostics, valid: diagnostics?.valid ?? true, warnings: [...prior, ...added] };
+}
+
 // ---------------------------------------------------------------------------
 // [#29196] The lint's `form-field-unknown` on a served view's `_diagnostics`
 // [#29309] …and its sibling `form-section-group-unknown`
@@ -661,6 +708,82 @@ export async function withListViewFieldWarnings<T>(
         warnings: [...(prior?.warnings ?? []), ...warnings],
     };
     return { ...served, _diagnostics: diagnostics } as T;
+}
+
+// ---------------------------------------------------------------------------
+// [#34901] The universe a view's field names are judged against while a
+// package that extends their object is disabled
+// ---------------------------------------------------------------------------
+
+/**
+ * [#34901] The objects a `view` write is judged against: each object a
+ * disabled package extends, folded with that package's `extend` contribution
+ * IN (`includeDisabledExtensions`, the fold the storage layer keeps), and
+ * every other object exactly as served.
+ *
+ * A disable withholds the fields its extensions add from the served object,
+ * while the owner's views keep naming them on purpose: re-enabling the package
+ * serves the column again with no write. Judged against the served objects,
+ * every save of such a view (a rename, a pin, a Studio edit) was refused for
+ * as long as the package stayed off. Judged against this fold, a withheld
+ * name is the real, stored field it is, wherever the view names it: a
+ * column, a sort, a filter, a grouping level, a searchable field or a form
+ * section (every view rule that reads its object's fields). A name no
+ * contributor declares is still unknown.
+ *
+ * The runtime authoring gate applies it to the merged universe (registered
+ * and stored halves alike), so a stored overlay of an extended object is
+ * folded the same way. ⛔ View writes ONLY: a flow, a formula or a
+ * validation rule written while the package is off would read a field the
+ * served object does not carry. A served view's lint reads the same fold
+ * ({@link viewLintObjectLookup}), so the read and the save door judge one
+ * body alike.
+ */
+export function withDisabledExtensionsFolded(registry: unknown, objects: unknown[]): unknown[] {
+    const r = registry as {
+        getWithheldExtensionFields?: (name: string) => Record<string, unknown>;
+        foldObjectExtendersOnto?: (name: string, base: unknown, options?: { includeDisabledExtensions?: true }) => unknown;
+    } | null | undefined;
+    if (typeof r?.getWithheldExtensionFields !== 'function' || typeof r.foldObjectExtendersOnto !== 'function') return objects;
+    let changed = false;
+    const folded = objects.map((object) => {
+        const name = (object as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string' || Object.keys(r.getWithheldExtensionFields!(name)).length === 0) return object;
+        try {
+            const storage = r.foldObjectExtendersOnto!(name, object, { includeDisabledExtensions: true });
+            if (storage === object || storage === null || typeof storage !== 'object') return object;
+            changed = true;
+            const packageId = (object as { _packageId?: unknown })._packageId;
+            return packageId === undefined ? storage : { ...(storage as Record<string, unknown>), _packageId: packageId };
+        } catch {
+            // The fold is a read over in-memory contributors; a failure leaves
+            // the served object, the judgement this write had before.
+            return object;
+        }
+    });
+    return changed ? folded : objects;
+}
+
+/**
+ * [#34901] The object lookup a served view's lint passes judge a name against
+ * ({@link withViewLintWarnings}): the object `registry` serves, folded with
+ * every disabled package's `extend` contribution exactly as the save door
+ * folds it ({@link withDisabledExtensionsFolded}).
+ *
+ * Judged against the served object, a view naming a field a disabled package
+ * adds read back `list-view-field-unknown` (and `form-field-unknown`) on a
+ * body the save door accepts, and a consumer that followed the warning would
+ * delete the column re-enabling the package is meant to bring back. A name no
+ * contributor declares still warns. An object the registry does not answer is
+ * not judged, as before.
+ */
+export function viewLintObjectLookup(registry: unknown): (name: string) => unknown {
+    const r = registry as { getObject?: (name: string) => unknown } | null | undefined;
+    return (name) => {
+        const served = r?.getObject?.(name);
+        if (served === null || typeof served !== 'object') return served;
+        return withDisabledExtensionsFolded(registry, [served])[0];
+    };
 }
 
 /**

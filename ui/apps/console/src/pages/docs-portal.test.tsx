@@ -25,7 +25,7 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 // Defined via vi.hoisted so the hoisted vi.mock factory can close over them,
 // and so the adapter is a STABLE singleton — the real useAdapter() returns a
 // memoized instance, so a fresh object per render would loop the fetch effects.
-const { ADAPTER, WORLD } = vi.hoisted(() => {
+const { ADAPTER, WORLD, GATED_REASON } = vi.hoisted(() => {
   const DOCS = [
     { name: 'crm_intro', label: 'CRM Intro', _packageId: 'crm', order: 1 },
     { name: 'crm_guide_lead', label: 'Leads', _packageId: 'crm', order: 2 },
@@ -86,12 +86,31 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
     'com.example.alpha': { shared_guide: 'ALPHA SHARED BODY', alpha_welcome: 'ALPHA BODY' },
     'com.example.beta': { shared_guide: 'BETA SHARED BODY', beta_start: 'BETA BODY' },
   };
+  // objectstack#34247 — a doc beta ships that the member's audience may not
+  // read: pruned from the member's list (ADR-0046 §6.7), so only the flat
+  // permalink's single-item read (objectui#10188) answers it, with the gate's
+  // 403 wherever the read reaches beta's doc.
+  const GATED: Record<string, string> = { gated_runbook: 'com.example.beta' };
+  const GATED_REASON = 'Only the runbook audience may read this documentation';
   /** A rejection shaped like `@objectstack/client`'s on a non-2xx response. */
   const failure = (httpStatus: number, code: string, message: string, details?: unknown) =>
     Object.assign(new Error(message), { httpStatus, code, details });
   const conflictRead = (name: string, packageId: string | undefined) => {
     if (name === 'broken_doc') throw failure(500, 'INTERNAL_ERROR', 'The metadata service is unavailable');
-    const holders = Object.keys(CONFLICT_CONTENT).filter((p) => name in CONFLICT_CONTENT[p]);
+    const holders = Object.keys(CONFLICT_CONTENT).filter((p) => name in CONFLICT_CONTENT[p] || GATED[name] === p);
+    WORLD.reads.push(packageId);
+    // objectstack#34247 — the server's exact address answers only that
+    // package's own doc: where it ships none of the name, 409
+    // `not-held-by-qualifier` naming the holders (ruling 6917064203 on
+    // objectstack#34398), or 404 when no package ships it.
+    if (packageId && WORLD.exact && !holders.includes(packageId)) {
+      if (holders.length === 0) throw failure(404, 'RESOURCE_NOT_FOUND', `doc "${name}" not found`);
+      // The server's envelope carries the candidates, not the reason.
+      throw failure(409, 'RESOURCE_CONFLICT', `doc "${name}" is not held by package "${packageId}"`, {
+        candidates: holders.map((p) => ({ kind: 'package', packageId: p })),
+      });
+    }
+    if (name in GATED) throw failure(403, 'PERMISSION_DENIED', GATED_REASON);
     if (packageId) return { item: { name, content: CONFLICT_CONTENT[packageId]?.[name] } };
     if (holders.length > 1) {
       throw failure(409, 'RESOURCE_CONFLICT', `doc "${name}" is held by ${holders.length} packages`, {
@@ -100,7 +119,7 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
     }
     return { item: { name, content: holders.length ? CONFLICT_CONTENT[holders[0]][name] : undefined } };
   };
-  const WORLD = { authored: false, conflict: false };
+  const WORLD = { authored: false, conflict: false, exact: false, reads: [] as Array<string | undefined> };
   const ADAPTER = {
     getClient: () => ({
       meta: {
@@ -117,7 +136,7 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
       },
     }),
   };
-  return { ADAPTER, WORLD };
+  return { ADAPTER, WORLD, GATED_REASON };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
@@ -558,5 +577,82 @@ describe('objectstack#34070 — a doc name two packages ship lists its candidate
     expect(await screen.findByText('Failed to load documentation')).toBeInTheDocument();
     expect(screen.getByText('The metadata service is unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Packages that provide this document' })).toBeNull();
+  });
+
+  /**
+   * objectstack#34247 — the server's `?package=X` read answers X's own doc or
+   * 404. The route's segment is ADR-0048 prefer-local context, not an exact
+   * address: the doc the route's package ships none of is read by name.
+   */
+  describe('objectstack#34247 — a doc the route\'s package ships none of is read by name', () => {
+    beforeEach(() => {
+      WORLD.exact = true;
+      WORLD.reads.length = 0;
+    });
+    afterEach(() => {
+      WORLD.exact = false;
+    });
+
+    it('a cross-reference from one package\'s docs to another package\'s doc renders that doc', async () => {
+      render(<Portal entry="/apps/com.example.alpha/docs/com.example.alpha/beta_start" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('BETA BODY');
+      expect(WORLD.reads).toEqual(['com.example.alpha', undefined]);
+    });
+
+    it('an app-name segment that names no package renders the doc its one holder ships', async () => {
+      render(<Portal entry="/apps/alpha_suite/docs/com.example.alpha/alpha_welcome" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('ALPHA BODY');
+      expect(WORLD.reads).toEqual(['alpha_suite', undefined]);
+    });
+
+    it('a name two other packages ship lists both holders', async () => {
+      render(<Portal entry="/apps/alpha_suite/docs/com.example.alpha/shared_guide" />);
+      const links = within(await candidateList()).getAllByRole('link');
+      expect(links.map((l) => l.getAttribute('href'))).toEqual([
+        '/apps/com.example.alpha/docs/shared_guide',
+        '/apps/com.example.beta/docs/shared_guide',
+      ]);
+    });
+
+    it('CONTROL: the route\'s own package\'s doc is read at its package address only', async () => {
+      render(<Portal entry="/apps/com.example.beta/docs/com.example.beta/shared_guide" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('BETA SHARED BODY');
+      expect(WORLD.reads).toEqual(['com.example.beta']);
+    });
+
+    // The flat permalink (DocsSlug), which every cross-reference is rewritten
+    // to (doc-links.ts), asks the server about a name the member's lists do
+    // not answer (objectui#10188): the route's segment is no exact address
+    // there either, so the doc's holder's audience verdict is what renders.
+    const refusal = () => screen.findByRole('heading', { name: 'You do not have access to this documentation' });
+
+    it('the flat permalink: a cross-reference to another package\'s gated doc renders its holder\'s refusal', async () => {
+      render(<Portal entry="/apps/com.example.alpha/docs/gated_runbook" />);
+      expect(await refusal()).toBeInTheDocument();
+      expect(screen.getByText(GATED_REASON)).toBeInTheDocument();
+      expect(screen.queryByText('Documentation not found')).toBeNull();
+      expect(screen.getByTestId('where').textContent).toBe('/apps/com.example.alpha/docs/gated_runbook');
+      expect(WORLD.reads).toEqual(['com.example.alpha', undefined]);
+    });
+
+    it('the flat permalink: an app-name segment that names no package renders the holder\'s refusal', async () => {
+      render(<Portal entry="/apps/alpha_suite/docs/gated_runbook" />);
+      expect(await refusal()).toBeInTheDocument();
+      expect(screen.getByText(GATED_REASON)).toBeInTheDocument();
+      expect(screen.queryByText('Documentation not found')).toBeNull();
+      expect(WORLD.reads).toEqual(['alpha_suite', undefined]);
+    });
+
+    it('CONTROL: the flat permalink under the holder\'s own package reads its address only', async () => {
+      render(<Portal entry="/apps/com.example.beta/docs/gated_runbook" />);
+      expect(await refusal()).toBeInTheDocument();
+      expect(WORLD.reads).toEqual(['com.example.beta']);
+    });
+
+    it('CONTROL: a name no package ships is still "not found"', async () => {
+      render(<Portal entry="/apps/com.example.alpha/docs/com.example.alpha/nobody_doc" />);
+      expect(await screen.findByText(/It may belong to a package that is not installed/)).toBeInTheDocument();
+      expect(screen.queryByTestId('doc-content')).toBeNull();
+    });
   });
 });

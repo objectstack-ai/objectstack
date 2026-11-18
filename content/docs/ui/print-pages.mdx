@@ -78,6 +78,15 @@ On a print page whose sections may break between sheets, author one `record:deta
 per section: `avoidBreakInside` keeps each block whole on one sheet when it fits, so a block
 holding several sections moves to the next sheet as one piece.
 
+Leave `avoidBreakInside` off on a print page whose detail table can run past one sheet, such
+as a `record:line_items` table on a quote or invoice with many lines. A table is one block,
+so with the key on, a table that does not fit the rest of the first sheet moves whole to the
+next sheet even when it cannot fit any single sheet, and is broken there. The first sheet is
+then left with only the blocks above the table and a blank lower part, and the document can
+take one sheet more: measured on an A4 invoice page, a 21-line table printed on 3 sheets
+with the key on and 2 with it off. With the key off, the table starts under the blocks above
+it and runs on, with its column headings repeated on each sheet (`repeatTableHeaders`).
+
 Blocks print whole:
 
 - `record:line_items` loads at most its row cap (`limit`, 500 when unset). On a print page,

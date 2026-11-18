@@ -21,6 +21,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -158,7 +160,7 @@ async function renderPillarOnSetA() {
 const inSetHeader = () => within(screen.getByTestId('access-item-header'));
 // The header is re-queried on each retry: the pillar's own header stands in
 // while no set is open, and the set's header replaces it once the page loads.
-const findInSetHeader = (text: string) => waitFor(() => inSetHeader().getByText(text));
+const findInSetHeader = (name: string) => waitFor(() => inSetHeader().getByTitle(name));
 
 /** Flip a cell in the open matrix so the editor reports dirty. */
 function dirtyTheMatrix() {
@@ -179,7 +181,7 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     // Still on set A, and the edit survived (row "None" left Read unchecked —
     // a remount would have reloaded allowRead: true).
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     const row = screen.getByText('a_account').closest('tr')!;
     expect(within(row).getByRole('checkbox', { name: 'a_account Read' })).not.toBeChecked();
 
@@ -205,13 +207,13 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
 
     // Cancel keeps the matrix mounted.
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('owd-overview')).not.toBeInTheDocument();
 
     // Confirm swaps to the overview (matrix unmounts → guard resets).
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(await screen.findByTestId('owd-overview')).toBeInTheDocument();
 
     // Back to a set: the discarded editor must NOT have left the guard armed.
@@ -236,7 +238,7 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
 /** Swap the main panel to the (real) OWD overview and edit a row so the panel
  * reports dirty. Assumes the open matrix is clean, so the swap never prompts. */
 async function openAndDirtyTheOwd() {
-  fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
   await screen.findByTestId('owd-internal-a_account');
   // The dial is the shared Select (objectui#11865): open it and pick, as a user does.
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
@@ -270,7 +272,7 @@ describe('AccessPillar — unsaved OWD overview edits guard (#2600)', () => {
 
     // The discarded panel reset the guard on unmount — swapping back to the
     // overview must NOT prompt, and it reloads the untouched baseline.
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
     await screen.findByTestId('owd-internal-a_account');
     expect(owdInternalValue()).toBe(OWD_UNSET);
@@ -280,7 +282,7 @@ describe('AccessPillar — unsaved OWD overview edits guard (#2600)', () => {
     await renderPillarOnSetA();
     await openAndDirtyTheOwd();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     // Not remounted — the unsaved edit is still visible.

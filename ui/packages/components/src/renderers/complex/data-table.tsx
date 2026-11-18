@@ -1129,6 +1129,15 @@ function isPinnedRightColumn(col: { className?: unknown }): boolean {
 const AUTO_WIDTH_ATTR = 'data-auto-width-key';
 
 /**
+ * The narrowest an auto-sized foreign-key column is drawn in an editable
+ * table, where its cells edit through the record picker (objectstack#34601):
+ * room for the picker's trigger to show a name. The same width `GridField`
+ * (`@object-ui/fields`) gives its lookup columns, `MIN_WIDTH_BY_TYPE.lookup`;
+ * this layer cannot import that package, so the value is spelled here.
+ */
+const LOOKUP_PICKER_MIN_WIDTH = 168;
+
+/**
  * The column an auto-width target names: only one the estimate sizes (no
  * explicit `width`, not `fitContent`), and never a masked one, whose values
  * the estimate does not read (objectui#10657). A chip column is read with an
@@ -1365,6 +1374,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const fieldAuthoring = useGridFieldAuthoring();
   const addColumnEnabled = !!fieldAuthoring?.onAddColumn;
   const editColumnEnabled = !!fieldAuthoring?.onEditColumn;
+  // A host that takes the header click (Studio selects the field) asks for a
+  // visible caret onto the column menu, so sort and hide stay one click away.
+  const columnMenuLabel = fieldAuthoring?.columnMenuLabel;
   // The table already implements column drag-reorder; a design host enables it by
   // providing onReorderFields (to persist the order to the object's field metadata).
   const reorderEnabled = reorderableColumns || !!fieldAuthoring?.onReorderFields;
@@ -1548,7 +1560,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       width: col.width,
       fitContent: col.fitContent,
       masked: col.masked === true,
+      // objectstack#34601 — a foreign-key column whose cells edit opens the
+      // record picker; see `pickerFloor` below.
+      pickerEdits: editable && col.foreignKey === true && col.editable !== false,
     }));
+    // objectstack#34601 — the floor of a column whose editor is the record
+    // picker: sized from the short names its cells draw, an editable lookup
+    // column left the picker's trigger a few dozen px, and the open list cut
+    // every name. Only the estimate is floored: an explicit width (an author's
+    // pin, a user's resize) is skipped above it and drawn as written.
+    const pickerFloor = (col: { pickerEdits: boolean }, width: number) =>
+      (col.pickerEdits ? Math.max(width, LOOKUP_PICKER_MIN_WIDTH) : width);
     for (const col of cols) {
       if (col.width) continue; // Skip columns with explicit widths
       // `fitContent` columns (e.g. the row-actions column) size to their own
@@ -1571,7 +1593,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // cell (and the header) needs to render whole, padding included.
       const drawnPx = col.masked ? undefined : drawnSizes?.px?.[col.accessorKey];
       if (drawnPx !== undefined) {
-        widths[col.accessorKey] = Math.min(400, Math.max(80, drawnPx));
+        widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, drawnPx)));
         continue;
       }
       const headerLen = (col.header || '').length;
@@ -1599,10 +1621,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         }
       }
       // Estimate pixel width: ~8px per character + 48px padding, min 80, max 400
-      widths[col.accessorKey] = Math.min(400, Math.max(80, maxLen * 8 + 48));
+      widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, maxLen * 8 + 48)));
     }
     return widths;
-  }, [rawColumns, data, drawnSizes]);
+  }, [rawColumns, data, drawnSizes, editable]);
 
   // State management
   const [searchQuery, setSearchQuery] = useState('');
@@ -3542,6 +3564,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
                         <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
                           <button
@@ -3556,6 +3579,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
                           >
                             <Edit className="h-3 w-3" />
+                          </button>
+                        )}
+                        {columnMenuLabel && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              // Not the header's own click (sort, or the host's
+                              // select), and not the document listener that
+                              // closes an open menu.
+                              e.stopPropagation();
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setContextMenu((open) =>
+                                open?.columnKey === col.accessorKey
+                                  ? null
+                                  : { x: r.left, y: r.bottom, columnKey: col.accessorKey },
+                              );
+                            }}
+                            title={columnMenuLabel}
+                            aria-label={columnMenuLabel}
+                            aria-expanded={contextMenu?.columnKey === col.accessorKey}
+                            data-testid={`grid-column-menu-${col.accessorKey}`}
+                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+                          >
+                            <ChevronDown className="h-3 w-3" />
                           </button>
                         )}
                       </div>

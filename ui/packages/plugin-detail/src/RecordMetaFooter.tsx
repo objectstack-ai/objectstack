@@ -203,12 +203,19 @@ const MetaEntry: React.FC<MetaEntryProps> = ({ label, user, date, objectSchema, 
     </TooltipProvider>
   ) : null;
 
+  // "· 3d ago" is one unit that never breaks (objectstack#34614): in a narrow
+  // drawer the entry wraps BETWEEN its pieces, so the whole unit moves to the
+  // next line instead of the relative time breaking word by word.
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-x-1.5" data-record-meta-entry="">
       <span className="text-muted-foreground/70">{label}</span>
       {user ? <UserRef value={user} objectSchema={objectSchema} fieldName={userField} /> : null}
-      {user && dateNode ? <span className="text-muted-foreground/40">·</span> : null}
-      {dateNode}
+      {dateNode ? (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap" data-record-meta-when="">
+          {user ? <span className="text-muted-foreground/40">·</span> : null}
+          {dateNode}
+        </span>
+      ) : null}
     </span>
   );
 };

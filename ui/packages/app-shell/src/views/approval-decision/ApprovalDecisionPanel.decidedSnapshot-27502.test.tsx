@@ -10,7 +10,8 @@
  * After a decision, the approval request page must not tell two stories
  * (objectstack#27502, ruling record 6499914328). The page's highlights read the
  * REQUEST row, whose status moves to approved; the decision panel's summary
- * reads the request's `payload`, the target record as it was SUBMITTED, which
+ * (since objectstack#34588 the whole submitted record, which used to be a
+ * six-field summary) reads the request's `payload`, the target record as it was SUBMITTED, which
  * keeps its submitted status (objectstack#10749, ruling record 5377367175: the
  * snapshot is kept as the evidence of what was submitted). So the summary is
  * labelled as the submitted values: a section whose accessible name is the
@@ -117,22 +118,22 @@ function mount(data: Record<string, unknown>): HTMLElement {
 describe('ApprovalDecisionPanel — the summary is labelled as the submitted values (objectstack#27502)', () => {
   it('a decided request: the snapshot keeps its submitted status, under the heading, and nobody is waited on', async () => {
     const panel = mount(requestRow('approved'));
-    const summary = await within(panel).findByTestId('record-snapshot-summary');
+    const summary = await within(panel).findByTestId('submitted-record');
 
     // The decided state the reload serves: nobody is waited on any more.
     expect(within(panel).queryByTestId('approval-decision-pending-approvers')).toBeNull();
     // The summary is the region the heading names, and the heading is the pack row.
     expect(HEADING).not.toBe(HEADING_KEY);
     expect(within(panel).getByRole('region', { name: HEADING })).toBe(summary);
-    expect(summary.querySelector('[data-summary-heading]')?.textContent).toBe(HEADING);
+    expect(summary.querySelector('[data-submitted-heading]')?.textContent).toBe(HEADING);
     // What the section holds is the snapshot as submitted, under the declared select field.
-    const status = summary.querySelector('[data-summary-field="status"]');
+    const status = summary.querySelector('[data-submitted-field="status"]');
     expect(status?.textContent).toBe('StatusSubmitted');
   });
 
   it('a pending request carries the heading too: it names the source, not a status', async () => {
     const panel = mount(requestRow('pending'));
-    const summary = await within(panel).findByTestId('record-snapshot-summary');
+    const summary = await within(panel).findByTestId('submitted-record');
 
     expect(within(panel).getByTestId('approval-decision-pending-approvers')).toBeTruthy();
     expect(within(panel).getByRole('region', { name: HEADING })).toBe(summary);
@@ -144,7 +145,7 @@ describe('ApprovalDecisionPanel — the summary is labelled as the submitted val
 
     await waitFor(() => expect(seen).toContain(`object:${EXPENSE_REPORT.name}`));
     await new Promise((r) => setTimeout(r, 0));
-    expect(within(panel).queryByTestId('record-snapshot-summary')).toBeNull();
+    expect(within(panel).queryByTestId('submitted-record')).toBeNull();
     expect(within(panel).queryByText(HEADING)).toBeNull();
   });
 

@@ -126,9 +126,11 @@ import {
   isMissingForRequired,
   isRuntimeDefault,
   isServerOwnedValue,
+  planObjectFormulas,
   resolveAffordance,
   resolveFieldRuleState,
   type FieldRuleFaults,
+  type ObjectFormulaPlan,
   type FieldRulePredicate,
 } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -2424,6 +2426,50 @@ function findSubmitRefusals(
   return { faultedVisibleWhen, missing };
 }
 
+const warnedUnservableRules = new Set<string>();
+
+/**
+ * `sections` with the OBJECT-level `visibleWhen` (`rules.visibleWhen`) of every
+ * row that reads a formula this page cannot compute dropped, each drop warned
+ * once (objectstack#35033). The field is then shown and keeps its `required`,
+ * and its rule is no fault, so the submit is not refused for it (no ADR-0137
+ * D2 refusal) and the server, which judges the write, decides. The view-level
+ * predicate is a layout gate and is left alone. Returns `sections` itself when
+ * nothing drops.
+ */
+export function withoutUnservableRuleVisibleWhen(
+  sections: RenderableSection[],
+  plan: ObjectFormulaPlan | undefined,
+): RenderableSection[] {
+  if (!plan || plan.unservable.size === 0) return sections;
+  let changed = false;
+  const out = sections.map((sec) => {
+    let fields: RenderableField[] | undefined;
+    sec.fields.forEach((f, i) => {
+      const pred = f.rules?.visibleWhen;
+      if (pred == null) return;
+      const reads = plan.unservableReadsOf(pred);
+      if (reads.length === 0) return;
+      fields ??= sec.fields.slice();
+      const { visibleWhen: _dropped, ...rules } = f.rules!;
+      fields[i] = { ...f, rules };
+      const why = reads.map(([name, reason]) => `'${name}' ${reason}`).join('; ');
+      const key = JSON.stringify([f.name, why]);
+      if (!warnedUnservableRules.has(key)) {
+        warnedUnservableRules.add(key);
+        console.warn(
+          `[object-ui] The visibleWhen of field '${f.name}' reads a formula the form cannot compute ` +
+            `(${why}), so the field is shown and keeps its required flag; the server decides on save.`,
+        );
+      }
+    });
+    if (!fields) return sec;
+    changed = true;
+    return { ...sec, fields };
+  });
+  return changed ? out : sections;
+}
+
 // ─── Main component ─────────────────────────────────────────────────
 
 export interface FormPageProps {
@@ -2749,9 +2795,30 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, identifier, search, channel]);
 
+  /**
+   * The object's `formula` fields, recomputed from the live values for the
+   * field rules (objectstack#35033): a rule reading one is judged on the value
+   * the written record would serve, as the server judges it. A row whose
+   * object-level `visibleWhen` reads a formula this page cannot compute loses
+   * that rule — shown and still required, never a submit refusal — in
+   * {@link withoutUnservableRuleVisibleWhen}. The payload stays `values`.
+   * The formulas are computed for the acting user of `predicateScope`
+   * (`current_user`), bound as the server binds it.
+   */
+  const formulaPlan = useMemo(
+    () => planObjectFormulas(loaded?.objectSchema?.fields, predicateScope),
+    [loaded, predicateScope],
+  );
+  const ruleValues = useMemo(
+    () => (formulaPlan ? formulaPlan.compute(values) : values),
+    [formulaPlan, values],
+  );
   const sections = useMemo<RenderableSection[]>(
-    () => (loaded ? buildSections(loaded.form, loaded.objectSchema, language) : []),
-    [loaded, language],
+    () =>
+      loaded
+        ? withoutUnservableRuleVisibleWhen(buildSections(loaded.form, loaded.objectSchema, language), formulaPlan)
+        : [],
+    [loaded, language, formulaPlan],
   );
 
   /**
@@ -2916,7 +2983,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const handleWizardNext = (object: string) => {
     const refusals = findSubmitRefusals(
       [sections[currentStep]],
-      values,
+      ruleValues,
       loaded?.record,
       isCreateForm,
       predicateScope,
@@ -2947,7 +3014,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     if (!loaded) return;
     const refusals = findSubmitRefusals(
       wizardView && !onLastStep ? [sections[currentStep]] : sections,
-      values,
+      ruleValues,
       loaded.record,
       isCreateForm,
       predicateScope,
@@ -2971,7 +3038,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     }
     const refusals = findSubmitRefusals(
       sections,
-      values,
+      ruleValues,
       loaded.record,
       isCreateForm,
       predicateScope,
@@ -3288,7 +3355,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // things that depend on it below — the row's presence, the
           // required marker, and the control's own attributes. Computing
           // it three times would be three chances to disagree.
-          const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
+          const state = resolveRowState(f, ruleValues, loaded.record, isCreateForm, predicateScope);
           if (!state.visible) return null;
           // The row's refusal mark, if the last submit left one: its own text
           // under the control, or the banner that names it.
@@ -3386,7 +3453,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const renderTabbedSections = () => {
     const drawn = sections
       .map((sec, at) => ({ sec, at, key: sectionTabKey(sec, at) }))
-      .filter(({ sec }) => isSectionVisible(sec, values, loaded.record, predicateScope));
+      .filter(({ sec }) => isSectionVisible(sec, ruleValues, loaded.record, predicateScope));
     if (drawn.length === 0) return null;
     const active = resolveActiveTab(drawn.map((d) => d.key), pickedTab, loaded.form?.defaultTab);
     const stripAt = loaded.form?.tabPosition ?? 'top';
@@ -3577,7 +3644,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // would renumber every later section the moment one hid, remounting
           // their inputs and taking the caret with them. `null` keeps each
           // surviving section on the key it already had.
-          if (!isSectionVisible(sec, values, loaded.record, predicateScope)) return null;
+          if (!isSectionVisible(sec, ruleValues, loaded.record, predicateScope)) return null;
           return (
           <section key={i} className="rounded-md border bg-card p-4 sm:p-5">
             {sec.label && (

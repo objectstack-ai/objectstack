@@ -90,6 +90,73 @@
       "evidence": "packages/runtime/src/sandbox/body-runner.ts#actionBodyRunnerFactory (`const raw = action.body`, in the factory whose own header calls it \"the ONE choke point where an `action.body` becomes an executable handler\" — both bind paths reach it: AppPlugin's collectBundleActions walk and engine.setDefaultActionRunner); packages/runtime/src/action-execution.ts#isHeadlessInvokableAction (gates headless dispatch on `action?.target || action?.body`)",
       "note": "server script (L1/L2) via engine.executeAction→body-runner. 2026-08-26: REPOINTED — the evidence cited packages/runtime/src/http-dispatcher.ts, which reads this key nowhere. Its 68 word-`body` occurrences are the inbound HTTP request body — the `body: any` parameter threaded through the handleX delegates (:890, :961, :1732, :1969 …) and the result envelope at :728 — plus the file's own \"Thin delegate — body extracted to ./domains/…\" extraction comments, where `body` means a function body. The consumer this note already NAMED in prose (body-runner) is where the read has always been; the surrounding action path was extracted into domains/actions.ts + action-execution.ts, and http-dispatcher.ts now only delegates (handleActions → handleActionsRequest at :1969-1970). WHY THE GATE COULD NOT SEE THE ROT: `body` is both a common English word and the name of the HTTP request member this dispatcher is built around, so the word-bounded key-mention check added in #11457 anchors on 68 unrelated hits and passes — the designed, honest limit of that signal, which is why this needed a hand call-graph read. Note the shape the repoint exposes: the NOTE's pointer (\"via engine.executeAction→body-runner\") stayed true the whole time while the EVIDENCE pointer rotted — the same split recorded on `requiredPermissions`, one layer over. 2026-08-28: RE-ANCHORED (commit 93ea19bca) — re-closed by hand against c459da6bc; both consumers stand where the 08-26 repoint put them, so the lines had not yet rotted and this is the grammar migration, not a second repair. The anchor is what makes that claim re-testable next time: `actionBodyRunnerFactory` is the symbol the header already calls the ONE choke point, so a consumer that moves inside this 798-line file keeps the pointer true and one that is deleted turns it red."
     },
+    "refusals": {
+      "status": "live",
+      "verifiedAt": "2026-11-17",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveActionRefusal (the one reader: a sandboxed action body's throw of a declared code is answered with that entry, and any other deliberate throw of an action that declares `refusals` is refused as a fault naming the action and the code); packages/runtime/src/sandbox/body-runner.ts#actionBodyRunnerFactory (hands every body throw of the action to `resolveActionRefusal` before it leaves the handler)",
+      "producer": "packages/runtime/src/app-plugin.ts#collectBundleActions and packages/runtime/src/app-artifact-handlers.ts#bindAppArtifactHandlers (hand the AUTHORED action, `refusals` included, to the body runner factory); packages/spec/src/ui/action.zod.ts#refuseUndeclaredLiteralActionRefusalCode (refuses at save a catalogue on an action that runs no js body, and a code or reason the body throws literally that the catalogue does not declare)",
+      "note": "[#34273] The hook catalogue's twin (`HookSchema.refusals`, #26170 ruling 6431311681 letter A; #33214 ruling 6879477573), seeded `live` with its reader in one change (Prime Directive 10): the key, the action body runner that answers it, the translation address (`objects.<object>._actions.<action>.refusals.…` / `globalActions.<action>.refusals.…`), `objectstack validate`'s key check and the i18n coverage walk. One entry shape for both catalogues (`data/declared-entry.zod.ts`) and one run-time answer (`resolveSandboxedRefusal`). An error a host call raised and the body let through unchanged, a crash and a sandbox fault pass through untouched. DRILLED to the entry's four keys: the entry face is closed (`.strict()`).",
+      "children": {
+        "message": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#ownerRefusalMessage (the sentence the refusal is answered with: `actionRefusalMessageKey` — `objects.<object>._actions.<action>.refusals.<CODE>.message`, or `globalActions.<action>.refusals.<CODE>.message` for an object-less action — picked through the `i18n` service in the caller's `executionContext.locale`, negotiated by `resolveBundleLocale`, else the declared `message`); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveActionRefusal (serves it as the refusal's caller-facing sentence and its `userMessage`)"
+        },
+        "status": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveActionRefusal (the refusal carries the declared `status`, else 400; the status the body set on its own throw is not read)"
+        },
+        "reasons": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredAnswer (a throw naming a `reason` the code declares is answered with that reason's sentence, the code's status and the code on the wire; an undeclared reason is refused as a fault naming the action, the code and the reason); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#ownerRefusalMessage (picks the reason's sentence and its key, `….refusals.<CODE>.reasons.<REASON>.message`)",
+          "producer": "packages/spec/src/ui/action.zod.ts#refuseUndeclaredLiteralActionRefusalCode (refuses at save a reason the body throws literally and the code does not declare)",
+          "children": {
+            "message": {
+              "status": "live",
+              "verifiedAt": "2026-11-17",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#ownerRefusalMessage (the reason's sentence the refusal is answered with, translated through `….refusals.<CODE>.reasons.<REASON>.message`, else as declared)"
+            }
+          }
+        },
+        "params": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#renderHookTemplate (fills the picked sentence's `{{ NAME }}` holes from the throw's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#ownerRefusalMessage (renders an entry that declares `params`; one that declares none stays plain text)",
+          "producer": "packages/spec/src/data/declared-entry.zod.ts#declaredRefusalEntrySchema (judges each sentence's holes against the declared names at save)"
+        }
+      }
+    },
+    "texts": {
+      "status": "live",
+      "verifiedAt": "2026-11-17",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (the one reader: `ctx.text(key, params)` on a script action's sandboxed body answers a declared text in the organization's language, and a key the action does not declare as a fault naming the action and the key); packages/runtime/src/sandbox/body-runner.ts#actionBodyRunnerFactory (builds it for every action body invocation and hands it to the body's sandbox context); packages/runtime/src/sandbox/quickjs-runner.ts#installCtx (wires it onto the VM's `ctx.text`)",
+      "producer": "packages/runtime/src/app-plugin.ts#collectBundleActions and packages/runtime/src/app-artifact-handlers.ts#bindAppArtifactHandlers (hand the AUTHORED action, `texts` included, to the body runner factory); packages/spec/src/ui/action.zod.ts#refuseUndeclaredLiteralActionTextKey (refuses at save `texts` on an action that runs no js body, and a key the body asks for literally that `texts` does not declare)",
+      "note": "[#34374, action half; ruling 6913660232 parameter 7] The hook texts' twin (`HookSchema.texts`), seeded `live` with its reader in one change (Prime Directive 10): the key, the action body runner that answers it, the translation address (`objects.<object>._actions.<action>.texts.<key>.message` / `globalActions.<action>.texts.<key>.message`), `objectstack validate`'s key check and the i18n coverage walk. One entry shape for both (`data/declared-entry.zod.ts`) and one run-time answer (`hook-text.ts`). Never the caller's language (parameter 2); a missing translation writes the declared sentence (parameter 5); an unreadable Localization setting rejects the call. Only a `type: 'script'` action's js body runs code of its own, so that is the one path it is served on. DRILLED to the entry's two keys: the entry face is closed.",
+      "children": {
+        "message": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (the sentence `ctx.text` answers: `actionTextMessageKey` — `objects.<object>._actions.<action>.texts.<key>.message`, or `globalActions.<action>.texts.<key>.message` for an object-less action — picked through the `i18n` service in the organization's language, `readOrganizationTextLocale`, negotiated by `resolveBundleLocale`, else the declared `message`)"
+        },
+        "params": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#renderHookTemplate (fills the picked sentence's `{{ NAME }}` holes from the call's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-text.ts#buildActionTextSurface (fills an entry that declares `params`; one that declares none stays plain text)",
+          "producer": "packages/spec/src/data/declared-entry.zod.ts#declaredTextEntrySchema (judges the message's holes against the declared names at save)"
+        }
+      }
+    },
     "params": {
       "status": "live",
       "verifiedAt": "2026-09-15",
@@ -277,7 +344,7 @@
     },
     "resultDialog": {
       "status": "live",
-      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}. `fields[].format: 'table'` and its `columns` (#34391) are PLANNED until the console reader #33187 lands (see `preflight.fields.columns`, the same row): the spec refuses the contradictions at parse, and the console draws a `table` row's label alone today."
+      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}. `fields[].format: 'table'` and its `columns` (#34391) are LIVE since the console reader #33187 (see `preflight.fields.columns`, the same row): the spec refuses the contradictions at parse, and the console's `ResultField` draws a `table` row as a table, one row per element and one cell per column."
     },
     "preflight": {
       "status": "live",
@@ -327,24 +394,25 @@
               "note": "Live with its container `preflight.fields`: the row's display format, from resultDialog's format set."
             },
             "columns": {
-              "status": "planned",
-              "verifiedAt": "2026-11-16",
-              "note": "PLANNED (spec card #34391; reader #33187, maintainer ruling A 6915677641). The cells of a `format: 'table'` row, `[{ path, label?, format? }]`, from the row builder `resultDialog.fields` shares (packages/spec/src/ui/action.zod.ts#actionAnswerFieldRow). Enforced at parse today: required by `table`, refused beside any other format (#refuseTableColumnContradictions), and a cell takes the field formats minus `table`. NOT yet drawn: the console's `ResultField` (ui/packages/app-shell/src/views/ActionResultDialog.tsx) has no `table` branch, so until #33187 lands a `table` row draws its label alone. Re-grade `live` in the PR that lands that renderer.",
+              "status": "live",
+              "verifiedAt": "2026-11-17",
+              "evidence": "ui/packages/app-shell/src/views/ActionResultDialog.tsx#ResultField (the `table` branch: an array value draws through `TableBlock`, any other value as `json`); ui/packages/app-shell/src/views/ActionResultDialog.tsx#TableBlock (one row per element, one cell per entry of `columns`, in order); ui/packages/app-shell/src/views/ActionResultDialog.tsx#TableCellValue (the cell, in the column's format or as compact JSON); ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel (each preflight `fields` row through the same `ResultField`)",
+              "note": "LIVE (spec card #34391; reader #33187, maintainer ruling A 6915677641). The cells of a `format: 'table'` row, `[{ path, label?, format? }]`, from the row builder `resultDialog.fields` shares (packages/spec/src/ui/action.zod.ts#actionAnswerFieldRow). Enforced at parse: required by `table`, refused beside any other format (#refuseTableColumnContradictions), and a cell takes the field formats minus `table`. Drawn by the console's `ResultField`, which the result dialog and the preflight panel share, by the `table` bullet of the `resultDialog` renderer contract; pinned in ui/packages/app-shell/src/views/__tests__/ActionResultDialog.test.tsx. First producer: `sys_user.import_sso_users`, whose per-row report draws as a table (packages/platform-objects/src/identity/sys-user.object.ts).",
               "children": {
                 "path": {
-                  "status": "planned",
-                  "verifiedAt": "2026-11-16",
-                  "note": "Planned with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws; a path that resolves to nothing draws an empty cell, and an element that is not an object draws as compact JSON text in its row's first cell."
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws; a path that resolves to nothing or to `null` draws an empty cell, and an element that is not a plain object draws as compact JSON text in its row's first cell."
                 },
                 "label": {
-                  "status": "planned",
-                  "verifiedAt": "2026-11-16",
-                  "note": "Planned with its container `preflight.fields.columns`: the column header; omitted, the header is the column's `path`."
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the column header; omitted, the header is the column's `path`."
                 },
                 "format": {
-                  "status": "planned",
-                  "verifiedAt": "2026-11-16",
-                  "note": "Planned with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, `text`. A value that does not fit the cell's format, whatever it is, draws as compact JSON text, and a missing value draws an empty cell (the `table` bullet of the `resultDialog` renderer contract)."
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, `text`. A value that does not fit the cell's format, whatever it is, draws as compact JSON text, and a missing or `null` value draws an empty cell (the `table` bullet of the `resultDialog` renderer contract)."
                 }
               }
             }

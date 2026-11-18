@@ -101,6 +101,8 @@ import {
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
+  datasetDrillHasRelationshipPath,
+  resolveDatasetDrillFilter,
   FilterOperatorError,
   relabelDimensions,
   // The dataset→chart derivation the dashboard and the chart view have always
@@ -865,6 +867,59 @@ function drillFilterOrRefusal(
   }
 }
 
+/**
+ * The drill filter of a bucket whose dimensions cross a relationship
+ * (`relationship.field` paths in `dimensionFields`), handed to `emit` once the
+ * related ids are read — `resolveDatasetDrillFilter` in `@object-ui/core`.
+ * The data API refuses the dotted path itself, so the filter names the
+ * relationship field `$in` the related ids matching the clicked value.
+ *
+ * A bucket it cannot resolve (a path past ADR-0071's hop limit, an unknown
+ * relationship, the empty bucket, more related records than the drill may
+ * list) or a read that fails emits no drill and logs why: the host builds its
+ * own fallback from an absent `objectFilter`, which would drop the scope, so
+ * there is no drill rather than a wider one — the posture
+ * {@link drillFilterOrRefusal} takes for a refused filter.
+ */
+function resolveRelationshipDrill(
+  object: string,
+  scope: MeasureDrillScope,
+  rawRow: Record<string, unknown> | undefined,
+  drillDims: string[],
+  dimensionFields: Record<string, string>,
+  runtimeFilter: Record<string, unknown> | undefined,
+  rawRanges: Record<string, DatasetDrillRange> | undefined,
+  dataSource: unknown,
+  emit: (objectFilter: Record<string, unknown>) => void,
+): void {
+  resolveDatasetDrillFilter({
+    object,
+    rawRow,
+    drillDims,
+    dimensionFields,
+    runtimeFilter: scopeDrillFilter(runtimeFilter, scope),
+    rawRanges,
+    dataSource,
+  }).then(
+    (resolution) => {
+      if (resolution.status === 'resolved') {
+        emit(resolution.filter);
+        return;
+      }
+      console.warn(
+        `[DatasetReportRenderer] drill-down not opened — the relationship dimension cannot be listed (${
+          resolution.status === 'too-many'
+            ? `more than ${resolution.cap} related '${resolution.object}' records`
+            : `${resolution.reason}: ${resolution.field}`
+        }).`,
+      );
+    },
+    (error: unknown) => {
+      console.warn('[DatasetReportRenderer] drill-down not opened — its relationship dimension could not be resolved:', error);
+    },
+  );
+}
+
 function EmptyMeasures({ dataset }: { dataset: string }) {
   return (
     <div className="flex items-center justify-center rounded-md border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground">
@@ -1057,6 +1112,12 @@ function DatasetReportTable({
       : state.drillRanges?.[index];
     const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
+    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+      const object = state.object;
+      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
+        onDrill!({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved }));
+      return;
+    }
     if (state.object && (drillDims.length > 0 || hasRange)) {
       const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.
@@ -2172,6 +2233,12 @@ function DatasetMatrixTable({
     const cellRanges = state.drillRanges?.[index];
     const hasRange = !!cellRanges && Object.keys(cellRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
+    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+      const object = state.object;
+      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges, dataSource, (resolved) =>
+        onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object, objectFilter: resolved }));
+      return;
+    }
     if (state.object && (drillDims.length > 0 || hasRange)) {
       const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.

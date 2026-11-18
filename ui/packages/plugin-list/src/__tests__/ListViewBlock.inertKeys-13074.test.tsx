@@ -109,6 +109,7 @@ function me(systemPermissions: string[] | undefined): MePermissionsAuthenticated
     tenantId: 't1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {

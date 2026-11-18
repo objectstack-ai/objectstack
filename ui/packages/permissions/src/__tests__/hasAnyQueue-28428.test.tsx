@@ -30,12 +30,13 @@ function Probe() {
   return null;
 }
 
-function answer(hasAnyQueue: boolean): MePermissionsAuthenticatedResponse {
+function answer(hasAnyQueue: boolean, objectsUsingQueues: string[] = []): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 'org_1',
     hasAnyQueue,
+    objectsUsingQueues,
     positions: [],
     permissionSets: ['member_default'],
     objects: {},
@@ -94,5 +95,36 @@ describe('objectstack#28428 — hasAnyQueue on the permission context', () => {
     render(<Probe />);
     expect(seen.at(-1)?.isLoaded).toBe(false);
     expect(seen.at(-1)?.hasAnyQueue).toBeUndefined();
+  });
+});
+
+// objectstack#34602 — `objectsUsingQueues`, the per-object answer beside the
+// boolean: handed on verbatim along the same sources, `undefined` wherever
+// `hasAnyQueue` is.
+describe('objectstack#34602 — objectsUsingQueues on the permission context', () => {
+  it('MePermissionsProvider hands on the served list, and a scope below forwards it', () => {
+    seen.length = 0;
+    render(
+      <MePermissionsProvider initialPermissions={answer(true, ['crm_case', 'crm_lead'])}>
+        <Probe />
+        <ServerReadScope objects={['sys_user']}>
+          <Probe />
+        </ServerReadScope>
+      </MePermissionsProvider>,
+    );
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    for (const value of seen.slice(-2)) expect(value.objectsUsingQueues).toEqual(['crm_case', 'crm_lead']);
+  });
+
+  it('no answer — anonymous, the role-based provider, or no provider — is undefined, never []', () => {
+    seen.length = 0;
+    render(<MePermissionsProvider initialPermissions={{ authenticated: false }}><Probe /></MePermissionsProvider>);
+    expect(seen.at(-1)?.objectsUsingQueues).toBeUndefined();
+    seen.length = 0;
+    render(<PermissionProvider roles={[]} permissions={[]} userRoles={[]}><Probe /></PermissionProvider>);
+    expect(seen.at(-1)?.objectsUsingQueues).toBeUndefined();
+    seen.length = 0;
+    render(<Probe />);
+    expect(seen.at(-1)?.objectsUsingQueues).toBeUndefined();
   });
 });

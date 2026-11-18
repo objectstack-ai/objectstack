@@ -17,6 +17,8 @@ import { registerAllFields } from '@object-ui/fields';
 import type { DataSource } from '@object-ui/types';
 import { ModalForm } from './ModalForm';
 import { DrawerForm } from './DrawerForm';
+import { MasterDetailForm } from './MasterDetailForm';
+import { FormDirtyReportContext } from './formDirtyReport';
 
 registerAllFields();
 
@@ -279,5 +281,153 @@ describe.each(OVERLAY_FORMS)('%s beforeunload guard', (_name, Form) => {
     await dirtyTheForm();
 
     expect(fireBeforeUnload().defaultPrevented).toBe(false);
+  });
+});
+
+/**
+ * objectstack#34599 — the master-detail arm (`subforms`) of both overlays
+ * guards its close like the flat arm: input in the header form or in the
+ * lines prompts on the X; a pristine form, and the explicit Cancel, close at
+ * once. The master-detail form reports that input through the package-internal
+ * `FormDirtyReportContext`, and a save clears it.
+ */
+describe('master-detail overlay unsaved-changes guard (objectstack#34599)', () => {
+  const mdDs: any = {
+    getObjectSchema: vi.fn(async (name: string) =>
+      name === 'claim'
+        ? { name: 'claim', fields: { title: { type: 'text', label: 'Title' } } }
+        : { name: 'claim_line', fields: { amount: { type: 'number', label: 'Amount' } } },
+    ),
+    find: vi.fn().mockResolvedValue({ data: [] }),
+    batchTransaction: vi.fn().mockResolvedValue({ results: [{ id: 'c1' }] }),
+  };
+  const subforms = [
+    { childObject: 'claim_line', relationshipField: 'claim', title: 'Lines', columns: [{ name: 'amount', label: 'Amount', type: 'number' }] },
+  ];
+  const mdSchema = (onOpenChange: (open: boolean) => void) =>
+    ({ objectName: 'claim', mode: 'create', title: 'New Claim', open: true, onOpenChange, fields: ['title'], subforms }) as any;
+
+  async function headerInput(): Promise<HTMLInputElement> {
+    await waitFor(() => expect(screen.getByTestId('md-form-submit')).toBeTruthy());
+    return waitFor(() => {
+      const el = document.querySelector('input[name="title"]') as HTMLInputElement | null;
+      if (!el) throw new Error('header form not ready');
+      return el;
+    });
+  }
+
+  it('ModalForm: a pristine master-detail dialog closes on the X with no prompt', async () => {
+    const onOpenChange = vi.fn();
+    render(<ModalForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
+    await headerInput();
+
+    accidentalClose();
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+  });
+
+  it('ModalForm: typed header input prompts on the X; "Discard" then closes', async () => {
+    const onOpenChange = vi.fn();
+    render(<ModalForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
+    fireEvent.change(await headerInput(), { target: { value: 'Trip to Berlin' } });
+
+    accidentalClose();
+
+    await waitFor(() => expect(screen.getByText('Discard changes?')).toBeTruthy());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Discard'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('ModalForm: an edited line alone prompts on the X', async () => {
+    const onOpenChange = vi.fn();
+    render(<ModalForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
+    await headerInput();
+    const amount = await waitFor(() => screen.getAllByLabelText('Amount')[0] as HTMLInputElement);
+    fireEvent.change(amount, { target: { value: '42' } });
+
+    accidentalClose();
+
+    await waitFor(() => expect(screen.getByText('Discard changes?')).toBeTruthy());
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('ModalForm: the explicit Cancel closes a dirty master-detail dialog at once', async () => {
+    const onOpenChange = vi.fn();
+    render(<ModalForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
+    fireEvent.change(await headerInput(), { target: { value: 'Trip to Berlin' } });
+
+    fireEvent.click(screen.getByTestId('md-form-cancel'));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+  });
+
+  it('ModalForm: a dirty master-detail dialog blocks a page unload', async () => {
+    render(<ModalForm schema={mdSchema(vi.fn())} dataSource={mdDs} />);
+    fireEvent.change(await headerInput(), { target: { value: 'Trip to Berlin' } });
+    await waitFor(() => expect(fireBeforeUnload().defaultPrevented).toBe(true));
+  });
+
+  it('DrawerForm: typed header input prompts on the X', async () => {
+    const onOpenChange = vi.fn();
+    render(<DrawerForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
+    fireEvent.change(await headerInput(), { target: { value: 'Trip to Berlin' } });
+
+    accidentalClose();
+
+    await waitFor(() => expect(screen.getByText('Discard changes?')).toBeTruthy());
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('MasterDetailForm reports its input to the nearest reporter, and a save clears it', async () => {
+    const reports: boolean[] = [];
+    const report = (dirty: boolean) => { reports.push(dirty); };
+    render(
+      <FormDirtyReportContext.Provider value={report}>
+        <MasterDetailForm
+          schema={{ type: 'object-master-detail-form', objectName: 'claim', mode: 'create', fields: ['title'], details: subforms } as any}
+          dataSource={mdDs}
+        />
+      </FormDirtyReportContext.Provider>,
+    );
+    fireEvent.change(await headerInput(), { target: { value: 'Trip to Berlin' } });
+    await waitFor(() => expect(reports.at(-1)).toBe(true));
+
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+
+    await waitFor(() => expect(mdDs.batchTransaction).toHaveBeenCalled());
+    await waitFor(() => expect(reports.at(-1)).toBe(false));
+  });
+
+  it('an edit save clears the reported input, though the header form stays mounted', async () => {
+    // A create remounts the header for the next entry; an edit keeps it, and
+    // its renderer still holds the opening record as its baseline.
+    const editDs: any = {
+      ...mdDs,
+      findOne: vi.fn().mockResolvedValue({ id: 'c1', title: 'Trip' }),
+      batchTransaction: vi.fn().mockResolvedValue({ results: [{ id: 'c1', title: 'Trip to Berlin' }] }),
+    };
+    const reports: boolean[] = [];
+    const report = (dirty: boolean) => { reports.push(dirty); };
+    render(
+      <FormDirtyReportContext.Provider value={report}>
+        <MasterDetailForm
+          schema={{ type: 'object-master-detail-form', objectName: 'claim', mode: 'edit', recordId: 'c1', fields: ['title'], details: subforms } as any}
+          dataSource={editDs}
+        />
+      </FormDirtyReportContext.Provider>,
+    );
+    const input = await headerInput();
+    await waitFor(() => expect(input.value).toBe('Trip'));
+    fireEvent.change(input, { target: { value: 'Trip to Berlin' } });
+    await waitFor(() => expect(reports.at(-1)).toBe(true));
+
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+
+    await waitFor(() => expect(editDs.batchTransaction).toHaveBeenCalled());
+    await waitFor(() => expect(reports.at(-1)).toBe(false));
+    expect((document.querySelector('input[name="title"]') as HTMLInputElement).value).toBe('Trip to Berlin');
   });
 });

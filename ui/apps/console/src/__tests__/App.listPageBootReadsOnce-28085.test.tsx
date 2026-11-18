@@ -59,7 +59,7 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
   }
   if (url.includes('/auth/me/permissions')) {
     return json({
-      authenticated: true, userId: USER.id, tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false,
+      authenticated: true, userId: USER.id, tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false, objectsUsingQueues: [],
     });
   }
   if (url.includes('/auth/')) return json({});

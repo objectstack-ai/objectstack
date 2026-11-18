@@ -18,14 +18,19 @@
  * - `query_dataset`: one NOT_FOUND for missing and hidden; `provenance`
  *   composed from what ran, which the model's input cannot set; the row cap
  *   and `truncated`; the delegation statement; no `sql`.
+ * - [#34919] `nextStep` and `sourceLine` (ADR-0149 M1 note): the decision for
+ *   each term, the precedence among mixed cases, the partial-answer rule, the
+ *   sentence's language, and that neither sentence names a member the caller
+ *   was not admitted to — on a mirror of `examples/app-crm`'s dataset.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
+import { ListDatasetsOutputSchema, QueryDatasetOutputSchema, getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
 import { createDatasetTools, getDatasetToolDefinitions } from '../dataset-tools.js';
+import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a', locale: 'zh-CN' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -43,6 +48,23 @@ const OBJECTS: Record<string, { enable?: unknown; fields: Record<string, Record<
   },
   crm_locked: { fields: { id: { type: 'text' }, amount: { type: 'number' } } },
   crm_closed: { enable: { apiEnabled: false }, fields: { id: { type: 'text' }, amount: { type: 'number' } } },
+  // [#34919] app-crm's two pipeline objects, as `examples/app-crm/src/objects` declares the fields its datasets read.
+  crm_opportunity: {
+    fields: {
+      id: { type: 'text' },
+      stage: { type: 'select' },
+      account: { type: 'text' },
+      close_date: { type: 'date' },
+      amount: { type: 'currency' },
+    },
+  },
+  crm_opportunity_line_item: {
+    fields: { id: { type: 'text' }, product: { type: 'text' }, quantity: { type: 'number' }, amount: { type: 'currency' } },
+  },
+  // [#35005] one 销售额 measure beside an industry and a quarter grouping.
+  sales_order: {
+    fields: { id: { type: 'text' }, industry: { type: 'text' }, quarter: { type: 'text' }, amount: { type: 'number' }, churn: { type: 'number' } },
+  },
 };
 
 const PIPELINE = {
@@ -105,18 +127,22 @@ function fakeEngine(rows: Record<string, unknown>[]) {
   };
 }
 
-/** The security double: u_me may not read `crm_locked` nor the `margin` field; u_admin reads everything. */
+/**
+ * The security double: u_me may not read `crm_locked` nor the `margin` field;
+ * [#34919] u_rep may not read the `amount` field of app-crm's two objects;
+ * u_admin reads everything.
+ */
+function fieldsFor(object: string, ctx?: ExecutionContext): string[] {
+  const all = Object.keys(OBJECTS[object]?.fields ?? {});
+  if (ctx?.userId === 'u_me') return all.filter((f) => f !== 'margin');
+  if (ctx?.userId === 'u_rep' && object.startsWith('crm_opportunity')) return all.filter((f) => f !== 'amount');
+  return all;
+}
 const security = {
   getReadFilter: async () => undefined,
   canReadObject: (object: string, ctx?: ExecutionContext) => !(ctx?.userId === 'u_me' && object === 'crm_locked'),
-  getReadableFields: async (object: string, ctx?: ExecutionContext) => {
-    const all = Object.keys(OBJECTS[object]?.fields ?? {});
-    return ctx?.userId === 'u_me' ? all.filter((f) => f !== 'margin') : all;
-  },
-  getQueryableFields: async (object: string, ctx?: ExecutionContext) => {
-    const all = Object.keys(OBJECTS[object]?.fields ?? {});
-    return ctx?.userId === 'u_me' ? all.filter((f) => f !== 'margin') : all;
-  },
+  getReadableFields: async (object: string, ctx?: ExecutionContext) => fieldsFor(object, ctx),
+  getQueryableFields: async (object: string, ctx?: ExecutionContext) => fieldsFor(object, ctx),
 };
 
 async function bootWired(rows: Record<string, unknown>[] = [{ stage: 'won', revenue: 100 }]) {
@@ -155,6 +181,23 @@ describe('the two AIToolDefinitions', () => {
     expect(defs[0].description).toMatch(/ask the user/i);
     expect(defs[0].description).toContain('非指标口径');
     expect(defs[1].description).toContain('provenance');
+  });
+
+  it('[#35005] scopes the ask-back to a word with a measure among its candidates', () => {
+    const [list] = getDatasetToolDefinitions();
+    expect(list.description).toContain('A word with a measure among its candidates: ask the same way');
+    expect(list.description).toContain(
+      'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+      + 'stops a matched measure.',
+    );
+  });
+
+  it('[#34919] says follow nextStep and cite sourceLine, and names the precedence the executor applies', () => {
+    const [list, query] = getDatasetToolDefinitions();
+    expect(list.description).toContain('nextStep');
+    expect(list.description).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
+    expect(query.description).toContain('sourceLine');
+    expect(DATASET_NEXT_STEP_PRECEDENCE).toEqual(['several_measures', 'one_measure', 'candidates_only', 'no_measure']);
   });
 });
 
@@ -762,5 +805,543 @@ describe('[#32072] query_dataset resolves the dataset by package (ADR-0150 D3)',
     const { answer, spy } = await run([broken]);
     expect(answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#34763] list_datasets candidates — only what this caller may read, never beside a match', () => {
+  /** Every candidate names a dataset the same answer lists and a member that entry lists. */
+  function expectResolvable(out: Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>) {
+    for (const c of out.candidates ?? []) {
+      const entry = out.datasets.find((d) => d.name === c.dataset);
+      expect(entry, `${c.dataset} is listed`).toBeDefined();
+      const [kind, name] = c.member.split('.') as ['measures' | 'dimensions', string];
+      expect(entry![kind].map((m) => m.name), `${c.member} is listed in ${c.dataset}`).toContain(name);
+    }
+    expect(ListDatasetsOutputSchema.safeParse(out).success).toBe(true);
+  }
+
+  const TERMS = ['rev', '营收', 'secret', 'rate', 'tot', 'marg'];
+
+  it('offers the readable near member for a term that matched nothing, and nothing for a term that matched', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ME);
+    // `secret` (an internal-field member), `rate` and `marg` (members over the
+    // unreadable `margin`) and `tot` (a measure of locked_ds, which u_me may
+    // not query, and of closed_ds, which is not API-exposed) offer nothing.
+    expect(out.candidates).toEqual([{ term: 'rev', dataset: 'pipeline', member: 'measures.revenue' }]);
+    expect(out.datasets[0].matches).toEqual([{ term: '营收', member: 'measures.revenue', matchedOn: 'label' }]);
+    expectResolvable(out);
+  });
+
+  it('a caller who reads more is offered more, from the same rule; an unexposed dataset is offered to nobody', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ADMIN);
+    expect(out.candidates).toEqual([
+      { term: 'rev', dataset: 'pipeline', member: 'measures.revenue' },
+      { term: 'rate', dataset: 'pipeline', member: 'measures.margin_rate' },
+      // `margin_total` folds to "margin total", which contains `tot`; datasets in listing order.
+      { term: 'tot', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'tot', dataset: 'locked_ds', member: 'measures.total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_rate' },
+    ]);
+    expect(out.candidates!.some((c) => c.dataset === 'closed_ds' || c.member === 'measures.secret_sum')).toBe(false);
+    expectResolvable(out);
+  });
+
+  it('a term with a match anywhere in the answer has no candidate, though a member is near it', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    // `margin` equals margin_total's label; margin_rate ("Margin rate") contains it and is not offered.
+    const matched = await tools.listDatasets({ terms: ['margin'] }, ADMIN);
+    expect(matched.datasets[0].matches).toEqual([{ term: 'margin', member: 'measures.margin_total', matchedOn: 'label' }]);
+    expect('candidates' in matched).toBe(false);
+    // The control: the near form alone is offered both members.
+    const near = await tools.listDatasets({ terms: ['marg'] }, ADMIN);
+    expect(near.candidates?.map((c) => c.member)).toEqual(['measures.margin_total', 'measures.margin_rate']);
+  });
+
+  it('omits the key when nothing is offered: no terms, every term matched, or nothing readable is near', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    for (const input of [{}, { terms: ['营收', 'phase'] }, { terms: ['secret', 'rate', 'tot', 'qa_no_word'] }]) {
+      const out = await tools.listDatasets(input, ME);
+      expect('candidates' in out, JSON.stringify(input)).toBe(false);
+    }
+  });
+});
+
+/**
+ * [#34919] `examples/app-crm`'s `crm_opportunity_metrics`
+ * (`src/datasets/opportunity.dataset.ts`), member for member with its labels
+ * and synonyms, beside a second dataset over app-crm's line items. app-crm
+ * declares one dataset, and the D1 rule refuses a word that answers to two
+ * members of one dataset, so "a word with two matches" needs a second dataset:
+ * `deal value` is `total_amount`'s synonym there and `line_amount`'s here.
+ */
+const CRM_OPPORTUNITY_METRICS = {
+  name: 'crm_opportunity_metrics',
+  label: 'Opportunity Metrics',
+  description: 'Semantic layer for sales-pipeline counts and amounts',
+  object: 'crm_opportunity',
+  dimensions: [
+    { name: 'stage', label: 'Stage', field: 'stage', type: 'string', synonyms: ['sales stage', 'deal stage', 'pipeline stage', '销售阶段', '商机阶段', '漏斗阶段'] },
+    { name: 'account', label: 'Account', field: 'account', type: 'string', synonyms: ['customer', 'client', 'company', '客户', '公司', '客户名称'] },
+    { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date', dateGranularity: 'month', synonyms: ['closing month', 'expected close date', '成交日期', '预计成交日期', '成交月份'] },
+  ],
+  measures: [
+    { name: 'opp_count', label: 'Opportunities', aggregate: 'count', synonyms: ['deal count', 'number of deals', '商机数', '商机数量', '机会数'] },
+    { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount', format: '0,0', synonyms: ['deal value', 'opportunity amount', '商机金额', '金额合计'] },
+    { name: 'avg_amount', label: 'Avg Deal Size', aggregate: 'avg', field: 'amount', format: '0,0', synonyms: ['average deal value', 'average opportunity amount', '平均商机金额'] },
+  ],
+};
+const CRM_LINE_ITEM_METRICS = {
+  name: 'crm_line_item_metrics',
+  label: 'Line Item Metrics',
+  object: 'crm_opportunity_line_item',
+  // `deal count` is also `opp_count`'s synonym in the other dataset: a word equal to a measure there and a dimension here.
+  dimensions: [{ name: 'product', label: 'Product', field: 'product', type: 'string', synonyms: ['deal count'] }],
+  measures: [
+    { name: 'line_amount', label: 'Line Amount', aggregate: 'sum', field: 'amount', synonyms: ['deal value', '明细金额'] },
+    { name: 'quantity_total', label: 'Quantity', aggregate: 'sum', field: 'quantity' },
+  ],
+};
+const loadCrm = async () => [CRM_OPPORTUNITY_METRICS, CRM_LINE_ITEM_METRICS];
+const REP = { userId: 'u_rep', tenantId: 'org_a' } as ExecutionContext;
+/** The members u_rep may not read (each over `amount`), by every word a sentence could name them with. */
+const WITHHELD_WORDS = ['Total Amount', 'total_amount', 'Avg Deal Size', 'avg_amount', 'Line Amount', 'line_amount'];
+/** Ruling B's ask-first instruction for a left-out word with candidates, by the locale the context names. */
+const ASK_FIRST: Record<string, string> = {
+  en: 'ask the user which one is meant before using it; do not pick one',
+  'zh-CN': '先问用户指的是哪一个再使用；不要替用户选',
+  'zh-TW': '先問使用者指的是哪一個再使用；不要替使用者選',
+  'ja-JP': '使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください',
+};
+const FOUR_LOCALES = [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[];
+
+type ListOut = Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>;
+
+/**
+ * The invariants `DatasetNextStepSchema` names and cannot refuse: the answer
+ * parses; `nextStep` is present exactly when terms were sent; every term it
+ * names was sent; a `candidates_only` term has entries in `candidates`; a
+ * measure case's terms have measure entries in `matches`.
+ */
+function expectNextStepInvariants(out: ListOut, sent: readonly string[] | undefined) {
+  expect(ListDatasetsOutputSchema.safeParse(out).success).toBe(true);
+  if (sent === undefined || sent.length === 0) {
+    expect('nextStep' in out).toBe(false);
+    return;
+  }
+  const step = out.nextStep!;
+  expect(step).toBeDefined();
+  for (const term of step.terms) {
+    expect(sent).toContain(term);
+    // Distinct members: a word sent twice repeats its entries in `matches`.
+    const measureHits = [...new Set(out.datasets.flatMap((d) => (d.matches ?? [])
+      .filter((m) => m.term === term && m.member.startsWith('measures.'))
+      .map((m) => `${d.name}.${m.member}`)))];
+    const offered = (out.candidates ?? []).filter((c) => c.term === term);
+    if (step.decision === 'one_measure') expect(measureHits).toHaveLength(1);
+    if (step.decision === 'several_measures') expect(measureHits.length).toBeGreaterThan(1);
+    if (step.decision === 'candidates_only') expect([measureHits.length, offered.length > 0]).toEqual([0, true]);
+    if (step.decision === 'no_measure') expect([measureHits.length, offered.length]).toEqual([0, 0]);
+  }
+  expect(new Set(step.terms).size).toBe(step.terms.length);
+}
+
+describe('[#34919] list_datasets nextStep on examples/app-crm — the decision each word gets', () => {
+  async function ask(terms: string[] | undefined, ctx: ExecutionContext = ADMIN) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets(terms === undefined ? {} : { terms }, ctx);
+    expectNextStepInvariants(out, terms);
+    return out;
+  }
+
+  it('a word with one match ⇒ one_measure, naming the measure, its dataset and the names to query', async () => {
+    const out = await ask(['商机数']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+    expect(out.nextStep!.note).toContain('Opportunities (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).toContain('"crm_opportunity_metrics"');
+    expect(out.nextStep!.note).toContain('"opp_count"');
+  });
+
+  it('one_measure beside a near-miss word: the measure is computed and the note names the left-out word with its candidates (ruling B)', async () => {
+    const CANDIDATES = ['Total Amount', 'Avg Deal Size', 'Line Amount'];
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '金额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('"opp_count"');
+      expect(note, String(ctx.locale)).toContain('金额');
+      for (const label of [...CANDIDATES, 'Line Item Metrics']) expect(note, `${ctx.locale} ⇒ ${label}`).toContain(label);
+      // Ruling B's ask-first sentence, after the candidates it is about.
+      const ask1st = ASK_FIRST[String(ctx.locale ?? 'en')];
+      expect(note, `${ctx.locale} ⇒ ask first`).toContain(ask1st);
+      expect(note.indexOf(ask1st), String(ctx.locale)).toBeGreaterThan(note.indexOf('Line Item Metrics'));
+    }
+    expect((await ask(['商机数', '金额'])).nextStep!.note).toContain('Total Amount (dataset: Opportunity Metrics)');
+    // The control: alone, the measure word's note asks nothing first.
+    expect((await ask(['商机数'])).nextStep!.note).not.toContain(ASK_FIRST.en);
+  });
+
+  it('one_measure beside an unknown word and a grouping word: the note keeps the unknown word\'s labelled fallback and names the grouping', async () => {
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '库存周转', '销售阶段'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('库存周转');
+      expect(note, String(ctx.locale)).toContain('query_records');
+      expect(note, String(ctx.locale)).toContain('Stage');
+    }
+    expect((await ask(['商机数', '库存周转', '销售阶段'])).nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    // The control: alone, the measure word's note sends nobody to the object tools.
+    expect((await ask(['商机数'])).nextStep!.note).not.toContain('query_records');
+  });
+
+  it('candidates_only beside an unknown word and a grouping word: the note names both, the unknown one with its labelled fallback (ruling B, seat S3)', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['库存周转', '金额', '销售阶段'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+      const note = out.nextStep!.note;
+      for (const label of ['Total Amount', 'Avg Deal Size', 'Line Amount']) expect(note, `${ctx.locale} ⇒ ${label}`).toContain(label);
+      expect(note, String(ctx.locale)).toContain('库存周转');
+      expect(note, String(ctx.locale)).toContain('query_records');
+      expect(note, String(ctx.locale)).toContain('Stage');
+    }
+    const two = await ask(['库存周转', '金额']);
+    expect(two.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+    expect(two.nextStep!.note).toContain('"库存周转" equals no measure and has no possible reading.');
+    expect(two.nextStep!.note).toContain('no governed metric was used for them');
+    expect((await ask(['金额', '销售阶段'])).nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    // The control: alone, the near-miss word's note sends nobody to the object tools.
+    expect((await ask(['金额'])).nextStep!.note).not.toContain('query_records');
+  });
+
+  it('two words that equal the same measure are one metric, not "each its own"', async () => {
+    const out = await ask(['商机数', '商机数量']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数', '商机数量'] });
+    expect(out.nextStep!.note).not.toContain('Each is its own metric');
+    expect(out.nextStep!.note).toContain('using that measure');
+    // The control: two words with two measures are two metrics.
+    expect((await ask(['商机数', '商机金额'])).nextStep!.note).toContain('Each is its own metric');
+  });
+
+  it('a mixed no_measure note falls back for the unknown word and still asks which number the grouping word means', async () => {
+    const out = await ask(['库存周转', '销售阶段']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
+    expect(out.nextStep!.note).toContain('query_records');
+    expect(out.nextStep!.note).toContain('ask the user which number they mean');
+  });
+
+  it('a word with two matches ⇒ several_measures, the note naming each by its label and its dataset\'s label', async () => {
+    const out = await ask(['deal value']);
+    expect(out.nextStep).toMatchObject({ decision: 'several_measures', terms: ['deal value'] });
+    expect(out.nextStep!.note).toContain('Total Amount (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).toContain('Line Amount (dataset: Line Item Metrics)');
+  });
+
+  it('a near-miss word ⇒ candidates_only, the note naming each offered member by its label and its dataset\'s label', async () => {
+    const out = await ask(['金额']);
+    expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+    expect(out.candidates!.map((c) => c.member)).toEqual(['measures.total_amount', 'measures.avg_amount', 'measures.line_amount']);
+    for (const named of ['Total Amount (dataset: Opportunity Metrics)', 'Avg Deal Size (dataset: Opportunity Metrics)', 'Line Amount (dataset: Line Item Metrics)']) {
+      expect(out.nextStep!.note).toContain(named);
+    }
+  });
+
+  it('an unknown word ⇒ no_measure, and the note sends the reader to the object tools', async () => {
+    const out = await ask(['库存周转']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['库存周转'] });
+    expect(out.nextStep!.note).toContain('query_records');
+  });
+
+  it('a word equal only to a dimension ⇒ no_measure, naming the grouping, and asks for the number instead of falling back', async () => {
+    const out = await ask(['销售阶段']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['销售阶段'] });
+    expect(out.nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).not.toContain('query_records');
+  });
+
+  it('no terms, or an empty list, ⇒ no nextStep', async () => {
+    await ask(undefined);
+    await ask([]);
+  });
+
+  it('a withheld member appears in no decision and no sentence (N5)', async () => {
+    // u_rep reads no `amount`: total_amount, avg_amount and line_amount are withheld.
+    for (const terms of [['deal value'], ['金额'], ['商机金额', '销售阶段'], ['商机数', 'deal value', '金额']]) {
+      const out = await ask(terms, REP);
+      const text = JSON.stringify(out.nextStep);
+      for (const word of WITHHELD_WORDS) expect(text, `${terms.join('+')} ⇒ ${word}`).not.toContain(word);
+    }
+    // What the same words read as for u_rep: the withheld equalities are gone, so nothing is a measure.
+    expect((await ask(['deal value'], REP)).nextStep).toMatchObject({ decision: 'no_measure', terms: ['deal value'] });
+    expect((await ask(['金额'], REP)).nextStep).toMatchObject({ decision: 'no_measure', terms: ['金额'] });
+    // The control: the same words name those members for a caller who reads `amount`.
+    expect((await ask(['deal value'])).nextStep!.note).toContain('Total Amount');
+  });
+});
+
+describe('[#34919] list_datasets nextStep — the precedence among mixed cases', () => {
+  async function decide(terms: string[]) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms }, ADMIN);
+    expectNextStepInvariants(out, terms);
+    return { decision: out.nextStep!.decision, terms: out.nextStep!.terms };
+  }
+
+  it('N1: a dimension-matched word never outranks a measure-matched one', async () => {
+    expect(await decide(['商机金额', '销售阶段'])).toEqual({ decision: 'one_measure', terms: ['商机金额'] });
+    expect(await decide(['销售阶段', '商机金额'])).toEqual({ decision: 'one_measure', terms: ['商机金额'] });
+  });
+
+  it('several_measures > one_measure > candidates_only > no_measure, naming every word in the reported case', async () => {
+    expect(await decide(['商机数', 'deal value'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['金额', 'deal value'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['deal value', '库存周转'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['金额', '商机数'])).toEqual({ decision: 'one_measure', terms: ['商机数'] });
+    expect(await decide(['库存周转', '金额'])).toEqual({ decision: 'candidates_only', terms: ['金额'] });
+    expect(await decide(['库存周转', '销售阶段'])).toEqual({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
+    // Two words with one measure each are two metrics: both named, in the order sent.
+    expect(await decide(['商机金额', '商机数', '销售阶段'])).toEqual({ decision: 'one_measure', terms: ['商机金额', '商机数'] });
+  });
+
+  it('a word equal to one measure and to a dimension is one_measure: the dimension is not counted', async () => {
+    expect(await decide(['deal count'])).toEqual({ decision: 'one_measure', terms: ['deal count'] });
+  });
+
+  it('a word sent twice is one word, and the member it equals is counted once', async () => {
+    expect(await decide(['商机数', '商机数'])).toEqual({ decision: 'one_measure', terms: ['商机数'] });
+  });
+});
+
+/**
+ * [#35005] An ask-back is owed only for the word being measured. A word whose
+ * candidates are all dimensions (「按行业」 near 行业, "this quarter" near
+ * `quarter`) is offered as a possible grouping: no question about it, and no
+ * stop for a matched measure. A word with a measure among its candidates keeps
+ * the question. The decision and the answer's `candidates` are unchanged: only
+ * the sentence is scoped.
+ */
+describe('[#35005] list_datasets nextStep — a grouping or time word with a candidate does not stop a matched measure', () => {
+  const SALES_METRICS = {
+    name: 'sales_metrics',
+    label: 'Sales Metrics',
+    object: 'sales_order',
+    dimensions: [
+      { name: 'industry', label: { en: 'Industry', 'zh-CN': '行业' }, field: 'industry', type: 'string' },
+      { name: 'quarter', label: { en: 'Quarter', 'zh-CN': '季度' }, field: 'quarter', type: 'string' },
+    ],
+    measures: [
+      { name: 'sales_amount', label: { en: 'Revenue', 'zh-CN': '销售额' }, aggregate: 'sum', field: 'amount' },
+      { name: 'churn_rate', label: { en: 'Churn Rate', 'zh-CN': '流失率' }, aggregate: 'avg', field: 'churn' },
+    ],
+  };
+  /** The sentence that offers a grouping and asks nothing about it, by the locale the context names. */
+  const GROUPING_OFFER: Record<string, string> = {
+    en: 'A possible grouping is not a question: do not ask the user about it',
+    'zh-CN': '可能的分组维度不需要追问：不要就它问用户',
+    'zh-TW': '可能的分組維度不需要追問：不要就它問使用者',
+    'ja-JP': 'グループ分けの候補は確認の対象ではありません',
+  };
+  /** The reported candidates_only question: compute nothing until the user answers. */
+  const ASK_BEFORE_COMPUTING: Record<string, string> = {
+    en: 'compute nothing until they answer',
+    'zh-CN': '用户回答前不要计算',
+    'zh-TW': '使用者回答前不要計算',
+    'ja-JP': '回答があるまで計算しないでください',
+  };
+  const loc = (ctx: ExecutionContext) => String(ctx.locale ?? 'en');
+
+  async function ask(terms: string[], ctx: ExecutionContext = ADMIN) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: async () => [SALES_METRICS] }).listDatasets({ terms }, ctx);
+    expectNextStepInvariants(out, terms);
+    return out;
+  }
+
+  it('「按行业」 + 销售额 ⇒ one_measure, computed with no question back, 行业 offered as a possible grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['按行业', '销售额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+      // The answer's candidates are what they were: the word is still offered its dimension.
+      expect(out.candidates).toEqual([{ term: '按行业', dataset: 'sales_metrics', member: 'dimensions.industry' }]);
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain('"sales_amount"');
+      expect(note, loc(ctx)).toContain('按行业');
+      expect(note, `${loc(ctx)} ⇒ no ask-first`).not.toContain(ASK_FIRST[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ no ask-before-computing`).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ grouping offered`).toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+    const en = (await ask(['按行业', '销售额'])).nextStep!.note;
+    expect(en).toContain('"按行业" matches no member exactly; it may name a grouping: Industry (dataset: Sales Metrics).');
+    expect(en).not.toContain('possible readings');
+  });
+
+  it('"this quarter" + "revenue" ⇒ one_measure, computed with no question back, quarter offered as a possible grouping', async () => {
+    const out = await ask(['this quarter', 'revenue']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+    expect(out.candidates).toEqual([{ term: 'this quarter', dataset: 'sales_metrics', member: 'dimensions.quarter' }]);
+    const note = out.nextStep!.note;
+    expect(note).toContain('"this quarter" matches no member exactly; it may name a grouping: Quarter (dataset: Sales Metrics).');
+    expect(note).toContain(GROUPING_OFFER.en);
+    expect(note).not.toContain(ASK_FIRST.en);
+    // 本季度 contains 季度 the same way.
+    const zh = await ask(['本季度', '销售额'], { ...ADMIN, locale: 'zh-CN' } as ExecutionContext);
+    expect(zh.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(zh.nextStep!.note).toContain(GROUPING_OFFER['zh-CN']);
+    expect(zh.nextStep!.note).not.toContain(ASK_FIRST['zh-CN']);
+  });
+
+  it('a bare near-miss measure word still asks: candidates_only, compute nothing until the user answers', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['销售'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
+      expect(out.candidates).toEqual([{ term: '销售', dataset: 'sales_metrics', member: 'measures.sales_amount' }]);
+      expect(out.nextStep!.note, loc(ctx)).toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a matched measure beside a word with a measure candidate still asks about that word (营收 + churn)', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['revenue', 'churn'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+      expect(out.nextStep!.note, `${loc(ctx)} ⇒ ask first`).toContain(ASK_FIRST[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a word with a measure AND a dimension among its candidates keeps the question', async () => {
+    const out = await ask(['industry revenue', '销售额']);
+    expect(out.candidates!.map((c) => c.member)).toEqual(['measures.sales_amount', 'dimensions.industry']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(out.nextStep!.note).toContain(ASK_FIRST.en);
+    expect(out.nextStep!.note).not.toContain(GROUPING_OFFER.en);
+    const alone = await ask(['industry revenue']);
+    expect(alone.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['industry revenue'] });
+    expect(alone.nextStep!.note).toContain(ASK_BEFORE_COMPUTING.en);
+  });
+
+  it('both kinds at once: the measure word is asked about and the grouping word is offered', async () => {
+    const withMeasure = (await ask(['churn', '按行业', '销售额'])).nextStep!;
+    expect(withMeasure).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(withMeasure.note).toContain(ASK_FIRST.en);
+    expect(withMeasure.note).toContain(GROUPING_OFFER.en);
+    // The ask-first sentence is about churn's readings and comes before the grouping offer.
+    expect(withMeasure.note.indexOf(ASK_FIRST.en)).toBeLessThan(withMeasure.note.indexOf('"按行业"'));
+    const noMeasure = (await ask(['销售', '按行业'])).nextStep!;
+    expect(noMeasure).toMatchObject({ decision: 'candidates_only', terms: ['销售', '按行业'] });
+    expect(noMeasure.note).toContain(ASK_BEFORE_COMPUTING.en);
+    expect(noMeasure.note).toContain(GROUPING_OFFER.en);
+  });
+
+  it('a lone grouping word with a candidate keeps candidates_only and asks which number, never about the grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['this quarter'], ctx);
+      // The decision is the spec's: a term with entries in `candidates` is candidates_only.
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['this quarter'] });
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain(GROUPING_OFFER[loc(ctx)]);
+      expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+    }
+    expect((await ask(['this quarter'])).nextStep!.note).toContain('ask the user which number they mean');
+  });
+});
+
+describe('[#34919] list_datasets nextStep — an incomplete catalogue says so (N4)', () => {
+  it('a degraded read keeps nextStep over what it lists and ends the note by saying the catalogue was incomplete', async () => {
+    const { service } = await bootWired();
+    const whole = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    const degraded = await service.datasetTools({
+      loadDatasets: async () => ({ items: [CRM_OPPORTUNITY_METRICS], partial: true as const, warning: 'one source unavailable' }),
+    }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    expectNextStepInvariants(degraded, ['商机数']);
+    expect(degraded).toMatchObject({ partial: true, nextStep: { decision: 'one_measure', terms: ['商机数'] } });
+    // The whole read's sentence, plus one closing sentence naming the warning.
+    expect(degraded.nextStep!.note.startsWith(whole.nextStep!.note)).toBe(true);
+    const added = degraded.nextStep!.note.slice(whole.nextStep!.note.length);
+    expect(added).toContain('incomplete');
+    expect(added).toContain('warning');
+    expect(whole.nextStep!.note).not.toContain('incomplete');
+  });
+
+  it('a catalogue that could not be read at all answers no_measure for every word, and says the catalogue was incomplete', async () => {
+    const { service } = await bootWired();
+    const failed = await service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); } })
+      .listDatasets({ terms: ['商机数', '销售阶段'] }, ADMIN);
+    expectNextStepInvariants(failed, ['商机数', '销售阶段']);
+    expect(failed).toMatchObject({ datasets: [], partial: true, nextStep: { decision: 'no_measure', terms: ['商机数', '销售阶段'] } });
+    expect(failed.nextStep!.note).toContain('incomplete');
+  });
+
+  it('an admission that could not be judged is a partial answer too, and its note says so', async () => {
+    const { service } = await bootWired();
+    vi.spyOn(service, 'admitDatasetCatalogEntry').mockImplementation(async () => ({ admitted: false, unresolved: true }) as never);
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    expect(out).toMatchObject({ partial: true, nextStep: { decision: 'no_measure' } });
+    expect(out.nextStep!.note).toContain('incomplete');
+  });
+});
+
+describe('[#34919] the sentences are in the caller\'s language, by the user-text ladder', () => {
+  it('reads the request locale, then the workspace default, through the platform locale table; en below both', () => {
+    expect(datasetToolSentenceLocale(['zh-CN'])).toBe('zh-Hans');
+    expect(datasetToolSentenceLocale(['zh-TW'])).toBe('zh-Hant');
+    expect(datasetToolSentenceLocale(['zh-Hant-HK'])).toBe('zh-Hant');
+    expect(datasetToolSentenceLocale(['ja-JP'])).toBe('ja');
+    expect(datasetToolSentenceLocale(['en-GB'])).toBe('en');
+    // A language with no sentences takes the next rung: the workspace default, then en.
+    expect(datasetToolSentenceLocale(['fr-FR', 'ja-JP'])).toBe('ja');
+    expect(datasetToolSentenceLocale(['fr-FR'])).toBe('en');
+    expect(datasetToolSentenceLocale([])).toBe('en');
+  });
+
+  it('the executor writes the note for the context\'s locale, then its workspace default', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadCrm });
+    const notes: Record<string, string> = {};
+    for (const [key, ctx] of Object.entries({
+      en: ADMIN,
+      zh: { ...ADMIN, locale: 'zh-CN' },
+      hant: { ...ADMIN, locale: 'zh-TW' },
+      ja: { ...ADMIN, locale: 'ja-JP' },
+      frThenJa: { ...ADMIN, locale: 'fr-FR', workspaceLocale: 'ja-JP' },
+    } as Record<string, ExecutionContext>)) {
+      const out = await tools.listDatasets({ terms: ['deal value'] }, ctx);
+      expect(out.nextStep!.decision).toBe('several_measures');
+      notes[key] = out.nextStep!.note;
+    }
+    expect(new Set([notes.en, notes.zh, notes.hant, notes.ja]).size).toBe(4);
+    expect(notes.frThenJa).toBe(notes.ja);
+    // Every language still names both members by label and dataset label.
+    for (const note of Object.values(notes)) {
+      for (const label of ['Total Amount', 'Opportunity Metrics', 'Line Amount', 'Line Item Metrics']) expect(note).toContain(label);
+    }
+  });
+});
+
+describe('[#34919] query_dataset sourceLine — the provenance as one finished line', () => {
+  it('is composed from the answer\'s provenance, in the caller\'s language, and parses', async () => {
+    const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const out = await tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'] } }, ME);
+    expect(out.sourceLine).toBe(composeDatasetSourceLine(out.provenance, ['zh-CN']));
+    for (const label of ['营收', '销售分析', 'Stage']) expect(out.sourceLine).toContain(label);
+    const admin = await tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ADMIN);
+    expect(admin.sourceLine).toBe(composeDatasetSourceLine(admin.provenance, []));
+    for (const label of ['Revenue', 'Pipeline']) expect(admin.sourceLine).toContain(label);
+    for (const answer of [out, admin]) expect(QueryDatasetOutputSchema.safeParse(answer).success).toBe(true);
+  });
+
+  it('names no member the caller was not admitted to (N5): a withheld measure is refused before any line exists', async () => {
+    const { service } = await bootWired([{ stage: 'won', opp_count: 3 }]);
+    const tools = service.datasetTools({ loadDatasets: loadCrm });
+    const out = await tools.queryDataset({ datasetName: 'crm_opportunity_metrics', selection: { measures: ['opp_count'], dimensions: ['stage'] } }, REP);
+    for (const label of ['Opportunities', 'Opportunity Metrics', 'Stage']) expect(out.sourceLine).toContain(label);
+    for (const word of WITHHELD_WORDS) expect(out.sourceLine).not.toContain(word);
+    await expect(tools.queryDataset({ datasetName: 'crm_opportunity_metrics', selection: { measures: ['total_amount'] } }, REP))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 });

@@ -56,6 +56,7 @@ import { isMissingTableError } from '@objectstack/types';
 import {
   auditFailureCauseKey,
   auditFailureCauseSummary,
+  auditPerformerMetadata,
   createFieldPresenceProbe,
 } from './audit-writers.js';
 import { recordedField, summarizeExportFilter } from './data-export-audit.js';
@@ -202,7 +203,6 @@ function safeStringify(v: unknown): string {
 export function buildDatasetQueryAuditRow(event: DatasetQueryAuditEvent, queriedAt: Date): Record<string, unknown> {
   const ctx = event.context ?? {};
   const userId = nonEmpty(ctx.userId);
-  const performedBy = nonEmpty(ctx.performedBy?.clientId);
 
   const metadata: Record<string, unknown> = {
     dataset: recordedField(String(event.datasetName ?? '')),
@@ -228,10 +228,10 @@ export function buildDatasetQueryAuditRow(event: DatasetQueryAuditEvent, queried
   }
   // [ADR-0090 D10 rule 4] The delegated-call pair, as the CRUD mirror and the
   // export row write it — present only when an agent performed the call.
-  if (performedBy) {
-    metadata.performed_by = performedBy;
-    metadata.on_behalf_of = userId ?? null;
-  }
+  // [#33694] Read by the CRUD mirror's own rule (`auditPerformerMetadata`): an
+  // OAuth client or the in-product AI agent, and beside the agent only, the
+  // conversation it ran in and the confirmation the person gave.
+  Object.assign(metadata, auditPerformerMetadata(ctx.performedBy, userId));
   const impersonatedBy = impersonatorOf(ctx);
   if (impersonatedBy) metadata[IMPERSONATED_BY_KEY] = impersonatedBy;
 

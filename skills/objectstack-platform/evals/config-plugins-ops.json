@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows under src/, namespace `crm`, protocol 18.",
+      "prompt": "Write `objectstack.config.ts` for our CRM app: objects, views and flows under src/, namespace `crm`, protocol 18. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "`defineStack` with a `manifest` of `id`, `version`, `type: 'app'`, `name`, `namespace: 'crm'`, `engines: { protocol: '^18' }`; barrel imports, `objects: Object.values(objects)` (likewise `views` / `flows`); prefixed object names (`crm_account`), no object-level `namespace`, no `tableName`; no driver in `plugins:` (the CLI resolves it); no `workflows` / `approvals` keys (refused).",
       "files": [],
       "assertions": {
@@ -41,7 +41,7 @@
     },
     {
       "id": 3,
-      "prompt": "Our scheduled flows never launch, and `notify` reports success but nobody receives anything.",
+      "prompt": "Our scheduled flows never launch, and `notify` reports success but nobody receives anything. The project's `objectstack.config.ts` is not in this directory: answer with what to check and change in it.",
       "expected_output": "`requires: ['automation', 'triggers']` on the stack root: `triggers` arms the start bindings, and schedule and time-relative ones run on the `job` service. `job` and `messaging` are always-on: a default boot mounts both, listed or not. Only a `--preset minimal` boot drops them; there, list `job` too (else scheduled flows stay silent) and `messaging` (else notify returns success with `skipped: true`). Declaring is a demand (missing provider = hard boot error); `defineStack` rejects an unknown token at authoring time.",
       "files": [],
       "assertions": {
@@ -75,7 +75,7 @@
     },
     {
       "id": 5,
-      "prompt": "I changed field types on an object with production data. Show me what the database needs, verify the metadata and give me a quality score.",
+      "prompt": "I changed field types on an object with production data. Show me what the database needs, verify the metadata and give me a quality score. None of the project's files are in this directory: answer with the commands to run.",
       "expected_output": "`os migrate plan` previews the drift, `os migrate apply` (`--allow-destructive` for type changes / drops) reconciles, then `os validate` and `os lint --score`; not done until `os validate` passes, which `os lint` does not replace.",
       "files": [],
       "assertions": {
@@ -111,7 +111,7 @@
     },
     {
       "id": 7,
-      "prompt": "Prepare a demo of our contracts app: the seed assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo opens signed in as Legal Counsel 1.",
+      "prompt": "Prepare a demo of our contracts app: the seed assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo opens signed in as Legal Counsel 1. None of the project's files are in this directory: write the configuration in your answer.",
       "expected_output": "Both go in `demoStaff` — `name` as the seed references them, `email`, a `position` / `permissionSets` the stack declares — and `os dev` creates the accounts with the seed password: no `password` key, no `role` alias, no platform set, no hand-written `sys_user` seed row. `devLogins` creates nothing (at most a banner entry); `os build` drops `demoStaff`; production creates no demo account.",
       "files": [],
       "assertions": {
@@ -129,7 +129,7 @@
     },
     {
       "id": 8,
-      "prompt": "In the contracts demo Paralegal 1 reports to Legal Counsel 1; the approval flow's manager step must reach the right person on a fresh `os dev`.",
+      "prompt": "In the contracts demo Paralegal 1 reports to Legal Counsel 1; the approval flow's manager step must reach the right person on a fresh `os dev`. None of the project's files are in this directory: write the configuration in your answer.",
       "expected_output": "On Paralegal 1's `demoStaff` entry, `manager: 'counsel1@example.com'` — Legal Counsel 1's entry `email`, never the display name — and nothing else: `os dev` writes `sys_user.manager_id` once every demo account exists. No seed row or hook writing `manager_id`, no `reportsTo` / `managerEmail` alias (refused); a manager naming no entry, itself or a loop is refused at load.",
       "files": [],
       "assertions": {
@@ -290,7 +290,7 @@
     },
     {
       "id": 17,
-      "prompt": "I edited an object in my app locally. How do I see my change on my ObjectOS Cloud environment?",
+      "prompt": "I edited an object in my app locally. How do I see my change on my ObjectOS Cloud environment? None of the project's files are in this directory: answer with the commands to run.",
       "expected_output": "Run `os deploy` from the project (`npm run deploy` in a scaffolded project, or press `d` in `os dev`). It builds, publishes `<manifest.version>-dev.<timestamp>`, installs it into your organization's only environment (or `--env <id>`, or the one `os environments switch` recorded) and waits until the environment serves it; `--no-wait` returns once the install is recorded. `os package publish` is for publishing a release version, not for this loop. On exit 1, a refusal before any write published nothing (log in with `os cloud login`, or pass `--env`); `could not build` is the environment's build failing while it keeps serving the previous build; a timeout means the install is recorded, so deploy again with a longer `--wait-timeout` or check the build in the ObjectOS Cloud console.",
       "files": [],
       "assertions": {
@@ -350,7 +350,7 @@
     },
     {
       "id": 21,
-      "prompt": "We run ObjectStack's Docker image on our own server at https://objectos.example.com. How do I deploy my app there from the project without typing its URL and key every time?",
+      "prompt": "We run ObjectStack's Docker image on our own server at https://objectos.example.com. How do I deploy my app there from the project without typing its URL and key every time? None of the project's files are in this directory: answer with the commands to run.",
       "expected_output": "Remember the runtime once: `os environments use-runtime https://objectos.example.com --token <key>`, with an API key that runtime issued. The key is tried on the runtime before anything is recorded (`--no-verify` skips that), then kept in `~/.objectstack/cloud.json` (0600), across cloud login and logout. From then on `os deploy` (or `d` in `os dev`) deploys there: it builds, prints the runtime's dry-run upgrade plan, installs the build inline, and reports it live when the runtime answers `hotLoaded`; `--confirm-access-upgrade <token>` confirms the access findings a refusal printed. `os package install` falls back to that runtime when `-u` is not given. `os environments use-runtime --forget` or `os environments switch <id>` makes ObjectOS Cloud the target again.",
       "files": [],
       "assertions": {

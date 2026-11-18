@@ -61,6 +61,7 @@ function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: { crm_account: { allowRead: true }, crm_opportunity: { allowRead: opportunityRead } },

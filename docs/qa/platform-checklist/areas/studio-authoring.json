@@ -955,7 +955,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -1016,7 +1016,7 @@
         {
           "clause": "the read-only gate holds: a read-only set hides Save, offers no field bulk at all and no operating object-row bulk, and disables every checkbox; the read-only badge names WHICH gate holds",
           "oracle": "screenshot",
-          "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and the object row's bulk, which appears only on hover or keyboard focus (engine.studio.access.bulkHint), is disabled when it appears; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
+          "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and every object row draws its bulk strip, every button of which is disabled in read-only Studio; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
           "evidence": "the read-only screenshot"
         },
         {
@@ -1096,6 +1096,12 @@
           "date": "2026-11-04",
           "change": "steps[3] and acceptance[3].clause corrected from QA run #29893 (W5-STUDIO, at 589049b0): after Clear a field falls back to the object's grant (data-field-rule=\"inherited\"), not to a read-only default; the verify (keys absent from the saved map) is unchanged. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-17",
+          "change": "acceptance[5].verify re-read for #34795 (PR #34914): every object row now draws its bulk strip, so the verify no longer says the strip appears only on hover or keyboard focus or cites engine.studio.access.bulkHint (that key is removed). It says every row draws the strip and every button in it is disabled in read-only Studio. The FAIL condition, an operating bulk control, is unchanged. Wording only; no clause weakened",
+          "ref": "#34795"
         }
       ]
     },
@@ -2697,7 +2703,7 @@
       "title": "Flows outside any package have their own Studio scope: /studio/~org offers only the Automations pillar, lists only package-less flows, opens them editable, saves drafts bound to no package and publishes each by reference",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2711,7 +2717,7 @@
         ]
       },
       "steps": [
-        "with no package-less flow yet, open the Studio landing's 'Organization flows' entry: it lands on /_console/studio/~org/automations, offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
+        "with no package-less flow yet, open /_console/studio: the landing draws no 'Flows in no app' entry (it is drawn only when there is at least one such flow, with the count); open /_console/studio/~org/automations directly: it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
         "write the package-less flow (fixtures.requires[1]); reload: the rail lists qa_org_raw and none of the showcase's packaged flows; GET /api/v1/meta/flow?package=com.example.showcase omits it, the unscoped list includes it",
         "open it: the canvas and the Enabled switch are editable; change a node label; let the autosave land; read GET /api/v1/meta/_drafts?type=flow — the draft row carries no package",
         "Publish → the review sheet lists only package-less flow drafts → Publish all; capture the network trace",
@@ -2768,7 +2774,8 @@
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
         },
-        { "revision": 3, "date": "2026-11-03", "change": "fixtures.requires[1] names a fixture that still makes a package-less flow, and steps[0], steps[1], steps[4], acceptance[0].verify and source[1] follow it. Since #28149 (ADR-0146 D4) the clone door lands its copy in the source's pair <base>.custom, so QA run #29672's clone of showcase_urgent_task_alert answered packageId com.example.showcase.custom and made no package-less flow; the run substituted PUT /api/v1/meta/flow/qa_org_raw naming no package (200) and passed every clause on it. Read at base 339f63da30: ADR-0146 D11 closes a package-less write only onto an item a code package ships (packagelessOverlayWriteRefusal), so a fresh name stays writable, and a PUT with no ?mode= is an active save (meta-save-request.ts). The same run found steps[0]'s empty state stale: it now reads engine.studio.org.none with no Open in Setup link (StudioDesignSurface.tsx). The clauses are unchanged. Card #29679, from QA run #29672", "ref": "#29679" }
+        { "revision": 3, "date": "2026-11-03", "change": "fixtures.requires[1] names a fixture that still makes a package-less flow, and steps[0], steps[1], steps[4], acceptance[0].verify and source[1] follow it. Since #28149 (ADR-0146 D4) the clone door lands its copy in the source's pair <base>.custom, so QA run #29672's clone of showcase_urgent_task_alert answered packageId com.example.showcase.custom and made no package-less flow; the run substituted PUT /api/v1/meta/flow/qa_org_raw naming no package (200) and passed every clause on it. Read at base 339f63da30: ADR-0146 D11 closes a package-less write only onto an item a code package ships (packagelessOverlayWriteRefusal), so a fresh name stays writable, and a PUT with no ?mode= is an active save (meta-save-request.ts). The same run found steps[0]'s empty state stale: it now reads engine.studio.org.none with no Open in Setup link (StudioDesignSurface.tsx). The clauses are unchanged. Card #29679, from QA run #29672", "ref": "#29679" },
+        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" }
       ]
     },
     {

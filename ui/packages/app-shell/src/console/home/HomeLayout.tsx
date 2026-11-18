@@ -40,11 +40,16 @@
  * handed inside an app as well. Once mounted it stays, so it closes as it
  * always has.
  *
+ * It hosts the AI assistant's drawer too (objectstack#34608): the same drawer,
+ * the same thread and the same per-tab state as inside an app, opened by the
+ * bar's robot. Home has no app, so a build thread here starts unbound.
+ *
  * @module
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { cn } from '@object-ui/components';
 import { useNavigationContext } from '../../context/NavigationContext.js';
 import { CommandPaletteProvider, useCommandPalette } from '../../context/CommandPaletteProvider.js';
 import { CommandPalette } from '../../chrome/CommandPalette.js';
@@ -59,11 +64,8 @@ import { navigationNames } from '../appObjectScope.js';
 import type { ReadNamesWithoutViews } from '../../hooks/useObjectPresence.js';
 import { buildExpressionUser } from '../../providers/expressionUser.js';
 import { useAuth } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
-
-// The ChatDock's launcher (dependency-free button).
-import { ConsoleChatbotFab } from '../../layout/ConsoleChatbotFab.js';
-import { rememberDockReturnLocation } from '../../layout/chatDockState.js';
+import { useConsoleChatDock } from '../../layout/useConsoleChatDock.js';
+import { ChatDockControlProvider } from '../../layout/chatDockControl.js';
 
 /**
  * Home's `app`, `data` and `features`: none. Module constants, not the
@@ -127,8 +129,8 @@ function HomeCommandPalette(props: HomeCommandPaletteProps) {
 interface HomeLayoutProps {
   children: React.ReactNode;
   /**
-   * Signed-in user id. Kept for API stability (callers pass it); the full-page
-   * chat surface resolves the user itself via useAuth.
+   * Signed-in user id. Kept for API stability (callers pass it); the drawer
+   * reads the session user itself.
    */
   userId?: string;
 }
@@ -140,20 +142,12 @@ export function HomeLayout({ children }: HomeLayoutProps) {
   const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
   const { apps } = useMetadata();
   const dataSource = useAdapter();
-  const { t } = useObjectTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
-  // ADR-0057: Home has no AppShell to host the docked rail, so its FAB opens
-  // the full-page surface — which IS the dock maximized, same thread. The
-  // origin is remembered so `/ai`'s collapse-to-dock lands back here.
-  const openAssistant = useCallback(() => {
-    rememberDockReturnLocation(`${location.pathname}${location.search}`);
-    navigate('/ai');
-  }, [location.pathname, location.search, navigate]);
-  // Render the chatbot only when the server serves AI (or an explicit
+  // The drawer exists only when the server serves AI (or an explicit
   // `VITE_AI_BASE_URL` opt-in is set) — same runtime signal as the rest of the
   // console's AI surface. See useAiSurfaceEnabled.
   const { enabled: showChatbot } = useAiSurfaceEnabled();
+  const chatDock = useConsoleChatDock({ enabled: showChatbot, userId: user?.id });
 
   useEffect(() => {
     setContext('home');
@@ -174,7 +168,13 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 
   return (
     <ExpressionProvider user={expressionUser} app={NO_SCOPE_INPUT} data={NO_SCOPE_INPUT} features={NO_SCOPE_INPUT}>
-    <div className="flex min-h-svh w-full flex-col bg-background" data-testid="home-layout">
+    <ChatDockControlProvider value={chatDock.control}>
+    {/* With the drawer's rail open the page is bounded to the window, so the
+        rail spans it and the page scrolls in its own box beside it. */}
+    <div
+      className={cn('flex w-full flex-col bg-background', chatDock.rail ? 'h-svh' : 'min-h-svh')}
+      data-testid="home-layout"
+    >
       {/* The provider wraps the bar and the palette only: the page below
           reads neither, so mounting it once the app list arrives re-mounts
           the bar and leaves the page as it is. */}
@@ -191,19 +191,15 @@ export function HomeLayout({ children }: HomeLayoutProps) {
       ) : (
         header
       )}
-      <main className="flex-1 min-w-0 overflow-auto pb-20 sm:pb-0">
-        {children}
-      </main>
-
-      {/* Assistant entry on the home/workspace screen — opens the full-page
-          chat (the dock maximized; Home has no shell to dock a rail into). */}
-      {showChatbot && (
-        <ConsoleChatbotFab
-          appLabel={t('workspace.default', { defaultValue: 'My Organization' })}
-          onOpenDock={openAssistant}
-        />
-      )}
+      <div className="flex min-h-0 w-full flex-1">
+        <main className="flex-1 min-w-0 overflow-auto pb-20 sm:pb-0">
+          {children}
+        </main>
+        {chatDock.rail}
+      </div>
+      {chatDock.sheet}
     </div>
+    </ChatDockControlProvider>
     </ExpressionProvider>
   );
 }

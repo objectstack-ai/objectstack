@@ -259,6 +259,7 @@ function answer(bits: Record<string, unknown> = FULL): MePermissionsAuthenticate
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: FULL, [COMMENT]: bits },
     fields: {},

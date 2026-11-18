@@ -12,7 +12,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -182,7 +182,8 @@ questions, and Studio's "AI exposure" diagnostics use the same predicates.
 `@objectstack/mcp` publishes your app over the Model Context Protocol, so an
 external agent (Claude, Cursor, Codex, …) can read it and act on it with **no
 cloud licence**. (Consuming *external* MCP servers is the inbound sibling,
-`@objectstack/connector-mcp`.)
+`@objectstack/connector-mcp`.) Answering a question through those tools, as
+the connected agent, is **objectstack-ask**.
 
 ```ts
 import { MCPServerPlugin } from '@objectstack/mcp';

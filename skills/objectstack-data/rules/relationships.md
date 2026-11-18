@@ -19,7 +19,6 @@
 ### One-to-Many: lookup
 
 ```typescript
-// Child: Contact (independent lifecycle) of an account
 export default ObjectSchema.create({
   name: 'contact',
   sharingModel: 'public_read_write',
@@ -138,7 +137,6 @@ export default ObjectSchema.create({
     hours_allocated: { type: 'number' },
   },
   indexes: [
-    // One assignment per (project, employee) pair.
     { fields: ['project_id', 'employee_id'], unique: 'organization' },
   ],
 });
@@ -185,21 +183,17 @@ A parent `summary` field aggregates a child collection. The engine recomputes it
 **server-side** whenever a child is inserted/updated/deleted (inside the same
 transaction as the write, so it's consistent).
 
-```typescript
-// On the PARENT object:
+```json
 {
-  type: 'summary',
-  summaryOperations: {
-    object: 'invoice_line',        // child object to aggregate
-    field: 'amount',               // child field to aggregate (ignored for count)
-    function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
-    // relationshipField: 'invoice' // optional; auto-detected from the child's
-                                     // master_detail/lookup field referencing
-                                     // this parent when omitted
-    // filter: { status: 'received' } // optional; see below
-  },
+  "type": "summary",
+  "summaryOperations": { "object": "invoice_line", "field": "amount", "function": "sum" }
 }
 ```
+
+`object` is the child object to aggregate, `field` its field (ignored for
+`count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
+`relationshipField` (auto-detected from the child's `master_detail`/`lookup`
+field referencing this parent when omitted) and `filter` (below).
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
 
@@ -228,17 +222,27 @@ where you can; declared late, run the migration before you call the number ready
 **Never finish with `security-rollup-source-unreadable` standing.** The total
 covers every child row and answers only to the parent field's own access, so
 `os build` warns for each permission set that reads the summary but not the
-child object, the aggregated field, or a field `filter` tests. Decide per set:
-it should see the children → grant the read; it should not → mask the summary
-on that set, after removing any View All / Modify All it holds on the parent
-(either overrides the mask).
+child object, the aggregated field, or a field `filter` tests. Decide per set
+from the request: it sees the children → grant the read; the total but not the
+children → keep the column readable and add `rollupSourceUnreadableReason` to
+the set's entry for it (the warning becomes a note quoting the reason; refused
+blank or beside `readable: false`); neither → mask the summary on that set,
+after removing any Modify All it holds on the parent (it overrides the mask).
+Never add the reason to silence a total the request withholds: mask it.
 
-```typescript
-definePermissionSet({
-  name: 'client_viewer',
-  objects: { project: { allowRead: true } },  // no `task` read: warned
-  fields: { 'project.task_count': { readable: false } },  // the mask: resolved
-})
+A permission set (in TypeScript, the argument of `definePermissionSet(...)`)
+with no `task` read — warned; `task_count` masked — resolved; `hours_total`,
+which clients are meant to see, acknowledged — a note:
+
+```json
+{
+  "name": "client_viewer",
+  "objects": { "project": { "allowRead": true } },
+  "fields": {
+    "project.task_count": { "readable": false },
+    "project.hours_total": { "readable": true, "rollupSourceUnreadableReason": "Clients see progress totals, not tasks" }
+  }
+}
 ```
 
 ## Inline Editing (Master-Detail Entry)
@@ -247,7 +251,8 @@ Declare inline editing **on the relationship**, in the data model — not in a f
 view. Set `inlineEdit: true` on the child's `master_detail` (or `lookup`) field
 that points back to the parent. The parent's **standard** create/edit form then
 renders an editable grid for these children and saves parent + children in **one
-atomic transaction**.
+atomic transaction**. A parent or child declaring `enable.apiMethods` must list
+`'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
 // On the CHILD object's FK field:
@@ -275,8 +280,7 @@ the parent. **Leave it off for associations** (comments, attachments, activity,
 audit): those are also `master_detail` (cascade delete) but should NOT clutter
 the parent's entry form — surface them as related lists on the detail page.
 
-A form view may still set `subforms` to override the derived columns/order. See the
-objectstack-ui skill (Master-Detail Forms) for the rendering side.
+The rendering side, `subforms` overrides included: objectstack-ui → Master-Detail Forms.
 
 #### Inline-edit form factor (`grid` vs `form`)
 
@@ -288,16 +292,12 @@ inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin childre
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
-- **`'grid'`** — best for *thin* line items
-  (invoice/order lines): few columns, high volume, keyboard-fast.
-- **`'form'`** — best for *fat* children (long text, attachments, many fields)
-  that don't fit a narrow grid cell.
-- **`true`** / omitted — **smart default**: picks `form` when the child has
-  rich/form-only fields (textarea, file, image, json, location…) or more than ~8
-  editable fields, else `grid`. Set the string to override.
+**`true`** / omitted — **smart default**: picks `form` when the child has
+rich/form-only fields (textarea, file, image, json, location…) or more than ~8
+editable fields, else `grid`. Set the string to override.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent (no UI config):
+behaviors purely from how you model the child + parent:
 
 ```typescript
 // Parent
@@ -344,18 +344,16 @@ InvoiceLine = {
 
 ### Detail-page related lists (the read-side mirror)
 
-Where `inlineEdit` is the **write** side, the **related list** on the parent's record detail page is the **read**
-side. You usually don't declare it: every child relationship
+You usually don't declare the **related list** on the parent's record detail page: every child relationship
 (`master_detail` and `lookup`) is shown **by default** — owned (`master_detail`)
 children first. The relationship
 flags exist to *refine* that:
 
 ```typescript
-// On the CHILD object's FK field:
 project: {
   type: 'master_detail',
   reference: 'project',
-  inlineEdit: true,                 // write side: edit inline in the Project form
+  inlineEdit: true,
   relatedList: 'primary',           // read side: a body table
   relatedListTitle: 'Tasks',
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
@@ -367,8 +365,7 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement:
 
-- `'primary'` — part of the record's main content: a full-width table in the
-  record's detail body. Default for a `master_detail` FK with `inlineEdit`.
+- `'primary'` — a full-width table in the record's detail body. Default for a `master_detail` FK with `inlineEdit`.
 - `false` — the child object is not shown on the parent record page.
 - `true`, or omitted (except inline-edited `master_detail`) — an auxiliary
   panel on the record page.

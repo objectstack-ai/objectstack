@@ -95,6 +95,61 @@ describe('gradeOperation — applied', () => {
   });
 });
 
+describe('gradeOperation — an aggregate post-state (`sum` / `each`) over every row its `where` matched', () => {
+  const LINES: DeclaredOutcome = {
+    kind: 'applied',
+    state: [
+      { object: 'claim_line', where: { 'claim.trip': 't121', expense_type: 'hotel' }, sum: { amount: 860 } },
+      { object: 'claim_line', where: { 'claim.trip': 't121' }, each: { over_standard: false } },
+    ],
+  };
+  const obs = (hotel: Array<Record<string, unknown>>, all: Array<Record<string, unknown>>): OperationObservation => ({
+    answer: { kind: 'applied' },
+    state: [hotel, all],
+  });
+  const night = { expense_type: 'hotel', quantity: 1, unit_amount: 430, amount: 430, over_standard: false };
+  const nights = { expense_type: 'hotel', quantity: 2, unit_amount: 430, amount: 860, over_standard: false };
+
+  it('meets one line of quantity 2 and two lines of quantity 1 alike, and says what it summed', () => {
+    expect(gradeOperation(LINES, obs([nights], [nights]))).toEqual({
+      pass: true,
+      checks: [
+        { check: 'answer:applied', pass: true, detail: 'applied' },
+        { check: 'state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)', pass: true, detail: 'read 860 = 860 over 1 row(s), declared 860' },
+        { check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: true, detail: '1 of 1 row(s) read false' },
+      ],
+    });
+    const perNight = gradeOperation(LINES, obs([night, night], [night, night]));
+    expect(perNight.pass).toBe(true);
+    expect(perNight.checks[1]!.detail).toBe('read 430 + 430 = 860 over 2 row(s), declared 860');
+  });
+
+  it('fails a wrong total, a line over the standard, and a row reading no number', () => {
+    expect(failed(LINES, obs([night], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    expect(failed(LINES, obs([nights, night], [nights, night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    const over = { ...nights, over_standard: true };
+    const g = gradeOperation(LINES, obs([over], [over]));
+    expect(g.pass).toBe(false);
+    expect(g.checks[2]).toEqual({ check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: false, detail: '1 of 1 row(s) read otherwise (true), declared false' });
+    expect(failed(LINES, obs([night, { ...night, amount: '430' }], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+  });
+
+  it('fails an aggregate over no row: a sum of nothing is not 0, and "every row" of none is no pass', () => {
+    const zero: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { 'claim.trip': 't121' }, sum: { amount: 0 }, each: { over_standard: false } }] };
+    expect(gradeOperation(zero, { answer: { kind: 'applied' }, state: [[]] }).checks[1]).toEqual({
+      check: 'state:claim_line[claim.trip="t121"]->rows',
+      pass: false,
+      detail: '0 row(s) read back, so there is nothing to aggregate',
+    });
+  });
+
+  it('sums decimals without float noise, and fails an aggregate the observation did not carry', () => {
+    const cents: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { expense_type: 'taxi' }, sum: { amount: 0.3 } }] };
+    expect(gradeOperation(cents, { answer: { kind: 'applied' }, state: [[{ amount: 0.1 }, { amount: 0.2 }]] }).pass).toBe(true);
+    expect(failed(LINES, { answer: { kind: 'applied' } })).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"]', 'state:claim_line[claim.trip="t121"]']);
+  });
+});
+
 describe('gradeOperation — refused', () => {
   const REFUSED: DeclaredOutcome = { kind: 'refused', code: 'PERMISSION_DENIED' };
 

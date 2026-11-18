@@ -7,7 +7,10 @@
  *
  *   node scripts/tenant-audit-census.mjs            # human summary
  *   node scripts/tenant-audit-census.mjs --json     # the whole census, machine-readable
- *   node scripts/tenant-audit-census.mjs --write    # rewrite both committed artefacts
+ *   node scripts/tenant-audit-census.mjs --write    # rewrite the committed artefacts (page region,
+ *                                                   # ledger index, one shard per package)
+ *   node scripts/tenant-audit-census.mjs --write --refresh-scale   # ...and re-measure the dated
+ *                                                   # corpus-scale block, which --write keeps
  *
  * ⚠️ This module deliberately exposes NO `--self-test` flag of its own, and that
  * is a wiring decision rather than an omission. {@link selfTest} below is real
@@ -116,13 +119,14 @@
  *
  * ## ⭐ Two kinds of number, rendered apart
  *
- * Both artefacts carry the POPULATION this census certifies (`census.totals`:
- * every write call site and its tenancy/context verdict) and, separately, the
- * CORPUS SCALE it walked ({@link corpusScaleRows}: sources read, engine-shaped
- * types recognised, objects declared, same-named calls subtracted). The gate
- * enforces the first and deliberately does not enforce the second -- a
- * maintainer ruling of 2026-08-31 adopting the split the sibling `isSystem`
- * census had already proved.
+ * The artefacts carry the POPULATION this census certifies (every write call
+ * site and its tenancy/context verdict, with `census.totals` split per package
+ * into the shards under {@link SHARD_DIR}) and, separately, the CORPUS SCALE it
+ * walked ({@link corpusScaleRows}: sources read, engine-shaped types recognised,
+ * objects declared, same-named calls subtracted -- on the page region and the
+ * ledger index). The gate enforces the first and deliberately does not enforce
+ * the second -- a maintainer ruling of 2026-08-31 adopting the split the sibling
+ * `isSystem` census had already proved.
  *
  * ⇒ That is why the scale numbers are rendered in their own DATED block rather
  *   than mixed in among the totals. An artefact whose unenforced numbers sit
@@ -230,9 +234,9 @@
  * are all non-zero exits naming what could not be read.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, posix } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { requireDefaultExport } from './import-prerequisite.mjs';
@@ -1801,6 +1805,42 @@ export function resolveObjectNameArg(a0, sf, decls) {
   return { kind: 'runtime', name: a0.getText(sf).replace(/\s+/g, ' ') };
 }
 
+/**
+ * The population totals of a set of sites.
+ *
+ * ⭐ Every figure is a COUNT of sites under a predicate, so the totals of a union
+ * are the sums of the totals of its parts. That is what lets the committed
+ * artefacts carry them PER PACKAGE (one shard each, see {@link SHARD_DIR}) and
+ * no cross-package total at all: every census total is still enforced, because a
+ * moved total moves the shard of the package it moved in, and the gate prints the
+ * census totals from the census it runs.
+ */
+export function totalsOf(sites) {
+  const tenancyEnabled = sites.filter((s) => s.tenancy === 'enabled');
+  return {
+    writeCallSites: sites.length,
+    staticallyDecidableObjectName: sites.filter((s) => s.tenancy !== 'undecidable').length,
+    undecidableObjectName: sites.filter((s) => s.tenancy === 'undecidable').length,
+    objectNameInline: sites.filter((s) => s.objectNameKind === 'literal').length,
+    objectNameConst: sites.filter((s) => s.objectNameKind === 'const-literal').length,
+    objectNameParameter: sites.filter((s) => s.objectNameKind === 'object-name-parameter').length,
+    objectNameRuntime: sites.filter((s) => s.objectNameKind === 'runtime').length,
+    tenancyEnabled: tenancyEnabled.length,
+    tenancyDisabled: sites.filter((s) => s.tenancy === 'disabled').length,
+    provablyNoTenantContext: sites.filter((s) => s.carriesTenantContext === false).length,
+    tenantContextUnreadable: sites.filter((s) => s.carriesTenantContext === 'undecidable').length,
+    carriesTenantContext: sites.filter((s) => s.carriesTenantContext === true).length,
+    tenancyEnabledProvablyNoContext: tenancyEnabled.filter((s) => s.carriesTenantContext === false).length,
+    tenancyEnabledContextUnreadable: tenancyEnabled.filter((s) => s.carriesTenantContext === 'undecidable').length,
+    placedByObjectName: sites.filter((s) => s.placedBy === 'object-name').length,
+    placedByObjectNameParameter: sites.filter((s) => s.placedBy === 'object-name-parameter').length,
+    placedByLedger: sites.filter((s) => s.placedBy === 'ledger').length,
+    elevatedContext: sites.filter((s) => s.elevatedContext === true).length,
+    nonElevatedContext: sites.filter((s) => s.carriesTenantContext && s.elevatedContext === false).length,
+    elevationUndecidable: sites.filter((s) => s.elevatedContext === 'undecidable').length,
+  };
+}
+
 /** Run the census. */
 export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
   const index = widenIndexThroughAliases(buildEngineTypeIndex(root), root);
@@ -1946,7 +1986,6 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
   sites.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   unresolved.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   undefendedSubtractions.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  const tenancyEnabled = sites.filter((s) => s.tenancy === 'enabled');
   return {
     sites,
     unresolved,
@@ -1961,28 +2000,7 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
     // those move only when the population's own boundary moves.
     nonEngineReasons: Object.fromEntries([...nonEngineReasons].sort((a, b) => a[0].localeCompare(b[0]))),
     undefendedSubtractions,
-    totals: {
-      writeCallSites: sites.length,
-      staticallyDecidableObjectName: sites.filter((s) => s.tenancy !== 'undecidable').length,
-      undecidableObjectName: sites.filter((s) => s.tenancy === 'undecidable').length,
-      objectNameInline: sites.filter((s) => s.objectNameKind === 'literal').length,
-      objectNameConst: sites.filter((s) => s.objectNameKind === 'const-literal').length,
-      objectNameParameter: sites.filter((s) => s.objectNameKind === 'object-name-parameter').length,
-      objectNameRuntime: sites.filter((s) => s.objectNameKind === 'runtime').length,
-      tenancyEnabled: tenancyEnabled.length,
-      tenancyDisabled: sites.filter((s) => s.tenancy === 'disabled').length,
-      provablyNoTenantContext: sites.filter((s) => s.carriesTenantContext === false).length,
-      tenantContextUnreadable: sites.filter((s) => s.carriesTenantContext === 'undecidable').length,
-      carriesTenantContext: sites.filter((s) => s.carriesTenantContext === true).length,
-      tenancyEnabledProvablyNoContext: tenancyEnabled.filter((s) => s.carriesTenantContext === false).length,
-      tenancyEnabledContextUnreadable: tenancyEnabled.filter((s) => s.carriesTenantContext === 'undecidable').length,
-      placedByObjectName: sites.filter((s) => s.placedBy === 'object-name').length,
-      placedByObjectNameParameter: sites.filter((s) => s.placedBy === 'object-name-parameter').length,
-      placedByLedger: sites.filter((s) => s.placedBy === 'ledger').length,
-      elevatedContext: sites.filter((s) => s.elevatedContext === true).length,
-      nonElevatedContext: sites.filter((s) => s.carriesTenantContext && s.elevatedContext === false).length,
-      elevationUndecidable: sites.filter((s) => s.elevatedContext === 'undecidable').length,
-    },
+    totals: totalsOf(sites),
     engineTypes: index.size,
     declaredObjects: objects.size,
     scannedSources: sources.length,
@@ -1991,9 +2009,63 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
 }
 
 export const PAGE = 'content/docs/permissions/tenant-audit-census.mdx';
+/** The ledger's INDEX: the method, the dated corpus scale, and where the shards are. */
 export const COUNTS = 'docs/audits/2026-08-tenant-audit-write-call-sites.counts.md';
+/**
+ * The ledger's SHARDS: one file per package, `<services|plugins>/<package>.md`.
+ *
+ * ## ⭐ Why the population is sharded, and why no total is committed anywhere
+ *
+ * The census used to be ONE page region and ONE ledger file, each carrying the
+ * cross-package totals (and the page's prose quoting them). Every PR that added a
+ * write call site rewrote those totals, so ANY two such PRs conflicted on the
+ * same lines -- in GitHub's server-side merge, which runs no driver -- and each
+ * landing left every other one `dirty` until a merge-and-regenerate round.
+ *
+ * ⇒ The cure is the one the strictness ledger's `.counts/` shards and the
+ *   liveness `state-counts/` shards already carry (`.gitattributes` records
+ *   both): one file per PACKAGE, each holding that package's rows AND that
+ *   package's totals, and ⛔ no total across packages committed anywhere. Two
+ *   branches that add a write call site in two different packages now edit two
+ *   different files. `node scripts/check-tenant-audit-census.mjs` prints the
+ *   census totals on every run, from the census it just ran.
+ *
+ * ⭐ Nothing stopped being enforced. Every census total is a COUNT of sites
+ * under a predicate ({@link totalsOf}), so it is the sum of the per-package
+ * totals: a total that moves moves the shard of the package it moved in, and
+ * that shard fails the byte comparison exactly as the single file did.
+ * `scripts/tenant-audit-census-replay.mjs` is the measurement: two branches off
+ * one base, each adding a site in a different package, merge with no conflict
+ * and the merged tree passes the gate with `--write` a no-op -- and the same
+ * replay on the unsharded artefacts conflicts.
+ */
+export const SHARD_DIR = 'docs/audits/2026-08-tenant-audit-write-call-sites.counts';
 export const BEGIN_MARKER = '{/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}';
 export const END_MARKER = '{/* END GENERATED: tenant-audit-census */}';
+
+/**
+ * The shard a site's file belongs to: `<services|plugins>/<package>`.
+ *
+ * ⛔ A file this cannot place in a package under {@link SURFACE_ROOTS} REFUSES
+ * rather than landing in some catch-all shard: a catch-all file is a single file
+ * every such PR rewrites, which is the conflict this sharding removes.
+ */
+export function shardKeyOf(file) {
+  const parts = String(file).split('/');
+  const root = SURFACE_ROOTS.find((r) => String(file).startsWith(`${r}/`));
+  if (!root || parts.length < 4 || root.split('/').length !== 2) {
+    throw new Error(
+      `tenant-audit-census: ${file} is not inside a package under ${SURFACE_ROOTS.join(' or ')} `
+      + '-- no per-package shard can hold it. Refusing to invent one.',
+    );
+  }
+  return `${parts[1]}/${parts[2]}`;
+}
+
+/** Where a shard's file lives, relative to the repo root. */
+export function shardPathOf(key) {
+  return `${SHARD_DIR}/${key}.md`;
+}
 
 /**
  * ⛔ NEITHER artefact carries LINE NUMBERS, and that is the design rather than an
@@ -2016,10 +2088,10 @@ export const END_MARKER = '{/* END GENERATED: tenant-audit-census */}';
  * ## Why the rows live in `docs/audits/` and not on the page
  *
  * Same split, and the same reason, as `packages/spec`'s strictness ledger and its
- * generated `.counts.md`: the page has prose to preserve and the row table has
- * none, so the table is regenerated WHOLE while the page keeps a small generated
- * region for the figures its prose reasons about. A reader gets a page they can
- * read; a re-deriver gets a ledger they can diff.
+ * generated `.counts/` shards: the page has prose to preserve and the row tables
+ * have none, so the tables are regenerated WHOLE while the page keeps a small
+ * generated region. A reader gets a page they can read; a re-deriver gets a
+ * ledger they can diff.
  *
  * It also keeps 140-odd rows of machine output out of the published docs site,
  * and out of `content/docs`-scoped prose ratchets that have no way to tell an
@@ -2081,63 +2153,98 @@ function cell(text) {
 }
 
 /**
- * The undefended-subtraction block, identical in both artefacts apart from
- * heading depth. Renders a row per subtraction the census could not defend, and
- * says so explicitly when there are none -- an empty section is a measurement,
- * while a missing section is indistinguishable from a check that stopped running.
+ * The population totals, as labelled rows: every field of {@link totalsOf}, in
+ * the order the artefacts and the gate's output print them.
+ *
+ * ⭐ One list, read by the shard renderer AND by the gate's printed totals, so a
+ * total cannot be enforced in the shards and missing from what the gate prints,
+ * or the other way round.
  */
-export function renderUndefendedSubtractions(census, heading, { withRows = true } = {}) {
+export function totalsRows(t) {
+  return [
+    ['Write call sites', t.writeCallSites],
+    ['Object name statically decidable', t.staticallyDecidableObjectName],
+    ['Object name chosen at run time', t.undecidableObjectName],
+    ['Object name spelled inline', t.objectNameInline],
+    ['Object name spelled through a `const`', t.objectNameConst],
+    ['Object name is an `object: string` parameter', t.objectNameParameter],
+    ['Object name is some other run-time expression', t.objectNameRuntime],
+    ['Against a tenancy-enabled object', t.tenancyEnabled],
+    ['Against an object declaring tenancy off', t.tenancyDisabled],
+    ['Threading a tenant context', t.carriesTenantContext],
+    ['Provably carrying none (options read, no context key)', t.provablyNoTenantContext],
+    ['…and decidably tenancy-enabled', t.tenancyEnabledProvablyNoContext],
+    ['Options argument unreadable', t.tenantContextUnreadable],
+    ['…and decidably tenancy-enabled', t.tenancyEnabledContextUnreadable],
+    ['Threading a decidably elevated (`isSystem`) context', t.elevatedContext],
+    ['Threading a decidably non-elevated context', t.nonElevatedContext],
+    ['Threading a context of undecidable elevation', t.elevationUndecidable],
+    ['Receiver carried a readable engine type',
+      t.writeCallSites - t.placedByObjectName - t.placedByObjectNameParameter - t.placedByLedger],
+    ['Receiver erased, placed by the object NAME', t.placedByObjectName],
+    ['Receiver erased, placed by an `object: string` PARAMETER', t.placedByObjectNameParameter],
+    ['Receiver erased, placed by an `UNTYPED_RECEIVERS` row', t.placedByLedger],
+  ];
+}
+
+/** The two undefended-subtraction counts, as labelled rows. */
+export function undefendedCountRows(census) {
   const rows = undefendedRows(census);
-  const doorShaped = rows.filter((r) => r.cells[5]).reduce((n, r) => n + r.count, 0);
-  const out = [];
-  out.push(`${heading} Subtractions the census could NOT defend — enforced`, '');
-  out.push('A same-named call on something that is not a data engine is subtracted, and the');
-  out.push('subtraction is DEFENSIBLE when this census can name why: the receiver is a `node:`');
-  out.push('builtin, a value it watched being constructed, a language global, a type THIS');
-  out.push('corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.');
-  out.push('');
-  out.push('⚠️ Counted below are the subtractions it can name no such fact for — the');
-  out.push('receiver carries a declared type the engine type index does not hold, and that');
-  out.push('index is built from TRACKED sources only, deliberately. An untracked, generated');
-  out.push('or dependency-owned declaration is one this census never saw, and «never saw it»');
-  out.push('must not be spelled the same way as «read it, not an engine».');
-  out.push('');
-  out.push('⚠️ One arm here says something else again: `type-text-not-round-trippable` is a');
-  out.push('receiver whose declared type THIS TOOL derived and then could not read back —');
-  out.push('the source parsed, the re-serialisation of it did not, so the door rule could');
-  out.push('never be read off it. That is a fault in this tool rather than a fact about the');
-  out.push('corpus, and it is the one row here that also fails the gate.');
-  out.push('');
-  out.push('| what | count |', '| :--- | ---: |');
-  out.push(`| write calls subtracted with no defensible reason | **${rows.reduce((n, r) => n + r.count, 0)}** |`);
-  out.push(`| …whose declared type text states an engine door anyway | **${doorShaped}** |`);
-  out.push('');
-  out.push('⛔ The second row is **0 by construction**, not a tally that happens to be low.');
-  out.push('An inline type literal stating a write door has no name for the engine type index');
-  out.push('to be keyed on, so the door rule is read off the type text itself and the site is');
-  out.push('PLACED — it is in the population above rather than subtracted here. A non-zero');
-  out.push('value on that row means a door-shaped receiver reached the subtraction anyway.');
-  out.push('');
-  if (rows.length === 0) {
-    out.push('None: every non-engine subtraction in this census rests on a named fact.');
-    return out;
-  }
-  // ⛔ The ROWS stay off the published page, the same split the site table
-  // follows: machine output belongs in `docs/audits/`, and a type text carrying
-  // braces and angle brackets is MDX-hostile besides. The page states the two
-  // counts and points here.
-  if (!withRows) {
-    out.push(`Every one of them is listed, by receiver and by the type text that could not be`);
-    out.push(`placed, in [\`${COUNTS}\`](https://github.com/objectstack-ai/objectstack/blob/main/${COUNTS}).`);
-    return out;
-  }
-  out.push('| file | receiver | verb | why | declared type | door | n |');
-  out.push('|---|---|---|---|---|---|---:|');
-  for (const r of rows) {
-    const [file, receiver, verb, reason, type, door] = r.cells;
-    out.push(`| \`${file}\` | \`${cell(receiver)}\` | \`${verb}\` | ${reason} | \`${cell(type)}\` | ${door ? '⚠️ yes' : 'no'} | ${r.count} |`);
-  }
-  return out;
+  return [
+    ['Write calls subtracted with no defensible reason', rows.reduce((n, r) => n + r.count, 0)],
+    ['…whose declared type text states an engine door anyway',
+      rows.filter((r) => r.cells[5]).reduce((n, r) => n + r.count, 0)],
+  ];
+}
+
+/**
+ * The census split by package: one entry per shard key that holds a write call
+ * site OR an undefended subtraction, each with its own totals. A package with
+ * neither has no shard -- an empty shard is a file nothing needs, and a stale one
+ * is refused by the gate.
+ */
+export function shardsOf(census) {
+  const keys = new Set();
+  for (const s of census.sites) keys.add(shardKeyOf(s.file));
+  for (const u of census.undefendedSubtractions ?? []) keys.add(shardKeyOf(u.file));
+  return [...keys].sort((a, b) => a.localeCompare(b)).map((key) => {
+    const sites = census.sites.filter((s) => shardKeyOf(s.file) === key);
+    const undefendedSubtractions = (census.undefendedSubtractions ?? []).filter((u) => shardKeyOf(u.file) === key);
+    return { key, path: shardPathOf(key), sites, undefendedSubtractions, totals: totalsOf(sites) };
+  });
+}
+
+/**
+ * The undefended-subtraction METHOD, stated once in the page region and once in
+ * the ledger index. ⛔ No count: each shard counts its own package's, and the
+ * gate prints the sum.
+ */
+function undefendedMethod(heading) {
+  return [
+    `${heading} Subtractions the census could NOT defend — enforced`, '',
+    'A same-named call on something that is not a data engine is subtracted, and the',
+    'subtraction is DEFENSIBLE when this census can name why: the receiver is a `node:`',
+    'builtin, a value it watched being constructed, a language global, a type THIS',
+    'corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.',
+    '',
+    '⚠️ Counted in every package shard are the subtractions it can name no such fact',
+    'for — the receiver carries a declared type the engine type index does not hold,',
+    'and that index is built from TRACKED sources only, deliberately. An untracked,',
+    'generated or dependency-owned declaration is one this census never saw, and',
+    '«never saw it» must not be spelled the same way as «read it, not an engine».',
+    '',
+    '⚠️ One arm here says something else again: `type-text-not-round-trippable` is a',
+    'receiver whose declared type THIS TOOL derived and then could not read back —',
+    'the source parsed, the re-serialisation of it did not, so the door rule could',
+    'never be read off it. That is a fault in this tool rather than a fact about the',
+    'corpus, and it is the one arm here that also fails the gate.',
+    '',
+    '⛔ A shard\'s door-shaped count is **0 by construction**, not a tally that happens',
+    'to be low. An inline type literal stating a write door has no name for the engine',
+    'type index to be keyed on, so the door rule is read off the type text itself and',
+    'the site is PLACED — it is in the population rather than subtracted. A non-zero',
+    'value there means a door-shaped receiver reached the subtraction anyway.',
+  ];
 }
 
 /**
@@ -2159,70 +2266,91 @@ export function renderUndefendedSubtractions(census, heading, { withRows = true 
  * "not there": a number nobody checks and nobody dates reads as current, which is
  * the disease this whole artefact exists to treat one level down.
  */
+const CORPUS_SCALE_FIELDS = [
+  ['tracked non-test sources scanned', 'scannedSources'],
+  ['engine-shaped types recognised', 'engineTypes'],
+  ['declared objects in the registry', 'declaredObjects'],
+  ['same-named calls subtracted as non-engine', 'nonEngineCalls'],
+];
+
 export function corpusScaleRows(census) {
-  return [
-    ['tracked non-test sources scanned', census.scannedSources],
-    ['engine-shaped types recognised', census.engineTypes],
-    ['declared objects in the registry', census.declaredObjects],
-    ['same-named calls subtracted as non-engine', census.nonEngineCalls],
-  ];
+  return CORPUS_SCALE_FIELDS.map(([label, field]) => [label, census[field]]);
 }
 
-/** The corpus-scale block, identical in both artefacts apart from heading depth. */
+const MEASURED_AT_LINE = /^Measured on (\d{4}-\d{2}-\d{2}) at `([0-9a-f]{7,40})`\.$/m;
+
+/**
+ * The corpus-scale values a committed artefact already states, or null when it
+ * states them incompletely.
+ *
+ * ## ⭐ Why `--write` keeps them instead of re-measuring
+ *
+ * The block is dated by the HEAD it was measured at, so a `--write` that
+ * re-measured it on every run rewrote the dated line in the page AND in the
+ * ledger index on every PR -- two branches each adding a write call site then
+ * conflicted on that line even with the population sharded. The gate never
+ * compares these values (the 2026-08-31 split), so keeping the committed ones is
+ * exactly as correct as replacing them, and it leaves both files untouched.
+ * `--write --refresh-scale` re-measures and re-dates the block on purpose.
+ */
+export function committedScale(text) {
+  const at = MEASURED_AT_LINE.exec(String(text ?? ''));
+  if (!at) return null;
+  const out = { measuredAt: { date: at[1], ref: at[2] } };
+  for (const [label, field] of CORPUS_SCALE_FIELDS) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp(`^\\| ${escaped} \\| (\\d+) \\|$`, 'm').exec(text);
+    if (!m) return null;
+    out[field] = Number(m[1]);
+  }
+  return out;
+}
+
+/** The corpus-scale block, identical in both carriers apart from heading depth. */
 export function renderCorpusScale(census, heading) {
   const out = [];
   out.push(`${heading} Corpus scale — present and dated, ⛔ NOT enforced`, '');
   out.push('⛔ These four describe the CORPUS this census walked, not the population it');
   out.push('certifies, and the gate deliberately does not hold them to the tree — a source');
-  out.push('file arriving anywhere under the two roots moves them while every verdict above');
+  out.push('file arriving anywhere under the two roots moves them while every verdict');
   out.push('holds still. They are required to be HERE and to say WHEN they were true;');
-  out.push('their values are not compared. The reasoning, and the measurement behind it,');
-  out.push('are in `scripts/check-tenant-audit-census.mjs`.', '');
+  out.push('their values are not compared, and `--write` keeps them as committed until');
+  out.push('`--write --refresh-scale` re-measures them. The reasoning, and the measurement');
+  out.push('behind it, are in `scripts/check-tenant-audit-census.mjs`.', '');
   out.push(`Measured on ${census.measuredAt.date} at \`${census.measuredAt.ref}\`.`, '');
   out.push('| corpus scale (not enforced) | count |', '| :--- | ---: |');
   for (const [label, value] of corpusScaleRows(census)) out.push(`| ${label} | ${value} |`);
   return out;
 }
 
-/** The page's generated region: the figures its prose reasons about. */
+const SHARD_DIR_URL = `https://github.com/objectstack-ai/objectstack/tree/main/${SHARD_DIR}`;
+const COUNTS_URL = `https://github.com/objectstack-ai/objectstack/blob/main/${COUNTS}`;
+
+/**
+ * The page's generated region: where the figures are, the subtraction method and
+ * the dated corpus scale -- ⛔ and no population figure. Those are per package in
+ * the shards, and the gate prints the totals.
+ */
 export function renderGeneratedRegion(census) {
-  const t = census.totals;
   const out = [];
   out.push(BEGIN_MARKER, '');
   out.push('## The measurement', '');
-  out.push('| what | count |', '| :--- | ---: |');
-  out.push(`| write call sites on the application surface | **${t.writeCallSites}** |`);
-  out.push(`| …whose object name is statically decidable | ${t.staticallyDecidableObjectName} |`);
-  out.push(`| …whose object name is chosen at run time | ${t.undecidableObjectName} |`);
-  out.push(`| …against an object with tenancy ENABLED | ${t.tenancyEnabled} |`);
-  out.push(`| …against an object that declares tenancy off | ${t.tenancyDisabled} |`);
-  out.push(`| threading a tenant context | ${t.carriesTenantContext} |`);
-  out.push(`| PROVABLY carrying none (options read, no context key) | **${t.provablyNoTenantContext}** |`);
-  out.push(`| …of those, against a decidably tenancy-enabled object | **${t.tenancyEnabledProvablyNoContext}** |`);
-  out.push(`| options argument UNREADABLE — may or may not carry one | ${t.tenantContextUnreadable} |`);
-  out.push(`| …of those, against a decidably tenancy-enabled object | ${t.tenancyEnabledContextUnreadable} |`);
-  out.push(`| threading a decidably ELEVATED (\`isSystem\`) context | ${t.elevatedContext} |`);
-  out.push(`| threading a context that is decidably NOT elevated | ${t.nonElevatedContext} |`);
-  out.push(`| threading a context whose elevation is a run-time fact | ${t.elevationUndecidable} |`);
+  out.push('⛔ This page states no population figure, and no committed file states a total');
+  out.push('across packages: two branches that each add a write call site would both');
+  out.push('rewrite it. The figures live per package — one shard per package under');
+  out.push(`[\`${SHARD_DIR}/\`](${SHARD_DIR_URL}),`);
+  out.push('each holding that package\'s totals and every one of its sites — and');
+  out.push('`node scripts/check-tenant-audit-census.mjs` prints the census totals on every');
+  out.push('run, from the census it has just taken. `node scripts/tenant-audit-census.mjs`');
+  out.push('prints the same summary without checking anything.');
   out.push('');
-  out.push('| how the instrument reached the site | count |', '| :--- | ---: |');
-  out.push(`| receiver carried a readable engine type | ${t.writeCallSites - t.placedByObjectName - t.placedByObjectNameParameter - t.placedByLedger} |`);
-  out.push(`| receiver erased, placed by the object NAME | ${t.placedByObjectName} |`);
-  out.push(`| receiver erased, placed by an \`object: string\` PARAMETER | ${t.placedByObjectNameParameter} |`);
-  out.push(`| receiver erased, placed by an \`UNTYPED_RECEIVERS\` row | ${t.placedByLedger} |`);
+  out.push(...undefendedMethod('###'));
   out.push('');
-  out.push(`| object name spelled inline | ${t.objectNameInline} |`);
-  out.push(`| object name spelled through a \`const\` | ${t.objectNameConst} |`);
-  out.push(`| object name is an \`object: string\` parameter | ${t.objectNameParameter} |`);
-  out.push(`| object name is some other run-time expression | ${t.objectNameRuntime} |`);
-  out.push('');
-  out.push(...renderUndefendedSubtractions(census, '###', { withRows: false }));
-  out.push('');
-  out.push(`The corpus walked is every tracked non-test source under \`packages/services/\``);
-  out.push(`and \`packages/plugins/\`; calls to a same-named method on something that is not`);
-  out.push(`a data engine were subtracted. Every site is listed in`);
-  out.push(`[\`${COUNTS}\`](https://github.com/objectstack-ai/objectstack/blob/main/${COUNTS}),`);
-  out.push(`regenerated by the same command.`);
+  out.push('The corpus walked is every tracked non-test source under `packages/services/`');
+  out.push('and `packages/plugins/`; calls to a same-named method on something that is not');
+  out.push('a data engine were subtracted. The method behind the shards is in');
+  out.push(`[\`${COUNTS}\`](${COUNTS_URL}),`);
+  out.push('regenerated by the same command.');
   out.push('');
   out.push(...renderCorpusScale(census, '###'));
   out.push('');
@@ -2231,27 +2359,19 @@ export function renderGeneratedRegion(census) {
 }
 
 /**
- * The audit ledger: every site, regenerated WHOLE.
+ * The ledger INDEX: the method, the dated corpus scale and where the shards are,
+ * regenerated WHOLE.
  *
- * No prose to preserve, so nothing here is spliced -- the file is rewritten. Two
- * branches that each add a write call site produce rows that git merges cleanly and
- * a header that merges cleanly and WRONG, so the correct resolution is always
- * "recompute from the merged tree" -- `node scripts/tenant-audit-census.mjs --write`,
- * which is what the header this function emits tells a merging author to do.
- *
- * That resolution is not delegated to a merge driver: no `.gitattributes` entry
- * covers this path, so `git check-attr merge` over it reads `unspecified` and git
- * text-merges it like any other file. `scripts/check-tenant-audit-census.mjs` is the
- * backstop -- a wrongly merged file fails the build loudly instead of landing
- * silently.
+ * ⛔ No population figure and no list of shards: either would be one line every
+ * PR adding a write call site rewrites (a list, every PR adding a site in a
+ * package that had none). The shard directory is the list.
  */
 export function renderCountsFile(census) {
-  const t = census.totals;
   const out = [];
   out.push('<!-- GENERATED — DO NOT EDIT BY HAND. -->');
   out.push('<!-- Regenerate: node scripts/tenant-audit-census.mjs --write -->');
   out.push('');
-  out.push('# Tenant-audit census — every write call site (generated)');
+  out.push('# Tenant-audit census — the write call site ledger (generated)');
   out.push('');
   out.push('Every application-surface write call site against a tenancy-enabled object, as');
   out.push('`scripts/tenant-audit-census.mjs` derives it from the tree. **The prose, the');
@@ -2259,58 +2379,126 @@ export function renderCountsFile(census) {
   out.push('(`content/docs/permissions/tenant-audit-census.mdx`); this file has no prose to');
   out.push('preserve and is regenerated whole.');
   out.push('');
-  out.push('⛔ **Never hand-patch a row or a number here** — fix the code, or the census, and');
-  out.push('regenerate. `scripts/check-tenant-audit-census.mjs` fails the build when this file');
-  out.push('and the tree disagree.');
+  out.push('## Where the sites are');
+  out.push('');
+  out.push(`One file per package, under [\`${SHARD_DIR.split('/').pop()}/\`](${SHARD_DIR.split('/').pop()}/) —`);
+  out.push('`services/<package>.md` and `plugins/<package>.md`, for every package that holds');
+  out.push('a write call site or a subtraction the census could not defend. Each shard');
+  out.push('carries that package\'s totals and every one of its sites. ⛔ No total across');
+  out.push('packages is committed anywhere, so two branches that each add a write call site');
+  out.push('in a different package edit different files and merge apart.');
+  out.push('`node scripts/check-tenant-audit-census.mjs` prints the census totals on every run.');
+  out.push('');
+  out.push('⛔ **Never hand-patch a row or a number in a shard** — fix the code, or the census,');
+  out.push('and regenerate. `scripts/check-tenant-audit-census.mjs` fails the build when a');
+  out.push('shard and the tree disagree, when a package with sites has no shard, and when a');
+  out.push('shard names a package the census finds nothing in.');
   out.push('');
   out.push('Rows are aggregated by (file, verb, object, tenancy, context posture) and carry no');
   out.push('line numbers, so a pure displacement cannot move them. Run the generator with');
   out.push('`--json` for per-site `file:line`.');
   out.push('');
-  out.push('⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches');
-  out.push('that each add a write call site produce rows git merges cleanly and totals that');
-  out.push('merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`');
-  out.push('row names it, so `git check-attr merge` over it reads `unspecified`. Routing it');
-  out.push('would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the');
-  out.push('manifest that row declares as owner, and no manifest declares such a pair for');
-  out.push('this census — the gate runs straight from the lint workflow. Root-level tooling');
-  out.push('is no obstacle by itself: the driver resolves those names in whichever manifest');
-  out.push('the row names, the root one included. The gate is the backstop — a wrongly');
-  out.push('merged file fails `check-tenant-audit-census`, so the error is loud rather than');
-  out.push('silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.');
+  out.push('⚠️ **On a merge conflict in a shard, regenerate — never resolve by hand.** Two');
+  out.push('branches that add a write call site in the SAME package produce a shard whose');
+  out.push('rows can merge cleanly and whose totals merge cleanly and WRONG. These files are');
+  out.push('NOT `merge=os-regen`: no `.gitattributes` row names them, so `git check-attr merge`');
+  out.push('over them reads `unspecified`. Routing them would take a `REGEN_ARTIFACTS` row');
+  out.push('whose `gen:`/`check:` names exist in the manifest that row declares as owner, and');
+  out.push('no manifest declares such a pair for this census — the gate runs straight from');
+  out.push('the lint workflow. The gate is the backstop — a wrongly merged shard fails');
+  out.push('`check-tenant-audit-census`, so the error is loud rather than silent, and');
+  out.push('`node scripts/tenant-audit-census.mjs --write` is the resolution.');
   out.push('');
-  out.push('## Totals');
-  out.push('');
-  out.push('| Measure | Value |');
-  out.push('|---|---:|');
-  out.push(`| Write call sites | ${t.writeCallSites} |`);
-  out.push(`| Object name statically decidable | ${t.staticallyDecidableObjectName} |`);
-  out.push(`| Object name chosen at run time | ${t.undecidableObjectName} |`);
-  out.push(`| Against a tenancy-enabled object | ${t.tenancyEnabled} |`);
-  out.push(`| Against an object declaring tenancy off | ${t.tenancyDisabled} |`);
-  out.push(`| Threading a tenant context | ${t.carriesTenantContext} |`);
-  out.push(`| Provably carrying none | ${t.provablyNoTenantContext} |`);
-  out.push(`| …and decidably tenancy-enabled | ${t.tenancyEnabledProvablyNoContext} |`);
-  out.push(`| Options argument unreadable | ${t.tenantContextUnreadable} |`);
-  out.push(`| …and decidably tenancy-enabled | ${t.tenancyEnabledContextUnreadable} |`);
-  out.push(`| Threading a decidably elevated context | ${t.elevatedContext} |`);
-  out.push(`| Threading a decidably non-elevated context | ${t.nonElevatedContext} |`);
-  out.push(`| Threading a context of undecidable elevation | ${t.elevationUndecidable} |`);
-  out.push('');
-  out.push(...renderUndefendedSubtractions(census, '##'));
+  out.push(...undefendedMethod('##'));
   out.push('');
   out.push(...renderCorpusScale(census, '##'));
   out.push('');
+  return out.join('\n');
+}
+
+/** One package's shard: its totals, its undefended subtractions and every site. */
+export function renderShard(census, shard) {
+  const sub = { ...census, sites: shard.sites, undefendedSubtractions: shard.undefendedSubtractions };
+  const out = [];
+  out.push('<!-- GENERATED — DO NOT EDIT BY HAND. -->');
+  out.push('<!-- Regenerate: node scripts/tenant-audit-census.mjs --write -->');
+  out.push('');
+  out.push(`# \`${shard.key}\` — tenant-audit census shard (generated)`);
+  out.push('');
+  out.push(`The write call sites in \`packages/${shard.key}/\`, as \`scripts/tenant-audit-census.mjs\``);
+  out.push('derives them from the tree: this package\'s totals and every one of its sites.');
+  out.push('One file per package, and no total across packages is committed anywhere —');
+  out.push('`node scripts/check-tenant-audit-census.mjs` prints the census totals. The');
+  out.push(`method is in [the ledger index](${'../'.repeat(shard.key.split('/').length)}${COUNTS.split('/').pop()}). ⛔ Never hand-patch`);
+  out.push('a row or a number here — fix the code, or the census, and regenerate.');
+  out.push('');
+  out.push('## Totals in this package');
+  out.push('');
+  out.push('| Measure | Value |');
+  out.push('|---|---:|');
+  for (const [label, value] of totalsRows(shard.totals)) out.push(`| ${label} | ${value} |`);
+  out.push('');
+  out.push('## Subtractions the census could NOT defend — enforced');
+  out.push('');
+  out.push('| what | count |');
+  out.push('|---|---:|');
+  for (const [label, value] of undefendedCountRows(sub)) out.push(`| ${label} | ${value} |`);
+  const undefended = undefendedRows(sub);
+  if (undefended.length > 0) {
+    out.push('');
+    out.push('| file | receiver | verb | why | declared type | door | n |');
+    out.push('|---|---|---|---|---|---|---:|');
+    for (const r of undefended) {
+      const [file, receiver, verb, reason, type, door] = r.cells;
+      out.push(`| \`${file}\` | \`${cell(receiver)}\` | \`${verb}\` | ${reason} | \`${cell(type)}\` | ${door ? '⚠️ yes' : 'no'} | ${r.count} |`);
+    }
+  }
+  out.push('');
   out.push('## Every site');
   out.push('');
-  out.push('| file | verb | object | tenancy | tenant context | n |');
-  out.push('|---|---|---|---|---|---:|');
-  for (const r of aggregate(census)) {
-    const [file, verb, object, tenancy, context] = r.cells;
-    out.push(`| \`${file}\` | \`${verb}\` | \`${object}\` | ${tenancy} | ${context} | ${r.count} |`);
+  const rows = aggregate(sub);
+  if (rows.length === 0) {
+    out.push('None: this package holds no write call site, only the subtraction above.');
+  } else {
+    out.push('| file | verb | object | tenancy | tenant context | n |');
+    out.push('|---|---|---|---|---|---:|');
+    for (const r of rows) {
+      const [file, verb, object, tenancy, context] = r.cells;
+      out.push(`| \`${file}\` | \`${verb}\` | \`${object}\` | ${tenancy} | ${context} | ${r.count} |`);
+    }
   }
   out.push('');
   return out.join('\n');
+}
+
+/** Every shard, rendered: repo-relative path -> text, in shard order. */
+export function renderShards(census) {
+  return new Map(shardsOf(census).map((shard) => [shard.path, renderShard(census, shard)]));
+}
+
+/**
+ * The shard files present on disk under {@link SHARD_DIR}, relative path -> text.
+ * Read from the working tree rather than `git ls-files`, so a shard `--write`
+ * just created is seen before it is staged, and an orphan is seen at all.
+ */
+export function readShardFiles(root = ROOT) {
+  const out = new Map();
+  const walk = (rel) => {
+    let entries;
+    try {
+      entries = readdirSync(join(root, rel), { withFileTypes: true });
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const childRel = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(childRel);
+      else out.set(childRel, readFileSync(join(root, childRel), 'utf8'));
+    }
+  };
+  walk(SHARD_DIR);
+  return out;
 }
 
 /** Splice the generated region into the page text. */
@@ -3126,15 +3314,41 @@ function main(argv) {
 
   const c = runCensus();
   if (argv.includes('--write')) {
-    for (const [rel, next] of [
-      [PAGE, spliceRegion(readFileSync(join(ROOT, PAGE), 'utf8'), renderGeneratedRegion(c))],
-      [COUNTS, renderCountsFile(c)],
-    ]) {
-      const abs = join(ROOT, rel);
-      const before = readFileSync(abs, 'utf8');
+    const refreshScale = argv.includes('--refresh-scale');
+    const read = (rel) => {
+      try { return readFileSync(join(ROOT, rel), 'utf8'); } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    // ⭐ The dated corpus-scale block is KEPT as committed unless asked to
+    // re-measure -- see `committedScale` for why a re-measure on every run was a
+    // conflict between any two branches.
+    const scaled = (text) => {
+      const kept = refreshScale ? null : committedScale(text);
+      return kept ? { ...c, ...kept } : c;
+    };
+    const pageBefore = read(PAGE);
+    if (pageBefore === null) throw new Error(`tenant-audit-census: cannot read ${PAGE}`);
+    const countsBefore = read(COUNTS);
+    const expected = new Map([
+      [PAGE, spliceRegion(pageBefore, renderGeneratedRegion(scaled(pageBefore)))],
+      [COUNTS, renderCountsFile(scaled(countsBefore))],
+      ...renderShards(c),
+    ]);
+    for (const [rel, next] of expected) {
+      const before = read(rel);
       if (before === next) { process.stdout.write(`tenant-audit-census: ${rel} already current\n`); continue; }
-      writeFileSync(abs, next);
-      process.stdout.write(`tenant-audit-census: rewrote ${rel}\n`);
+      mkdirSync(dirname(join(ROOT, rel)), { recursive: true });
+      writeFileSync(join(ROOT, rel), next);
+      process.stdout.write(`tenant-audit-census: ${before === null ? 'created' : 'rewrote'} ${rel}\n`);
+    }
+    // A shard whose package the census no longer finds anything in is REMOVED:
+    // left in place it would certify sites that are gone, and the gate refuses it.
+    for (const rel of readShardFiles(ROOT).keys()) {
+      if (expected.has(rel)) continue;
+      unlinkSync(join(ROOT, rel));
+      process.stdout.write(`tenant-audit-census: removed ${rel} (the census finds nothing in that package)\n`);
     }
     return 0;
   }

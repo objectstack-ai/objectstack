@@ -308,3 +308,30 @@ export function requestAssistantOpen(): void {
 export function requestAssistantReview(target: AssistantReviewTarget): void {
   assistantBus.requestReview(target);
 }
+
+// ── objectstack#34610 — a publish landed ───────────────────────────────────
+// The screen's one Publish is the shell's bar (the draft bar, or the
+// unpublished-app bar for an app not yet published), and the chat draws none
+// of its own. So the chat learns a publish landed from here and shows a
+// receipt for it. Fire-and-forget, off the snapshot bus, like the two
+// signals above; `emitMetadataRefresh` still carries the "re-read" half.
+
+export interface PublishReceipt {
+  /** The package the publish covered; null when it covered the whole environment. */
+  packageId: string | null;
+}
+
+const publishReceiptListeners = new Set<(receipt: PublishReceipt) => void>();
+
+/** Announce that a publish from the shell's bar landed. */
+export function emitPublishReceipt(receipt: PublishReceipt): void {
+  for (const l of publishReceiptListeners) l(receipt);
+}
+
+/** Subscribe to landed publishes; returns an unsubscriber. */
+export function subscribePublishReceipt(listener: (receipt: PublishReceipt) => void): () => void {
+  publishReceiptListeners.add(listener);
+  return () => {
+    publishReceiptListeners.delete(listener);
+  };
+}

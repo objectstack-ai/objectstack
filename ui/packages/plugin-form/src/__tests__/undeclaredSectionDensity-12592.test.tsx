@@ -24,6 +24,12 @@
  * These pins read the class attributes the real renderer draws, per host, and
  * compare each page host with the dialog, because the claim is about what
  * renders.
+ *
+ * objectstack-ai/objectstack#34607 parts the two for a field-heavy form: the
+ * dialog's undeclared count follows its field count (`dialogUndeclaredColumns`,
+ * at least two), while every page host keeps two. So the field-heavy
+ * `UNDECLARED` fixture now reads three per row from `@2xl` in the dialog and
+ * two on the page hosts; the light `MIXED` fixture still matches byte for byte.
  */
 
 import React from 'react';
@@ -149,8 +155,10 @@ describe('objectui#12592 — an undeclared section draws as the dialog does, on 
       expect(c1.grid, 'one column below @md').toContain('grid-cols-1');
       expect(ladder(c1), '@md / @2xl / @4xl').toEqual([2, 2, 2]);
       expect(perRowAt(readField('full'), '@4xl'), "span: 'full' takes the row").toBe(1);
-      // Byte for byte the dialog's classes, not merely the same count.
-      expect(c1).toEqual(reference);
+      // The dialog spreads this field-heavy form to three from @2xl
+      // (objectstack-ai/objectstack#34607); the page host keeps two.
+      expect(reference.grid, 'dialog: one column below @md').toContain('grid-cols-1');
+      expect(ladder(reference), 'dialog @md / @2xl / @4xl').toEqual([2, 3, 3]);
     });
 
     it(`${host}: an undeclared section beside a declared columns: 3 one still draws two`, async () => {

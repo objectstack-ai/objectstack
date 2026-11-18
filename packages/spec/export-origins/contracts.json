@@ -12,6 +12,8 @@
     "AIRequestOptions": "src/contracts/ai-service.ts#AIRequestOptions (interface)",
     "AIRequestOptionsWithTools": "src/contracts/ai-service.ts#AIRequestOptionsWithTools (type)",
     "AIResult": "src/contracts/ai-service.ts#AIResult (interface)",
+    "AIRouteCredentialKind": "src/contracts/ai-service.ts#AIRouteCredentialKind (type)",
+    "AIRouteUser": "src/contracts/ai-service.ts#AIRouteUser (interface)",
     "AIStreamEvent": "src/contracts/ai-service.ts#AIStreamEvent (type)",
     "AIToolCall": "src/contracts/ai-service.ts#AIToolCall (type)",
     "AIToolDefinition": "src/contracts/ai-service.ts#AIToolDefinition (interface)",

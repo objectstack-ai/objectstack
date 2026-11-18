@@ -117,7 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -3103,11 +3103,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * registers, and a malformed envelope used to be stored verbatim and rendered
    * by `notify` as JSON with nothing said at any layer.
    *
+   * [#34451] `fieldTypes`: the field types of the object the flow's run binds
+   * as `record` — the object its conditions are typed against (the start
+   * node's `objectName`, else a time-relative flow's swept object) — passed
+   * only where that binding holds: a record-triggered flow or a sweep of the
+   * typed object, rebinding neither `record` nor `previous` (the caller's
+   * `valueEnvelopeFieldTypes`). Handed on
+   * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
+   * family alone reach the envelope, over its `record.<field>` /
+   * `previous.<field>` reads: `timestamp(record.<date field>)` faults on the
+   * `YYYY-MM-DD` text on every run. The engine's `registerFlow` passes the
+   * same hint (`valueEnvelopeRefusals`), so the two doors refuse one set.
+   * Absent (no typed object), the call is byte for byte what it was.
+   *
    * @returns whether the slot was refused on SHAPE, so the caller can skip the
    *   root judgment (#22565) — a value that is not an envelope has no source to
    *   read roots from.
    */
-  const checkDeclaredValue = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredValue = (
+    where: string,
+    raw: unknown,
+    fieldTypes?: Readonly<Record<string, string>>,
+  ): { refused: boolean } => {
     if (raw == null) return { refused: false };
     // `celSourceOf` — not a second read of `.source`: the same helper every
     // other slot in this file locates its finding with.
@@ -3118,7 +3135,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
       return { refused: true };
     }
-    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    const res = validateExpression(
+      'value',
+      raw as { dialect?: string; source?: string },
+      fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
+    );
     for (const e of res.errors) {
       issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
     }
@@ -3294,6 +3315,24 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       triggerKind,
       sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
     });
+    // [#34451] The value envelopes' typing holds on the same flows: where the
+    // run's `record` IS a row of the typed object — the flows a condition has
+    // a proven outcome on — and only while the flow rebinds neither root the
+    // typing reads (`celScope` spreads the run's variables over the context,
+    // so an assigned or output `record` / `previous` is what an envelope
+    // reads): `record` by any row of `collectFlowVariableNames` (a declared
+    // one too), `previous` by a NODE row only — the collector asked without
+    // `flow.variables` — since `seedRunVariables` sets `previous` over a
+    // declared variable of that name. Elsewhere (an inbound hook, a schedule,
+    // a flow a parent's `subflow` / `map` starts) `record` holds whatever the
+    // entrance handed the run, and the envelope is judged untyped. The
+    // engine's `registerFlow` stands down on the same set
+    // (`flow-registration-checks.ts` `flowRebindsRunRowRoots`).
+    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName
+      && !declaredVariables.has('record')
+      && !collectFlowVariableNames({}, graphs).has('previous')
+      ? fieldTypeIndex.get(objectName)
+      : undefined;
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
     // instead of the field: the type check never types them as the field.
@@ -3521,7 +3560,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
             const from = issues.length;
-            if (!checkDeclaredValue(slotWhere, found.value).refused) {
+            if (!checkDeclaredValue(slotWhere, found.value, valueEnvelopeFieldTypes).refused) {
               refuseUnboundRoots(slotWhere, found.value, from, 'value');
             }
             continue;
@@ -4675,6 +4714,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // pages' action rows off an object write. Errors since #25680, a holeless
   // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
+  // [#34273] An action refusal sentence over declared `params` — the hook
+  // refusal's compile half, on the same collections the copy pass reads.
+  issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
 
   return issues;
 }
