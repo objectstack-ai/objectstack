@@ -6500,7 +6500,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * without `flowRunId` — for the rows a platform service writes to an object
    * it owns because the write this api serves happened (the audit writer's
    * ledger and activity rows). ⛔ Never for a write the automation itself
-   * asked for. See `platform-system-api.ts`, where the line is drawn.
+   * asked for: on an app-authored hook's api it returns what {@link sudo}
+   * returns there — the mark (`'hook'` when the context carries none) and
+   * `flowRunId` kept. See `platform-system-api.ts`, where the line is drawn.
    *
    * Keyed on {@link PLATFORM_SYSTEM_API}, a symbol the package entry does not
    * export, so it is no nameable member of this class's published face: it is

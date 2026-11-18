@@ -123,8 +123,11 @@ export class ScopedContextFacet {
   /**
    * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; the method's docblock
    * there is its contract, and `platform-system-api.ts` draws its line.
+   * An app-authored hook's api is never the platform's: there it is that
+   * api's own {@link ScopedContextFacet.sudo}, provenance kept.
    */
-  static platformSystemApi(this: Pick<ScopedContextHost, 'derive' | 'executionContext'>): ScopedContext {
+  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext'>): ScopedContext {
+    if (this.appAuthored) return ScopedContextFacet.sudo.call(this);
     const { flowRunId: _run, ...context } = withoutAppAutomationElevation({ ...this.executionContext, isSystem: true });
     return this.derive(context as ExecutionContext);
   }

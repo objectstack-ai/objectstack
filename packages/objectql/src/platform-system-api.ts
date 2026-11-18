@@ -29,12 +29,16 @@
  * The write's context, elevated as `sudo()` elevates it — every other key kept,
  * so the rows stay in the write's unit of work, its organization and its
  * attribution — without the app-automation mark and without `flowRunId`. The
- * api is derived as every api is (`derive`): an app-authored hook's api keeps
- * its permanent-delete refusal, and its own `sudo()` marks again.
+ * api is derived as every api is (`derive`), and its own `sudo()` marks again.
  *
  * ⛔ For the platform's own rows only, never for a write the automation itself
  * asked for: an action body's or a hook's insert into those objects, through
  * its `ctx.api` or its `ctx.api.sudo()`, keeps the provenance and is judged.
+ * The engine enforces that line for the one api it knows is the automation's:
+ * on an app-authored hook's api (its handler's `ctx.api`, and every api
+ * derived from it) this answers exactly what that api's `sudo()` answers — the
+ * `'hook'` mark when the context carries none, the mark it carries otherwise,
+ * `flowRunId` kept — so a hook handing its own api here gains nothing.
  *
  * A symbol, and ⛔ not re-exported from either package entry, for the reason
  * `SEED_USER_GRANTS` gives (`hook-run-as.ts`): the method is no nameable member
