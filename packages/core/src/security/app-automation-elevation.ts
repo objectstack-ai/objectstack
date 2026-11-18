@@ -32,6 +32,17 @@
  * hook's or the body's own write sets off under the same context (a nested
  * hook, a cascade leg, a `sudo()` taken inside the body) is judged as theirs.
  *
+ * ## Where it is taken off — the platform's own rows
+ *
+ * One write set off under a marked context is not theirs: the row a platform
+ * service writes to an object it owns because the hook's or the body's write
+ * happened — the audit writer's `sys_audit_log` row and its `sys_activity`
+ * mirror. That writer derives the platform's own system context from the
+ * write's ({@link withoutAppAutomationElevation}, through objectql's
+ * `platformSystemApi`), so its rows are not judged as an insert the automation
+ * made. The automation's own insert into the same objects — through its
+ * `ctx.api`, its `ctx.api.sudo()` — still carries the mark.
+ *
  * ## Why a symbol, and why it is not an `ExecutionContext` field
  *
  * It is server-constructed by construction: no request body, query string or
@@ -75,6 +86,18 @@ export function appAutomationElevationOf(context: unknown): AppAutomationElevati
   if (context === null || typeof context !== 'object') return undefined;
   const mark = (context as { [APP_AUTOMATION_ELEVATION]?: unknown })[APP_AUTOMATION_ELEVATION];
   return mark === 'hook' || mark === 'action' ? mark : undefined;
+}
+
+/**
+ * `context` without the mark: the same object when it carries none, else a
+ * fresh copy with every other own property. For the platform's own rows (see
+ * the module header); ⛔ never for a write the automation itself makes.
+ */
+export function withoutAppAutomationElevation<T>(context: T): T {
+  if (context === null || typeof context !== 'object') return context;
+  if (!Object.prototype.hasOwnProperty.call(context, APP_AUTOMATION_ELEVATION)) return context;
+  const { [APP_AUTOMATION_ELEVATION]: _taken, ...rest } = context as T & { [APP_AUTOMATION_ELEVATION]?: unknown };
+  return rest as T;
 }
 
 /**

@@ -246,6 +246,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { PLATFORM_SYSTEM_API } from './platform-system-api.js';
 import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -6479,14 +6480,34 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   /**
    * Create an elevated (system) context.
    *
-   * [#25653] Platform code's `sudo()` carries no app-automation mark, so its
-   * writes to the four identity-assignment objects land. An app-authored
-   * hook's in-process `ctx.api.sudo()` is the hook's elevation: it carries
-   * the `'hook'` mark (unless the context already carries one).
+   * [#25653] Platform code's `sudo()` adds no app-automation mark, so its
+   * writes to the four identity-assignment objects land — unless the context
+   * it is taken on already carries one (a platform hook fired by an action
+   * body's write): the spread keeps it, and the writes are judged as that
+   * automation's. The platform's own record of such a write is made through
+   * {@link PLATFORM_SYSTEM_API} instead. An app-authored hook's in-process
+   * `ctx.api.sudo()` is the hook's elevation: it carries the `'hook'` mark
+   * (unless the context already carries one).
    */
   sudo(): ScopedContext {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
     return ScopedContextFacet.sudo.call(scopedContextHost.of(this));
+  }
+
+  /**
+   * The platform's own system api: this api's context elevated as
+   * {@link sudo} elevates it, without the app-automation elevation mark and
+   * without `flowRunId` — for the rows a platform service writes to an object
+   * it owns because the write this api serves happened (the audit writer's
+   * ledger and activity rows). ⛔ Never for a write the automation itself
+   * asked for. See `platform-system-api.ts`, where the line is drawn.
+   *
+   * Keyed on {@link PLATFORM_SYSTEM_API}, a symbol the package entry does not
+   * export, so it is no nameable member of this class's published face: it is
+   * reached through `platformSystemApi`.
+   */
+  [PLATFORM_SYSTEM_API](): ScopedContext {
+    return ScopedContextFacet.platformSystemApi.call(scopedContextHost.of(this));
   }
 
   /**
