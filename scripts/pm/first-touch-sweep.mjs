@@ -38,7 +38,8 @@
  *   ③ a `domain:*` with no pm state (`PM_EXCLUSIVE_STATE_LABELS`, `needs-user-decision` included);
  *   ④ `pm:queue` + `domain:*` with no `priority:*`;
  *   ⑤ created inside the window (`--since`) and carrying `pm:queue` or a `priority:*` that was applied in the same
- *      minute the card was created — first-touch as untriaged, ⛔ never judged by who applied it.
+ *      minute the card was created — listed whoever applied it; the touch it is owed adds area and type, and a
+ *      grade a person set stays (`references/filing-gate.md`: the hand-set grade).
  *
  * ②③④ take only cards whose `updated_at` is older than `SETTLE_MS` (~2 min): a card being labelled right now is
  * mid-write, not owed. ⑤ needs a window; without `--since` it is NOT RUN, the verdict is PARTIAL and the exit 4 —
@@ -46,6 +47,15 @@
  *
  * Report-only: ⛔ this file writes nothing. Each hit is a card triage owes a first touch this fire; the order of the
  * touches (newest first when the sweep clears, oldest first when it does not) is triage's, not this file's.
+ *
+ * ## The area backstop — a sixth row, daily, and NOT part of the verdict
+ *
+ * Every public card carries exactly one `area:*`, set at filing or at triage's first touch. The backstop is the
+ * daily read that catches the card neither reached (`AREA_BACKSTOP_PHRASE`, pinned like the disjunctions): every
+ * open card of the same walk that carries no `area:*`, with the sweep's own exclusions plus `security` — a security
+ * card owes no area. It rides the walk already paid for, so it costs no request. ⛔ It is a DAILY duty, not a
+ * first-touch debt: it is printed after the five rows and never enters the `owed` set, the verdict or the exit code,
+ * so a board that is mid-backfill does not turn every fire's sweep into FOUND.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -92,6 +102,10 @@ export const TRIAGE_RULE_PHRASES = Object.freeze([
   '不等 ⇒ 报 `sweep INCOMPLETE`',
 ]);
 
+/** The daily backstop's sentence in the same rule file (the self-test pins it), and the labels that owe no area. */
+export const AREA_BACKSTOP_PHRASE = '日对账 fire 扫无 `area:*` 的公开卡';
+export const AREA_BACKSTOP_LIST_CAP = 30;
+
 /** The multi-lane boards (`cross-repo-coordination.md`: 「多车道仓 `objectstack`」); ② runs on these alone. */
 export const MULTI_LANE_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 export const MULTI_LANE_RULE_PATH = '.claude/skills/pm-dispatch/references/cross-repo-coordination.md';
@@ -108,7 +122,7 @@ export const DISJUNCTIONS = Object.freeze({
   2: 'pm:queue with no domain:* (multi-lane board)',
   3: 'domain:* with no pm state',
   4: 'pm:queue + domain:* with no priority:*',
-  5: 'created in the window with pm:queue / priority:* applied in the creation minute',
+  5: 'created in the window with pm:queue / priority:* applied in the creation minute (the touch adds area and type; a grade a person set stays)',
 });
 
 // ---------------------------------------------------------------------------
@@ -137,6 +151,16 @@ export function classify(issue, { repo, nowMs }) {
   if (settled && domain && !state) hits.push(3);
   if (settled && has('pm:queue') && domain && !priority) hits.push(4);
   return hits;
+}
+
+/**
+ * The area backstop: an open card that carries no `area:*`. The sweep's exclusions apply, and a `security` card owes
+ * none — it is graded in the private channel and carries no area by rule. Pure.
+ */
+export function lacksArea(issue) {
+  const labels = labelsOf(issue);
+  if (labels.some((l) => EXCLUDED_LABELS.includes(l) || l === 'security')) return false;
+  return !labels.some((l) => l.startsWith('area:'));
 }
 
 /** ⑤'s first half: created at or after the window's start, not excluded, carrying `pm:queue` or a `priority:*`. Pure. */
@@ -232,7 +256,8 @@ export async function sweep({ repo, nowMs, sinceMs = NaN, get }) {
   }
 
   const hits = new Set(Object.values(found).flat().map((i) => i.number));
-  return { repo, nowMs, sinceMs, pages, enumerated: issues.length, totalCount, complete: why.length === 0, why, found, fifthRun, hits, unjudged };
+  const noArea = issues.filter(lacksArea);
+  return { repo, nowMs, sinceMs, pages, enumerated: issues.length, totalCount, complete: why.length === 0, why, found, fifthRun, hits, unjudged, noArea };
 }
 
 export function renderText(r) {
@@ -253,6 +278,9 @@ export function renderText(r) {
     lines.push(`${marks[d]} ${DISJUNCTIONS[d]}: ${cards.length}`);
     for (const c of cards) lines.push(`    #${c.number} · updated ${String(c.updated_at ?? '').slice(0, 16)}Z · ${String(c.title ?? '').slice(0, 100)}`);
   }
+  const bare = (r.noArea ?? []).map((i) => i.number).sort((a, b) => a - b);
+  const listed = bare.length > AREA_BACKSTOP_LIST_CAP ? `the first ${AREA_BACKSTOP_LIST_CAP} of them (--json lists all)` : 'all of them';
+  lines.push(`area backstop (daily, not part of the verdict) — open cards with no area:*: ${bare.length}${bare.length ? ` · ${listed}: ${bare.slice(0, AREA_BACKSTOP_LIST_CAP).map((n) => `#${n}`).join(' ')}` : ''}`);
   lines.push(verdictLine(r));
   return lines.join('\n');
 }
@@ -268,6 +296,7 @@ export function renderJson(r) {
     fifth_run: r.fifthRun,
     disjunctions: { 1: ids(1), 2: ids(2), 3: ids(3), 4: ids(4), 5: ids(5) },
     owed: [...r.hits].sort((a, b) => a - b),
+    no_area: (r.noArea ?? []).map((i) => i.number).sort((a, b) => a - b),
     verdict: verdictLine(r),
   };
 }
@@ -374,11 +403,12 @@ function rearmThroughProxy(args) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
   'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 16,
-  'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor': 7,
+  'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set': 8,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
+  'the area backstop: an open card with no area:* is listed daily, and never moves the first-touch verdict': 9,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 const batteryCases = new Map();
 let openBattery = null;
@@ -429,7 +459,7 @@ export async function selfTest() {
   t('exclusions come first: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => c([x]).length), [0, 0, 0, 0]);
   t('labels compare case-insensitively', c(['Domain:Skills', 'PM:Queue']), [4]);
 
-  battery('the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor');
+  battery('the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set');
   {
     const SINCE = Date.parse('2026-11-14T20:00:00Z');
     const born = card(9, ['pm:queue', 'domain:ui', 'priority:p2'], { created_at: '2026-11-14T21:10:07Z' });
@@ -438,6 +468,7 @@ export async function selfTest() {
     t('…no window, no candidate', fifthCandidate(born, { sinceMs: NaN }), false);
     t('…an excluded card is not', fifthCandidate(card(9, ['pm:queue', 'pm:seat'], { created_at: born.created_at }), { sinceMs: SINCE }), false);
     t('⭐ pm:queue applied in the creation minute is ⑤, whoever applied it', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'pm:queue' }, created_at: '2026-11-14T21:10:59Z', actor: { login: 'objectstack-fleet[bot]' } }]));
+    t('⭐ …a person\'s hand in the creation minute is ⑤ as well: the card is listed for area and type, and the sweep says the grade stays', [sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'priority:p2' }, created_at: '2026-11-14T21:10:30Z', actor: { login: 'os-warren', type: 'User' }, performed_via_github_app: null }]), DISJUNCTIONS[5].includes('a grade a person set stays')], [true, true]);
     t('…a priority applied a minute later is a touch, not ⑤', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'priority:p2' }, created_at: '2026-11-14T21:11:00Z' }]), false);
     t('…another label in the minute is not ⑤', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'domain:ui' }, created_at: '2026-11-14T21:10:08Z' }]), false);
   }
@@ -477,6 +508,22 @@ export async function selfTest() {
     const fifth = board([[born]], 1, { [`/repos/${REPO}/issues/77/events?per_page=100&page=1`]: { status: 500, json: null } });
     const unread = await sweep({ repo: REPO, nowMs: NOW, sinceMs: SINCE, get: fifth.get });
     t('⭐ a ⑤ card whose events cannot be read is UNJUDGED and the run INCOMPLETE', [unread.complete, unread.unjudged], [false, [77]]);
+  }
+
+  battery('the area backstop: an open card with no area:* is listed daily, and never moves the first-touch verdict');
+  {
+    t('the backstop sentence is a substring of triage-duties.md (a reworded rule reds here)', readFileSync(new URL(TRIAGE_RULE_PATH, REPO_ROOT), 'utf8').includes(AREA_BACKSTOP_PHRASE));
+    t('a routed, graded, queued card with no area:* is listed', lacksArea(card(1, ['domain:spec', 'pm:queue', 'priority:p2'])));
+    t('…and the same card carrying one is not', lacksArea(card(1, ['domain:spec', 'pm:queue', 'priority:p2', 'area:data'])), false);
+    t('the label compares case-insensitively', lacksArea(card(1, ['Area:UX'])), false);
+    t('⛔ a security card owes no area', lacksArea(card(1, ['security', 'pm:queue'])), false);
+    t('the sweep\'s exclusions apply here too: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => lacksArea(card(1, [x]))), [false, false, false, false]);
+    const rows = [card(41, ['domain:spec', 'pm:queue', 'priority:p2', 'area:build']), card(42, ['domain:spec', 'pm:queue', 'priority:p2']), card(43, ['security', 'domain:server', 'pm:queue', 'priority:p1'])];
+    const get = async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 3, incomplete_results: false } } : { status: 200, json: p.endsWith('page=1') ? rows : [] });
+    const r = await sweep({ repo: REPO, nowMs: NOW, sinceMs: Date.parse('2026-11-14T20:00:00Z'), get });
+    t('the walk lists exactly the card with no area', [r.noArea.map((i) => i.number), renderJson(r).no_area], [[42], [42]]);
+    t('⭐ …and it is NOT a first-touch debt: nothing is owed and the verdict is CLEAN', [[...r.hits], verdictLine(r), sweepExit(r)], [[], 'sweep CLEAN — no card owed a first touch', EXIT_OK]);
+    t('the text names the count and the card, after the five rows and before the verdict', renderText(r).split('\n').slice(-2)[0], 'area backstop (daily, not part of the verdict) — open cards with no area:*: 1 · all of them: #42');
   }
 
   battery('the CLI: what a typo must never mean, and the exits a patrol reads');
