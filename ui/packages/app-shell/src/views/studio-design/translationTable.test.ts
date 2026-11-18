@@ -200,8 +200,8 @@ describe('readDeclaredStack', () => {
     expect((stack.views as Doc[])[0]).toMatchObject({ name: 'all_open', object: 'repair_ticket' });
     // The owner the platform injects points at the user object, which is walked too.
     expect(objects.map((o) => o.name).at(-1)).toBe('sys_user');
-    // 14 list reads, 11 item reads, 1 platform object.
-    expect(requests).toBe(14 + 11 + 1);
+    // 15 list reads, 11 item reads, 1 platform object.
+    expect(requests).toBe(15 + 11 + 1);
     expect(fake.calls).toHaveLength(requests);
     expect(fake.calls).toContain('layered object sys_user ');
     expect(fake.peak()).toBeLessThanOrEqual(DECLARED_STACK_READ_CONCURRENCY);

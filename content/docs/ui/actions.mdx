@@ -72,7 +72,10 @@ export default defineStack({
 
 Self-contained logic ships inside the metadata and runs in the server sandbox
 — signature `(input, ctx)`, with `ctx.api.object(name)` for data access, a
-5-second default timeout, and declared `capabilities`:
+5-second default timeout, and declared `capabilities`. `input` and `ctx` are the
+wrapper's parameters, so a body must not declare them again: `const input = …`
+does not compile, and `os validate` / `os build` / the publish door refuse it
+(`action-body-does-not-compile`):
 
 ```typescript
 export const MarkDoneAction = defineAction({
@@ -131,6 +134,56 @@ Body-carrying actions are **registered automatically** at boot.
   await ctx.api.object('showcase_task').update(ctx.record);   // ✅ lands — not reported
   ```
 </Callout>
+
+#### Refuse in the user's language — `refusals`
+
+A body that refuses with `throw new Error('…')` answers every caller in the
+language the author wrote. To refuse in the caller's language, declare the
+refusals the body may throw, keyed by code, and throw the code instead of the
+sentence — the same catalogue a [hook declares](/docs/automation/hooks):
+
+```typescript
+export const SubmitSignoff = defineAction({
+  name: 'submit_signoff',
+  label: 'Submit for sign-off',
+  objectName: 'crm_invoice',
+  type: 'script',
+  refusals: {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.', status: 409 },
+    STAGE_LOCKED: {
+      message: 'This stage change is not allowed.',
+      params: ['stage'],
+      reasons: { closed: { message: 'A {{ stage }} invoice can no longer change.' } },
+    },
+  },
+  body: {
+    language: 'js',
+    source:
+      "if (ctx.record.status !== 'draft') throw { code: 'NOT_DRAFT' };" +
+      "if (ctx.record.closed) throw { code: 'STAGE_LOCKED', reason: 'closed', params: { stage: ctx.record.stage } };" +
+      "return { ok: true };",
+    capabilities: [],
+  },
+});
+```
+
+The server answers a declared code with its entry: the `message` (or the
+declared reason's), translated in the caller's locale with the declared
+sentence as the fallback, its `{{ }}` holes filled from the throw's `params`,
+and the entry's `status` (400 when it names none). The sentence rides on the
+refusal's `userMessage`, which the console's failure toast shows. Translate it
+beside the action's other copy —
+`objects.<object>._actions.<action>.refusals.<CODE>.message` (and
+`….reasons.<REASON>.message`), or `globalActions.<action>.refusals.…` for an
+action with no `objectName`; `os i18n extract` scaffolds the keys.
+
+A code the catalogue does not declare, a reason a code with `reasons` does not
+declare, or a throw with no code is refused loudly: at save when the body
+names it literally, otherwise when it runs, as a fault naming the action and
+the code. An error a `ctx.api` call raised and the body let through unchanged
+passes through as before, and so does a crash. `refusals` is read only for a
+`type: 'script'` action with a `js` body (an inline `target` function is
+lowered to one by `os build`); on any other action it is refused.
 
 ### Path B: a registered handler (full TypeScript)
 

@@ -214,6 +214,20 @@ concurrency:
 # affected-package type check) carries its own note saying how.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ⭐ EVERY GIT TRANSFER IN THIS FILE IS BOUNDED BY ITS BYTE RATE (#34994).
+# A git HTTP request that moves under 1000 bytes/s for 120 s is aborted by curl
+# (exit 128, "curl 28 Operation too slow"), so actions/checkout's own fetch
+# retry (3 attempts) runs instead of the CHECKOUT BUDGET expiring. On
+# 2026-11-16/17, 20 of this file's full-history checkouts ran to that 20-25
+# minute budget with no index-pack running: the server never started the pack.
+# The slowest healthy wait for the pack is ~15 s (this fetch reuses the
+# server's packs: ~4 s), and a healthy receive runs at MiB/s, so neither number
+# cuts a slow transfer that moves. The CHECKOUT BUDGET stays the outer wall.
+# ci.yml carries the same block and says more.
+env:
+  GIT_HTTP_LOW_SPEED_LIMIT: '1000'
+  GIT_HTTP_LOW_SPEED_TIME: '120'
+
 jobs:
 
   schedule-gate:
@@ -311,10 +325,11 @@ jobs:
     # header). What each lane repeats is the six setup steps, the gate-family
     # selector where the lane carries a scoped step, and, since #23191, the
     # `Lane verdict` step that ends it (it replaced the unmeasured-tail
-    # reporter pair). Every lane keeps the single job's full-history checkout:
-    # which of the ~190 gates read history was not re-derived for this split,
-    # and a gate that loses its history degrades to "not verified" rather than
-    # going red.
+    # reporter pair). Every lane but `lint-eslint` keeps the single job's
+    # full-history checkout: which of the ~190 gates read history was not
+    # re-derived for this split, and a gate that loses its history degrades to
+    # "not verified" rather than going red. `lint-eslint`'s three steps were
+    # re-derived (#34994): none reads history, so it checks out at depth 1.
     #
     # The lanes are independent. The only inter-step reads in the single job
     # were `steps.gate-families.outputs.*` (nine `if:` lines, one step `id:`),
@@ -525,12 +540,11 @@ jobs:
         # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
         # above says why every lane carries it.
         timeout-minutes: 25
-        with:
-          # The slot-lookup ratchet compares the baseline against its state at
-          # the merge base with main — the only way to see a file being ADDED
-          # to the grandfather list. A shallow clone has no merge base, and the
-          # check would degrade to "not verified" on every run.
-          fetch-depth: 0
+        # Depth 1, the default (#34994): nothing in this lane reads history.
+        # ESLint and the engine test-double gate read the working tree only,
+        # and the slot-lookup ratchet that once needed the merge base here
+        # runs in `lint-scoped-slot-corpus` since the lane split. The other
+        # lanes keep `fetch-depth: 0` for their own history readers.
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -610,7 +624,12 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # Gates in this lane and the scoped lanes below compare against the
+          # merge base with main — the slot-lookup ratchet, for one, sees a
+          # file being ADDED to its grandfather list only that way. A shallow
+          # clone has no merge base, and such a check degrades to "not
+          # verified" on every run. (This note stood on `lint-eslint`'s
+          # checkout until that lane, which reads no history, went to depth 1.)
           fetch-depth: 0
 
       - name: Setup workspace
@@ -1956,7 +1975,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -3008,7 +3027,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -4158,7 +4177,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -4318,7 +4337,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -4464,7 +4483,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -4654,7 +4673,7 @@ jobs:
         # above says why every lane carries it.
         timeout-minutes: 25
         with:
-          # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
+          # `fetch-depth: 0`: same reason as the `lint-repo-tooling` checkout above.
           fetch-depth: 0
 
       - name: Setup workspace
@@ -4816,6 +4835,11 @@ jobs:
     # one retry inside the same total gains nothing (the hazard is flat).
     # Healthy runs pay nothing for it: max 435 s over 3,576 checkouts of this
     # workflow after the incident. The queries are in #29980's dev report.
+    # That flat hazard is a SLOW transfer's. A STALLED one (the server never
+    # starts the pack, 2026-11-16/17) is cut inside git by the workflow `env:`
+    # block above, and actions/checkout retries it within this budget (#34994),
+    # so the budget only binds a transfer that moves. `lint-eslint` checks out
+    # at depth 1 since then and keeps the same budget, unchanged.
     # The one exception is `typecheck-workspace`: its body budget is 35, and
     # 35 + 20 = 55 is already the cap the `lint` job argues, so that lane
     # keeps 20 until its body is faster or the fetch is narrowed (#22034).
@@ -4855,8 +4879,9 @@ jobs:
           # touches no spec file at all) go red for "deleting"
           # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
           #
-          # Same line as the ESLint job above, opposite failure mode, and that
-          # is why it is spelled out here rather than cross-referenced: shallow
+          # Same line as the `lint-repo-tooling` checkout above, opposite
+          # failure mode, and that is why it is spelled out here rather than
+          # cross-referenced: shallow
           # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
           # and degrades this gate to a false RED on an innocent PR.
           fetch-depth: 0

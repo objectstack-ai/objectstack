@@ -246,3 +246,59 @@ describe('#14955 — the throw arm refreshes `$error` like the returned-failure 
         expect(seen.deleted).toBe(false);
     });
 });
+
+describe('the missing-executor arm publishes `$error` like the two failure arms', () => {
+    it('a node with no installed executor inside a try region names itself, with code NO_EXECUTOR', async () => {
+        // The node never ran, so nothing else can describe the failure: the
+        // missing-executor arm publishes `$error` before deciding whether it
+        // routes, and `try_catch` binds that fresh value's `code` onto its own
+        // caught error, so a catch region can tell "the plugin is not installed"
+        // from any other failure.
+        const engine = new AutomationEngine(makeLogger());
+        let seenCaught: any;
+        let seenError: any;
+        registerTryCatchNode(engine, ctxWith({}));
+        engine.registerNodeExecutor({
+            type: 'probe',
+            async execute(_node, variables) {
+                seenCaught = variables.get('caught');
+                seenError = variables.get('$error');
+                return { success: true };
+            },
+        } as NodeExecutor);
+        engine.registerFlow('missing_in_try', {
+            name: 'missing_in_try', label: 'Missing in try', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'tc', type: 'try_catch', label: 'Guarded',
+                    config: {
+                        errorVariable: 'caught',
+                        try: {
+                            // Not `approval`: a pausing type may not sit in a region at all.
+                            nodes: [{ id: 'signoff', type: 'uninstalled_step', label: 'Sign-off' }],
+                            edges: [],
+                        },
+                        catch: { nodes: [{ id: 'look', type: 'probe', label: 'Look' }], edges: [] },
+                    },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'tc' },
+                { id: 'e2', source: 'tc', target: 'end' },
+            ],
+        } as any);
+
+        const result = await engine.execute('missing_in_try', { userId: 'u1' } as any);
+
+        expect(result.success).toBe(true);
+        expect(seenError).toEqual({
+            nodeId: 'signoff',
+            message: "No executor registered for node type 'uninstalled_step'",
+            code: 'NO_EXECUTOR',
+        });
+        expect(seenCaught?.code).toBe('NO_EXECUTOR');
+        expect(seenCaught?.message).toBe("No executor registered for node type 'uninstalled_step'");
+    });
+});

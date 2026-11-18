@@ -634,7 +634,24 @@ export const CEILINGS = new Map([
   // priced text is 27611 bytes -> ceil(27611 / 4) = 6903; the ceiling moves +42,
   // the measured remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27611 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6903],
+  // 6903 -> 6992 (2026-11-17, card #34655, its Done-when "Document it in the
+  // automation skill", ruled into the same PR by the area): one paragraph under
+  // "A flow an installed package ships" teaches `defaultActive: false` — the
+  // flow ships unarmed (`_status` `enabled: false`) until an administrator turns
+  // the packaged-flow switch on, that choice outlives restart / upgrade /
+  // reinstall, `status: 'obsolete'` disarms past the switch, and a flow
+  // authored in the deployment is refused the key. Raise path the standing
+  // ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  // NOTHING PAID DOWN: the file was read whole for a restatement of the
+  // activation switch, its default or `status` as a switch and none exists —
+  // the paragraph points at the switch the preceding paragraph introduces
+  // rather than restating it. Arithmetic in priced bytes (stamp line
+  // excluded), against `main`'s 27611 (headroom 0): the diff adds 357 bytes
+  // and removes none, so the LANDED priced text is 27968 bytes ->
+  // ceil(27968 / 4) = 6992; the ceiling moves +89, the measured addition only.
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27968 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6992],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -1073,7 +1090,22 @@ export const CEILINGS = new Map([
   // now carries it), the related-list example's "write side" comment (the paragraph above
   // says it) and "(no UI config)" (the sentence says "purely from how you model"). 16925 ->
   // 16916 bytes -> ceil(16916 / 4) = 4229; the row follows the measurement down.
-  ['skills/objectstack-data/rules/relationships.md', 4229],
+  // 4229 -> 4221: the roll-up section names the third way out of
+  // `security-rollup-source-unreadable` (the set is meant to see the total but not the
+  // children: keep the column readable and add `rollupSourceUnreadableReason` to the set's
+  // entry; refused blank or beside `readable: false`), with the acknowledged entry in the
+  // `client_viewer` example, and its mask sentence names Modify All alone (a set's own mask
+  // binds beside its own View All). +419 bytes, PAID IN FULL by restatement cut from the
+  // same file (-451), each keeping a home: the `'grid'` / `'form'` bullets (the code
+  // comments beside the three `inlineEdit` values and the smart-default sentence), the
+  // "`inlineEdit` is the write side, the related list is the read side" lead-in (the
+  // heading's "read-side mirror" and the `relatedList` comment), "part of the record's main
+  // content" (the same bullet's "full-width table in the record's detail body") and four
+  // code comments the code or the prose above them states (the junction index's "one
+  // assignment per pair", "On the PARENT object", the second "On the CHILD object's FK
+  // field", the contact example's "independent lifecycle"). 16916 -> 16884 bytes ->
+  // ceil(16884 / 4) = 4221; the row follows the measurement down.
+  ['skills/objectstack-data/rules/relationships.md', 4221],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
