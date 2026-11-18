@@ -9,10 +9,11 @@
  * lost a race; the stored owner is the winner.
  *
  * The cells cross the two answers a lost race used to get with the two unit
- * shapes the engine has: an object with no metadata `beforeUpdate` hook opens
- * no unit of work for the write; one with such a hook opens the after-abort
- * unit (`opensAfterAbortUnit`'s side-writing term). When that unit enclosed the
- * middleware chain, the loser's whole write — the authorization gate's
+ * shapes the engine has: an object with no metadata update hook opens no unit
+ * of work for the write; one with a metadata `beforeUpdate` hook opens the
+ * after-abort unit (`opensAfterAbortUnit`'s side-writing term), and so does one
+ * whose only metadata hook is a blocking `afterUpdate` (its aborting term, the
+ * fifth cell). When that unit enclosed the middleware chain, the loser's whole write — the authorization gate's
  * caller-scoped pre-image read included — waited on the single connection for
  * the winner's commit, and then read a row it no longer owned: `private`
  * answered 404 (it cannot see the row), `public_read` answered 403 (it can see
@@ -55,7 +56,9 @@ const memberOf = (userId: string) => ({
 });
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
 
-async function boot(opts: { sharingModel: 'private' | 'public_read'; beforeHook: boolean }) {
+type HookShape = 'none' | 'beforeUpdate' | 'afterUpdate';
+
+async function boot(opts: { sharingModel: 'private' | 'public_read'; hook: HookShape }) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
@@ -70,12 +73,15 @@ async function boot(opts: { sharingModel: 'private' | 'public_read'; beforeHook:
     }],
   } as never);
   await engine.syncSchemas();
-  if (opts.beforeHook) {
+  if (opts.hook !== 'none') {
     // A metadata-bound hook that does nothing: its presence alone is what
-    // makes the engine open the after-abort unit for this object's updates.
-    bindHooksToEngine(engine as never, [{ name: 'cq_touch', object: CASE, events: ['beforeUpdate'], handler: () => {} } as never], {
-      packageId: 'app:cq', logger: QUIET as never,
-    });
+    // makes the engine open the after-abort unit for this object's updates —
+    // any `beforeUpdate` (side-writing term), or a blocking `afterUpdate` whose
+    // `onError` is `abort` (aborting term).
+    const hook = opts.hook === 'afterUpdate'
+      ? { name: 'cq_after', object: CASE, events: ['afterUpdate'], onError: 'abort', handler: () => {} }
+      : { name: 'cq_touch', object: CASE, events: ['beforeUpdate'], handler: () => {} };
+    bindHooksToEngine(engine as never, [hook as never], { packageId: 'app:cq', logger: QUIET as never });
   }
   await engine.insert('sys_user', [A, B].map((id) => ({ id, name: id, email: `${id}@cq.test` })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'CQ', slug: 'cq' }], SYS);
@@ -121,36 +127,47 @@ const claim = (engine: ObjectQL, id: string, user: string) =>
 const outcome = (r: PromiseSettledResult<unknown>): string =>
   r.status === 'fulfilled' ? 'fulfilled' : `${(r.reason as any)?.code}/${(r.reason as any)?.status}`;
 
-for (const sharingModel of ['private', 'public_read'] as const) {
-  for (const beforeHook of [false, true]) {
-    describe(`[ADR-0142 D4] concurrent claims — ${sharingModel} OWD, ${beforeHook ? 'metadata beforeUpdate hook (the unit opens)' : 'no hook (no unit)'}`, () => {
-      it(`exactly one claim lands and every loser answers 409 CONCURRENT_UPDATE, over ${ROUNDS} rounds`, async () => {
-        const engine = await boot({ sharingModel, beforeHook });
-        const losers: Record<string, number> = {};
-        for (let round = 0; round < ROUNDS; round++) {
-          const id = `case_${round}`;
-          await seed(engine, { id, name: 'parked', owner_id: null, queue: QUEUE });
-          const settled = await Promise.allSettled([claim(engine, id, A), claim(engine, id, B)]);
-          const won = settled.flatMap((r, i) => (r.status === 'fulfilled' ? [[A, B][i]] : []));
-          expect(won, `round ${round}: ${settled.map(outcome).join(' | ')}`).toHaveLength(1);
-          for (const r of settled) {
-            if (r.status === 'rejected') {
-              const key = outcome(r);
-              losers[key] = (losers[key] ?? 0) + 1;
-            }
+const HOOK_LABEL: Record<HookShape, string> = {
+  none: 'no hook (no unit)',
+  beforeUpdate: 'metadata beforeUpdate hook (the unit opens)',
+  afterUpdate: 'only a blocking metadata afterUpdate hook (the unit opens)',
+};
+const CELLS: ReadonlyArray<{ sharingModel: 'private' | 'public_read'; hook: HookShape }> = [
+  { sharingModel: 'private', hook: 'none' },
+  { sharingModel: 'private', hook: 'beforeUpdate' },
+  { sharingModel: 'public_read', hook: 'none' },
+  { sharingModel: 'public_read', hook: 'beforeUpdate' },
+  { sharingModel: 'private', hook: 'afterUpdate' },
+];
+
+for (const { sharingModel, hook } of CELLS) {
+  describe(`[ADR-0142 D4] concurrent claims — ${sharingModel} OWD, ${HOOK_LABEL[hook]}`, () => {
+    it(`exactly one claim lands and every loser answers 409 CONCURRENT_UPDATE, over ${ROUNDS} rounds`, async () => {
+      const engine = await boot({ sharingModel, hook });
+      const losers: Record<string, number> = {};
+      for (let round = 0; round < ROUNDS; round++) {
+        const id = `case_${round}`;
+        await seed(engine, { id, name: 'parked', owner_id: null, queue: QUEUE });
+        const settled = await Promise.allSettled([claim(engine, id, A), claim(engine, id, B)]);
+        const won = settled.flatMap((r, i) => (r.status === 'fulfilled' ? [[A, B][i]] : []));
+        expect(won, `round ${round}: ${settled.map(outcome).join(' | ')}`).toHaveLength(1);
+        for (const r of settled) {
+          if (r.status === 'rejected') {
+            const key = outcome(r);
+            losers[key] = (losers[key] ?? 0) + 1;
           }
-          const stored = await engine.findOne(CASE, { where: { id } } as never, SYS);
-          expect((stored as any)?.owner_id, `round ${round}: the stored owner is the winner`).toBe(won[0]);
         }
-        expect(losers).toEqual({ 'CONCURRENT_UPDATE/409': ROUNDS });
-      });
+        const stored = await engine.findOne(CASE, { where: { id } } as never, SYS);
+        expect((stored as any)?.owner_id, `round ${round}: the stored owner is the winner`).toBe(won[0]);
+      }
+      expect(losers).toEqual({ 'CONCURRENT_UPDATE/409': ROUNDS });
     });
-  }
+  });
 }
 
 describe('[ADR-0142 D4] the unit around the engine body keeps the gate\'s refusals — private OWD, hooked object', () => {
   it('a row that is gone still answers 404 RECORD_NOT_FOUND', async () => {
-    const engine = await boot({ sharingModel: 'private', beforeHook: true });
+    const engine = await boot({ sharingModel: 'private', hook: 'beforeUpdate' });
     await seed(engine, { id: 'case_gone', name: 'parked', owner_id: null, queue: QUEUE });
     await engine.delete(CASE, { where: { id: 'case_gone' }, context: { isSystem: true } } as never);
     const err = await claim(engine, 'case_gone', A).then(() => undefined, (e: unknown) => e);
@@ -158,7 +175,7 @@ describe('[ADR-0142 D4] the unit around the engine body keeps the gate\'s refusa
   });
 
   it('a row the caller cannot read answers as not found, never as forbidden', async () => {
-    const engine = await boot({ sharingModel: 'private', beforeHook: true });
+    const engine = await boot({ sharingModel: 'private', hook: 'beforeUpdate' });
     await seed(engine, { id: 'case_theirs', name: 'owned', owner_id: B, queue: null });
     const err = await claim(engine, 'case_theirs', A).then(() => undefined, (e: unknown) => e);
     expect(err).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
