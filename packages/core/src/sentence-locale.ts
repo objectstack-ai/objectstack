@@ -4,11 +4,10 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
 
 /**
  * [ADR-0149 M1] The language a platform-composed sentence in a tool's result
- * is written in: ONE picker for every executor that hands a caller a finished
- * sentence (the dataset tools' `nextStep` and `sourceLine` in
- * `@objectstack/service-analytics`, the MCP record tools' `ifNotRecorded` in
- * `@objectstack/mcp`), so two members of one answer never disagree on the
- * language for the same caller.
+ * is written in: one picker shared by the dataset tools (`nextStep` and
+ * `sourceLine` in `@objectstack/service-analytics`) and the MCP record tools
+ * (`ifNotRecorded` in `@objectstack/mcp`), so those producers never disagree
+ * on the language for the same caller.
  *
  * `locales` is the caller's ladder in order, as a door hands it
  * ({@link userTextLocalesOf}: the request's locale, then the workspace

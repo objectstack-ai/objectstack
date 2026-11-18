@@ -1288,10 +1288,19 @@ const ALWAYS_ADDRESSABLE_COLUMNS: ReadonlySet<string> = new Set([
 const WHERE_LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['$and', '$or', '$nor', '$not']);
 
 /**
- * The field names a `where` the caller sent addresses on its own object, in
- * order: each condition key's first path segment (a dotted key names a
- * relation's field through its head), through the logical operators. Other
- * `$` keys are operators, never names.
+ * The name a sent field name addresses on the object itself: its first path
+ * segment. A dotted name (`owner.name`) reaches a relation's field through its
+ * head, and the head is what the object's schema lists; the rest is the
+ * related object's business. Every channel's names are read this way.
+ */
+function sentFieldHead(name: string): string {
+  return name.split('.')[0];
+}
+
+/**
+ * The field names a `where` the caller sent addresses, in order: each
+ * condition key, through the logical operators. Other `$` keys are operators,
+ * never names.
  */
 function whereFieldNames(where: unknown, into: string[]): string[] {
   if (Array.isArray(where)) {
@@ -1304,7 +1313,7 @@ function whereFieldNames(where: unknown, into: string[]): string[] {
       if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
       continue;
     }
-    into.push(key.split('.')[0]);
+    into.push(key);
   }
   return into;
 }
@@ -1344,7 +1353,8 @@ function aggregateRecordsSentFields(args: {
  * `describe_object` answer). ⛔ So an object or a field the caller's schema
  * does not show is answered exactly as one that does not exist, whatever the
  * refusal beside it says, and nothing the schema shows is ever named or
- * counted. A schema read that throws, or one with no field list, establishes
+ * counted. Each sent name is read by its head ({@link sentFieldHead}) on
+ * every channel, so a dotted name whose head the schema shows is never named. A schema read that throws, or one with no field list, establishes
  * nothing: no member.
  */
 async function notRecordedMembersOf(
@@ -1369,7 +1379,8 @@ async function notRecordedMembersOf(
       const name = (f as { name?: unknown } | null)?.name;
       if (typeof name === 'string') shown.add(name);
     }
-    const absent = [...new Set(sentFields)].filter((name) => !shown.has(name));
+    const heads = sentFields.map(sentFieldHead).filter((head) => head !== '');
+    const absent = [...new Set(heads)].filter((name) => !shown.has(name));
     if (absent.length === 0) return undefined;
     notRecorded = { object: objectName, fields: absent };
   }

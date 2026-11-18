@@ -17,14 +17,25 @@
  * the HTTP bridge's schema and locale answers are pinned in
  * `packages/runtime/src/domains/mcp-not-recorded.test.ts`).
  *
- * The stdio bridge's locale member is pinned at the bottom.
+ * The stdio door is pinned over the shared ADR-0106 case table, on the real
+ * stdio bridge and the real tools, and its locale member at the bottom.
  */
 
 import { describe, expect, it } from 'vitest';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import {
+  FLS_CONTRACT_OBJECT,
+  OBJECT_SCHEMA_MASK_CASES,
+  securityDoubleFor,
+  type ObjectSchemaMaskCase,
+} from '@objectstack/metadata-core/testing';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { McpDataBridge } from './mcp-http-tools.js';
+import { registerObjectTools, type McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
 
 const OBJECT = 'crm_deal';
@@ -148,6 +159,30 @@ describe('[#35138] record reads: a field the caller\'s schema does not show', ()
     expect(answer.isError).toBe(true);
     expect(answer.payload.notRecorded).toEqual({ object: OBJECT, fields: ['region', 'invoice_total', 'channel'] });
   });
+
+  it('a dotted name is read by its head on every channel: a head the schema shows is never named', async () => {
+    // `organization_id` is served; `organization_id.name` reaches the related
+    // object's field through it. Whatever the door refuses, the call named
+    // nothing the schema does not show.
+    const query = await callTool(bridge(), 'query_records', {
+      objectName: OBJECT,
+      where: { 'organization_id.name': 'x' },
+      fields: ['organization_id.name'],
+      orderBy: [{ field: 'organization_id.name', order: 'asc' }],
+    });
+    expect(query.isError).toBe(true);
+    expect(Object.keys(query.payload)).toEqual(['error']);
+    const aggregate = await callTool(bridge(), 'aggregate_records', {
+      objectName: OBJECT,
+      groupBy: ['organization_id.name', { field: 'organization_id.region' }],
+      aggregations: [{ function: 'sum', field: 'organization_id.amount', alias: 't', filter: { 'organization_id.kind': 'a' } }],
+    });
+    expect(aggregate.isError).toBe(true);
+    expect(Object.keys(aggregate.payload)).toEqual(['error']);
+    // A dotted name whose head the schema does not show names that head.
+    const unknownHead = await callTool(bridge(), 'query_records', { objectName: OBJECT, fields: ['invoice_lines.qty'] });
+    expect(unknownHead.payload.notRecorded).toEqual({ object: OBJECT, fields: ['invoice_lines'] });
+  });
 });
 
 describe('[#35138] the answer names only what the caller can see — CONTROL', () => {
@@ -259,4 +294,139 @@ describe('[#35138] stdio bridge: userTextLocales', () => {
     expect(await bridgeWith({}, () => { throw new Error('no i18n (test)'); }).userTextLocales!()).toEqual([]);
     expect(await bridgeWith({}, () => ({ getDefaultLocale: () => { throw new Error('boom (test)'); } })).userTextLocales!()).toEqual([]);
   });
+});
+
+/**
+ * The stdio door, over the shared ADR-0106 case table (`OBJECT_SCHEMA_MASK_CASES`,
+ * the cases every object-schema exit is judged by): the real stdio bridge,
+ * its own caller view of the object, and the real tools, with the engine
+ * refusing every read. A case's absent fields and an unreadable object are
+ * what that caller cannot see; each is answered with members byte-identical
+ * to a name that does not exist, the name aside.
+ */
+describe('[#35138] stdio door: the answer names only what the caller can see', () => {
+  const STDIO_OBJECT = FLS_CONTRACT_OBJECT.name;
+  const UNKNOWN_FIELD = 'no_such_field';
+  const UNKNOWN_OBJECT = 'no_such_object';
+  const declared = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
+  const refusing = () => refusal('PERMISSION_DENIED', 403, 'You do not have permission to perform this action.');
+
+  async function connect(testCase: ObjectSchemaMaskCase) {
+    const security = securityDoubleFor(testCase);
+    const engine = {
+      find: async () => { throw refusing(); },
+      findOne: async () => { throw refusing(); },
+      count: async () => { throw refusing(); },
+      aggregate: async () => { throw refusing(); },
+    } as unknown as IDataEngine;
+    const metadataService = {
+      listObjects: async () => [declared()],
+      getObject: async (name: string) => (name === STDIO_OBJECT ? declared() : undefined),
+      list: async () => [],
+    } as unknown as IMetadataService;
+    const bridge = createStdioDataBridge({
+      engine,
+      metadataService,
+      resolvePrincipal: async () => ({ ...testCase.context }) as unknown as ExecutionContext,
+      ...(security ? { security: () => security } : {}),
+    });
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const res = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> };
+      const text = res.content[0]!.text;
+      let payload: any;
+      try { payload = JSON.parse(text); } catch { payload = undefined; }
+      return { isError: res.isError === true, text, payload };
+    };
+    return { call, close: () => client.close() };
+  }
+
+  async function under<T>(testCase: ObjectSchemaMaskCase, run: () => Promise<T>): Promise<T> {
+    const previous = process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
+    delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
+    try {
+      return await run();
+    } finally {
+      if (previous !== undefined) process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = previous;
+    }
+  }
+
+  const fieldCases = OBJECT_SCHEMA_MASK_CASES.filter((c) => c.expect.kind === 'fields' && !c.maskingDisabled);
+  const objectCases = OBJECT_SCHEMA_MASK_CASES.filter((c) => c.expect.kind === 'absent' && !c.maskingDisabled);
+
+  it('the table carries cases of both kinds', () => {
+    expect(fieldCases.length).toBeGreaterThan(0);
+    expect(objectCases.length).toBeGreaterThan(0);
+  });
+
+  it.each(fieldCases.map((c) => [c.id, c] as const))(
+    '%s: a field the caller cannot see gets the members a field that does not exist gets',
+    async (_id, testCase) => {
+      const expected = testCase.expect as { present: readonly string[]; absent: readonly string[] };
+      await under(testCase, async () => {
+        const session = await connect(testCase);
+        try {
+          const ask = (field: string) =>
+            session.call('query_records', { objectName: STDIO_OBJECT, where: { [field]: 'x' }, fields: [field] });
+          const unknown = await ask(UNKNOWN_FIELD);
+          expect(unknown.isError).toBe(true);
+          expect(unknown.payload.notRecorded).toEqual({ object: STDIO_OBJECT, fields: [UNKNOWN_FIELD] });
+          for (const field of expected.absent) {
+            const answer = await ask(field);
+            expect(answer.isError).toBe(true);
+            expect(Object.keys(answer.payload)).toEqual(Object.keys(unknown.payload));
+            expect(membersText(answer.payload).split(field).join(UNKNOWN_FIELD)).toBe(membersText(unknown.payload));
+            for (const other of expected.absent) {
+              if (other !== field) expect(mentions(answer.text, other)).toBe(false);
+            }
+          }
+          // CONTROL: a field the caller can see is never named, nor a dotted name through it.
+          for (const field of expected.present) {
+            const answer = await session.call('query_records', {
+              objectName: STDIO_OBJECT,
+              where: { [field]: 'x' },
+              fields: [`${field}.label`],
+            });
+            expect(answer.isError).toBe(true);
+            expect(Object.keys(answer.payload)).toEqual(['error']);
+          }
+        } finally {
+          await session.close();
+        }
+      });
+    },
+  );
+
+  it.each(objectCases.map((c) => [c.id, c] as const))(
+    '%s: an object the caller cannot read gets the members an object that does not exist gets',
+    async (_id, testCase) => {
+      await under(testCase, async () => {
+        const session = await connect(testCase);
+        try {
+          for (const [tool, extra] of [
+            ['query_records', {}],
+            ['get_record', { recordId: 'r1' }],
+            ['aggregate_records', { aggregations: [{ function: 'count', alias: 'n' }] }],
+          ] as const) {
+            const unknown = await session.call(tool, { objectName: UNKNOWN_OBJECT, ...extra });
+            const hidden = await session.call(tool, { objectName: STDIO_OBJECT, ...extra });
+            expect(unknown.isError).toBe(true);
+            expect(hidden.isError).toBe(true);
+            expect(unknown.payload.notRecorded).toEqual({ object: UNKNOWN_OBJECT });
+            expect(hidden.payload.notRecorded).toEqual({ object: STDIO_OBJECT });
+            expect(Object.keys(hidden.payload)).toEqual(Object.keys(unknown.payload));
+            expect(membersText(hidden.payload).split(STDIO_OBJECT).join(UNKNOWN_OBJECT)).toBe(membersText(unknown.payload));
+            for (const field of Object.keys(FLS_CONTRACT_OBJECT.fields ?? {})) expect(mentions(hidden.text, field)).toBe(false);
+          }
+        } finally {
+          await session.close();
+        }
+      });
+    },
+  );
 });
