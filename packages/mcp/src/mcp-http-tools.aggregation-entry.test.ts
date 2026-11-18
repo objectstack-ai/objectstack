@@ -205,3 +205,127 @@ describe('aggregate_records — the aggregation entry (#28550)', () => {
     expect(entry?.required).toEqual(expect.arrayContaining(['function', 'alias']));
   });
 });
+
+/**
+ * [aggregate order and cut] A ranking question ("the top five customers by
+ * revenue") over more groups than the row cap: the tool hands the bridge's
+ * `aggregateGroups` the order and the cut plus one probe group, serves exactly
+ * the groups asked for in the order the bridge answered, and states the
+ * statement's own count of the groups before the cut (`groupCount`) and
+ * whether more existed (`truncated`). It never sorts or slices an uncut list:
+ * a bridge without `aggregateGroups` is refused, and the uncut path is not
+ * asked. The engine and driver halves are pinned in `@objectstack/objectql`
+ * (`aggregate-order-cut.test.ts`) and `@objectstack/driver-sql`
+ * (`sql-driver-aggregate-order-cut.test.ts`); the stdio bridge in
+ * `stdio-data-bridge.aggregate-order-cut.test.ts`; over a real SQLite database
+ * through the HTTP bridge in `@objectstack/runtime`
+ * (`mcp-aggregate-order-cut.test.ts`).
+ */
+describe('aggregate_records — ordered, cut and counted groups', () => {
+  const CAP = 50;
+  /** 120 customers, more than the cap: the bridge answers in its own (database) order. */
+  const groups = Array.from({ length: 120 }, (_, i) => ({ customer: `c${String(119 - i).padStart(3, '0')}`, revenue: (119 - i) * 10 }));
+
+  function makeCutBridge() {
+    const bridge = makeBridge() as RecordingBridge & { cuts: any[] };
+    bridge.cuts = [];
+    bridge.aggregateGroups = async (object: string, opts: any) => {
+      bridge.cuts.push([object, opts]);
+      const ordered = opts.orderBy[0]?.field === 'customer' && opts.orderBy[0]?.order === 'asc' ? [...groups].reverse() : groups;
+      return { rows: ordered.slice(0, opts.limit), groupCount: groups.length };
+    };
+    return bridge;
+  }
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => { runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' }); });
+
+  const call = async (bridge: RecordingBridge, args: Record<string, unknown>) => {
+    const res = await aggregate(runtime, bridge, { objectName: 'showcase_project', aggregations: [{ function: 'sum', field: 'amount', alias: 'revenue' }], groupBy: ['customer'], ...args });
+    return { ...res, body: res.refused ? undefined : JSON.parse(res.text) };
+  };
+
+  it('top five by a measure over more groups than the cap: exactly five, in order, with the total number of groups', async () => {
+    const bridge = makeCutBridge();
+    const { refused, text, body } = await call(bridge, { orderBy: [{ field: 'revenue', order: 'desc' }], limit: 5 });
+    expect(refused, text).toBe(false);
+    expect(body.rows.map((r: any) => r.customer)).toEqual(['c119', 'c118', 'c117', 'c116', 'c115']);
+    expect(body.groupCount).toBe(120);
+    expect(body.truncated).toBe(true);
+    // The order and the cut went to the bridge — one probe group past the limit — and the uncut path was never asked.
+    expect(bridge.cuts).toHaveLength(1);
+    expect(bridge.cuts[0][1]).toMatchObject({ orderBy: [{ field: 'revenue', order: 'desc' }], limit: 6, groupBy: ['customer'] });
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('ordered by a group key, ascending', async () => {
+    const bridge = makeCutBridge();
+    const { body } = await call(bridge, { orderBy: [{ field: 'customer', order: 'asc' }], limit: 3 });
+    expect(body.rows.map((r: any) => r.customer)).toEqual(['c000', 'c001', 'c002']);
+    expect(body.groupCount).toBe(120);
+  });
+
+  it('an order with no limit is cut at the cap, and says so', async () => {
+    const bridge = makeCutBridge();
+    const { body } = await call(bridge, { orderBy: [{ field: 'revenue', order: 'desc' }] });
+    expect(body.rows).toHaveLength(CAP);
+    expect(body.truncated).toBe(true);
+    expect(bridge.cuts[0][1].limit).toBe(CAP + 1);
+  });
+
+  it('a cut that drops nothing carries no truncated flag', async () => {
+    const bridge = makeBridge() as RecordingBridge;
+    bridge.aggregateGroups = async () => ({ rows: [{ customer: 'a', revenue: 1 }], groupCount: 1 });
+    const { body } = await call(bridge, { orderBy: [{ field: 'revenue', order: 'desc' }], limit: 5 });
+    expect(body).toEqual({ rows: [{ customer: 'a', revenue: 1 }], groupCount: 1, totalGroups: 1 });
+  });
+
+  it('the engine\'s refusal of an order key (INVALID_SORT, naming the columns) reaches the caller as its envelope', async () => {
+    const bridge = makeBridge() as RecordingBridge;
+    bridge.aggregateGroups = async () => {
+      throw Object.assign(new Error("aggregate('showcase_project') ordered or cut by group: `orderBy[0]` names 'amount', which is not a column of the aggregated row. … which here are: customer, revenue. The query was NOT run and nothing was read."), {
+        code: 'INVALID_SORT', status: 400, httpStatus: 400,
+      });
+    };
+    const { refused, text } = await call(bridge, { orderBy: [{ field: 'amount', order: 'desc' }], limit: 5 });
+    expect(refused).toBe(true);
+    const { error } = JSON.parse(text);
+    expect({ code: error.code, status: error.status }).toEqual({ code: 'INVALID_SORT', status: 400 });
+    expect(error.message).toContain('customer, revenue');
+  });
+
+  it('a bridge that cannot order and cut groups refuses (NOT_IMPLEMENTED), and never sorts an uncut list', async () => {
+    const bridge = makeBridge();
+    const { refused, text } = await call(bridge, { orderBy: [{ field: 'revenue', order: 'desc' }], limit: 5 });
+    expect(refused).toBe(true);
+    expect(JSON.parse(text).error).toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501 });
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('a limit past the cap, a sort spelling and a malformed order are refused at the door', async () => {
+    const bridge = makeCutBridge();
+    expect((await call(bridge, { limit: CAP + 1 })).refused).toBe(true);
+    const sort = await call(bridge, { sort: [{ field: 'revenue', order: 'desc' }] });
+    expect(sort.refused).toBe(true);
+    expect(sort.text).toContain('orderBy');
+    expect((await call(bridge, { orderBy: [{ field: 'revenue', order: 'down' }] })).refused).toBe(true);
+    expect(bridge.cuts).toEqual([]);
+  });
+
+  it('CONTROL — no order and no limit: the uncut path as before, now with groupCount beside totalGroups', async () => {
+    const bridge = makeCutBridge();
+    const { body } = await call(bridge, {});
+    expect(body).toEqual({ rows: [{ n: 2, all: 5 }], groupCount: 1, totalGroups: 1 });
+    expect(bridge.cuts).toEqual([]);
+    expect(bridge.calls).toHaveLength(1);
+  });
+
+  it('tools/list declares orderBy and limit on aggregate_records', async () => {
+    const bridge = makeCutBridge();
+    const listed = await rpc(runtime, bridge, 'tools/list');
+    const tool = listed.result.tools.find((t: any) => t.name === 'aggregate_records');
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(expect.arrayContaining(['orderBy', 'limit']));
+    expect(tool.inputSchema.properties.limit.maximum).toBe(CAP);
+    expect(tool.description).toMatch(/groupCount/);
+  });
+});
