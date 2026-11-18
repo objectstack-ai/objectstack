@@ -89,6 +89,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
 
+// `ReportView` reaches a dynamic `import('@objectstack/lint')` (through the panel's
+// inspector): pay its load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ReportView } from './ReportView';
 
 const PKG = 'com.qa.tr';
