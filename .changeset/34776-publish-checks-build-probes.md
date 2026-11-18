@@ -7,7 +7,7 @@
 
 feat(lint): five publish-time checks for metadata that passes the schema and does nothing at run time, and four build probes over what landed
 
-Clause-②: no (narrowing: six publish-time refusals of metadata the schema accepts today)
+Clause-②: no (narrowing: four publish-time refusals of metadata the schema accepts today)
 Metadata-protocol: narrowed
 Skills-docs: follow-up #35245
 
