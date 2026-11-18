@@ -113,17 +113,25 @@ defineFlow({
 });
 ```
 
+As JSON the flow is that literal without `defineFlow(...)`; its start node:
+
+```json
+{ "id": "start", "type": "start", "label": "Daily Sweep", "config": { "timeRelative": {
+    "object": "contracts", "dateField": "end_date", "offsetDays": [60, 30, 7],
+    "filter": { "status": "active" } } } }
+```
+
 **Date EQUALITY never matches**, so a hand-rolled sweep filters windows, not
 days: a `date` field carries a time component, so `field == daysFromNow(N)` (or
 `{ $in: [...] }`) compares two differently-timed timestamps and silently returns
 nothing (build warns `flow-date-equality-filter`). Tier each threshold as a
-one-day **window** (`$gte`/`$lt`):
+one-day **window** (`$gte`/`$lt`) — this `filter`, plus the same window at
+30 / 31 and at 60 / 61 as further `$or` entries:
 
-```ts
-filter: { status: 'active', $or: [
-  { end_date: { $gte: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' },
-                $lt:  { dialect: 'cel', source: 'isoDate(daysFromNow(8))' } } },
-  // …and the same one-day window at 30 / 31 and at 60 / 61
+```json
+{ "status": "active", "$or": [
+  { "end_date": { "$gte": { "dialect": "cel", "source": "isoDate(daysFromNow(7))" },
+                  "$lt":  { "dialect": "cel", "source": "isoDate(daysFromNow(8))" } } }
 ] }
 ```
 
