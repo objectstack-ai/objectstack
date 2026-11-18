@@ -100,26 +100,27 @@ driver layer. See [indexing.md](./indexing.md) for index options.
 
 ## State Machine Validation
 
-```typescript
-validations: [
-  {
-    name: 'status_flow',
-    type: 'state_machine',
-    field: 'status',
-    initialStates: ['draft'],   // the one state a record may be CREATED in
-    transitions: {
-      draft: ['submitted', 'cancelled'],
-      submitted: ['in_review', 'cancelled'],
-      in_review: ['approved', 'rejected'],
-      approved: ['published'],
-      rejected: ['draft'],
-      published: [],  // Terminal state
-      cancelled: [],  // Terminal state
-    },
-    message: 'Invalid status transition',
-    severity: 'error',
+A `validations[]` entry. `initialStates` holds the one state a record may be
+CREATED in; `[]` marks a terminal state:
+
+```json
+{
+  "name": "status_flow",
+  "type": "state_machine",
+  "field": "status",
+  "initialStates": ["draft"],
+  "transitions": {
+    "draft": ["submitted", "cancelled"],
+    "submitted": ["in_review", "cancelled"],
+    "in_review": ["approved", "rejected"],
+    "approved": ["published"],
+    "rejected": ["draft"],
+    "published": [],
+    "cancelled": []
   },
-]
+  "message": "Invalid status transition",
+  "severity": "error"
+}
 ```
 
 ## Format Validation

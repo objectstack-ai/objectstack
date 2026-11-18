@@ -73,9 +73,11 @@ customer has since edited.
 |:-----|:---------|:---------|
 | `ignore` | **Default.** Create-only: insert a record whose row is missing (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), leave an existing row exactly as it is | Business and starter data the customer owns once it is loaded |
 | `upsert` | Create if new (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), and on **every** replay write each declared column back onto the matched row | Reference data the package must keep current |
-| `insert` | Insert **every** record unconditionally — no existing-row check, so it **duplicates the table on each replay boot** ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)). Rarely what you want | Append-only rows loaded exactly once (never re-run) |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
-| `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
+
+Every mode matches on `externalId`, so a replay finds the row an earlier load wrote.
+The unkeyed modes `insert` and `replace` are retired: see
+[Moving off `insert` and `replace`](#moving-off-insert-and-replace).
 
 ### `ignore` — The Default (Create-Only)
 
@@ -126,32 +128,57 @@ customer or a job owns, mark those columns create-only — see
   `mode: 'upsert'` on the datasets that must stay current.
 </Callout>
 
-### `replace` — Insert Into an Already-Cleared Table
+### Moving off `insert` and `replace`
+
+`insert` and `replace` matched no existing row, so every replay inserted each
+record again: a 3-row fixture became 6, then 9
+([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)), and a person
+reference the first load had to leave empty stayed empty on the first row while
+only a later copy named the person. `replace` expected the caller to clear the
+table first, and no load ever clears one. Both were removed in
+`@objectstack/spec` 18.7.0 ([#34613](https://github.com/objectstack-ai/objectstack/issues/34613)):
+
+- **Authoring refuses them.** `defineSeed`, `defineStack`, `os validate`, `os build`
+  and the metadata save and publish doors reject `mode: 'insert'` or
+  `mode: 'replace'` with a message that names the fix.
+- **A stored dataset is refused alone.** A package or a compiled artifact
+  (`objectstack.json`) built before the change, or a seed already stored, can
+  still carry one. The environment still boots: the boot seed, the organization
+  replay, the dev hot reload and a package install or upgrade refuse that one
+  dataset. It writes nothing, the load reports it as an error with the same
+  message, and every other dataset and definition loads.
+- **Rows already duplicated stay.** Earlier replays wrote them as data; nothing
+  deletes them. Remove the extra copies yourself if they matter.
+
+To convert a dataset, declare which field identifies a row, then drop the mode
+(or declare `upsert` for reference data the package keeps current):
+
+1. **A field names the row** (a code, a slug, an email): set `externalId` to it.
+2. **No single field does** (a join table, a line item under a parent): set
+   `externalId` to the list of fields that together identify a row, for example
+   `['team', 'project']`. Reference fields are matched by their resolved ids. A
+   reference the first load has to leave empty (a person who has not signed up
+   yet) still belongs in the key: each later load finds that row again by the
+   key as authored, and the load that can resolve the person fills it in. See
+   [Composite natural key](#composite-externalid--join--junction-tables).
+3. **The records carry their own ids**: set `externalId: 'id'`.
 
 ```typescript
-// ⚠️ The seed loader does NOT delete existing records for you — `replace`
-// always inserts. Truncate/clear the table yourself before this seed runs,
-// or every load will attempt to insert duplicate rows.
-// Only use for cache or lookup tables with no user-generated data.
-defineSeed(ExchangeRateCache, {
-  externalId: 'key',
+// Before — refused since @objectstack/spec 18.7.0
+defineSeed(ExchangeRate, {
   mode: 'replace',
-  env: ['dev'],
-  records: [
-    { key: 'USD_EUR', rate: 0.92 },
-    { key: 'USD_GBP', rate: 0.79 },
-  ],
+  records: [{ key: 'USD_EUR', rate: 0.92 }],
+});
+
+// After — one row per key, written once
+defineSeed(ExchangeRate, {
+  externalId: 'key',
+  records: [{ key: 'USD_EUR', rate: 0.92 }],
 });
 ```
 
-### `insert` — Not Idempotent (Avoid for Replayed Seeds)
-
-Seeds are **replayed** — they re-load on every dev-server boot and every package
-re-publish, not applied once. `insert` writes every record with **no existing-row
-check**, so a replayed `insert` dataset duplicates its table on each restart
-(a 3-row fixture becomes 6, then 9 — [#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
-It is almost never the right mode: leave `mode` unset (create-only), or declare
-`upsert` for reference data, with a stable `externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
+Rebuild the package (and reinstall it where it was installed with
+`os package install`) so the stored body carries the new declaration.
 
 ### A Deleted Seed Row Stays Deleted
 
@@ -243,8 +270,8 @@ defineSeed(Instalment, {
   out of the write: the row keeps the values the jobs gave it, while `amount`
   (`applyOn: 'always'`, the default) is refreshed. A row whose only differences
   are create-only columns is not written at all.
-- An `update` dataset never writes a create-only column. `insert`, `ignore` and
-  `replace` never update a matched row, so the policy changes nothing there.
+- An `update` dataset never writes a create-only column. `ignore` never updates
+  a matched row, so the policy changes nothing there.
 - A create-only **reference** on a matched row is not resolved at all, so a
   replay neither re-points it nor reports it.
 - A column of the `externalId` is what the row was matched by, so it stays in
@@ -597,8 +624,9 @@ const membershipsSeed = defineSeed(ProjectMembership, {
 });
 ```
 
-Without a composite key such a table can only fall back to `mode: 'insert'`, which
-duplicates on every replay boot ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
+Without a composite key such a table has nothing to match a replay on. The
+unkeyed `mode: 'insert'` it once fell back to duplicated on every replay boot
+([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)) and is retired.
 
 ---
 
@@ -865,8 +893,8 @@ see [A Fallback Set](#a-fallback-set--fallback-true).
 
 The default, `ignore`, is idempotent and never overwrites an edit. Declare a mode only
 when the use case requires it — `upsert` for reference data the package keeps current
-(with `applyOn: 'create'` on the columns the customer or a job owns), or `replace`
-for ephemeral cache tables.
+(with `applyOn: 'create'` on the columns the customer or a job owns), or `update`
+for a migration patch on rows that already exist.
 
 ### Declare a dependency no field expresses
 
@@ -896,7 +924,7 @@ function defineSeed<
   objectDef: TObj,
   config: {
     externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
-    mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'ignore'
+    mode?: 'update' | 'upsert' | 'ignore'; // default: 'ignore'
     columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale

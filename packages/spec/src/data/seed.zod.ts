@@ -7,6 +7,7 @@ import { z } from 'zod';
  * Defines how the engine handles existing records when a seed is applied.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { enumWithRetiredValues } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { LocaleSchema } from '../system/translation.zod';
@@ -21,13 +22,58 @@ import {
   SeedFileReferenceSchema,
   isSeedFileReference,
 } from './seed-file.zod';
-export const SeedMode = z.enum([
-  'insert',    // Insert every record, no match: each replay inserts them again (a row the database refuses is that row's error)
+/**
+ * The fix both retired modes share: a seed row's identity is declared, never
+ * guessed by the loader (#34613, ruling 6942780880).
+ */
+const SEED_MODE_RETIRED_FIX =
+  'Declare the rows\' identity instead: keep the default `mode: \'ignore\'` (or `\'upsert\'`) and set '
+  + '`externalId` to the field that names a row, to a list of fields when no single field does (a junction '
+  + 'table\'s `[\'team\', \'project\']`), or to `\'id\'` when the '
+  + 'records carry their own ids.';
+
+/**
+ * The parse refusals an author meets for the two unkeyed modes (ADR-0049
+ * enforce-or-remove; `enumWithRetiredValues`, `../shared/retired-key.ts`).
+ * A seed is replayed — every single-tenant boot, every package install or
+ * upgrade, every publish — and neither mode matched a row, so each replay
+ * inserted every record again: the table grew by the dataset on every restart,
+ * and a person reference the first load had to leave NULL stayed NULL on the
+ * first row while a later copy got it (#34613, measured 1 → 2 → 3 rows over
+ * three boots). `replace` promised a table "the caller cleared" and no load
+ * path ever cleared one. No D2 conversion: which field names a row is the
+ * author's to say. The D3 semantic entry `seed-mode-insert-replace-retired`
+ * carries that judgement.
+ */
+const SEED_MODE_INSERT_RETIRED =
+  "`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — a seed is "
+  + 'replayed on every boot, package install and publish, and `insert` matched no existing row, so every replay '
+  + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
+const SEED_MODE_REPLACE_RETIRED =
+  "`seed.mode: 'replace'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it inserted "
+  + 'every record and left clearing the table to the caller, and no load ever clears one, so every replay '
+  + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
+
+/** The live seed modes, in the order the reference documents them. */
+const SEED_MODE_VALUES = [
   'update',    // Only update found records, ignore new
   'upsert',    // Create new or update existing: every replay writes the declared columns back
-  'replace',   // Insert every record, no match, deleting nothing: for a cache table the caller cleared
-  'ignore'     // Create-only (the default): insert missing rows, leave existing rows alone
-]);
+  'ignore',    // Create-only (the default): insert missing rows, leave existing rows alone
+] as const;
+
+const SEED_MODE_RETIRED = { insert: SEED_MODE_INSERT_RETIRED, replace: SEED_MODE_REPLACE_RETIRED };
+
+/**
+ * [#34613] The retired `SeedMode` values, for the doors that hold a STORED
+ * seed (a compiled artifact, an installed package body, a stored seed item):
+ * such a door hands a dataset declaring one to the seed load, which refuses
+ * that dataset alone with `SeedMode`'s own prescription, instead of failing
+ * every other dataset and definition with it. Membership only: the
+ * prescription is always read from `SeedMode`, never restated.
+ */
+export const RETIRED_SEED_MODE_VALUES: readonly string[] = Object.freeze(Object.keys(SEED_MODE_RETIRED));
+
+export const SeedMode = enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED);
 
 /**
  * Seed Column — the write policy a seed dataset declares for one of its
@@ -47,8 +93,8 @@ export const SeedColumnSchema = lazySchema(() => strictObject({
    * replay's no-op check, not written, and — a reference column — not
    * resolved and not deferred to pass 2, so nothing the load does afterwards
    * writes it back. A row the load creates gets it like any other column.
-   * `insert`, `ignore` and `replace` never update a matched row, so the policy
-   * changes nothing on those modes.
+   * `ignore` never updates a matched row, so the policy changes nothing on
+   * that mode.
    *
    * A column of the dataset's `externalId` is the key the row was matched by:
    * it stays in the matched row's update whatever it declares, as an import's
@@ -155,8 +201,9 @@ export const SeedSchema = lazySchema(() => strictObject({
    * — a list of field names — is required for objects with no single-field
    * natural key, most commonly a **join / junction table** keyed by both of its
    * foreign keys (e.g. `externalId: ['team', 'project']`). Without it such a
-   * dataset can only run `mode: 'insert'`, which re-inserts every row on each
-   * replay boot and duplicates the table (framework#3434). The reference fields
+   * dataset has no key to match a replay on (the unkeyed `insert` mode, which
+   * re-inserted every row on each replay boot and duplicated the table —
+   * framework#3434 — is retired, #34613). The reference fields
    * are matched by their RESOLVED ids, so a composite of foreign keys dedupes
    * correctly across restarts.
    */
@@ -215,9 +262,8 @@ export const SeedSchema = lazySchema(() => strictObject({
       'is create-only: a missing row is inserted and an existing row is left as it is, so a replay ' +
       '(every boot, a package install or upgrade, a publish) never writes a seeded value back over a ' +
       'later edit. `upsert` also writes every declared column back onto the matched row on each replay; ' +
-      'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
-      '`insert` inserts every record with no match, so each replay inserts them again, and `replace` does the ' +
-      'same and deletes nothing: it is for a table the caller cleared. On the loads that seed an organization ' +
+      'declare it for reference data the package keeps current. `update` writes matched rows only. Every mode ' +
+      'matches on `externalId`, so a replay finds the row an earlier load wrote instead of inserting it again. On the loads that seed an organization ' +
       '(the boot seed, a seed-replayer replay, the dev hot reload, a package install or upgrade), an `ignore` or ' +
       '`upsert` row that landed once and was later deleted is not inserted again; a publish, or a load that ' +
       'names no organization and finds no sole one, keeps no such record, and seed-replayer called with ' +

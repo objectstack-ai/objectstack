@@ -2,6 +2,7 @@
 
 import type { IDataEngine, IFieldFileService, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
 import type {
+  SeedLoaderRequest,
   SeedLoaderRequestParsed,
   SeedLoaderResultParsed,
   SeedLoaderConfig,
@@ -16,6 +17,9 @@ import type {
 } from '@objectstack/spec/data';
 import {
   SeedLoaderConfigSchema,
+  SeedLoaderRequestSchema,
+  SeedMode,
+  RETIRED_SEED_MODE_VALUES,
   isMultiValueField,
   isTenancyDisabled,
   referenceTargetOf,
@@ -426,6 +430,13 @@ function perOrganizationSeedRowId(authoredId: string, organizationId: string): s
 const SEED_LANDED_KEY_OBJECT = 'sys_seed_landed_key';
 
 /**
+ * [#34613] The `SeedMode` values retired by ruling 6942780880 that a stored
+ * seed can still carry. Only membership is read here: the prescription a
+ * refused dataset reports is `SeedMode`'s own refusal.
+ */
+const RETIRED_SEED_MODES: ReadonlySet<string> = new Set(RETIRED_SEED_MODE_VALUES);
+
+/**
  * [#31021] The key a landed seed row is recorded under in
  * {@link SEED_LANDED_KEY_OBJECT}: the dataset's `externalId` field names, each
  * with the value the row is matched by, JSON-encoded (`[["name","Acme"]]`).
@@ -508,8 +519,8 @@ interface LandedKeyLedger {
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references — pass 2 writes a deferred
  *   reference back through the source row's INTERNAL id captured at insert
- *   time (commit 9a884c6e4), so it heals KEYLESS datasets (`mode: 'insert'`, no
- *   `externalId`) the same as keyed ones
+ *   time (commit 9a884c6e4), so it heals a row whose key evaluates empty the
+ *   same as a keyed one
  * - Dry-run validation mode
  * - Upsert support honoring SeedSchema mode
  * - Idempotent replay: an upsert/update whose declared fields already match
@@ -1598,6 +1609,66 @@ export class SeedLoaderService implements ISeedLoaderService {
     return fromMetadata;
   }
 
+  /**
+   * [#34613] Load a request built from STORED seeds: the loads that replay a
+   * seed the author is not there to fix — the single-tenant boot seed, the
+   * per-organization replay, the dev hot reload, a package install, upgrade
+   * or sample-data reseed.
+   *
+   * `SeedMode` retired `insert` and `replace` (ruling 6942780880, ADR-0049):
+   * neither matched a row, so every replay inserted each record again. A
+   * package built or a seed stored before the retirement can still carry one,
+   * and the request parse would refuse the WHOLE load over it. Here that
+   * dataset alone is refused: it writes nothing, its prescription (the
+   * `SeedMode` refusal, read from the schema, never restated) becomes one
+   * error of the result with `success: false`, and every other dataset loads.
+   * No log line of its own: the refusal is handed to the caller, which
+   * reports a failed load's errors as it reports any other. (A compiled
+   * artifact reaches here too: the artifact door parses the rest of the
+   * artifact without such a dataset, see `@objectstack/metadata`'s
+   * `artifact-retired-seed-modes.ts`; and `loadDataset` refuses the mode again
+   * for a caller that skips this funnel.)
+   *
+   * The publish doors do not come here. A publish has its author present, so
+   * it parses the request itself and refuses the whole publish with the same
+   * prescription.
+   *
+   * Every other problem of the request is the parse's, as before: it throws.
+   */
+  async loadStored(request: {
+    seeds: ReadonlyArray<unknown>;
+    config?: SeedLoaderRequest['config'];
+  }): Promise<SeedLoaderResultParsed> {
+    const admitted: unknown[] = [];
+    const refusals: ReferenceResolutionError[] = [];
+    for (const seed of request.seeds) {
+      const mode = (seed as { mode?: unknown } | null)?.mode;
+      const verdict = typeof mode === 'string' && RETIRED_SEED_MODES.has(mode) ? SeedMode.safeParse(mode) : undefined;
+      if (!verdict || verdict.success) {
+        admitted.push(seed);
+        continue;
+      }
+      const objectName = String((seed as { object?: unknown }).object ?? '(unnamed)');
+      refusals.push({
+        sourceObject: objectName,
+        field: 'mode',
+        targetObject: objectName,
+        targetField: '(dataset)',
+        attemptedValue: mode,
+        // The mode is the dataset's, not a row's; no row was attempted.
+        recordIndex: 0,
+        message: `Seed dataset for '${objectName}' was not loaded: ${verdict.error.issues[0]?.message ?? `mode '${mode}' is retired`}`,
+      });
+    }
+    if (refusals.length === 0) return this.load(SeedLoaderRequestSchema.parse({ config: {}, ...request }));
+    // Every dataset refused: there is nothing to load (and the request schema
+    // asks for at least one dataset), so the answer is the empty load, failed.
+    const result = admitted.length === 0
+      ? this.buildEmptyResult(SeedLoaderConfigSchema.parse(request.config ?? {}), 0)
+      : await this.load(SeedLoaderRequestSchema.parse({ config: {}, ...request, seeds: admitted }));
+    return { ...result, success: false, errors: [...refusals, ...result.errors] };
+  }
+
   async validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResultParsed> {
     const parsedConfig = SeedLoaderConfigSchema.parse({ ...config, dryRun: true });
     // `datasets` is the AUTHOR state (that is what `validate` takes); `load`
@@ -1622,6 +1693,44 @@ export class SeedLoaderService implements ISeedLoaderService {
   ): Promise<SeedLoadResultParsed> {
     const objectName = dataset.object;
     const mode = dataset.mode || config.defaultMode;
+    // [#34613] A mode outside the live `SeedMode` set refuses the dataset HERE,
+    // whatever the caller parsed: `load()` and `validate()` take requests they
+    // do not parse, and the retired `insert` / `replace` would otherwise fall to
+    // the default arm below and insert every record again on each replay. The
+    // refusal writes nothing, counts every record errored, and carries the
+    // schema's own prescription. (No mode at all, a request built without the
+    // parse's defaults, keeps its old path below.)
+    const modeVerdict = mode === undefined ? undefined : SeedMode.safeParse(mode);
+    if (modeVerdict && !modeVerdict.success) {
+      const error: ReferenceResolutionError = {
+        sourceObject: objectName,
+        field: 'mode',
+        targetObject: objectName,
+        targetField: '(dataset)',
+        attemptedValue: mode,
+        // The mode is the dataset's, not a row's; no row was attempted.
+        recordIndex: 0,
+        message: `Seed dataset for '${objectName}' was not loaded: ${modeVerdict.error.issues[0]?.message ?? `mode '${String(mode)}' is not a seed mode`}`,
+      };
+      allErrors.push(error);
+      this.logger.error(`[SeedLoader] ${error.message}`, undefined, { object: objectName, mode });
+      return {
+        object: objectName,
+        mode,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        errored: dataset.records.length,
+        total: dataset.records.length,
+        referencesResolved: 0,
+        referencesDeferred: 0,
+        referencesDropped: 0,
+        summariesStale: 0,
+        landedIds: [],
+        insertedIds: [],
+        errors: [error],
+      };
+    }
     const externalId = dataset.externalId || 'name';
     // [#25761] Left out of every write to a row this dataset MATCHED — see
     // `matchesExistingRow` in the record loop below.
@@ -1704,7 +1813,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
           `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
           `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
-          `Set externalId to a field the object declares and each record carries, or use mode 'insert'.`,
+          `Set externalId to a field the object declares and each record carries, a list of fields when no ` +
+          `single field names a row, or 'id' when the records carry their own ids.`,
         { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
       );
     }
@@ -1733,8 +1843,8 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // [#31021] The record of landed seed rows, for the datasets that insert a
     // keyed row they do not find (`upsert`, `ignore`): the modes the
-    // create-only rule reaches. `update` never inserts; `insert` / `replace`
-    // match no key.
+    // create-only rule reaches. `update` never inserts. (The unkeyed
+    // `insert` / `replace` modes are retired, #34613.)
     const recordedKeys = this.landedKeyLedger && (mode === 'upsert' || mode === 'ignore')
       ? await this.landedKeysOf(objectName)
       : undefined;
@@ -1768,8 +1878,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // gets the batched path below. See framework#2678.
     const hasSelfRef = objectRefs.some(ref => ref.targetObject === objectName);
 
-    // Records resolved as inserts (mode 'insert'/'replace', or an unmatched
-    // upsert/ignore) are buffered here and flushed in batches through the
+    // Records resolved as inserts (an unmatched upsert/ignore) are buffered here and flushed in batches through the
     // engine's array-form insert() — one round-trip per batch instead of one
     // per record, with transient-error retry and per-row degradation on a
     // logical/validation failure. See framework#2678.
@@ -1785,9 +1894,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // unlike the `insertedRecords` registrations, which need a non-empty
     // natural key. Once the dataset has fully written, the deferred updates it
     // pushed are annotated from this map (see the loop after the final flush),
-    // so pass 2 back-fills BY INTERNAL ID and a KEYLESS dataset (`mode:
-    // 'insert'`, no `externalId` — the honest authoring for an engine-owned
-    // object with no natural key) heals exactly like a keyed one. Before this,
+    // so pass 2 back-fills BY INTERNAL ID and a row whose key evaluates empty
+    // heals exactly like a keyed one (the keyless `insert` mode this was first
+    // written for is retired, #34613). Before this,
     // pass 2 re-resolved the source row through its externalId and a keyless
     // deferral was structurally unreachable: it resolved the target, then
     // dropped the link ("empty externalId, so no internal id").
@@ -2311,8 +2420,8 @@ export class SeedLoaderService implements ISeedLoaderService {
        * asks. The same lookup {@link SeedLoaderService.decideWriteAction}
        * makes: the record's natural key, as resolved so far, against the rows
        * pre-loaded for the modes that match one (`upsert`, `update`,
-       * `ignore`). A dry run and the `insert` / `replace` modes pre-load
-       * nothing, so every row they see is one they create.
+       * `ignore`). A dry run pre-loads nothing, so every row it sees is one
+       * it creates.
        */
       const matchesExistingRow = (): boolean =>
         existingRowsFor()?.has(this.externalIdKey(record, externalId)) === true;
@@ -4019,11 +4128,6 @@ export class SeedLoaderService implements ISeedLoaderService {
     const opts = this.writeOptionsFor(rowOrganization) as any;
 
     switch (mode) {
-      case 'insert': {
-        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
-        return { action: 'inserted', id: this.extractId(result) };
-      }
-
       case 'update': {
         if (!existing) {
           return { action: 'skipped' };
@@ -4058,12 +4162,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         return { action: 'inserted', id: this.extractId(result) };
       }
 
-      case 'replace': {
-        // Replace mode: just insert (caller should have cleared the table)
-        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
-        return { action: 'inserted', id: this.extractId(result) };
-      }
-
+      // The retired `insert` / `replace` (#34613) never reach here:
+      // `loadDataset` refuses a mode outside the live set before any write.
       default: {
         const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
@@ -4109,8 +4209,6 @@ export class SeedLoaderService implements ISeedLoaderService {
           : { action: 'update', id: this.extractId(existing)! };
       case 'ignore':
         return existing ? { action: 'skip', id: this.extractId(existing) } : { action: 'insert' };
-      case 'insert':
-      case 'replace':
       default:
         return { action: 'insert' };
     }
@@ -5476,8 +5574,8 @@ interface DeferredUpdate {
    * The source record's INTERNAL id, captured at the moment its pass-1 write
    * landed (commit 9a884c6e4). This is the handle pass 2 writes the resolved reference
    * back through: it exists for every row this load actually wrote —
-   * including rows of a KEYLESS dataset (`mode: 'insert'`, no `externalId`)
-   * and rows whose composite key evaluated to the empty string — so the
+   * including rows whose key (single or composite) evaluated to the empty
+   * string — so the
    * "pass 2 resolved the target and had nowhere to write it" loss (#5127) is
    * reduced to the one case where it is true: the source row never landed.
    *

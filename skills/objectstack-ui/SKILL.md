@@ -130,13 +130,18 @@ type's keys: [Navigation](./rules/navigation.md).
 ## Actions
 
 **An operation is an `action`, never a view, and a write button must write.**
-"Mark as done", "approve", "set status to X" is `defineAction` with
-`objectName` and `locations`; with neither `locations` nor a view naming it,
+"Mark as done", "approve", "set status to X" is an action (`defineAction` in
+TypeScript) with `objectName` and `locations`; with neither `locations` nor a view naming it,
 it renders nowhere. `ctx.record` is a read-only snapshot and the body's return
 value is applied to nothing: a body that returns or assigns the new values
-reports success and changes nothing. Call the API: `type: 'script'`,
-`body: { language: 'js', source: "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });", capabilities: ['api.write'] }`,
-with the option `value`, never its label ([Actions](./rules/actions.md)).
+reports success and changes nothing. Call the API, with the option `value`,
+never its label ([Actions](./rules/actions.md)):
+
+```json
+{ "name": "mark_done", "label": "Mark as done", "objectName": "task", "locations": ["record_header"],
+  "type": "script", "body": { "language": "js", "capabilities": ["api.write"],
+    "source": "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });" } }
+```
 
 ### Action Types
 

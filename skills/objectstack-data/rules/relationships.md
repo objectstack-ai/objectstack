@@ -183,20 +183,17 @@ A parent `summary` field aggregates a child collection. The engine recomputes it
 **server-side** whenever a child is inserted/updated/deleted (inside the same
 transaction as the write, so it's consistent).
 
-```typescript
+```json
 {
-  type: 'summary',
-  summaryOperations: {
-    object: 'invoice_line',        // child object to aggregate
-    field: 'amount',               // child field to aggregate (ignored for count)
-    function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
-    // relationshipField: 'invoice' // optional; auto-detected from the child's
-                                     // master_detail/lookup field referencing
-                                     // this parent when omitted
-    // filter: { status: 'received' } // optional; see below
-  },
+  "type": "summary",
+  "summaryOperations": { "object": "invoice_line", "field": "amount", "function": "sum" }
 }
 ```
+
+`object` is the child object to aggregate, `field` its field (ignored for
+`count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
+`relationshipField` (auto-detected from the child's `master_detail`/`lookup`
+field referencing this parent when omitted) and `filter` (below).
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
 
@@ -233,14 +230,19 @@ blank or beside `readable: false`); neither → mask the summary on that set,
 after removing any Modify All it holds on the parent (it overrides the mask).
 Never add the reason to silence a total the request withholds: mask it.
 
-```typescript
-definePermissionSet({
-  name: 'client_viewer',
-  objects: { project: { allowRead: true } },  // no `task` read: warned
-  fields: { 'project.task_count': { readable: false } },  // the mask: resolved
-  // or, clients are meant to see the count: acknowledged, a note
-  // fields: { 'project.task_count': { readable: true, rollupSourceUnreadableReason: 'Clients see progress counts, not tasks' } },
-})
+A permission set (in TypeScript, the argument of `definePermissionSet(...)`)
+with no `task` read — warned; `task_count` masked — resolved; `hours_total`,
+which clients are meant to see, acknowledged — a note:
+
+```json
+{
+  "name": "client_viewer",
+  "objects": { "project": { "allowRead": true } },
+  "fields": {
+    "project.task_count": { "readable": false },
+    "project.hours_total": { "readable": true, "rollupSourceUnreadableReason": "Clients see progress totals, not tasks" }
+  }
+}
 ```
 
 ## Inline Editing (Master-Detail Entry)

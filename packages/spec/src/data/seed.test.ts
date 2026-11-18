@@ -5,11 +5,24 @@ import { FieldMappingEntrySchema } from '../api/export.zod';
 
 describe('SeedMode', () => {
   it('should accept valid dataset modes', () => {
-    const validModes = ['insert', 'update', 'upsert', 'replace', 'ignore'];
+    const validModes = ['update', 'upsert', 'ignore'];
     
     validModes.forEach(mode => {
       expect(() => SeedMode.parse(mode)).not.toThrow();
     });
+  });
+
+  // [#34613] The two unkeyed modes are retired (ADR-0049 enforce-or-remove):
+  // each refusal names the mode, the version and the keyed fix.
+  it.each([
+    ['insert', /`seed\.mode: 'insert'` was removed in @objectstack\/spec 18\.7\.0.*every replay.*inserted each record again.*`mode: 'ignore'`.*`externalId`/s],
+    ['replace', /`seed\.mode: 'replace'` was removed in @objectstack\/spec 18\.7\.0.*no load ever clears one.*`mode: 'ignore'`.*`externalId`/s],
+  ])('refuses the retired mode %s with its prescription', (mode, prescription) => {
+    expect(() => SeedMode.parse(mode)).toThrow(prescription);
+    const parsed = SeedSchema.safeParse({ object: 'task', mode, records: [{ name: 'a' }] });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['mode']);
+    expect(parsed.error?.issues[0]?.message).toMatch(prescription);
   });
 
   it('should reject invalid modes', () => {
@@ -61,7 +74,7 @@ describe('SeedSchema', () => {
   });
 
   it('keeps every authored mode as written — only an omitted mode takes the default', () => {
-    for (const mode of ['insert', 'update', 'upsert', 'replace', 'ignore'] as const) {
+    for (const mode of ['update', 'upsert', 'ignore'] as const) {
       expect(SeedSchema.parse({ object: 'product', mode, records: [] }).mode).toBe(mode);
     }
   });
@@ -84,7 +97,7 @@ describe('SeedSchema', () => {
   });
 
   it('should accept different modes', () => {
-    const modes: Array<Seed['mode']> = ['insert', 'update', 'upsert', 'replace', 'ignore'];
+    const modes: Array<Seed['mode']> = ['update', 'upsert', 'ignore'];
     
     modes.forEach(mode => {
       const dataset = SeedSchema.parse({
@@ -208,7 +221,7 @@ describe('SeedSchema', () => {
     const demoData = SeedSchema.parse({
       object: 'project',
       externalId: 'name',
-      mode: 'replace',
+      mode: 'ignore',
       env: ['dev'],
       records: [
         { name: 'Demo Project 1', status: 'active' },
@@ -217,7 +230,7 @@ describe('SeedSchema', () => {
     });
 
     expect(demoData.env).toEqual(['dev']);
-    expect(demoData.mode).toBe('replace');
+    expect(demoData.mode).toBe('ignore');
   });
 
   it('should handle test data use case', () => {
