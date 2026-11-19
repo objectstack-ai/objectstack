@@ -36,7 +36,8 @@
  *   ① bare — no `pm:*` label, no `needs-user-decision`, no `area:*` (other labels, `finding` among them, do not
  *      make a card "touched": ① is NOT "no labels");
  *   ② `pm:queue` with no `area:*` — on a multi-lane board only (`MULTI_LANE_REPOS`);
- *   ③ an `area:*` with no pm state (`PM_EXCLUSIVE_STATE_LABELS`, `needs-user-decision` included);
+ *   ③ an `area:*` with no pm state (`PM_EXCLUSIVE_STATE_LABELS`, `needs-user-decision` included, plus `pm:epic`:
+ *      an epic is never dispatched, so it owes no position — H13 counts it as a state for the same phrase);
  *   ④ `pm:queue` + `area:*` with no `priority:*`;
  *   ⑤ created inside the window (`--since`) and carrying `pm:queue` or a `priority:*` that was applied in the same
  *      minute the card was created — listed whoever applied it; the touch it is owed adds area and type, and a
@@ -156,7 +157,9 @@ export function classify(issue, { repo, nowMs }) {
   const anyPm = labels.some((l) => l.startsWith('pm:'));
   const area = labels.some((l) => l.startsWith('area:'));
   const priority = labels.some((l) => l.startsWith('priority:'));
-  const state = PM_EXCLUSIVE_STATE_LABELS.some(has);
+  // ③'s state: a dispatch position, or `pm:epic` — a parent card is never dispatched, and H13 reads the same phrase
+  // with `pm:epic` counted. ⛔ ③ only: the type row and the area row keep their own epic readings.
+  const state = PM_EXCLUSIVE_STATE_LABELS.some(has) || has(EPIC_LABEL);
   const settled = Date.parse(issue?.updated_at ?? '') < nowMs - SETTLE_MS;
   const hits = [];
   if (!anyPm && !has(DECISION_INBOX_LABEL) && !area) hits.push(1);
@@ -438,7 +441,8 @@ function rearmThroughProxy(args) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
-  'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 20,
+  // 20 → 22: ③ counts `pm:epic` as a state (H13's reading of the same phrase), with its stateless control.
+  'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 22,
   'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set': 8,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
@@ -490,6 +494,8 @@ export async function selfTest() {
   t('⭐ ③ an area with no state — the stateless strip', c(['area:fleet', 'priority:p1']), [3]);
   t('③ needs-user-decision IS a state', c(['area:fleet', 'needs-user-decision']), []);
   t('③ pm:awaiting-maintainer IS a state', c(['area:fleet', 'pm:awaiting-maintainer']), []);
+  t('⭐ ③ pm:epic IS a state — an `area:*` epic with a grade and no position draws no ③ row, as H13 reads it', c(['area:fleet', 'pm:epic', 'priority:p1']), []);
+  t('③ control: the same `area:*` card with no state at all still draws its ③ row', c(['area:fleet', 'priority:p1']), [3]);
   t('④ queued, routed, ungraded', c(['area:data', 'pm:queue']), [4]);
   t('a routed, graded, queued card is owed nothing', c(['area:data', 'pm:queue', 'priority:p3']), []);
   t('②③④ wait ~2 min after the last update: a card mid-write is not owed', [c(['area:fleet'], { updated_at: FRESH }), c(['pm:queue'], { updated_at: FRESH })], [[], []]);

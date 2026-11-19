@@ -381,7 +381,7 @@ export const objectForm = defineForm({
             // engine computes and stores it on write (`planStoredExpressions`),
             // so a formula-only row hid a live key on a stored field.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
-            // The five members are what `FieldSchema.returnType` declares, and
+            // The six members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
             // in `field.form.ts` (#19677). This grid additionally offered
             // `datetime` and `currency`, so an author who added a formula field
@@ -389,11 +389,12 @@ export const objectForm = defineForm({
             // refusal arriving from the save door, naming a key they never
             // typed. Declared-vs-enforced, one seam before that door.
             // `currency` is declared since #22727 and offered again, in the
+            // same change as the enum; `percent` joined with #35047, in the
             // same change as the enum; `datetime` is still refused.
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' },
               { label: 'Boolean', value: 'boolean' }, { label: 'Date', value: 'date' },
-              { label: 'Currency', value: 'currency' },
+              { label: 'Currency', value: 'currency' }, { label: 'Percent', value: 'percent' },
             ] },
             // A roll-up is ONE key — `summaryOperations` {object, field, function}.
             // The flat `summaryType` / `summaryField` pair named neither of them
@@ -712,7 +713,7 @@ export const objectForm = defineForm({
         // #19332 (flight G2b of ruling record 5861442317) — the per-entry override
         // of the matrix `managedBy` above resolves (`resolveCrudAffordances`),
         // so it sits directly under it. A composite with declared sub-rows over
-        // all five keys of the strict block (its alias and guidance words —
+        // all six keys of the strict block (its alias and guidance words —
         // `new`, `export`, the VIEW block's `sort`, … — are refusals, not keys).
         //
         // `create` / `import` / `edit` / `delete` are each a UNION — a boolean,
@@ -723,7 +724,9 @@ export const objectForm = defineForm({
         // new entry (the first arm) renders a switch, and a stored object
         // renders its three keys, whose edits merge into it. The object arm is
         // therefore written in source and edited here once stored. `exportCsv` is
-        // a plain boolean, the `enable` toggles' face.
+        // a plain boolean, the `enable` toggles' face. `transfer` (the Change Owner
+        // switch, ruling 7000907189 point 1) is the same union as the four CRUD
+        // entries, so it takes their `json` face.
         //
         // A switch reads `false` for an unset entry, which is not what the
         // resolved default says for most buckets, so the composite's help text
@@ -731,13 +734,14 @@ export const objectForm = defineForm({
         {
           field: 'userActions',
           type: 'composite',
-          helpText: 'Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object\'s records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission.',
+          helpText: 'Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object\'s records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission. Change Owner is not part of that matrix: its default follows the sharing model (see its entry).',
           fields: [
             { field: 'create', label: 'Create', widget: 'json', helpText: 'The New button: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the button on the record in scope, evaluated once per toolbar (the host record on a related list).' },
             { field: 'import', label: 'Import', widget: 'json', helpText: 'The CSV import entry: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the entry on the record in scope, evaluated once per toolbar.' },
             { field: 'edit', label: 'Edit', widget: 'json', helpText: 'Editing existing records, inline and in the form: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
             { field: 'delete', label: 'Delete', widget: 'json', helpText: 'Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
             { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The CSV export entry. Unset: shown, since every managedBy bucket offers export.' },
+            { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
           ],
         },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [

@@ -69,7 +69,11 @@ vi.mock('sonner', () => ({
 // `renderListView`, as the real one does.
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: () => null,
+  ListView: (props: any) => {
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+  },
 }));
 // The list area, reduced to the view it was handed.
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({

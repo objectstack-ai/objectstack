@@ -1124,8 +1124,8 @@ export function labelNames(issue) {
 }
 
 /**
- * Lane labels retired INTO another lane, read as that lane everywhere this
- * sweep compares a card's `domain:*` label with a seat's (maintainer ruling
+ * Lane labels retired INTO another lane, read as that lane wherever this
+ * sweep still reads a `domain:*` spelling (maintainer ruling
  * 2026-10-22, letter 乙: `domain:engine`, `domain:services` and `domain:cli`
  * fold into `domain:server`; `domain:rest`, never a lane of its own, is read
  * the same way by the maintainer's 2026-11-06 「车道的问题同意」). The
@@ -1133,11 +1133,12 @@ export function labelNames(issue) {
  * in-flight cards keep their old label until they land, open cards are
  * relabelled in batches by triage after the merge lands, and seat posts are
  * retitled at each seat's next round — so for a while one lane is spelled five
- * ways on the board. Every lane comparison below goes through
- * {@link canonicalLane}, which is what lets a `domain:server` seat count a
- * `domain:engine` queue card as its own, a seat still titled `domain:cli` see
- * a claim on a `domain:server` card, and the census count a card carrying both
- * spellings once. ⛔ An alias map, never a vocabulary: it says nothing about
+ * ways on the board. Since lanes became seats plus epics, no reader here
+ * judges a CARD by its `domain:*` label (a card is read by its intake,
+ * `cardIntakeKeys`), so the one reader left is a seat post's title
+ * ({@link seatLane}, through {@link canonicalLane}): a post still titled
+ * `domain:cli` reads as the `domain:server` seat, its number intact.
+ * ⛔ An alias map, never a vocabulary: it says nothing about
  * which labels EXIST (that is `scripts/pm/ensure-pm-labels.sh`), and the
  * cleanup PR that retires the label objects deletes these rows with them. The
  * write doors (`issue-create.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`)
@@ -8002,6 +8003,57 @@ export function seatLane(issue) {
 }
 
 /**
+ * The cards a seat post TAKES, read off its title — the seats-plus-epics
+ * reading that replaces a card's `domain:*` label (lanes become seats and
+ * epics; cards are picked by epic and area under the grade rules). Two key
+ * kinds, the spellings the live seat titles carry: `area:NAME` for each
+ * `area:*` token (`· area:data`, `· area:ai + area:workflow`), and `epic:#N`
+ * for each `epic #N` / `epic:#N` (`· epic #34571`).
+ *
+ * Only a seat on THIS board's repo lane has an intake here: `repo:NAME`
+ * (`#N` or `· seat N` beside it) whose NAME is the swept repo's, with no
+ * `@ elsewhere`. A `repo:cloud` seat's cards live on another board, and a
+ * `domain:*` seat post takes no card by label any more, so both answer `[]`
+ * — never guessed. Pure.
+ *
+ * @param {object} issue — the `pm:seat` post.
+ * @param {string} [repo] — `owner/name` of the board whose cards are counted.
+ * @returns {string[]} the intake keys, deduplicated, title order.
+ */
+export function seatIntakeKeys(issue, repo = SWEEP_REPO.repo) {
+  const title = String(issue?.title ?? '');
+  const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(title);
+  if (!m) return [];
+  const name = m[1].trim();
+  const lane = /^repo:([A-Za-z0-9._-]+)/u.exec(name);
+  const own = String(repo).split('/')[1] ?? '';
+  const at = /@\s*(\S+)/u.exec(name);
+  if (!lane || lane[1].toLowerCase() !== own.toLowerCase() || (at && at[1].toLowerCase() !== own.toLowerCase())) return [];
+  const keys = [
+    ...[...title.matchAll(/(?<![A-Za-z0-9_:-])area:([a-z0-9][a-z0-9-]*)/gu)].map((x) => `area:${x[1]}`),
+    ...[...title.matchAll(/\bepic[ \t]*:?[ \t]*#([1-9][0-9]*)\b/giu)].map((x) => `epic:#${x[1]}`),
+  ];
+  return [...new Set(keys)];
+}
+
+/**
+ * The intake keys a CARD falls under — the other half of `seatIntakeKeys`:
+ * each `area:*` label it carries, plus `epic:#N` when its sub-issue parent
+ * (`parent_issue_url`, on the REST issue row, so it costs no request) is
+ * issue N on the same repo. A `domain:*` label is not read. Pure.
+ *
+ * @param {object} issue — the card.
+ * @param {string} [repo] — `owner/name` the card lives on.
+ * @returns {string[]}
+ */
+export function cardIntakeKeys(issue, repo = SWEEP_REPO.repo) {
+  const keys = labelNames(issue ?? {}).filter((l) => typeof l === 'string' && /^area:[a-z0-9][a-z0-9-]*$/u.test(l));
+  const parent = /\/repos\/([^/]+\/[^/]+)\/issues\/([1-9][0-9]*)$/u.exec(String(issue?.parent_issue_url ?? ''));
+  if (parent && parent[1].toLowerCase() === String(repo).toLowerCase()) keys.push(`epic:#${parent[2]}`);
+  return [...new Set(keys)];
+}
+
+/**
  * Is this seat post declaring a HELD seat — a 🟢 with a real holder?
  *
  * Reuses `h5SeatStickerDesync`'s reading of the status word rather than
@@ -8071,11 +8123,20 @@ export function seatMarkerAgeMinutes(marker, nowMs = Date.now()) {
  * only for seats this row could actually speak about — 6 of the 12 open seat
  * posts at the 2026-08-25 census, and the only comment fetches the seat
  * population has ever bought (the H2 branch explicitly skips `pm:seat`).
+ *
+ * Two legs since lanes became seats plus epics: a seat whose title names an
+ * intake on this board (`seatIntakeKeys` — what H32 and H38 now count), and a
+ * seat on a `domain:*` lane this board can read (`seatLane`). That second leg
+ * judges no card: it only keeps a retired domain seat's thread read (H44's seat
+ * leg reads it anyway) until the post is retitled or closed, and H32 and H38
+ * both skip such a post, since it names no intake. Both are HELD seat posts, so
+ * the population stays inside H44's seat leg and the shared memo still costs
+ * nothing extra.
  */
 export function h32NeedsSeatComments(issue) {
   if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
   if (!seatIsHeld(issue)) return false;
-  return !seatLane(issue).foreign;
+  return seatIntakeKeys(issue).length > 0 || !seatLane(issue).foreign;
 }
 
 /**
@@ -8210,19 +8271,51 @@ export function seatWindowAudit(source) {
 }
 
 /**
+ * H32's inventory for one seat: the cards whose intake keys (`cardIntakeKeys`)
+ * meet the seat's (`seatIntakeKeys`), counted once each however many keys
+ * they share. "Unclaimed" is `pm:queue` with NO assignee, the queue view's own
+ * dispatchable population; "in flight" is `pm:dispatched`. Pure, over the
+ * listings the sweep already holds, so it buys no request.
+ *
+ * @param {string[]} keys — the seat's intake keys.
+ * @param {Iterable<object>} cards — the open cards this sweep listed.
+ * @param {string} [repo]
+ * @returns {{ unclaimed: number, inFlight: number }}
+ */
+export function seatIntakeInventory(keys, cards, repo = SWEEP_REPO.repo) {
+  const want = new Set(Array.isArray(keys) ? keys : []);
+  const out = { unclaimed: 0, inFlight: 0 };
+  if (want.size === 0) return out;
+  for (const card of cards ?? []) {
+    if (!card || card.pull_request) continue;
+    if (!cardIntakeKeys(card, repo).some((k) => want.has(k))) continue;
+    const labels = labelNames(card);
+    if (labels.includes('pm:queue') && (card.assignees ?? []).length === 0) out.unclaimed += 1;
+    if (labels.includes('pm:dispatched')) out.inFlight += 1;
+  }
+  return out;
+}
+
+/**
  * H32 — null when clean, else the finding sentence.
+ *
+ * The seat's lane is its INTAKE — the areas and epics its title names
+ * (`seatIntakeKeys`), never a `domain:*` label on the cards: a seat post with
+ * no intake on this board (a `domain:*` or `repo:cloud` seat, the triage seat)
+ * is out of scope, the harmless direction.
  *
  * @param {object} issue — the seat post.
  * @param {{ body: string, createdAt: string|null }|null|undefined} marker —
  *   the latest seat-post comment. `undefined` unconsulted, `null` unreadable.
- * @param {{ unclaimed: number, inFlight: number }} lane — the lane inventory,
- *   counted off listings this sweep already holds.
+ * @param {{ unclaimed: number, inFlight: number }} lane — the intake inventory
+ *   (`seatIntakeInventory`), counted off listings this sweep already holds.
  */
 export function h32SeatIdleOverQueue(issue, marker, lane, nowMs = Date.now()) {
   if (!labelNames(issue ?? {}).includes('pm:seat')) return null;
   if (!seatIsHeld(issue)) return null;
-  const { lane: laneName, foreign } = seatLane(issue);
-  if (foreign || !laneName) return null;
+  const intake = seatIntakeKeys(issue);
+  if (intake.length === 0) return null;
+  const laneName = intake.map((k) => `\`${k}\``).join(' + ');
 
   const unclaimed = Number(lane?.unclaimed ?? 0);
   const inFlight = Number(lane?.inFlight ?? 0);
@@ -8249,7 +8342,7 @@ export function h32SeatIdleOverQueue(issue, marker, lane, nowMs = Date.now()) {
       : `~${Math.round(age)} min since the seat's latest marker (threshold ${SEAT_IDLE_STALE_MINUTES} min)`;
 
   return (
-    `\`pm:seat\` HELD, and its lane \`${laneName}\` has ${unclaimed} unclaimed \`pm:queue\` card(s) with ` +
+    `\`pm:seat\` HELD, and its intake ${laneName} has ${unclaimed} unclaimed \`pm:queue\` card(s) with ` +
     `NOTHING in flight — ${clock}. The board is asserting two things that cannot both be healthy: a lane ` +
     'with dispatchable work and zero throughput, and a named holder on the clock for it. Neither half is ' +
     'visible from any card — a queued card looks exactly like an ordinary queued card however long it has ' +
@@ -8448,15 +8541,16 @@ export function isFleetCard(issue) {
 }
 
 /**
- * Does this sub-issue INHERIT its parent's domain or grade (SKILL.md: 「sub-issue
+ * Does this sub-issue INHERIT its parent's area or grade (SKILL.md: 「sub-issue
  * 承父卡域 … 免审计评论」)? True when the parent row carries one of the card's
- * own `domain:*` or `priority:*` labels. Pure; a parent that is not a row
- * (null, undefined, the unreadable sentinel) inherits nothing.
+ * own `area:*` or `priority:*` labels — the area is what a first touch now
+ * routes by; a shared `domain:*` label inherits nothing. Pure; a parent that
+ * is not a row (null, undefined, the unreadable sentinel) inherits nothing.
  */
 export function h74InheritsFromParent(issue, parent) {
   if (!parent || parent === H74_PARENT_UNREADABLE || !Array.isArray(parent.labels)) return false;
   const inherited = labelNames(parent);
-  return labelNames(issue).some((l) => (l.startsWith('domain:') || l.startsWith('priority:')) && inherited.includes(l));
+  return labelNames(issue).some((l) => typeof l === 'string' && (l.startsWith('area:') || l.startsWith('priority:')) && inherited.includes(l));
 }
 
 /** The heading a signed first-touch record carries — the filing card's spelling, `## Triage`. */
@@ -8485,7 +8579,7 @@ export function isTriageAuditRecord(text) {
  * filing card's 「`[maintainer]` cards」 read as SKILL.md's 非车队卡: a human
  * author with no seat signature is never first-touched this way); not a
  * main-red anchor card. The third exemption, a sub-issue inheriting its
- * parent's domain or grade, costs a read and is judged in the predicate.
+ * parent's area or grade, costs a read and is judged in the predicate.
  */
 export function h74SpeaksAbout(issue) {
   if (!issue || issue.pull_request) return false;
@@ -8530,7 +8624,7 @@ export function needsTriageAuditComments(issue) {
  * `parent` carries FOUR input states (H45's three plus the unreadable
  * sentinel): `undefined` not read — the row judges without the sub-issue
  * exemption; `null` the documented 404, parentless; a row — exempt when the
- * card inherits its domain or grade from it; `H74_PARENT_UNREADABLE` — the
+ * card inherits its area or grade from it; `H74_PARENT_UNREADABLE` — the
  * row fires UNJUDGED, never clean and never silent.
  *
  * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
@@ -8550,7 +8644,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
   if (parent === H74_PARENT_UNREADABLE) {
     return (
       `${UNJUDGED_MARKER} ${state} card with no triage audit record in either channel (both read) whose ` +
-      'sub-issues PARENT read failed this sweep — whether it inherits a domain or grade from a parent is ' +
+      'sub-issues PARENT read failed this sweep — whether it inherits an area or grade from a parent is ' +
       'UNJUDGED, not settled. Read the parent by hand before acting: an unreadable relation is not an ' +
       'absent one.'
     );
@@ -8574,7 +8668,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
     'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
     '`pm:seat`, `qa-run`, `eval-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
-    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
+    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s area or grade.'
   );
 }
 
@@ -9291,7 +9385,8 @@ export function seatPostLastEventMs(seat, commentRows) {
 
 /**
  * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
- * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
+ * (`Seat: repo:<name>#<n>`, `Seat: epic:#<N>#<k>`, or a retired domain seat's
+ * `Seat: domain:<x>#<n>`; free-claim multi-seat), read with the same key-line
  * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
  * decoration around the key). Three answers, and the middle one is the reason
  * this reader is not a one-liner:
@@ -9305,7 +9400,9 @@ export function seatPostLastEventMs(seat, commentRows) {
  *   TWO spellings reach it: a line-initial key naming no `#<n>`, and a
  *   declaration the key line cannot see at all (mid-sentence, inside a code
  *   span, inside a subscript tag, behind a `> - ` prefix).
- * · Otherwise the number the line names.
+ * · Otherwise the number the line names: the FIRST `#<n>` of the payload, so a
+ *   trailing note (`… (#35205)`) never moves it — except the epic shape
+ *   `epic:#<N>#<k>`, whose first `#<N>` is the epic and whose seat is `k`.
  *
  * ⚠️ The second spelling of the second answer is the repair, and the cost it
  * removes is measured: a wrong answer that is a REAL seat does not surface as
@@ -9322,26 +9419,39 @@ const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:
 /**
  * PRESENCE only — consulted solely when the key line matched nothing, and it
  * ⛔ never yields a number. Case-SENSITIVE, and it demands the whole declared
- * payload (`domain:<lane>#<n>`), because off the line start there is no
- * position left to tell a declaration from prose: the pinned control
- * 「the seat: domain:services#2 is busy」 has to keep reading as seat 1. Pinned
- * to the measured shape; an unmeasured variant it misses falls back to 1,
- * which is the defect, so widen it on evidence rather than narrowing it.
+ * payload in one of the seat spellings live on the board — `repo:<name>#<n>`
+ * (a repo name may carry `.` and `-`, e.g. `repo:www.objectos.ai#2`),
+ * `epic:#<N>#<k>`, and a retired domain seat's `domain:<lane>#<n>` — because
+ * off the line start there is no position left to tell a declaration from
+ * prose: the pinned controls 「the seat: domain:services#2 is busy」 and
+ * 「the seat: repo:objectstack#2 is busy」 have to keep reading as seat 1.
+ * Pinned to the measured shapes; an unmeasured variant it misses falls back to
+ * 1, which is the defect, so widen it on evidence rather than narrowing it.
  */
-const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?domain:[a-z0-9_-]+[ \t]*#\d/;
+const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?(?:domain:[a-z0-9_-]+|repo:[A-Za-z0-9._-]+|epic:#[1-9][0-9]*)[ \t]*#\d/;
 
 /** @returns {number|null} the seat number, 1 when NO declaration is present at all, null when one is present but unreadable. */
 export function claimSeatNumber(body) {
   const text = String(body ?? '');
   const m = CLAIM_SEAT_KEY_LINE.exec(text);
   if (!m) return CLAIM_SEAT_DECLARATION_ANYWHERE.test(text) ? null : 1;
-  const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
+  const payload = String(m[1] ?? '');
+  // An epic seat names its epic first: `epic:#<N>#<k>` is seat k, never seat N.
+  const epic = /^`?epic:#[1-9][0-9]*#(\d+)\b/.exec(payload);
+  if (epic) return Number(epic[1]);
+  const n = /#(\d+)\b/.exec(payload);
   return n ? Number(n[1]) : null;
 }
 
 /**
- * The newest `Claim:` on a lane, over the dispatched cards this sweep holds,
- * restricted to the claims of ONE seat number.
+ * The newest `Claim:` on a seat's intake, over the dispatched cards this sweep
+ * holds, restricted to the claims of ONE seat number.
+ *
+ * A card is on the intake when its `cardIntakeKeys` (its `area:*` labels, plus
+ * `epic:#N` for a same-board sub-issue parent) meet the seat's
+ * `seatIntakeKeys` — the seats-plus-epics reading H71 and H32 use. ⛔ A card's
+ * `domain:*` label is no intake: the domain seats retired, so a card carrying
+ * only one is on no seat and its claim outruns no post.
  *
  * Free-claim multi-seat puts several PMs on one lane, one post each. A post is
  * behind only when a claim of ITS OWN seat outran it — another seat's claim is
@@ -9364,21 +9474,21 @@ export function claimSeatNumber(body) {
  * LOCALLY here rather than requested as a two-label query — that query returns
  * the union and would over-count in the "too many" direction.
  *
- * @param {string} lane — a `domain:*` label.
+ * @param {string|string[]} intake — the seat's intake keys (`seatIntakeKeys(post)`);
+ *   a lone key may be passed bare.
  * @param {Iterable<any>} issues — open cards this sweep already listed.
  * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
  * @param {number} [seat=1] — the seat number whose claims count (`seatLane(post).seat`).
  * @returns {{ number: number, at: number }|null} the newest claim, or null.
  */
-export function newestLaneClaim(lane, issues, commentsByNumber, seat = 1) {
+export function newestLaneClaim(intake, issues, commentsByNumber, seat = 1) {
   let best = null;
-  // The lane and the card's labels are compared through the alias map, so a
-  // card still carrying a retired spelling is on the lane that absorbed it.
-  const want = canonicalLane(lane);
+  const want = new Set((Array.isArray(intake) ? intake : [intake]).filter((k) => typeof k === 'string'));
+  if (want.size === 0) return null;
   for (const issue of issues ?? []) {
     const labels = labelNames(issue ?? {});
     // Both conditions intersected locally — see the OR/AND note above.
-    if (!labels.includes('pm:dispatched') || !labels.some((l) => canonicalLane(l) === want)) continue;
+    if (!labels.includes('pm:dispatched') || !cardIntakeKeys(issue).some((k) => want.has(k))) continue;
     const rows = commentsByNumber?.get?.(issue.number);
     if (!rows) continue;
     // Only this seat's claims: the filter runs on the rows, the predicate is reused.
@@ -9397,16 +9507,19 @@ export function newestLaneClaim(lane, issues, commentsByNumber, seat = 1) {
  *
  * @param {object} seat — the `pm:seat` post.
  * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
- * @param {{ number: number, at: number }|null} claim — the newest lane claim
- *   OF THIS POST'S SEAT NUMBER (`newestLaneClaim(lane, …, seatLane(seat).seat)`).
+ * @param {{ number: number, at: number }|null} claim — the newest intake claim
+ *   OF THIS POST'S SEAT NUMBER (`newestLaneClaim(seatIntakeKeys(seat), …, seatLane(seat).seat)`).
  */
 export function h38SeatPostStale(seat, seatAt, claim) {
   if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
-  const { lane, foreign, seat: seatNo } = seatLane(seat ?? {});
-  // A lane this board cannot count has no readable claim population here, so
-  // an absent claim would mean "unreadable", not "none" — H32's `foreign`
-  // reasoning, and the reason this row declines rather than reporting silence.
-  if (foreign || !lane) return null;
+  const intake = seatIntakeKeys(seat ?? {});
+  const { seat: seatNo } = seatLane(seat ?? {});
+  // A seat whose title names no intake on this board (a sibling board's lane,
+  // a retired `domain:*` seat, triage) has no readable claim population here,
+  // so an absent claim would mean "unreadable", not "none" — H32's reasoning,
+  // and the reason this row declines rather than reporting silence.
+  if (intake.length === 0) return null;
+  const lane = intake.map((k) => `\`${k}\``).join(' + ');
   if (!claim) return null;
   // ⛔ Both sides must be READABLE. This is an ORDER comparison, not an age, so
   // an unreadable stamp does not make the reading conservative — it makes it
@@ -9417,7 +9530,7 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 
   const behindHours = (claim.at - seatAt) / 3_600_000;
   return (
-    `\`pm:seat\` post is STALE — its lane \`${lane}\` (seat ${seatNo}) carries a \`Claim:\` on #${claim.number} written ` +
+    `\`pm:seat\` post is STALE — its intake ${lane} (seat ${seatNo}) carries a \`Claim:\` on #${claim.number} written ` +
     `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
     `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
     'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
@@ -9529,8 +9642,10 @@ export function censusPageExhausted(batch) {
 }
 
 /**
- * The lanes a card belongs to — `domain:*` for domain lanes and `repo:*` for
- * single-lane seats, the same two spellings the seat posts name.
+ * The lanes a card belongs to — its intake (`cardIntakeKeys`: its `area:*`
+ * labels, plus `epic:#N` for a same-board sub-issue parent) and `repo:*` for
+ * single-lane seats, the spellings the seat posts name. ⛔ A `domain:*` label is
+ * no lane: the domain seats retired.
  *
  * A card carrying neither is bucketed under `(no lane)` rather than dropped: an
  * unrouted closed card with `pm:` residue is still residue, and silently
@@ -9538,9 +9653,9 @@ export function censusPageExhausted(batch) {
  * a reader could not see.
  */
 export function censusLanesOf(issue) {
-  // Through the alias map, deduplicated: a card carrying a retired spelling
-  // beside the lane that absorbed it is one lane, never two rows.
-  const lanes = [...new Set(labelNames(issue ?? {}).filter((l) => /^(?:domain|repo):/u.test(l)).map(canonicalLane))];
+  // Deduplicated, so a card is one row per lane, never two.
+  const repoLanes = labelNames(issue ?? {}).filter((l) => typeof l === 'string' && /^repo:/u.test(l));
+  const lanes = [...new Set([...cardIntakeKeys(issue ?? {}), ...repoLanes])];
   return lanes.length > 0 ? lanes : ['(no lane)'];
 }
 
@@ -15758,7 +15873,9 @@ export function h73SpeaksAbout(issue) {
 
 /**
  * H73 — null when clean, else the finding sentence naming the ruling id, its
- * age and the `domain:*` seat that owes the exit.
+ * age and the intake that names the seat owing the exit: the card's `area:*`
+ * labels and its epic parent (`cardIntakeKeys`), which the seat posts' titles
+ * take — ⛔ never a `domain:*` label, which no seat takes cards by any more.
  *
  * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
  * rendered into a GitHub issue body, and the card it is about is the row's own
@@ -15775,11 +15892,15 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
     ageHours === null
       ? 'its `Ruled:` line carries no readable UTC stamp (an unreadable age must not read as fresh)'
       : `recorded ~${Math.round(ageHours)}h ago (threshold ${RULED_IN_BOX_STALE_HOURS}h)`;
-  const domains = labelNames(issue).filter((l) => typeof l === 'string' && l.startsWith('domain:'));
+  // The epic parent is said, never numbered: the sentence carries no tracker number.
+  const intake = cardIntakeKeys(issue);
+  const areas = intake.filter((k) => k.startsWith('area:')).map((d) => `\`${d}\``);
+  const epic = intake.some((k) => k.startsWith('epic:'));
+  const named = [...areas, ...(epic ? ['the epic its sub-issue parent is'] : [])].join(' / ');
   const owes =
-    domains.length > 0
-      ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
-      : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
+    intake.length > 0
+      ? `owed by the seat whose post names ${named}`
+      : 'owed by NO seat yet — the card carries no `area:*` label and no epic parent, so the TRIAGE seat routes it first';
   return (
     `\`${DECISION_INBOX_LABEL}\` still on a card whose BODY carries a ruling record: ` +
     `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
@@ -16229,9 +16350,15 @@ export function h70HeldSeatWithoutPatrol(issue) {
 /**
  * H71 — null when clean, else the finding sentence.
  *
+ * The card's lane is its intake (`cardIntakeKeys`: its `area:*` labels and its
+ * epic parent), matched against the intake keys the 🟢 seat posts' titles name
+ * (`seatIntakeKeys`) — ⛔ never a `domain:*` label, which no seat takes cards
+ * by any more.
+ *
  * @param {object} issue — the card.
- * @param {Map<string, number[]>} onDutyLanes — canonical lane → issue numbers of
- *   its 🟢 seat posts, read off the `pm:seat` listing this sweep holds.
+ * @param {Map<string, number[]>} onDutyLanes — intake key (`area:NAME`,
+ *   `epic:#N`) → issue numbers of the 🟢 seat posts naming it, read off the
+ *   `pm:seat` listing this sweep holds.
  */
 export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
   if (!issue || issue.pull_request || issue.state === 'closed') return null;
@@ -16242,7 +16369,7 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
   // so "that seat claims it" would be the wrong remedy.
   if (H71_NOT_CANDIDATE_LABELS.some((l) => labels.includes(l))) return null;
   if ((issue.assignees ?? []).length > 0) return null;
-  const lanes = [...new Set(labels.filter((l) => /^domain:/u.test(l)).map(canonicalLane))];
+  const lanes = cardIntakeKeys(issue);
   const held = lanes.filter((lane) => (onDutyLanes?.get(lane) ?? []).length > 0);
   if (held.length === 0) return null;
   const updated = Date.parse(issue.updated_at ?? '');
@@ -16254,7 +16381,7 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
       ? 'an unreadable `updated_at` (which must not read as fresh)'
       : `no activity for ~${Math.round(ageHours)}h (threshold ${QUEUE_ON_DUTY_UNCLAIMED_HOURS}h; a lower bound on its time in the queue)`;
   return (
-    `\`pm:queue\`, open and unassigned, with ${reading}, on a lane a 🟢 seat holds: ${seats}. A seat on duty ` +
+    `\`pm:queue\`, open and unassigned, with ${reading}, under an intake a 🟢 seat post names: ${seats}. A seat on duty ` +
     'with cards in flight patrols every 45 minutes or less, and a patrol\'s first act is to claim up to its ' +
     '`batch` limit, so a card this old on its lane usually means the patrol is not running (H70 names a held ' +
     'post with no `Patrol:` line) or the seat is full. ⚠️ A seat on STANDBY wakes on mailbox and PR events plus ' +
@@ -16263,7 +16390,8 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
     'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
     'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +
     'of scope: an assigned queue card (H24), a `pm:epic` subtree card, a card awaiting a decision or a ' +
-    're-triage (`needs-user-decision`, `pm:retriage`: not candidates), a lane with no 🟢 seat post.'
+    're-triage (`needs-user-decision`, `pm:retriage`: not candidates), an area or epic no 🟢 seat post names ' +
+    '(a `domain:*` label alone is no intake).'
   );
 }
 
@@ -19516,7 +19644,8 @@ export function summaryLine(counts, findingCount) {
     'of this one and costs no request of its own' +
     `${refRead < refTargets ? ' — each unread branch is named on its own card\'s row, never dropped' : ''}. ` +
     `Seat liveness (H32): marker thread read on ${seatsRead} of ${seatCandidates} HELD seat post(s) whose ` +
-    'lane is countable on THIS board — a seat held for a sibling repo\'s lane is out of scope here (its ' +
+    'intake (the areas and epics its title names) or lane is countable on THIS board — a seat held for a ' +
+    'sibling repo\'s lane is out of scope here (its ' +
     'inventory is unreadable from this sweep, so an empty-looking queue would mean nothing), and an ' +
     'unread thread makes H32 decline to judge that seat rather than accuse it. ' +
     `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
@@ -24561,47 +24690,27 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     throw lastHoldError;
   }
 
-  // H32 (#11706) — the lane inventory, then the verdicts. Counted off the label
-  // pages this sweep already holds, so the whole row costs nothing beyond the
-  // gated seat-marker fetches above.
+  // H32 (#11706) — the intake inventory, then the verdicts. Counted off the
+  // label pages this sweep already holds, so the whole row costs nothing beyond
+  // the gated seat-marker fetches above.
   //
-  // "Unclaimed" is `pm:queue` with NO assignee, which is the queue view's own
-  // dispatchable population — an assigned `pm:queue` card is H24's
-  // contradiction and is deliberately NOT counted as work this seat could take
-  // (the claim protocol reads it as taken). Counting it would let one
-  // half-state manufacture another.
-  const laneInventory = new Map();
-  const laneBucket = (lane) => {
-    if (!laneInventory.has(lane)) laneInventory.set(lane, { unclaimed: 0, inFlight: 0 });
-    return laneInventory.get(lane);
-  };
-  for (const issue of seen.values()) {
-    const labels = labelNames(issue);
-    // Through the alias map, deduplicated, so a retired spelling counts toward
-    // the lane that absorbed it and a card carrying both is counted once.
-    const lanes = [...new Set(labels.filter((l) => /^domain:/u.test(l)).map(canonicalLane))];
-    if (lanes.length === 0) continue;
-    const unclaimed = labels.includes('pm:queue') && (issue.assignees ?? []).length === 0;
-    const inFlight = labels.includes('pm:dispatched');
-    for (const lane of lanes) {
-      const bucket = laneBucket(lane);
-      if (unclaimed) bucket.unclaimed += 1;
-      if (inFlight) bucket.inFlight += 1;
-    }
-  }
+  // A seat's inventory is the cards under the areas and epics its title names
+  // (`seatIntakeInventory`), never a `domain:*` label on a card. "Unclaimed" is
+  // `pm:queue` with NO assignee, which is the queue view's own dispatchable
+  // population — an assigned `pm:queue` card is H24's contradiction and is
+  // deliberately NOT counted as work this seat could take (the claim protocol
+  // reads it as taken). Counting it would let one half-state manufacture
+  // another.
   for (const { issue, marker } of seatMarkers.values()) {
-    const { lane } = seatLane(issue);
-    const idle = h32SeatIdleOverQueue(issue, marker, laneInventory.get(lane) ?? { unclaimed: 0, inFlight: 0 });
+    const idle = h32SeatIdleOverQueue(issue, marker, seatIntakeInventory(seatIntakeKeys(issue), seen.values()));
     if (idle) findings.push([issue, 'H32', idle]);
   }
   // H71 (#28642) — the card-side complement of H32, off the same listings: an
-  // unclaimed queue card gone quiet on a lane some 🟢 seat post holds. Free.
+  // unclaimed queue card gone quiet under an intake some 🟢 seat post names. Free.
   const onDutyLanes = new Map();
   for (const issue of seen.values()) {
     if (!labelNames(issue).includes('pm:seat') || !seatOnDuty(issue)) continue;
-    const { lane, foreign } = seatLane(issue);
-    if (!lane || foreign) continue;
-    onDutyLanes.set(lane, [...(onDutyLanes.get(lane) ?? []), issue.number]);
+    for (const key of seatIntakeKeys(issue)) onDutyLanes.set(key, [...(onDutyLanes.get(key) ?? []), issue.number]);
   }
   for (const issue of seen.values()) {
     const waiting = h71UnclaimedOnDutyLane(issue, onDutyLanes);
@@ -25280,14 +25389,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // different finding with a different remedy, and inventing it inside this row
   // would put an accusation of staleness on a post that correctly says it is
   // not running a shift.
+  // The seat's intake (`seatIntakeKeys`) is what its claims are read against,
+  // so a retired `domain:*` seat post in this population takes no row here.
   for (const { issue, rows } of seatMarkers.values()) {
-    const { lane, seat } = seatLane(issue);
-    if (!lane) continue;
+    const intake = seatIntakeKeys(issue);
+    if (intake.length === 0) continue;
+    const { seat } = seatLane(issue);
     // Free-claim multi-seat: the post is compared against ITS seat's claims only.
     const stale = h38SeatPostStale(
       issue,
       seatPostLastEventMs(issue, rows),
-      newestLaneClaim(lane, seen.values(), commentCache, seat),
+      newestLaneClaim(intake, seen.values(), commentCache, seat),
     );
     if (stale) findings.push([issue, 'H38', stale]);
   }
@@ -26238,8 +26350,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
   'H43 hand-off timing': 103,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
-  // free readings, each with its firing controls and its out-of-scope arms inside.
-  'H70/H71 seat patrol': 30,
+  // free readings, each with its firing controls and its out-of-scope arms inside;
+  // H71's intake readers (seat title, card labels and epic parent) add five.
+  'H70/H71 seat patrol': 35,
   // Registered with the mailbox off-table row (#28675), pin just under the count:
   // the predicate over readings (firing, window boundary, unreadable stamp and
   // reading, the listing cap), the population predicate, the text's shape, the
@@ -26260,8 +26373,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
-  // re-entry line, the owing seat, the live record shapes, the text, the band.
-  'H73 ruled card in the decision box': 25,
+  // re-entry line, the owing seat (read off the card's intake, a `domain:*` alone
+  // owing nothing), the live record shapes, the text, the band.
+  'H73 ruled card in the decision box': 26,
   // Registered with the blocking-relation rows, pin AT the count: for
   // each of H77–H81 the firing case beside the control that silences it, the
   // stand-down for the neighbouring row (H4/H19 for H77, H73 for H81), the
@@ -29379,25 +29493,30 @@ async function selfTest() {
   b(BATTERY28642, 'H70 band: registered as `state`, and the sweep really pushes it', `${familyBand('H70')}/${familyRegistryCoverage().emitted.includes('H70')}`, 'state/true');
 
   const NOW71 = Date.parse('2026-11-01T10:29:00Z');
-  const ON_DUTY71 = new Map([['domain:spec', [18917]]]);
+  const ON_DUTY71 = new Map([['area:data', [35557]]]);
   // The measured incident: a p1 card entered the queue at 05:56Z on a lane whose seat was held, unclaimed till 10:29Z.
   const card71 = (labels, extra = {}) => ({ ...issue(labels), number: 28560, state: 'open', updated_at: '2026-11-01T05:56:00Z', ...extra });
   const row71 = (...args) => String(h71UnclaimedOnDutyLane(...args) ?? '');
-  b(BATTERY28642, 'H71: the incident — unassigned `pm:queue` card on a 🟢 lane, quiet ~4.5h -> finding', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec', 'priority:p1']), ON_DUTY71, NOW71), 'string');
-  b(BATTERY28642, 'H71: …and the row names the lane, its seat post and the age', [row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('`domain:spec` (#18917)'), row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('~5h')].join(), 'true,true');
-  b(BATTERY28642, '⭐ H71: inside the window is clean — 1h59m quiet does not fire, 2h01m does', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:30:00Z' }), ON_DUTY71, NOW71), typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:28:00Z' }), ON_DUTY71, NOW71)].join(), ',string');
-  b(BATTERY28642, '⛔ H71: a lane with NO 🟢 seat post is out of scope however old the card', h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:ui']), ON_DUTY71, NOW71), null);
-  b(BATTERY28642, '⛔ H71: an ASSIGNED queue card is H24\'s, not this row\'s', h71UnclaimedOnDutyLane({ ...card71(['pm:queue', 'domain:spec']), assignees: [{ login: 'marchtian' }] }, ON_DUTY71, NOW71), null);
-  b(BATTERY28642, '⛔ H71: a `pm:epic` subtree card and a card not in `pm:queue` are out of scope', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:epic', 'domain:spec']), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:blocked', 'domain:spec']), ON_DUTY71, NOW71)].every((v) => v === null), true);
-  b(BATTERY28642, '⛔ H71: a queued card awaiting a decision (`needs-user-decision`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'needs-user-decision', 'domain:spec']), ON_DUTY71, NOW71), null);
-  b(BATTERY28642, '⛔ H71: a queued card in re-triage (`pm:retriage`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:retriage', 'domain:spec']), ON_DUTY71, NOW71), null);
-  b(BATTERY28642, '⛔ H71: a closed card, a PR row and a missing row are never judged', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { state: 'closed' }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { pull_request: {} }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(undefined, ON_DUTY71, NOW71)].every((v) => v === null), true);
-  b(BATTERY28642, 'H71: an unreadable `updated_at` must not read as fresh', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: 'not a date' }), ON_DUTY71, NOW71), 'string');
-  b(BATTERY28642, 'H71: a retired lane spelling reads through the alias map to the lane that absorbed it', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:engine']), new Map([['domain:server', [6367]]]), NOW71), 'string');
-  b(BATTERY28642, 'H71 text: the dropped spare-concurrency condition is SAID, and the row stays report-only', ['Spare concurrency is NOT judged', 'Report-only', 'lower bound'].every((s) => row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes(s)), true);
+  b(BATTERY28642, 'H71: the incident — unassigned `pm:queue` card on a 🟢 lane, quiet ~4.5h -> finding', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data', 'priority:p1']), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, 'H71: …and the row names the lane, its seat post and the age', [row71(card71(['pm:queue', 'area:data']), ON_DUTY71, NOW71).includes('`area:data` (#35557)'), row71(card71(['pm:queue', 'area:data']), ON_DUTY71, NOW71).includes('~5h')].join(), 'true,true');
+  b(BATTERY28642, '⭐ H71: inside the window is clean — 1h59m quiet does not fire, 2h01m does', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data'], { updated_at: '2026-11-01T08:30:00Z' }), ON_DUTY71, NOW71), typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data'], { updated_at: '2026-11-01T08:28:00Z' }), ON_DUTY71, NOW71)].join(), ',string');
+  b(BATTERY28642, '⛔ H71: a lane with NO 🟢 seat post is out of scope however old the card', h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:ux']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: an ASSIGNED queue card is H24\'s, not this row\'s', h71UnclaimedOnDutyLane({ ...card71(['pm:queue', 'area:data']), assignees: [{ login: 'marchtian' }] }, ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a `pm:epic` subtree card and a card not in `pm:queue` are out of scope', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:epic', 'area:data']), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:blocked', 'area:data']), ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H71: a queued card awaiting a decision (`needs-user-decision`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'needs-user-decision', 'area:data']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a queued card in re-triage (`pm:retriage`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:retriage', 'area:data']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a closed card, a PR row and a missing row are never judged', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data'], { state: 'closed' }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data'], { pull_request: {} }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(undefined, ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, 'H71: an unreadable `updated_at` must not read as fresh', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'area:data'], { updated_at: 'not a date' }), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, '⛔ H71: a `domain:*` label alone is no intake — the card is silent even where a map key spells that label', h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:server']), new Map([['domain:server', [6367]], ['area:data', [35557]]]), NOW71), null);
+  b(BATTERY28642, '⭐ H71: an epic seat takes its subtree — a card whose sub-issue parent is the epic it names fires, naming `epic:#N`', row71(card71(['pm:queue'], { parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/34571` }), new Map([['epic:#34571', [34584]]]), NOW71).includes('`epic:#34571` (#34584)'), true);
+  b(BATTERY28642, 'H71 control: …a parent on ANOTHER repo with the same number is not that epic — silent', h71UnclaimedOnDutyLane(card71(['pm:queue'], { parent_issue_url: 'https://api.github.com/repos/objectstack-ai/elsewhere-board/issues/34571' }), new Map([['epic:#34571', [34584]]]), NOW71), null);
+  b(BATTERY28642, 'seatIntakeKeys: the live title shapes — one area, two areas, an epic, a parenthesised note — on this board\'s repo lane', [`[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} · seat 7 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · area:data`, `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} · seat 4 — 🟢 os-elon-musk · area:ai + area:workflow`, `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} · seat 3 — 🟢 os-support-ai · epic #34571`, `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} · seat 5 — 🟢 os-bill · area:ux（待 #35205 回填）`].map((title) => seatIntakeKeys(seat70(title, '')).join('+')).join(' | '), 'area:data | area:ai+area:workflow | epic:#34571 | area:ux');
+  b(BATTERY28642, '⛔ seatIntakeKeys: no intake off this board or off a retired lane — `repo:` of another board, an `@ elsewhere` suffix, a `domain:*` seat, a bare seat and an unparseable title all answer none', [`[PM seat] repo:elsewhere-board · seat 2 — 🟢 os-warren · area:cloud`, `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} @ elsewhere-board — 🟢 os-x · area:data`, '[PM seat] domain:spec · seat 3 — 🟢 os-sam · area:data', `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} · seat 2 — 🟢 os-steve`, 'area:data seat registry'].map((title) => seatIntakeKeys(seat70(title, '')).length).join(), '0,0,0,0,0');
+  b(BATTERY28642, 'cardIntakeKeys: every `area:*` label plus the same-repo epic parent; a `domain:*` and a foreign parent read as nothing', [cardIntakeKeys(card71(['area:data', 'domain:server', 'priority:p1'], { parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/35205` })).join('+'), cardIntakeKeys(card71(['domain:server'], { parent_issue_url: 'https://api.github.com/repos/objectstack-ai/elsewhere-board/issues/9' })).length].join(), 'area:data+epic:#35205,0');
+  b(BATTERY28642, 'H71 text: the dropped spare-concurrency condition is SAID, and the row stays report-only', ['Spare concurrency is NOT judged', 'Report-only', 'lower bound'].every((s) => row71(card71(['pm:queue', 'area:data']), ON_DUTY71, NOW71).includes(s)), true);
   b(BATTERY28642, 'seatOnDuty: 🟢 login and 🟢 Routine are on duty; vacant, paused and an unparseable title are not', [seatOnDuty(seat70(HELD70, '')), seatOnDuty(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏳ vacant', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏸️ paused', '')), seatOnDuty(seat70('devx seat registry', ''))].join(), 'true,true,false,false,false');
   b(BATTERY28642, 'H71 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H71')}/${familyRegistryCoverage().emitted.includes('H71')}`, 'stall/true');
-  b(BATTERY28642, 'H70/H71: neither is a loud finding — they never escalate a sweep', [isLoudFinding(row70(seat70(HELD70, STUB70))), isLoudFinding(row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71))].join(), 'false,false');
+  b(BATTERY28642, 'H70/H71: neither is a loud finding — they never escalate a sweep', [isLoudFinding(row70(seat70(HELD70, STUB70))), isLoudFinding(row71(card71(['pm:queue', 'area:data']), ON_DUTY71, NOW71))].join(), 'false,false');
   b(BATTERY28642, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28642) && SELF_TEST_BATTERIES[BATTERY28642] > 0, true);
 
   // -- H72 (#28675): a recent mailbox comment the doorbell reader does not read.
@@ -29499,7 +29618,7 @@ async function selfTest() {
   const card73 = (extra = {}) => ({
     number: 28658,
     state: 'open',
-    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'area:data' }, { name: 'priority:p2' }],
     body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
     ...extra,
   });
@@ -29508,8 +29627,8 @@ async function selfTest() {
   const at73 = (iso) => Date.parse(iso);
   b(BATTERY29386, 'H73 fires: an open card carrying the decision label and a line-leading `Ruled:` record past the threshold', typeof h73(), 'string');
   b(BATTERY29386, 'H73 row: names the ruling id, its age and the threshold', ['ruling comment 6566731522', 'recorded ~11h ago', `threshold ${RULED_IN_BOX_STALE_HOURS}h`].every((x) => row73().includes(x)), true);
-  b(BATTERY29386, 'H73 row: names the `domain:*` seat that owes the exit', row73().includes('owed by the `domain:server` lane seat'), true);
-  b(BATTERY29386, '⛔ H73: the SAME body without the decision label is clean', h73({ labels: [{ name: 'domain:server' }, { name: 'pm:queue' }] }), null);
+  b(BATTERY29386, 'H73 row: names the card\'s `area:*` as the intake of the seat that owes the exit', row73().includes('owed by the seat whose post names `area:data`'), true);
+  b(BATTERY29386, '⛔ H73: the SAME body without the decision label is clean', h73({ labels: [{ name: 'area:data' }, { name: 'pm:queue' }] }), null);
   b(BATTERY29386, '⛔ H73: a `Ruled:` line inside a backtick FENCE is a citation, not a record', h73({ body: `quoting the other card:\n\`\`\`\n${RULED73}\n\`\`\`\n` }), null);
   b(BATTERY29386, 'H73 control: …and the identical line with the fence removed fires, so the silence is the fence\'s', typeof h73({ body: `quoting the other card:\n${RULED73}\n` }), 'string');
   b(BATTERY29386, '⛔ H73: a tilde fence is a fence too', h73({ body: `~~~text\n${RULED73}\n~~~` }), null);
@@ -29523,8 +29642,9 @@ async function selfTest() {
   b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
   b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
   b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
-  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: DECISION_INBOX_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
-  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, 'H73: no `area:*` label and no epic parent names the TRIAGE seat instead of inventing a seat', row73({ labels: [{ name: DECISION_INBOX_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, '⛔ H73: a `domain:*` label alone owes nothing to a lane any more — the TRIAGE seat routes it, and the label is never named as an owner', [row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }] }).includes('the TRIAGE seat routes it first'), row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }] }).includes('`domain:server`')].join(), 'true,false');
+  b(BATTERY29386, 'H73: an area and a same-repo epic parent are both named — the epic said, never numbered (the row is a GitHub body)', [row73({ parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/35205` }).includes('`area:data` / the epic its sub-issue parent is'), /#[0-9]/.test(row73({ parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/35205` }))].join(), 'true,false');
   b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
   b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
   b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
@@ -29716,7 +29836,7 @@ async function selfTest() {
     number: 29613,
     state: 'open',
     title: 'rest(record): the audit log row is dropped on bulk delete',
-    labels: [{ name: 'pm:queue' }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    labels: [{ name: 'pm:queue' }, { name: 'area:data' }, { name: 'domain:server' }, { name: 'priority:p2' }],
     body: `${LANE_SIG74}\n\n## 维护者速读\n\n- 问题:…`,
     ...extra,
   });
@@ -29757,11 +29877,13 @@ async function selfTest() {
   }
   b(BATTERY74, 'H74 exempt control: a card ABOUT main-red (`pm-dispatch(main-red): …`) stays in the population — fires', typeof h74([], { title: 'pm-dispatch(main-red): when the anchor card closes, the held seats are rung' }), 'string');
   b(BATTERY74, 'H74 exempt control: `red on main` without the prefix colon is prose, not an anchor — fires', typeof h74([], { title: 'rest: the export route goes red on main-like boards' }), 'string');
-  // A sub-issue inheriting its parent's domain or grade — the read bought last.
-  const domainParent = { number: 29600, labels: [{ name: 'tracking' }, { name: 'domain:server' }] };
+  // A sub-issue inheriting its parent's area or grade — the read bought last.
+  const areaParent = { number: 29600, labels: [{ name: 'tracking' }, { name: 'area:data' }] };
+  const domainParent = { number: 29603, labels: [{ name: 'tracking' }, { name: 'domain:server' }] };
   const gradeParent = { number: 29601, labels: [{ name: 'tracking' }, { name: 'priority:p2' }] };
-  const strangerParent = { number: 29602, labels: [{ name: 'tracking' }, { name: 'domain:ui' }, { name: 'priority:p1' }] };
-  b(BATTERY74, '⛔ H74 exempt: a sub-issue whose parent carries its `domain:*` is silent', h74QueuedWithoutTriageAudit(card74(), [], domainParent), null);
+  const strangerParent = { number: 29602, labels: [{ name: 'tracking' }, { name: 'area:ux' }, { name: 'domain:ui' }, { name: 'priority:p1' }] };
+  b(BATTERY74, '⛔ H74 exempt: a sub-issue whose parent carries its `area:*` is silent', h74QueuedWithoutTriageAudit(card74(), [], areaParent), null);
+  b(BATTERY74, 'H74 exempt control: a parent sharing only the card\'s `domain:*` inherits nothing any more — fires', typeof h74QueuedWithoutTriageAudit(card74(), [], domainParent), 'string');
   b(BATTERY74, '⛔ H74 exempt: …or its `priority:*`', h74QueuedWithoutTriageAudit(card74(), [], gradeParent), null);
   b(BATTERY74, 'H74 exempt control: a parent sharing NEITHER label inherits nothing — fires', typeof h74QueuedWithoutTriageAudit(card74(), [], strangerParent), 'string');
   b(BATTERY74, 'H74 exempt control: a parentless card (the documented 404) fires, and an unread parent fires as before', [typeof h74QueuedWithoutTriageAudit(card74(), [], null), typeof h74([])].join(), 'string,string');
@@ -32587,6 +32709,10 @@ async function selfTest() {
   const SIBLING_BOARD = OWN_BOARD === 'objectui' ? 'objectstack' : 'objectui';
   const ownLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${OWN_BOARD} — ${status}`);
   const siblingLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${SIBLING_BOARD} — ${status}`);
+  // The seats-plus-epics title H32 now counts: a repo-lane seat on THIS board naming its area intake (the live
+  // `area:build + area:fleet` shape). The `domain:*` HELD post above keeps driving the `seatLane` parse (seat number,
+  // the fetch leg a retired domain seat still buys); no row judges a card by it.
+  const AREA32 = `[PM seat] repo:${OWN_BOARD} — 🟢 os-sales · 由 os-sales 账户的项目负责 · area:build + area:fleet`;
 
   // The lane parse, across the three measured title shapes.
   t('H32 lane: a plain domain lane is own-board', seatLane(seat(HELD)).lane, 'domain:spec');
@@ -32608,22 +32734,37 @@ async function selfTest() {
   t('H32 held: a Routine seat is excluded (no claim cadence of its own)', seatIsHeld(seat('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
 
   // The board halves — both required.
-  t('H32: held + idle lane + stale marker -> finding', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32), 'string');
-  t('H32: …and it names the lane', h32row(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('`domain:spec`'), true);
-  t('H32: …and the unclaimed count', h32row(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('15 unclaimed'), true);
-  t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), busy, NOW32), null);
-  t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
+  t('H32: held + idle lane + stale marker -> finding', typeof h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', 600), idleLane, NOW32), 'string');
+  t('H32: …and it names the intake its title takes', h32row(seat(AREA32), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('its intake `area:build` + `area:fleet`'), true);
+  t('⛔ H32: a `domain:*` lane seat has no intake any more — out of scope however idle its marker', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), idleLane, NOW32), null);
+  t('⛔ H32: …and so are a sibling board\'s repo-lane seat and a bare repo-lane seat naming no area', [h32SeatIdleOverQueue(seat(`[PM seat] repo:${SIBLING_BOARD} — 🟢 os-x · area:data`), marker('Round-start marker', 600), idleLane, NOW32), h32SeatIdleOverQueue(seat(`[PM seat] repo:${OWN_BOARD} · seat 2 — 🟢 os-steve`), marker('Round-start marker', 600), idleLane, NOW32)].every((v) => v === null), true);
+  // The intake inventory: cards under the seat's areas and epics, each counted once; never a `domain:*` label.
+  const inv32 = (labels, extra = {}) => ({ ...issue(labels), ...extra });
+  const CARDS32 = [
+    inv32(['pm:queue', 'area:build']),
+    inv32(['pm:queue', 'area:build', 'area:fleet']),
+    inv32(['pm:queue', 'area:fleet'], { assignees: [{ login: 'os-x' }] }),
+    inv32(['pm:dispatched', 'area:data']),
+    inv32(['pm:queue', 'domain:spec']),
+    inv32(['pm:queue'], { parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/34571` }),
+  ];
+  t('H32 inventory: unclaimed under the intake, a two-area card once, an assigned queue card never, a `domain:*` card never', JSON.stringify(seatIntakeInventory(['area:build', 'area:fleet'], CARDS32)), JSON.stringify({ unclaimed: 2, inFlight: 0 }));
+  t('H32 inventory: in flight counts under the intake too, and an epic key counts its sub-issues', [JSON.stringify(seatIntakeInventory(['area:data'], CARDS32)), JSON.stringify(seatIntakeInventory(['epic:#34571'], CARDS32))].join(' '), '{"unclaimed":0,"inFlight":1} {"unclaimed":1,"inFlight":0}');
+  t('H32 inventory: no intake counts nothing', JSON.stringify(seatIntakeInventory([], CARDS32)), JSON.stringify({ unclaimed: 0, inFlight: 0 }));
+  t('H32: …and the unclaimed count', h32row(seat(AREA32), marker('Round-start marker — R6.', 600), idleLane, NOW32).includes('15 unclaimed'), true);
+  t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', 600), busy, NOW32), null);
+  t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
   t('H32: a vacant seat is out of scope however deep the queue', h32SeatIdleOverQueue(seat('[PM seat] domain:spec — ⏳ vacant'), marker('收班', 6000), idleLane, NOW32), null);
   t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(siblingLaneSeat(), marker('Round-start marker', 600), idleLane, NOW32), null);
   t('H32: a non-seat card is out of scope', h32SeatIdleOverQueue({ ...issue(['pm:queue']), title: HELD }, marker('x', 600), idleLane, NOW32), null);
 
   // The threshold, at both edges of SEAT_IDLE_STALE_MINUTES.
-  t('H32: a marker inside the horizon -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES - 1), idleLane, NOW32), null);
-  t('H32: exactly at the horizon -> clean (strictly past it fires)', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES), idleLane, NOW32), null);
-  t('H32: one minute past -> finding', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES + 1), idleLane, NOW32), 'string');
+  t('H32: a marker inside the horizon -> clean', h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES - 1), idleLane, NOW32), null);
+  t('H32: exactly at the horizon -> clean (strictly past it fires)', h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES), idleLane, NOW32), null);
+  t('H32: one minute past -> finding', typeof h32SeatIdleOverQueue(seat(AREA32), marker('Round-start marker — R6.', SEAT_IDLE_STALE_MINUTES + 1), idleLane, NOW32), 'string');
   // The measured cross-shift interval that must NOT fire: domain:engine's
   // 收班 23:10 -> 开轮 01:47 pair, the shape the 480-min horizon was set above.
-  t('H32: a 收班/开轮 turnaround inside the horizon is clean', h32SeatIdleOverQueue(seat(HELD), marker('**开轮 / ROUND-OPEN marker** — domain:engine seat', 157), idleLane, NOW32), null);
+  t('H32: a 收班/开轮 turnaround inside the horizon is clean', h32SeatIdleOverQueue(seat(AREA32), marker('**开轮 / ROUND-OPEN marker** — domain:engine seat', 157), idleLane, NOW32), null);
 
   // The wait exemption — structural, unbounded by time (grading's ruling).
   for (const [name, body] of [
@@ -32634,21 +32775,21 @@ async function selfTest() {
     ['a named Blocked-by', 'Round brief — the whole queue is Blocked-by: #123'],
     ['决策箱', '收班 — 队列 12,其中 12 在决策箱'],
   ]) {
-    t(`H32 exempt: a marker naming ${name} silences the row`, h32SeatIdleOverQueue(seat(HELD), marker(body, 6000), idleLane, NOW32), null);
+    t(`H32 exempt: a marker naming ${name} silences the row`, h32SeatIdleOverQueue(seat(AREA32), marker(body, 6000), idleLane, NOW32), null);
   }
-  t('H32 exempt: …and the exemption is UNBOUNDED by time', h32SeatIdleOverQueue(seat(HELD), marker('等裁决', 60_000), idleLane, NOW32), null);
-  t('H32: a marker with no wait declared is NOT exempt', typeof h32SeatIdleOverQueue(seat(HELD), marker('Round brief — 10 PR landed.', 6000), idleLane, NOW32), 'string');
+  t('H32 exempt: …and the exemption is UNBOUNDED by time', h32SeatIdleOverQueue(seat(AREA32), marker('等裁决', 60_000), idleLane, NOW32), null);
+  t('H32: a marker with no wait declared is NOT exempt', typeof h32SeatIdleOverQueue(seat(AREA32), marker('Round brief — 10 PR landed.', 6000), idleLane, NOW32), 'string');
   t('H32 exempt: seatDeclaresWait is case-folded', seatDeclaresWait('Everything is AWAITING the maintainer'), true);
   t('H32 exempt: …and plain prose declares nothing', seatDeclaresWait('Round 2 result — os-warren'), false);
 
   // The unread/unconsulted thread DECLINES — the one asymmetry against H4.
-  t('H32: an unconsulted thread declines to judge', h32SeatIdleOverQueue(seat(HELD), undefined, idleLane, NOW32), null);
-  t('H32: an UNREADABLE thread declines too (never a blind accusation)', h32SeatIdleOverQueue(seat(HELD), null, idleLane, NOW32), null);
-  t('H32: a seat with NO marker at all declines', h32SeatIdleOverQueue(seat(HELD), latestSeatMarker([]), idleLane, NOW32), null);
+  t('H32: an unconsulted thread declines to judge', h32SeatIdleOverQueue(seat(AREA32), undefined, idleLane, NOW32), null);
+  t('H32: an UNREADABLE thread declines too (never a blind accusation)', h32SeatIdleOverQueue(seat(AREA32), null, idleLane, NOW32), null);
+  t('H32: a seat with NO marker at all declines', h32SeatIdleOverQueue(seat(AREA32), latestSeatMarker([]), idleLane, NOW32), null);
   // An unreadable STAMP still fires — that is the #4690 direction, and it
   // differs from an unreadable THREAD because the wait exemption was still read.
-  t('H32: an unreadable marker stamp must not read as fresh', typeof h32SeatIdleOverQueue(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32), 'string');
-  t('H32: …and the row says so rather than printing a number', h32row(seat(HELD), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32).includes('unreadable marker timestamp'), true);
+  t('H32: an unreadable marker stamp must not read as fresh', typeof h32SeatIdleOverQueue(seat(AREA32), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32), 'string');
+  t('H32: …and the row says so rather than printing a number', h32row(seat(AREA32), { body: 'Round-start marker', createdAt: 'not-a-date' }, idleLane, NOW32).includes('unreadable marker timestamp'), true);
 
   // latestSeatMarker — recency, with governingClaim's thread-order fallback.
   t('H32 marker: the NEWEST comment wins', latestSeatMarker([{ body: 'old', created_at: minsAgo(600) }, { body: 'new', created_at: minsAgo(10) }]).body, 'new');
@@ -32660,6 +32801,7 @@ async function selfTest() {
 
   // The gathering gate buys a fetch only for seats the row can speak about.
   t('H32 gate: a held own-board seat is a candidate', h32NeedsSeatComments(seat(HELD)), true);
+  t('H32 gate: a held repo-lane seat naming an intake on this board is a candidate; one naming none, or on a sibling board, is not', [h32NeedsSeatComments(seat(AREA32)), h32NeedsSeatComments(seat(`[PM seat] repo:${OWN_BOARD} · seat 2 — 🟢 os-steve`)), h32NeedsSeatComments(seat(`[PM seat] repo:${SIBLING_BOARD} — 🟢 os-x · area:data`))].join(), 'true,false,false');
   t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(siblingLaneSeat()), false);
   t('H32 gate: a vacant seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:spec — ⏳ vacant')), false);
   t('H32 gate: a non-seat card buys no fetch', h32NeedsSeatComments(issue(['pm:queue'])), false);
@@ -32823,7 +32965,8 @@ async function selfTest() {
   // cards without touching it. The claims are what a silent shift leaves behind.
   const SEAT_AT_38 = Date.parse('2026-08-29T07:09:00Z');
   const at38 = (iso) => Date.parse(iso);
-  const seat38 = (title = '[PM seat] domain:services — 🟢 os-elon · R4 派发中', extra = {}) => ({
+  // A repo-lane seat on THIS board naming its area intake: the seats-plus-epics title H38 now reads.
+  const seat38 = (title = `[PM seat] repo:${OWN_BOARD} — 🟢 os-elon · area:data · R4 派发中`, extra = {}) => ({
     number: 6021,
     title,
     labels: [{ name: 'pm:seat' }],
@@ -32836,10 +32979,8 @@ async function selfTest() {
 
   // The measured specimen: a claim written ~24h after the post's last event.
   t('H38: a lane claim NEWER than the seat post -> finding', typeof h38SeatPostStale(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
-  // The specimen post is titled `domain:services`; since the 2026-10-22 lane
-  // merge that spelling is an alias, and the finding names the lane it speaks
-  // for (the `domain:server lane aliases` battery below holds the controls).
-  t('H38: …and the finding names the lane, in its merged spelling', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('domain:server'), true);
+  // The finding names the intake the post takes, as its title spells it.
+  t('H38: …and the finding names the intake the post takes', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('its intake `area:data` (seat 1)'), true);
   t('H38: …and the card whose claim outran the post', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('#13398'), true);
   t('H38: …and states how far behind the post is', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:09:00Z')).includes('24.0h'), true);
   // ⛔ The row must not read as an accusation — the card is explicit that both
@@ -32856,6 +32997,8 @@ async function selfTest() {
   // A lane on a sibling board has an unreadable claim population here, so an
   // absent claim would mean "unreadable", not "none" (H32's `foreign` rule).
   t('H38: a FOREIGN lane is out of scope', h38SeatPostStale(siblingLaneSeat(), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  t('H38: ⛔ a retired `domain:*` seat post is out of scope — it names no intake', h38SeatPostStale(seat38('[PM seat] domain:services — 🟢 os-elon · R4 派发中'), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  t('H38: a sibling board\'s repo seat naming an area is out of scope too', h38SeatPostStale(seat38(`[PM seat] repo:${SIBLING_BOARD} — 🟢 os-x · area:data`), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
   t('H38: a lane-less seat title is out of scope', h38SeatPostStale(seat38('[PM seat] triage (objectstack-wide) — 🟢 os-help'), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
   // ⛔ An ORDER comparison built on an unreadable stamp is a fabricated
   // ordering, not a conservative one — H33 settles this direction.
@@ -32876,29 +33019,35 @@ async function selfTest() {
   const laneCard = (number, labels) => ({ number, labels: labels.map((name) => ({ name })), assignees: [], body: '', title: '' });
   const CLAIM_ROW = [{ body: 'Claim: PM loop round 4\nSession: `session_x`', created_at: '2026-08-30T07:30:00Z' }];
   const laneIssues = [
-    laneCard(13398, ['pm:dispatched', 'domain:services']),
-    laneCard(13399, ['pm:dispatched', 'domain:devx']),
-    laneCard(13400, ['pm:queue', 'domain:services']),
+    laneCard(13398, ['pm:dispatched', 'area:data']),
+    laneCard(13399, ['pm:dispatched', 'area:build']),
+    laneCard(13400, ['pm:queue', 'area:data']),
   ];
   const laneComments = new Map([[13398, CLAIM_ROW], [13399, CLAIM_ROW], [13400, CLAIM_ROW]]);
-  t('H38 lane: the newest claim on the lane is found', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
-  t('H38 lane: a claim on ANOTHER lane is not counted (OR-not-AND)', newestLaneClaim('domain:devx', laneIssues, laneComments).number, 13399);
-  t('H38 lane: a `pm:queue` card is not a dispatch claim', newestLaneClaim('domain:services', [laneCard(13400, ['pm:queue', 'domain:services'])], laneComments), null);
-  // `domain:skills`, not `domain:engine`: since the 2026-10-22 merge the latter
-  // is the same lane as the fixtures' `domain:services`, so it would be FOUND.
-  t('H38 lane: a lane with no dispatched cards is null', newestLaneClaim('domain:skills', laneIssues, laneComments), null);
-  t('H38 lane: an unfetched thread contributes nothing', newestLaneClaim('domain:services', laneIssues, new Map()), null);
-  t('H38 lane: the NEWEST of several claims wins', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services']), laneCard(2, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: a', created_at: '2026-08-29T00:00:00Z' }]], [2, [{ body: 'Claim: b', created_at: '2026-08-30T00:00:00Z' }]]])).number, 2);
+  t('H38 lane: the newest claim on the lane is found', newestLaneClaim('area:data', laneIssues, laneComments).number, 13398);
+  t('H38 lane: a claim on ANOTHER lane is not counted (OR-not-AND)', newestLaneClaim('area:build', laneIssues, laneComments).number, 13399);
+  t('H38 lane: a `pm:queue` card is not a dispatch claim', newestLaneClaim('area:data', [laneCard(13400, ['pm:queue', 'area:data'])], laneComments), null);
+  t('H38 lane: a lane with no dispatched cards is null', newestLaneClaim('area:ux', laneIssues, laneComments), null);
+  t('H38 lane: an unfetched thread contributes nothing', newestLaneClaim('area:data', laneIssues, new Map()), null);
+  t('H38 lane: the NEWEST of several claims wins', newestLaneClaim('area:data', [laneCard(1, ['pm:dispatched', 'area:data']), laneCard(2, ['pm:dispatched', 'area:data'])], new Map([[1, [{ body: 'Claim: a', created_at: '2026-08-29T00:00:00Z' }]], [2, [{ body: 'Claim: b', created_at: '2026-08-30T00:00:00Z' }]]])).number, 2);
   // ⛔ The claim predicate is REUSED, not re-spelled: a comment that is not a
   // canonical `Claim:` is invisible here exactly as it is to H2 and H33.
-  t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
-  t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
-  t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
+  t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('area:data', [laneCard(1, ['pm:dispatched', 'area:data'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('area:data', [laneCard(1, ['pm:dispatched', 'area:data'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  // The intake reading: a `domain:*` label alone puts a card on no seat; an epic parent and a multi-key intake do.
+  t('H38 lane: ⛔ a card carrying only `domain:*` is on no intake — its claim is not counted', newestLaneClaim('area:data', [laneCard(5, ['pm:dispatched', 'domain:services'])], new Map([[5, CLAIM_ROW]])), null);
+  t('H38 lane: a seat taking an epic sees the claim on that epic\'s sub-issue', newestLaneClaim(['epic:#34571'], [{ ...laneCard(6, ['pm:dispatched']), parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/34571` }], new Map([[6, CLAIM_ROW]])).number, 6);
+  t('H38 lane: …but not on a sub-issue of another board\'s issue with that number', newestLaneClaim(['epic:#34571'], [{ ...laneCard(6, ['pm:dispatched']), parent_issue_url: 'https://api.github.com/repos/someone/else/issues/34571' }], new Map([[6, CLAIM_ROW]])), null);
+  t('H38 lane: a multi-key intake counts a claim under any of its keys', newestLaneClaim(['area:ux', 'area:build'], laneIssues, laneComments).number, 13399);
+  t('H38 lane: an empty intake sees nothing', newestLaneClaim([], laneIssues, laneComments), null);
+  t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('area:data', [laneCard(1, ['pm:dispatched', 'area:data'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
 
   // Free-claim multi-seat: several PMs on one lane, one post per seat, and a
   // post is compared only against claims of ITS seat number. The title suffix
   // and the claim's `Seat:` line are the two readings; both default to seat 1.
   const seat2Title = '[PM seat] domain:services · seat 2 — 🟢 os-b (session_y)';
+  // The seat-2 post H38 judges: a repo-lane seat naming its intake (the domain title above drives the seatLane parse only).
+  const seat2Area = `[PM seat] repo:${OWN_BOARD} · seat 2 — 🟢 os-b (session_y) · area:data`;
   // `domain:server`: the title's `domain:services` is an alias since 2026-10-22.
   t('H38 seat: a `· seat N` title suffix parses as the LANE (merged spelling), not foreign', seatLane(seat38(seat2Title)).lane, 'domain:server');
   t('H38 seat: …and is not foreign', seatLane(seat38(seat2Title)).foreign, false);
@@ -32920,27 +33069,37 @@ async function selfTest() {
   t('H38 seat: a declaration mid-sentence in a code span is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** dispatched by the `domain:spec` execution seat. `Seat: domain:spec#3` · claimed 2026-09-18T19:31Z'), null);
   t('H38 seat: …and the same declaration inside a subscript tag', claimSeatNumber('<sub>Seat: domain:spec#3</sub>'), null);
   // The two controls that keep the probe from swallowing the default: prose (above) needs the capital key, and a lane token alone is not a declaration.
+  // The seat spellings live today, mid-line: a `repo:` or `epic:` declaration the key line cannot see is PRESENT too.
+  t('H38 seat: a mid-line `repo:` declaration is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** by the seat. `Seat: repo:objectstack#3` · claimed'), null);
+  t('H38 seat: …and so is a mid-line `epic:` declaration', claimSeatNumber('**Claim:** by the seat. `Seat: epic:#31527#1` · claimed'), null);
+  t('H38 seat: a line-initial `Seat: repo:objectstack#3` reads 3', claimSeatNumber('Claim: x\nSeat: repo:objectstack#3'), 3);
+  // The epic shape names its epic before its seat: `epic:#<N>#<k>` is seat k. Every other spelling keeps the FIRST `#<n>`.
+  t('H38 seat: a line-initial `Seat: epic:#31527#1` reads 1, ⛔ not the epic number', claimSeatNumber('Claim: x\nSeat: epic:#31527#1'), 1);
+  t('H38 seat: …backticked, `epic:#31527#2` reads 2', claimSeatNumber('Claim: x\nSeat: `epic:#31527#2`'), 2);
+  t('H38 seat: …and a trailing note does not move the epic seat', claimSeatNumber('Claim: x\nSeat: epic:#31527#1 (filed under #35205)'), 1);
+  t('H38 seat: a repo seat keeps its FIRST `#<n>` — a trailing note does not move it', claimSeatNumber('Claim: x\nSeat: repo:objectstack#3 (filed under #35205)'), 3);
+  t('H38 seat: prose naming a repo seat is still not a declaration, so seat 1', claimSeatNumber('the seat: repo:objectstack#2 is busy'), 1);
   t('H38 seat: a lane token with no `Seat:` key is not a declaration, so the absent default holds', claimSeatNumber('Claim: x\nre-graded for `domain:spec#3` work'), 1);
   t('H38 seat: a body with no declaration at all is still seat 1 — every pre-line claim keeps its default', claimSeatNumber('Claim: x\nSession: `session_y`\nWorktree: `objectstack-issue-1`'), 1);
   const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
-  const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
+  const oneCard = [laneCard(1, ['pm:dispatched', 'area:data'])];
   const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
   const seat1Claim = new Map([[1, seatRow('Branch: `claude/issue-1-a`', '2026-08-30T00:00:00Z')]]);
-  t('H38 seat: a SAME-seat newer claim is found (seat 2 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 2).number, 1);
-  t('H38 seat: ANOTHER seat\'s claim is not counted (seat 1 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 1), null);
-  t('H38 seat: an absent `Seat:` line is seat 1 — the seat 1 post sees it', newestLaneClaim('domain:services', oneCard, seat1Claim, 1).number, 1);
-  t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
-  t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
-  t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  t('H38 seat: a SAME-seat newer claim is found (seat 2 post, seat 2 claim)', newestLaneClaim('area:data', oneCard, seat2Claim, 2).number, 1);
+  t('H38 seat: ANOTHER seat\'s claim is not counted (seat 1 post, seat 2 claim)', newestLaneClaim('area:data', oneCard, seat2Claim, 1), null);
+  t('H38 seat: an absent `Seat:` line is seat 1 — the seat 1 post sees it', newestLaneClaim('area:data', oneCard, seat1Claim, 1).number, 1);
+  t('H38 seat: …and the seat 2 post does not', newestLaneClaim('area:data', oneCard, seat1Claim, 2), null);
+  t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('area:data', laneIssues, laneComments).number, 13398);
+  t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('area:data', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
   const midLineClaim = new Map([[1, [{ body: '**Claim:** by the `domain:services` seat. `Seat: domain:services#3` · claimed', created_at: '2026-08-30T00:00:00Z' }]]]);
-  t('H38 seat: a mid-line declaration is invisible to the seat it names…', newestLaneClaim('domain:services', oneCard, midLineClaim, 3), null);
-  t('H38 seat: …and — the whole point — invisible to seat 1 too, so no post is rowed over it', newestLaneClaim('domain:services', oneCard, midLineClaim, 1), null);
-  t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
+  t('H38 seat: a mid-line declaration is invisible to the seat it names…', newestLaneClaim('area:data', oneCard, midLineClaim, 3), null);
+  t('H38 seat: …and — the whole point — invisible to seat 1 too, so no post is rowed over it', newestLaneClaim('area:data', oneCard, midLineClaim, 1), null);
+  t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('area:data', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
   // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
-  t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
-  t('H38 seat: …and the finding names the seat', h38row(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 2'), true);
+  t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Area), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38 seat: …and the finding names the seat', h38row(seat38(seat2Area), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 2'), true);
   t('H38 seat: …while the bare post names seat 1', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 1'), true);
-  t('H38 seat: a seat-2 post with no same-seat claim -> clean', h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, newestLaneClaim('domain:services', oneCard, seat1Claim, 2)), null);
+  t('H38 seat: a seat-2 post with no same-seat claim -> clean', h38SeatPostStale(seat38(seat2Area), SEAT_AT_38, newestLaneClaim('area:data', oneCard, seat1Claim, 2)), null);
 
   // -- Lane label aliases — the domain:server merge (maintainer ruling 2026-10-22, letter 乙) --
   //
@@ -32969,18 +33128,19 @@ async function selfTest() {
   b(BATTERY_SERVER, 'seat title: …and is not foreign', seatLane(seat38('[PM seat] domain:cli — ⏳ vacant')).foreign, false);
   b(BATTERY_SERVER, 'seat title: a retitled `domain:server · seat 3` post reads as itself', [seatLane(seat38('[PM seat] domain:server · seat 3 — 🟢 os-b')).lane, seatLane(seat38('[PM seat] domain:server · seat 3 — 🟢 os-b')).seat].join(), 'domain:server,3');
   b(BATTERY_SERVER, 'seat title control: a `domain:spec` post is untouched by the alias', seatLane(seat38('[PM seat] domain:spec — 🟢 os-b')).lane, 'domain:spec');
-  // The lane claim index, through the alias in BOTH directions.
+  // The claim index no longer reads a card's `domain:*` label in ANY spelling: a card is on a seat by its intake
+  // (`cardIntakeKeys`), so the alias map reaches seat TITLES only (above), never a card.
   const engineCard = [laneCard(7, ['pm:dispatched', 'domain:engine'])];
   const serverCard = [laneCard(8, ['pm:dispatched', 'domain:server'])];
   const aliasClaims = new Map([[7, CLAIM_ROW], [8, CLAIM_ROW]]);
-  b(BATTERY_SERVER, 'claim index: a `domain:server` seat sees the claim on a card still labelled `domain:engine`', newestLaneClaim('domain:server', engineCard, aliasClaims).number, 7);
-  b(BATTERY_SERVER, 'claim index: a seat still titled `domain:cli` sees the claim on a `domain:server` card', newestLaneClaim('domain:cli', serverCard, aliasClaims).number, 8);
-  b(BATTERY_SERVER, 'claim index: …and the claim on a sibling retired spelling', newestLaneClaim('domain:services', engineCard, aliasClaims).number, 7);
-  b(BATTERY_SERVER, 'claim index control: another lane still sees nothing (OR-not-AND holds through the alias)', newestLaneClaim('domain:spec', engineCard, aliasClaims), null);
-  b(BATTERY_SERVER, 'claim index control: a `pm:queue` card is still not a dispatch claim', newestLaneClaim('domain:server', [laneCard(9, ['pm:queue', 'domain:engine'])], new Map([[9, CLAIM_ROW]])), null);
-  // The census: one lane per card, whatever its spelling, and never twice.
-  b(BATTERY_SERVER, 'census: a `domain:cli` card is counted under `domain:server`', censusLanesOf(laneCard(1, ['domain:cli', 'pm:dispatched'])).join(), 'domain:server');
-  b(BATTERY_SERVER, 'census: a card carrying an old AND the new spelling is ONE lane, not two', censusLanesOf(laneCard(1, ['domain:engine', 'domain:server'])).join(), 'domain:server');
+  b(BATTERY_SERVER, 'claim index: ⛔ a card still labelled `domain:engine` is on no intake — no seat sees its claim', newestLaneClaim(['area:data'], engineCard, aliasClaims), null);
+  b(BATTERY_SERVER, 'claim index: ⛔ …nor a card labelled `domain:server`', newestLaneClaim(['area:data'], serverCard, aliasClaims), null);
+  b(BATTERY_SERVER, 'claim index: ⛔ a `domain:*` spelling handed in as the intake matches no card either', newestLaneClaim('domain:server', [...engineCard, ...serverCard], aliasClaims), null);
+  b(BATTERY_SERVER, 'claim index control: the same card with an `area:*` label beside its `domain:engine` is seen', newestLaneClaim(['area:data'], [laneCard(7, ['pm:dispatched', 'domain:engine', 'area:data'])], aliasClaims).number, 7);
+  b(BATTERY_SERVER, 'claim index control: a `pm:queue` card is still not a dispatch claim', newestLaneClaim(['area:data'], [laneCard(9, ['pm:queue', 'area:data'])], new Map([[9, CLAIM_ROW]])), null);
+  // The census: a `domain:*` label is no lane any more, in any spelling; one lane per card, never twice.
+  b(BATTERY_SERVER, 'census: ⛔ a `domain:cli` card alone buckets under `(no lane)` — a domain label is no lane', censusLanesOf(laneCard(1, ['domain:cli', 'pm:dispatched'])).join(), '(no lane)');
+  b(BATTERY_SERVER, 'census: a card carrying `domain:*` beside `area:*` is counted under the area only', censusLanesOf(laneCard(1, ['domain:engine', 'domain:server', 'area:data'])).join(), 'area:data');
   b(BATTERY_SERVER, 'census control: a `repo:*` lane passes through untouched', censusLanesOf(laneCard(1, ['repo:hotcrm'])).join(), 'repo:hotcrm');
   b(BATTERY_SERVER, 'census control: a card with no lane still buckets under `(no lane)`', censusLanesOf(laneCard(1, ['pm:queue'])).join(), '(no lane)');
   b(BATTERY_SERVER, 'floor: this battery is DECLARED on the frozen roster with a positive pin, and the roster floor rose to TEN with it', [Object.hasOwn(SELF_TEST_BATTERIES, BATTERY_SERVER), SELF_TEST_BATTERIES[BATTERY_SERVER] > 0, SELF_TEST_BATTERY_FLOOR === 10, Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR].join(), 'true,true,true,true');
@@ -33005,14 +33165,14 @@ async function selfTest() {
   const corpus = (rows, truncated = false) => ({ rows, truncated });
   const censusOf = (byLabel, controlRows = 42) => summariseClosedResidue(new Map(byLabel), { controlRows });
 
-  const DEVX = ['pm:dispatched', 'domain:devx'];
+  const DEVX = ['pm:dispatched', 'area:build'];
   const baseCensus = censusOf([
-    ['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX), censusCard(3, ['pm:dispatched', 'domain:spec'])])],
-    ['pm:queue', corpus([censusCard(1, ['pm:queue', 'domain:devx']), censusCard(9, ['pm:queue', 'domain:spec'])])],
+    ['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX), censusCard(3, ['pm:dispatched', 'area:data'])])],
+    ['pm:queue', corpus([censusCard(1, ['pm:queue', 'area:build']), censusCard(9, ['pm:queue', 'area:data'])])],
   ]);
 
   t('H39: a label total is the count of its cards', baseCensus.rows.find((r) => r.label === 'pm:dispatched').total, 3);
-  t('H39: lanes are counted locally, per label', baseCensus.rows.find((r) => r.label === 'pm:dispatched').lanes.find((l) => l[0] === 'domain:devx')[1], 2);
+  t('H39: lanes are counted locally, per label', baseCensus.rows.find((r) => r.label === 'pm:dispatched').lanes.find((l) => l[0] === 'area:build')[1], 2);
   t('H39: rows sort by size so the worst lane leads', baseCensus.rows[0].label, 'pm:dispatched');
   t('H39: the oldest closure is carried, for the "how old is this" question', baseCensus.rows[0].oldest.number, 1);
   // The contradictory pair, intersected LOCALLY — the endpoint's `labels`
@@ -33058,7 +33218,9 @@ async function selfTest() {
   t('H39 paging: the ceiling is generous enough not to bind routinely', CENSUS_PAGE_CEILING >= 50, true);
 
   // Lane bucketing — an unrouted card is still residue and must not vanish.
-  t('H39 lanes: a domain label is a lane', censusLanesOf(censusCard(1, ['pm:queue', 'domain:spec'])).includes('domain:spec'), true);
+  t('H39 lanes: an area label is a lane', censusLanesOf(censusCard(1, ['pm:queue', 'area:data'])).includes('area:data'), true);
+  t('H39 lanes: ⛔ a domain label alone is no lane — the card is bucketed under `(no lane)`', censusLanesOf(censusCard(1, ['pm:queue', 'domain:spec'])).join(), '(no lane)');
+  t('H39 lanes: a same-board epic parent is a lane', censusLanesOf(censusCard(1, ['pm:queue'], undefined, { parent_issue_url: `https://api.github.com/repos/${SWEEP_REPO.repo}/issues/34571` })).join(), 'epic:#34571');
   t('H39 lanes: a repo label is a lane too (single-lane seats)', censusLanesOf(censusCard(1, ['pm:queue', 'repo:cloud'])).includes('repo:cloud'), true);
   t('H39 lanes: an unrouted card is bucketed, not dropped', censusLanesOf(censusCard(1, ['pm:queue']))[0], '(no lane)');
 
@@ -34115,7 +34277,7 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   // between the two readings is STALE on page 1's `T_seat` and CLEAN on the
   // newest page's — the verdict flip this card is about.
   const CLAIM_18325 = { number: 18324, at: Date.parse('2026-09-14T20:00:00Z') };
-  const LANE_SEAT_18325 = { ...SEAT_18325, title: '[PM seat] domain:devx @ objectstack — 🟢 os-project-manager' };
+  const LANE_SEAT_18325 = { ...SEAT_18325, title: `[PM seat] repo:${SWEEP_REPO.repo.split('/')[1]} — 🟢 os-project-manager · area:build` };
   t('H38 verdict: ⛔ on the OLD window the post reads STALE against a claim it already answered', typeof h38SeatPostStale(LANE_SEAT_18325, Date.parse('2026-09-14T11:41:59Z'), CLAIM_18325), 'string');
   t('H38 verdict: ⭐ …and CLEAN once `T_seat` comes off the newest page', h38SeatPostStale(LANE_SEAT_18325, Date.parse('2026-09-15T08:00:00Z'), CLAIM_18325), null);
   // ⭐ The population is what did NOT move. Both gates read exactly as before.

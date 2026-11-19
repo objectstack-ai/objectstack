@@ -705,9 +705,11 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     // 9 since #26835: the hook form offers the `refusals` record, whose two
     // entry fields (`message`, `status`) are enumerated the same way. 12 since
     // #33657: the entry also offers `reasons` (a record of `{ message }`) and
-    // `params`, three more enumerated children.
+    // `params`, three more enumerated children. 14 since #34575: the form
+    // offers the `texts` record, whose entry fields (`message`, `params`) are
+    // enumerated the same way.
     expect(HOOK_ENUMERATED.covered.length, 'hookForm enumerates no repeater row properties').toBe(0);
-    expect(HOOK_ENUMERATED.skipped.length).toBe(12);
+    expect(HOOK_ENUMERATED.skipped.length).toBe(14);
     for (const child of SHARED_BODY_CHILDREN) expect(HOOK_ENUMERATED.skipped).toContain(`body.${child}`);
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.maxRetries');
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.backoffMs');
@@ -716,6 +718,8 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     expect(HOOK_ENUMERATED.skipped).toContain('refusals.reasons');
     expect(HOOK_ENUMERATED.skipped).toContain('refusals.reasons.message');
     expect(HOOK_ENUMERATED.skipped).toContain('refusals.params');
+    expect(HOOK_ENUMERATED.skipped).toContain('texts.message');
+    expect(HOOK_ENUMERATED.skipped).toContain('texts.params');
     //
     // ⇒ one composite, two forms, two different greens: a lit control that
     // passes on a sibling repeater, and a dark control that is right about

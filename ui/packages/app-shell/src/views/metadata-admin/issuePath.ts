@@ -42,6 +42,47 @@ export function describeIssuePath(headLabel: string, path: string, rootValue: un
   return parts.join(' → ');
 }
 
+/**
+ * The top-level key a dot-joined issue path names: its HEAD segment, `''` for
+ * a root-level issue. objectstack#35499 — the one key every reader that asks
+ * "does the form draw this issue?" compares: the row placement in `SchemaForm`,
+ * the inline register it publishes, and the host's banner and refusal line.
+ */
+export function issuePathHead(path: string): string {
+  const dot = path.indexOf('.');
+  return dot < 0 ? path : path.slice(0, dot);
+}
+
+/** The path below its head (`label.not_a_locale` → `not_a_locale`); `''` when the path IS the head. */
+export function issuePathRest(path: string): string {
+  const dot = path.indexOf('.');
+  return dot < 0 ? '' : path.slice(dot + 1);
+}
+
+/**
+ * objectstack#35499 — an issue is drawn on the DEEPEST row the form renders
+ * for a prefix of its path. A form groups its issues by head; a row whose face
+ * is a nested form then calls this to hand down the issues whose next segment
+ * names one of the rows that nested form renders (`nestedRows`), the prefix
+ * trimmed, and keeps the rest — its own exact issues, and every issue below a
+ * face that does not descend (repeater, record map, code widget), which the
+ * row draws itself with the path's trail. `nestedRows` undefined: nothing
+ * descends.
+ */
+export function splitRowIssues<T extends { path: string }>(
+  rowIssues: readonly T[],
+  nestedRows: ReadonlySet<string> | undefined,
+): { handDown: T[]; kept: T[] } {
+  const handDown: T[] = [];
+  const kept: T[] = [];
+  for (const issue of rowIssues) {
+    const rest = issuePathRest(issue.path);
+    if (rest && nestedRows?.has(issuePathHead(rest))) handDown.push({ ...issue, path: rest });
+    else kept.push(issue);
+  }
+  return { handDown, kept };
+}
+
 /** Best-effort stable identity of an array item, resolving an I18nLabel object
  *  ({ key, defaultValue }) to its string. Returns undefined when none usable. */
 function itemIdentity(item: unknown): string | undefined {

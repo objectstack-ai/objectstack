@@ -427,7 +427,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "Acciones de usuario",
-        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente."
+        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente. Cambiar propietario no forma parte de esa matriz: su valor predeterminado sigue el modelo de uso compartido (vea su entrada)."
       },
       "userActions.create": {
         label: "Crear",
@@ -448,6 +448,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "Exportar CSV",
         helpText: "La entrada de exportación CSV. Sin definir: se muestra, porque todas las categorías de managedBy ofrecen la exportación."
+      },
+      "userActions.transfer": {
+        label: "Cambiar propietario",
+        helpText: "La acción Cambiar propietario, individual y masiva: activada la ofrece, desactivada la oculta. Sin definir: activada, salvo desactivada en un objeto de detalle controlled_by_parent. Solo se ofrece en un objeto cuyos registros tienen un propietario reasignable (ownership user o sin definir, sin managedBy, no es un objeto sys_, owner_id no es de solo lectura y, en un objeto externo, está declarado o mapeado); activarla en cualquier otro objeto se rechaza. Solo controla la acción, no una edición directa de owner_id. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escriba uno en el código fuente para condicionar la acción a cada registro."
       },
       editMode: {
         label: "Modo de edición",
@@ -988,6 +992,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "Parámetros",
         helpText: "Nombres que las frases pueden rellenar (p. ej. state): el cuerpo lanza { code, params: { state } } y un marcador {{ state }} muestra su valor. Si se omite: las frases son texto plano"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que el gancho escribe en los registros, indexadas por la clave snake_case que su código pide con ctx.text (p. ej. follow_up_subject). El gancho recibe el mensaje declarado en el idioma de la organización, traducido, con el mensaje declarado como respaldo. Para un cuerpo JavaScript (L2) o un manejador; se rechaza en un cuerpo de expresión"
+      },
+      "texts.message": {
+        label: "Mensaje",
+        helpText: "La frase que escribe el gancho cuando su código pide esta clave. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "texts.params": {
+        label: "Parámetros",
+        helpText: "Nombres que la frase puede rellenar (p. ej. lead): el código pide ctx.text(key, { lead }) y un marcador {{ lead }} muestra su valor. Si se omite: la frase es texto plano"
       },
       handler: {
         label: "Manejador",

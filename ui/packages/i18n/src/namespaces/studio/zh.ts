@@ -4092,6 +4092,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.defaultView': '默认视图',
   'engine.studio.inspector.listView.notCreated': '改动先存为草稿。',
   'engine.studio.inspector.listView.readOnly': '本包只读:这里展示列表视图,不能编辑。',
+  'engine.studio.inspector.listView.environmentView':
+    '此视图是在本部署中创建的,{package} 并不包含它,因此不在这里定制。请在应用中该对象的列表上编辑:管理视图,再从该视图的 ⋯ 菜单选择「编辑视图配置」。',
+  'engine.studio.inspector.listView.notShipped': '{package} 并不包含此视图,因此不在这里定制。',
   'engine.studio.inspector.listView.notList': '「{view}」不是列表视图,因此不在这里编辑。',
   'engine.studio.inspector.listView.filter': '筛选',
   'engine.studio.inspector.listView.sort': '排序',
