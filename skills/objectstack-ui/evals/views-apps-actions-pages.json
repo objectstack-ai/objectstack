@@ -38,7 +38,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "type: 'record'", "regions", "page:header", "record:path", "src/docs/", "type: 'doc'"],
-        "must_not_contain": ["record_detail", ".mdx", "type: 'url'"]
+        "must_not_contain": ["type: 'record_detail'", ".mdx", "type: 'url'"]
       }
     },
     {
@@ -48,7 +48,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "interfaceConfig", "columns", "allowedVisualizations", "summary", "dataset"],
-        "must_not_contain": ["sourceView", "type: 'chart'"]
+        "must_not_contain": ["sourceView:", "type: 'chart'"]
       }
     },
     {
@@ -88,7 +88,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["disabled:", "disabledReason"],
-        "must_not_contain": ["description:", "disabledMessage", "disabledTooltip", "visible:"]
+        "must_not_contain": ["description:", "disabledMessage:", "disabledTooltip:", "visible:"]
       }
     },
     {

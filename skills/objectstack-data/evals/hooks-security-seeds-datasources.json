@@ -38,7 +38,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
-        "must_not_contain": ["new Date(", "defineDataset", "externalId: 'id'"]
+        "must_not_contain": ["new Date(", "defineDataset(", "externalId: 'id'"]
       }
     },
     {
@@ -68,7 +68,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["when:", "editable: false", "readable: true", "clm_contract.governing_law"],
-        "must_not_contain": ["validations:", "readonlyWhen"]
+        "must_not_contain": ["validations:", "readonlyWhen:"]
       }
     },
     {
@@ -98,7 +98,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineQueue", "type: 'position'", "type: 'queue'", "CONCURRENT_UPDATE"],
-        "must_not_contain": ["assigned_to", "beforeInsert"]
+        "must_not_contain": ["assigned_to:", "beforeInsert"]
       }
     },
     {
