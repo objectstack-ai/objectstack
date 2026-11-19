@@ -75,6 +75,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
 import { ValueDataSource } from '../ValueDataSource';
+import { toFilterNodeSafely } from '../../utils/filter-converter';
 
 /**
  * Three rows: two share a `role`, the ages straddle every bound used below, and
@@ -554,5 +555,190 @@ describe('objectui#8447 — the card’s measured examples (scope declaration)',
     expect(await selectedIds({ score: { $startsWith: '5' } }, CARD_ROWS)).toEqual(['s']);
     expect(await selectedIds({ score: { $null: false } }, CARD_ROWS)).toEqual(['n', 's']);
     expect(await selectedIds({ score: { $exists: true } }, CARD_ROWS)).toEqual(['n', 's']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A plain-object comparand is refused in the `$` dialect as in the AST dialect
+// ---------------------------------------------------------------------------
+
+/**
+ * A plain object with no `$` key in comparand position, `{ owner: { $ne:
+ * { id: 'u1' } } }`, is the nested relation condition the AST arm refuses by
+ * name. Read as a value it compared by reference or as the text
+ * `[object Object]`: `$ne`, `$notContains` and `$nin` (a member) answered every
+ * row and the orderings answered some rows. The spec's comparand door refuses
+ * the same comparand, so this face now refuses it too, with the AST arm's
+ * sentence from the one builder the two arms share.
+ *
+ * `owner` holds text on two rows and null on the third, so a negated operator
+ * that reads the object answers all three and an ordering answers `'zeta'`,
+ * which sorts past `[object Object]`. The empty set plus the logged sentence is
+ * the refusal; for the operators that answered no row before, the sentence is
+ * the discriminant.
+ */
+describe('a plain-object comparand under a `$` operator is refused as the AST arm refuses it', () => {
+  const COMPARAND_ROWS = [
+    { id: 'a', owner: 'zeta', age: 30, floor: 25 },
+    { id: 'b', owner: 'Alpha', age: 25, floor: 25 },
+    { id: 'c', owner: null, age: 20, floor: 10 },
+  ];
+  const NESTED = { id: 'u1' };
+  const REFUSAL =
+    "filter condition on field 'owner' carries the non-operator key 'id'; "
+    + 'the in-memory matcher does not descend into a nested relation constraint';
+
+  /** The declared operators whose slot is a flag rather than a comparand. */
+  const FLAG_OPERATORS = new Set(['$null', '$exists', '$empty']);
+  const LIST_OPERATORS = new Set(['$in', '$nin', '$between']);
+  const COMPARAND_OPERATORS = FILTER_OPERATORS.filter((op) => !FLAG_OPERATORS.has(op));
+
+  async function refusalOf(filter: unknown): Promise<{ ids: string[]; lines: string[] }> {
+    const warn = spyWarn();
+    const ids = await selectedIds(filter, COMPARAND_ROWS);
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+    return { ids, lines };
+  }
+
+  it('the operator set is the declared vocabulary minus the three flag operators', () => {
+    expect(COMPARAND_OPERATORS).toEqual([
+      '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$between',
+      '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
+    ]);
+  });
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses a plain-object WHOLE comparand by name, excluding every row',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ owner: { [operator]: NESTED } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(REFUSAL);
+    },
+  );
+
+  it.each([...LIST_OPERATORS])(
+    '`%s` refuses a plain-object list MEMBER by name, excluding every row',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ owner: { [operator]: [NESTED, 'zzz'] } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(REFUSAL);
+    },
+  );
+
+  it.each([
+    ['$ne', { owner: { $ne: NESTED } }],
+    ['$notContains', { owner: { $notContains: NESTED } }],
+    ['$gt', { owner: { $gt: NESTED } }],
+    ['$nin member', { owner: { $nin: [NESTED] } }],
+  ] as const)(
+    '%s: the object form and its lowered AST form log one and the same sentence',
+    async (_label, filter) => {
+      const lowered = toFilterNodeSafely(filter);
+      if (!lowered.ok) throw new Error(`the lowering refused ${JSON.stringify(filter)}`);
+      const objectForm = await refusalOf(filter);
+      const astForm = await refusalOf(lowered.node);
+      expect(objectForm.ids).toEqual([]);
+      expect(astForm.ids).toEqual([]);
+      expect(objectForm.lines).toHaveLength(1);
+      expect(astForm.lines).toEqual(objectForm.lines);
+    },
+  );
+
+  it('CONTROL: scalar comparands still answer, with nothing logged', async () => {
+    const warn = spyWarn();
+    expect(await selectedIds({ owner: { $ne: 'zeta' } }, COMPARAND_ROWS)).toEqual(['b', 'c']);
+    expect(await selectedIds({ age: { $gt: 22 } }, COMPARAND_ROWS)).toEqual(['a', 'b']);
+    expect(await selectedIds({ owner: { $nin: ['zeta'] } }, COMPARAND_ROWS)).toEqual(['b', 'c']);
+    expect(await selectedIds({ owner: { $notContains: 'et' } }, COMPARAND_ROWS))
+      .toEqual(['b', 'c']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a `Date` comparand still answers, with nothing logged', async () => {
+    const rows = [
+      { id: 'a', created: new Date('2026-03-01T00:00:00Z') },
+      { id: 'b', created: new Date('2026-01-01T00:00:00Z') },
+    ];
+    const warn = spyWarn();
+    expect(await selectedIds({ created: { $gt: new Date('2026-02-01T00:00:00Z') } }, rows))
+      .toEqual(['a']);
+    expect(await selectedIds({ created: { $ne: new Date('2026-03-01T00:00:00Z') } }, rows))
+      .toEqual(['b']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a `{ $field }` reference still resolves, with nothing logged', async () => {
+    const warn = spyWarn();
+    expect(await selectedIds({ age: { $gt: { $field: 'floor' } } }, COMPARAND_ROWS))
+      .toEqual(['a', 'c']);
+    expect(await selectedIds({ age: { $ne: { $field: 'floor' } } }, COMPARAND_ROWS))
+      .toEqual(['a', 'c']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Only a PLAIN object is a nested condition. A class instance with its own
+   * non-`$` keys is data, the way a moment or luxon date or a decimal object
+   * is: an ordering operator compares it through its `valueOf`. `age` is
+   * 30 / 25 / 20.
+   */
+  class Amount {
+    readonly units: number;
+    constructor(units: number) {
+      this.units = units;
+    }
+    valueOf(): number {
+      return this.units;
+    }
+  }
+
+  it.each([
+    ['$gt', 22, ['a', 'b']],
+    ['$gte', 25, ['a', 'b']],
+    ['$lt', 26, ['b', 'c']],
+    ['$lte', 25, ['b', 'c']],
+  ] as const)(
+    'CONTROL: a class instance with own keys under `%s` compares through valueOf, with nothing logged',
+    async (operator, units, expected) => {
+      const comparand = new Amount(units);
+      expect(Object.keys(comparand)).toEqual(['units']);
+      const warn = spyWarn();
+      expect(await selectedIds({ age: { [operator]: comparand } }, COMPARAND_ROWS))
+        .toEqual(expected);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a class instance as the WHOLE condition is a value, refused in the converter’s words', async () => {
+    // Read as an operator map, its own key `units` was refused as a nested
+    // relation. It is a value in comparand position, which the converter
+    // refuses as one; this face logs that refusal, alone or inside `$or`.
+    for (const filter of [
+      { age: new Amount(30) },
+      { $or: [{ owner: 'Alpha' }, { age: new Amount(30) }] },
+    ]) {
+      const { ids, lines } = await refusalOf(filter);
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("The filter on field 'age' carries a Amount instance");
+      expect(lines[0]).not.toContain('nested relation');
+    }
+  });
+
+  it('the flag operator `$empty` keeps its own boolean-flag refusal', async () => {
+    const { ids, lines } = await refusalOf({ owner: { $empty: NESTED } });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("filter operator '$empty' on field 'owner' takes a boolean flag");
+  });
+
+  it('a non-operator key keeps the refusal that names that key', async () => {
+    const { ids, lines } = await refusalOf({ owner: { profile: NESTED } });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("carries the non-operator key 'profile'");
   });
 });

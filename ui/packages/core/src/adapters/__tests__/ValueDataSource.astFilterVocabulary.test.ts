@@ -528,9 +528,26 @@ describe('the nested-relation node is refused by name in both dialects', () => {
     },
   );
 
+  /**
+   * A list operator's comparand is judged member by member: a plain-object
+   * member is the same nested condition. `nin` read it by reference, so it
+   * answered every row; `in` and `between` answered none, in silence.
+   */
+  it.each(['nin', 'in', 'between'])(
+    '`%s` with a plain-object list member is refused too',
+    async (operator) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, [{ verified: true }, 'zzz']], PROFILE_ROWS))
+        .toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+    },
+  );
+
   it('CONTROL: a scalar `=` still matches, with nothing logged', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await selectedIds(['role', '=', 'admin'])).toEqual(['a', 'c']);
+    expect(await selectedIds(['role', 'nin', ['user']])).toEqual(['a', 'c']);
     expect(warn).not.toHaveBeenCalled();
   });
 
