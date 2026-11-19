@@ -436,7 +436,9 @@
  *      Tier S arm (objectui's, measured, refuses `.claude/**` without an
  *      authorized approval; cloud's, objectos' and hotcrm's are unread and fail
  *      closed to H).
- *   S  席内达档 L2 审核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
+ *   S  席内达档 L2 审核落地 — objectstack's `.claude/**` tree (since 2026-11-19 less its
+ *      hooks and settings, and only on a verified declaration — section "The guard
+ *      instruments and the `.claude/**` declaration split" below): the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
  *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
@@ -609,6 +611,49 @@
  * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
  * commit and `--branch` / `--pr` per PR. The reader is dependency-free on
  * purpose: the guard's `pull_request` leg runs before any install.
+ *
+ * ## The guard instruments and the `.claude/**` declaration split (2026-11-19)
+ *
+ * The maintainer, in the review-split thread on 2026-11-19, verbatim and
+ * untranslated: 「1+2+4」 — point 1 hands fleet rule text back to him,
+ * overriding the 2026-09-18 amendment that moved all of `.claude/**` to a
+ * seat's contract review — and 「「已裁定的照抄只核对、不再审」 同意」. The
+ * scope he gave "rule text" (card #35321): what an agent may do without him
+ * (merge, bypass checks, change repo settings); what gets done and in what
+ * order (grading, dispatch, scope); what must go to him (decisions, maintainer
+ * actions). Process steps, scripts, wording, slimming and file moves stay with
+ * the reviewer. Three register facts follow:
+ *
+ *   - THE GUARD INSTRUMENTS ARE ROWS, Tier H, objectstack alone: this file,
+ *     `check-governed-queue-guard.mjs`, `record-recognisers.mjs` (the record
+ *     readers the guard loads) and `dispatch-gates.mjs` (it holds
+ *     `CONTRACT_REVIEW_TIER`). Measured on 00cfb78f, `--test` answered 0 of 3
+ *     hits on the first three — and the queue leg runs the guard from the merge
+ *     group's own tree, so a PR that edited the guard was judged by its own
+ *     copy. `governed-surface-guard.yml` joins `WORKFLOW_TIER_H_FILES`.
+ *   - `.claude/hooks/**`, `.claude/settings.json` and
+ *     `.claude/settings.local.json` — the agents' own guardrails and
+ *     permissions — are Tier H rows of their own that OVERLAP the `.claude/**`
+ *     row: one of them in a diff makes it Tier H whatever the rest reads.
+ *   - THE `.claude/**` ROW SPLITS BY DECLARATION (`ruleChange` on the row,
+ *     objectstack alone; `applyRuleChangeSplit`). The row keeps `tier: S`, so a
+ *     path-only reader answers as before; the queue guard hands in a READING,
+ *     and the row holds S only when the PR body carries ONE bare
+ *     `Rule-change: none` — or `Rule-change: ruled` beside a line-start
+ *     `Ruling-ref:` quoting the maintainer's words, source and time, the PR
+ *     that only writes down a ruling he already gave — AND the review of record
+ *     on the current head carries the SAME value on its `Rule-change-verified:`
+ *     line. A missing line, `Rule-change: yes`, a record without the line or
+ *     with another value: Tier H. ⛔ No reading, or an unmeasured one, is H; a
+ *     body that holds with no record read yet is `pending`, never S.
+ *     ⚠️ Known gap, stated rather than discovered: `--test`, `--branch`, `--pr`,
+ *     the sweep and the relay's review plan read paths and the low-risk arm
+ *     only, so they still say S for a `.claude/**` PR declaring
+ *     `Rule-change: yes`; the queue guard is where the split is enforced.
+ *
+ * A narrowed metadata protocol landing only by the maintainer is the queue
+ * guard's own leg ("The narrowing leg" there): it reads PR bodies and
+ * changesets, never paths, so no register row carries it.
  *
  * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
  *
@@ -1163,7 +1208,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the governed predicate: the 2026-08-18 unified list, exactly': 9,
   'the dispatch-gates declaration (#9979)': 9,
   '⚖️ the two landing tiers (#19133, ruled 2026-09-18)': 19,
-  "a row's tier is scoped per repository (#25199)": 12,
+  "a row's tier is scoped per repository (#25199)": 13,
   'since parsing': 4,
   'the window: landing order, not committer dates (#12633)': 15,
   'since-ref is topological (#12633 route B)': 7,
@@ -1205,14 +1250,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
+  '⚖️ the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19)': 35,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Raised 35 → 36 with the
 // workflows split battery (ruling record 6722205630): one battery, one row.
 // Raised 36 → 37 with the low-risk skills arm battery (#33501), 37 → 38 with its post-merge leg (#33603),
-// 38 → 39 with the weekly audit card's battery (#33814), 39 → 40 with the arm's ADR leg (#33539).
-const SELF_TEST_BATTERY_FLOOR = 40;
+// 38 → 39 with the weekly audit card's battery (#33814), 39 → 40 with the arm's ADR leg (#33539),
+// 40 → 41 with the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19).
+const SELF_TEST_BATTERY_FLOOR = 41;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1346,8 +1393,10 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * that declares no `repos` key carries the default; `surfaceRepos` is the one
  * reader of that default. The `workflows` row is scoped to the two public
  * repositories the ruling 「两仓加治理行」 names plus `cloud`, whose own table
- * already carries the same row: `objectos` and `hotcrm` are NOT governed by
- * it — no ruling names them, and a new gate defaults to no. Every reader of
+ * already carries the same row, and since 2026-11-19 `hotcrm` (an audit
+ * mirror: hotcrm's own AGENTS.md lists `.github/workflows/**` as governed;
+ * maintainer, review-split thread, 「1+2+4」): `objectos` is NOT governed by
+ * it — no ruling names it, and a new gate defaults to no. Every reader of
  * this table therefore asks for ONE repository (`governedPathsIn(paths,
  * repo)`), and a call that names none is refused, never answered for "all".
  *
@@ -1367,24 +1416,42 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * ruling 2026-10-25, director item 16). A root row never reaches into `ui/`
  * and a `ui-*` row never reaches the root: prefixes and exact paths both
  * anchor at the repository root.
+ *
+ * The seven rows after them govern objectstack alone and are all Tier H
+ * (header section "The guard instruments and the `.claude/**` declaration
+ * split"): `.claude/hooks/**` and both settings files, which OVERLAP the
+ * `.claude/**` row on purpose — a path hits both, and one Tier H row among the
+ * hits makes the whole PR Tier H, so no reading of the `.claude/**` row can
+ * move them — and the four guard instruments, exact paths.
  */
 /** The `workflows` row's prefix, which its content-aware split reads (`readWorkflowDiff`). */
 export const WORKFLOWS_PREFIX = '.github/workflows/';
 
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']), addOnly: true }), what: 'architecture decision records' }),
-  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
+  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), ruleChange: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
   Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
   Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
-  Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), split: Object.freeze({ repos: Object.freeze(['objectstack']), reader: 'readWorkflowDiff' }), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
+  Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud', 'hotcrm']), split: Object.freeze({ repos: Object.freeze(['objectstack']), reader: 'readWorkflowDiff' }), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
   Object.freeze({ id: 'ui-adr', prefix: 'ui/docs/adr/', glob: 'ui/docs/adr/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's architecture decision records" }),
   Object.freeze({ id: 'ui-claude-tree', prefix: 'ui/.claude/', glob: 'ui/.claude/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction tree" }),
   Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: "the ui workspace's published skills catalog" }),
   Object.freeze({ id: 'ui-agents-md', exact: 'ui/AGENTS.md', glob: 'ui/AGENTS.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction file" }),
   Object.freeze({ id: 'ui-claude-md', exact: 'ui/CLAUDE.md', glob: 'ui/CLAUDE.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's Claude instruction file" }),
   Object.freeze({ id: 'ui-workflows', prefix: 'ui/.github/workflows/', glob: 'ui/.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's workflow files" }),
+  // The agents' own permissions and guardrails, always Tier H inside the `.claude/**` row (header section
+  // "The guard instruments and the `.claude/**` declaration split"). Both settings files Claude Code reads.
+  Object.freeze({ id: 'claude-hooks', prefix: '.claude/hooks/', glob: '.claude/hooks/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the agents' own guardrail hooks" }),
+  Object.freeze({ id: 'claude-settings', exact: '.claude/settings.json', glob: '.claude/settings.json', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the agents' own permission set" }),
+  Object.freeze({ id: 'claude-settings-local', exact: '.claude/settings.local.json', glob: '.claude/settings.local.json', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the agents' local permission set" }),
+  // The guard's own instruments: the register and audit, the queue guard, the record readers it loads, and the
+  // file that holds `CONTRACT_REVIEW_TIER`. A PR that edits one is judged by its own copy at the queue.
+  Object.freeze({ id: 'guard-merges', exact: 'scripts/pm/check-governed-merges.mjs', glob: 'scripts/pm/check-governed-merges.mjs', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: 'the governed register, its tier functions and the post-merge audit' }),
+  Object.freeze({ id: 'guard-queue', exact: 'scripts/pm/check-governed-queue-guard.mjs', glob: 'scripts/pm/check-governed-queue-guard.mjs', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: 'the merge-queue guard itself' }),
+  Object.freeze({ id: 'guard-records', exact: 'scripts/pm/record-recognisers.mjs', glob: 'scripts/pm/record-recognisers.mjs', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: 'the contract-review record readers the queue guard loads' }),
+  Object.freeze({ id: 'guard-dispatch-gates', exact: 'scripts/pm/dispatch-gates.mjs', glob: 'scripts/pm/dispatch-gates.mjs', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: 'the file that holds `CONTRACT_REVIEW_TIER`, the tier a record must stand at' }),
 ]);
 
 /**
@@ -1715,9 +1782,10 @@ export function landingTierOf(matched) {
  * list answers `H` (see `landingTierOf`). `repo` is required, as for
  * `governedPathsIn`: the rows consulted are the ones that govern it.
  */
-export function governedTierFor(paths, repo, register = GOVERNED_SURFACES, workflowDiff = null, lowRisk = null) {
+export function governedTierFor(paths, repo, register = GOVERNED_SURFACES, workflowDiff = null, lowRisk = null, ruleChange = undefined) {
   const id = assertGovernedRepo(repo, 'governedTierFor');
-  return landingTierOf(applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, id, register), id, workflowDiff), id, lowRisk));
+  // `ruleChange` left out (every path-only caller) passes the `.claude/**` row through unread; see `applyRuleChangeSplit`.
+  return landingTierOf(applyRuleChangeSplit(applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, id, register), id, workflowDiff), id, lowRisk), id, ruleChange));
 }
 
 // ── the `workflows` row's content-aware tier (ruling record 6722205630, letter C) ──
@@ -1738,8 +1806,11 @@ export const WORKFLOW_SPLIT_RULING = 'ruling record 6722205630, letter C';
  * push) and the row's own `what` ("what deploys"). Every edit to one of these
  * is Tier H whatever its content. `fleet-write.yml` is not a release — it is
  * the relay that holds the App key every fleet write leaves through, biased
- * to H for the credential. ⛔ A row here is a ruling-sized edit: it widens the
- * maintainer's queue, never the seats'.
+ * to H for the credential. `governed-surface-guard.yml` runs the queue guard
+ * (2026-11-19, the guard instruments ruling): measured on its own text, a new
+ * step ahead of the guard step that overwrites the guard script reads S by
+ * content, so the file is H by path. ⛔ A row here is a ruling-sized edit: it
+ * widens the maintainer's queue, never the seats'.
  */
 export const WORKFLOW_TIER_H_FILES = Object.freeze([
   Object.freeze({ path: '.github/workflows/release.yml', why: 'publishes the packages and queues the `release` deployment (Prime Directive #15)' }),
@@ -1748,6 +1819,7 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
   Object.freeze({ path: '.github/workflows/docs-deploy.yml', why: 'deploys the docs site (`vercel deploy --prebuilt`, the deploy token)' }),
   Object.freeze({ path: '.github/workflows/checklist-status.yml', why: 'publishes the checklist status pages to the wiki (`contents: write`)' }),
   Object.freeze({ path: '.github/workflows/fleet-write.yml', why: "the fleet's write relay and its App key (biased to H: the credential, not a release)" }),
+  Object.freeze({ path: '.github/workflows/governed-surface-guard.yml', why: 'runs the queue guard itself: a step added ahead of the guard step can rewrite the guard it then runs, and that edit reads S by content' }),
 ]);
 
 /** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
@@ -2658,15 +2730,20 @@ export function readBareDeclaration(text, reader, key, value) {
     const marker = /^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})/.exec(line);
     if (marker) fence = fence === null ? marker[1][0] : marker[1][0] === fence ? null : fence;
   }
-  const want = `${key}: ${value}`;
-  if (hits.length === 0) return { ok: false, reason: `no \`${key}:\` line` };
-  if (hits.length > 1) return { ok: false, reason: `${hits.length} \`${key}:\` lines, where exactly one bare \`${want}\` is read` };
+  // `value` may name several values the one line may carry (the `Rule-change:` split reads `none` or `ruled`);
+  // a single value reads, and words its reasons, exactly as before. `value` on an `ok` answer is the one it read.
+  const values = Array.isArray(value) ? value : [value];
+  const want = values.map((v) => `\`${key}: ${v}\``).join(' or ');
+  const lines = hits.length;
+  if (hits.length === 0) return { ok: false, reason: `no \`${key}:\` line`, value: null, lines };
+  if (hits.length > 1) return { ok: false, reason: `${hits.length} \`${key}:\` lines, where exactly one bare ${want} is read`, value: null, lines };
   const [{ line, fenced }] = hits;
-  if (fenced) return { ok: false, reason: `its one \`${key}:\` line sits inside a code fence` };
-  if (/^[ \t]*>/.test(line)) return { ok: false, reason: `its one \`${key}:\` line is a quote (${quoteLine(line)})` };
+  if (fenced) return { ok: false, reason: `its one \`${key}:\` line sits inside a code fence`, value: null, lines };
+  if (/^[ \t]*>/.test(line)) return { ok: false, reason: `its one \`${key}:\` line is a quote (${quoteLine(line)})`, value: null, lines };
   const bare = line.replace(/^[ \t]*(?:[-*][ \t]+)?/, '').replace(/\*\*|`/g, '').replace(/[ \t]+/g, ' ').trim();
-  if (bare !== want) return { ok: false, reason: `its \`${key}:\` line reads ${quoteLine(line)}, not exactly \`${want}\`` };
-  return { ok: true, reason: null };
+  const read = values.find((v) => bare === `${key}: ${v}`);
+  if (read === undefined) return { ok: false, reason: `its \`${key}:\` line reads ${quoteLine(line)}, not exactly ${want}`, value: null, lines };
+  return { ok: true, reason: null, value: read, lines };
 }
 
 /**
@@ -2976,6 +3053,174 @@ export function renderLowRiskLines(matched) {
     return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files, add-only ADR notes and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever on the PR or a card it names and no catalog path named for it, no fork, and a record on this head reading \`${LOW_RISK_RECORD_LINE}\`.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
+}
+
+// ── the `.claude/**` declaration split (header section "The guard instruments and the `.claude/**` declaration split") ──
+
+/** Where the split is ruled, printed under every verdict it decides. */
+export const RULE_CHANGE_RULING = 'maintainer ruling 2026-11-19, review-split thread';
+
+/** The PR body's line, the record's line, and the line a `ruled` declaration quotes the maintainer on. */
+export const RULE_CHANGE_KEY = 'Rule-change';
+export const RULE_CHANGE_VERIFIED_KEY = 'Rule-change-verified';
+export const RULING_REF_KEY = 'Ruling-ref';
+
+/** Every value either line may carry; `yes` is read, and it is Tier H. */
+export const RULE_CHANGE_VALUES = Object.freeze(['none', 'ruled', 'yes']);
+/** The two values Tier S may hold on, declared in the body and verified, the same one, on the record. */
+export const RULE_CHANGE_LANDING_VALUES = Object.freeze(['none', 'ruled']);
+
+/** The reason a `pending` record stage reads Tier H on: the record was not read. */
+export const RULE_CHANGE_PENDING_REASON = `its contract-review record was not read, so no \`${RULE_CHANGE_VERIFIED_KEY}:\` line is established`;
+
+/**
+ * A reader for one `KEY:` line, in the shape `readBareDeclaration` asks of the fleet's readers:
+ * `{ kind: 'declared' }` for a line that carries the key at its start — after a `>` quote, a list
+ * bullet, bold or backticks, each of which the bare test then refuses or strips — and null for every
+ * other line. ⛔ The exact key, in its exact case: `Rule-change-verified:` is no `Rule-change:` line,
+ * and a body spelling `rule-change:` carries no declaration at all (Tier H). Pure.
+ */
+export function keyLineReader(key) {
+  if (!/^[A-Za-z][A-Za-z-]*$/.test(String(key ?? ''))) throw new TypeError(`keyLineReader wants a plain key, got ${JSON.stringify(key)}`);
+  const re = new RegExp(`^[ \\t]*(?:>[ \\t]*)*(?:[-*][ \\t]+)?(?:\\*\\*)?\`?${key}\`?(?:\\*\\*)?[ \\t]*:`);
+  return (line) => (re.test(String(line ?? '')) ? { kind: 'declared' } : null);
+}
+
+/**
+ * The `Ruling-ref:` lines a `Rule-change: ruled` body carries: at a line start, outside any ``` or ~~~
+ * fence, not quoted, with words after the colon. Their content — the maintainer's words, source and
+ * time — is the reviewer's to check against the diff (`Rule-change-verified: ruled`); this reads only
+ * that one is there. Pure.
+ */
+export function rulingRefLines(text) {
+  const reader = keyLineReader(RULING_REF_KEY);
+  const found = [];
+  let fence = null;
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    if (fence === null && reader(line) && !/^[ \t]*>/.test(line) && line.slice(line.indexOf(':') + 1).trim() !== '') found.push(line);
+    const marker = /^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})/.exec(line);
+    if (marker) fence = fence === null ? marker[1][0] : marker[1][0] === fence ? null : fence;
+  }
+  return found;
+}
+
+/**
+ * The PR body's declaration: exactly ONE bare `Rule-change: none` or `Rule-change: ruled`
+ * (`readBareDeclaration`), and beside `ruled` at least one `Ruling-ref:` line (`rulingRefLines`).
+ * `{ ok, value, reason }`. A missing line, `yes`, a second line, a quoted or fenced one, trailing
+ * words, or `ruled` with no reference is `ok: false` with its reason. Pure.
+ */
+export function ruleChangeDeclaration(body) {
+  const read = readBareDeclaration(body, keyLineReader(RULE_CHANGE_KEY), RULE_CHANGE_KEY, RULE_CHANGE_LANDING_VALUES);
+  if (!read.ok) return { ok: false, value: null, reason: read.reason };
+  if (read.value === 'ruled' && rulingRefLines(body).length === 0) {
+    return { ok: false, value: 'ruled', reason: `it declares \`${RULE_CHANGE_KEY}: ruled\` with no line-start \`${RULING_REF_KEY}:\` line quoting the maintainer's words, source and time` };
+  }
+  return { ok: true, value: read.value, reason: null };
+}
+
+/**
+ * The record's `Rule-change-verified:` line, read off the record comment's body with the same bare
+ * reader: `{ state: 'read', value }` (one of `RULE_CHANGE_VALUES`), `{ state: 'missing' }` (no such
+ * line) or `{ state: 'unreadable', reason }` (two lines, a quoted or fenced one, another value). Pure.
+ */
+export function ruleChangeVerifiedReading(recordBody) {
+  const read = readBareDeclaration(recordBody, keyLineReader(RULE_CHANGE_VERIFIED_KEY), RULE_CHANGE_VERIFIED_KEY, RULE_CHANGE_VALUES);
+  if (read.ok) return { state: 'read', value: read.value };
+  if (read.lines === 0) return { state: 'missing' };
+  return { state: 'unreadable', reason: read.reason };
+}
+
+/** The record stage's one conjunct: the record on this head verifies the body's value. Pure. */
+function ruleChangeRecordReasons(record, declared) {
+  const key = RULE_CHANGE_VERIFIED_KEY;
+  const want = `${key}: ${declared}`;
+  if (!record || record.measured !== true) {
+    return [`its contract-review record was not read (${record?.reason ?? 'no reading'}), so no \`${want}\` line is established`];
+  }
+  if (record.located !== 'found') {
+    return [record.located === 'unsigned'
+      ? `its contract-review record on this head names no reviewer, so its \`${key}:\` line does not count`
+      : `no contract-review record names this head, so no \`${want}\` line is established`];
+  }
+  const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
+  // A record carried from an older head stands only when the hops moved no `.claude/` path: the reviewer
+  // verified the declaration against the diff it read, never against one written after it.
+  if (record.carried && record.carried.ok !== true) return [`${which} ${record.carried.reason ?? 'was carried from an older head over hops this leg did not read'}, so its \`${key}:\` line does not stand for this head`];
+  const line = record.ruleChangeVerified;
+  if (!line || line.state === 'missing') return [`${which} carries no \`${key}:\` line`];
+  if (line.state !== 'read') return [`the \`${key}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`];
+  if (line.value !== declared) return [`${which} reads \`${key}: ${String(line.value)}\`, where the PR body declares \`${RULE_CHANGE_KEY}: ${declared}\``];
+  return [];
+}
+
+/**
+ * The split's verdict over the `.claude/**` row, from a READING of the pull request:
+ * `{ measured: true, body, record? }` — the PR body, and the record stage (`record`: the review of
+ * record on this head, the shape `lowRiskRecordStage` builds, with its `ruleChangeVerified` line).
+ * Tier S only when the body carries one bare `Rule-change: none` or `Rule-change: ruled` (with a
+ * `Ruling-ref:` line) AND the record found on this head carries the SAME value on its
+ * `Rule-change-verified:` line. `recordStage` says how far it got, as the low-risk arm's does:
+ * `not-reached` (the body already failed and no record was handed in), `pending` (the body holds and
+ * no record was handed in — Tier H, the caller reads the record and asks again), `read`.
+ * ⛔ Fail closed: no reading, or one not measured, is Tier H with its reason; `pending` is never S.
+ */
+export function ruleChangeSplitVerdict(reading) {
+  if (!reading || reading.measured !== true) {
+    return {
+      tier: GOVERNED_TIER_H,
+      measured: false,
+      reason: reading?.reason ?? 'no reading of the pull request was handed in — a path list alone cannot say what its body declares',
+      reasons: [],
+      declared: null,
+      recordStage: LOW_RISK_RECORD_STAGE.notReached,
+    };
+  }
+  const reasons = [];
+  const declared = ruleChangeDeclaration(reading.body);
+  if (!declared.ok) reasons.push(`the PR body: ${declared.reason}`);
+  let recordStage = LOW_RISK_RECORD_STAGE.notReached;
+  if (reading.record != null) {
+    recordStage = LOW_RISK_RECORD_STAGE.read;
+    if (declared.ok) reasons.push(...ruleChangeRecordReasons(reading.record, declared.value));
+  } else if (reasons.length === 0) {
+    recordStage = LOW_RISK_RECORD_STAGE.pending;
+    reasons.push(RULE_CHANGE_PENDING_REASON);
+  }
+  return { tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, reasons, declared: declared.ok ? declared.value : null, recordStage };
+}
+
+/** Does this row carry the declaration split in `repo`? Pure; the only reader of `ruleChange`. */
+export function ruleChangeSplitIn(surface, repo) {
+  return Array.isArray(surface?.ruleChange?.repos) && surface.ruleChange.repos.includes(repo);
+}
+
+/**
+ * The matched slice with the `.claude/**` row's tier read off its declaration, in `repo`.
+ * `reading === undefined` — every path-only caller, and every caller that predates the split — passes
+ * the slice through AS IS, byte-identical; the queue guard hands a reading in (null included: Tier H).
+ * Read only where it can decide: with another governed row in the slice already at Tier H the PR is H
+ * whatever the body says, so the slice passes through and nothing is left pending. Run LAST, after the
+ * workflow split and the low-risk arm, whose rows it reads as they stand. Pure.
+ */
+export function applyRuleChangeSplit(matched, repo, reading) {
+  const list = Array.isArray(matched) ? matched : [];
+  if (reading === undefined || !list.some((s) => ruleChangeSplitIn(s, repo))) return list;
+  if (list.some((s) => !ruleChangeSplitIn(s, repo) && s?.tier !== GOVERNED_TIER_S)) return list;
+  const ruleChangeVerdict = ruleChangeSplitVerdict(reading);
+  return list.map((s) => (ruleChangeSplitIn(s, repo) ? Object.freeze({ ...s, tier: ruleChangeVerdict.tier, ruleChangeVerdict }) : s));
+}
+
+/** The split's words under a verdict, once, or '' when it decided nothing. Pure. */
+export function renderRuleChangeLines(matched) {
+  const v = (Array.isArray(matched) ? matched : []).find((s) => s?.ruleChangeVerdict)?.ruleChangeVerdict;
+  if (!v) return '';
+  const head = `      ⚖️ \`.claude/**\` declaration split (${RULE_CHANGE_RULING})`;
+  if (!v.measured) return `${head}: NOT MEASURED — ${v.reason}.\n         Tier H, fail closed.\n`;
+  if (v.tier === GOVERNED_TIER_S) {
+    return `${head}: Tier S — the body declares one bare \`${RULE_CHANGE_KEY}: ${v.declared}\`${v.declared === 'ruled' ? ` beside a \`${RULING_REF_KEY}:\` line` : ''} and the record on this head verifies it (\`${RULE_CHANGE_VERIFIED_KEY}: ${v.declared}\`).\n`;
+  }
+  return `${head}: Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
 
 /** `owner/name` out of any git remote spelling, or null. Pure. */
@@ -7073,9 +7318,9 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths, REPO).map((s) => s.id);
-  assert('all-thirteen-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-twenty-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows,claude-hooks,claude-settings,claude-settings-local,guard-merges,guard-queue,guard-records,guard-dispatch-gates', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
-  assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
+  assert('whole-claude-tree-not-only-skills-and-hooks-and-settings-also-hit-their-own-rows', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree,claude-hooks,claude-settings' && ids(['.claude/agents/os-dev.md']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
   assert('root-agents-md-exact', ids(['AGENTS.md']).join() === 'agents-md');
   assert('root-claude-md-exact', ids(['CLAUDE.md']).join() === 'claude-md');
@@ -7096,8 +7341,8 @@ async function selfTest() {
   battery('the per-row repository scope (ruled B2, 2026-10-13)');
   const everyRepo = GOVERNED_REPOS.map((r) => r.id);
   const workflowsRow = GOVERNED_SURFACES.find((s) => s.id === 'workflows');
-  assert('the-six-pre-existing-rows-declare-no-scope-and-so-govern-every-repository', GOVERNED_SURFACES.filter((s) => s.id !== 'workflows' && !s.id.startsWith('ui-')).every((s) => s.repos === undefined && surfaceRepos(s).join() === everyRepo.join()), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
-  assert('the-workflows-row-is-scoped-to-objectstack-objectui-and-cloud-exactly', surfaceRepos(workflowsRow).join() === 'objectstack,objectui,cloud' && workflowsRow.tier === GOVERNED_TIER_H && workflowsRow.glob === '.github/workflows/**', JSON.stringify(workflowsRow));
+  assert('the-six-pre-existing-rows-declare-no-scope-and-so-govern-every-repository', GOVERNED_SURFACES.filter((s) => ['adr', 'claude-tree', 'skills-catalog', 'agents-md', 'claude-md', 'north-star'].includes(s.id)).every((s) => s.repos === undefined && surfaceRepos(s).join() === everyRepo.join()), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
+  assert('the-workflows-row-is-scoped-to-objectstack-objectui-cloud-and-hotcrm-exactly', surfaceRepos(workflowsRow).join() === 'objectstack,objectui,cloud,hotcrm' && workflowsRow.tier === GOVERNED_TIER_H && workflowsRow.glob === '.github/workflows/**', JSON.stringify(workflowsRow));
   assert('every-declared-scope-is-a-non-empty-duplicate-free-subset-of-GOVERNED_REPOS-ids', GOVERNED_SURFACES.every((s) => s.repos === undefined || (Array.isArray(s.repos) && s.repos.length > 0 && new Set(s.repos).size === s.repos.length && s.repos.every((id) => everyRepo.includes(id)))), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
   assert('the-workflows-row-is-a-prefix-row-with-a-separator-so-it-reaches-dispatch-gates-as-written-and-declares-no-hint', workflowsRow.prefix === '.github/workflows/' && !ROOT_FILE_WATCH_HINTS.some((h) => h.startsWith('.github/')));
   const wf = '.github/workflows/lint.yml';
@@ -7105,10 +7350,10 @@ async function selfTest() {
   assert('an-objectui-workflow-path-is-governed-Tier-H', governedPathsIn([wf], 'objectui').map((s) => s.id).join() === 'workflows' && governedTierFor([wf], 'objectui') === GOVERNED_TIER_H);
   assert('a-cloud-workflow-path-is-governed-Tier-H', governedPathsIn([wf], 'cloud').map((s) => s.id).join() === 'workflows' && governedTierFor([wf], 'cloud') === GOVERNED_TIER_H && testVerdict([wf], { repo: 'cloud' }).governed === true);
   assert('an-objectos-workflow-path-is-NOT-governed', governedPathsIn([wf], 'objectos').length === 0 && testVerdict([wf], { repo: 'objectos' }).governed === false && testVerdict([wf], { repo: 'objectos' }).clearPaths.join() === wf);
-  assert('a-hotcrm-workflow-path-is-NOT-governed', governedPathsIn([wf], 'hotcrm').length === 0 && testVerdict([wf], { repo: 'hotcrm' }).governed === false);
+  assert('a-hotcrm-workflow-path-is-governed-Tier-H-the-2026-11-19-audit-mirror', governedPathsIn([wf], 'hotcrm').map((s) => s.id).join() === 'workflows' && governedTierFor([wf], 'hotcrm') === GOVERNED_TIER_H && testVerdict([wf], { repo: 'hotcrm' }).governed === true);
   assert('the-default-rows-still-govern-objectos-and-hotcrm-the-scope-narrows-one-row-not-the-register', ['objectos', 'hotcrm'].every((r) => governedPathsIn(['AGENTS.md', 'docs/adr/0001-x.md', '.claude/agents/os-dev.md'], r).map((s) => s.id).join() === 'adr,claude-tree,agents-md'));
   assert('the-near-misses-for-the-workflows-row-stay-out', ids(['.github/ISSUE_TEMPLATE/bug.md', '.github/workflows.bak/x.yml', '.github/workflowsx/y.yml', 'github/workflows/z.yml', '.github/CODEOWNERS', 'packages/x/.github/workflows/w.yml']).length === 0);
-  assert('surfacesChecked-counts-the-rows-that-govern-the-repository-not-the-table', testVerdict(['README.md'], { repo: 'objectstack' }).surfacesChecked === 13 && testVerdict(['README.md'], { repo: 'objectos' }).surfacesChecked === 6 && governedSurfacesFor('cloud').length === 7 && governedSurfacesFor('hotcrm').map((s) => s.id).join() === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star');
+  assert('surfacesChecked-counts-the-rows-that-govern-the-repository-not-the-table', testVerdict(['README.md'], { repo: 'objectstack' }).surfacesChecked === 20 && testVerdict(['README.md'], { repo: 'objectos' }).surfacesChecked === 6 && governedSurfacesFor('cloud').length === 7 && governedSurfacesFor('hotcrm').map((s) => s.id).join() === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows');
   assert('the-verdict-carries-the-repository-it-answered-for', testVerdict([wf], { repo: 'cloud' }).repo === 'cloud' && JSON.parse(JSON.stringify(testVerdict([wf], { repo: 'objectui' }))).repo === 'objectui');
   const refuses = (fn) => { try { fn(); return null; } catch (error) { return error; } };
   const noRepo = refuses(() => governedPathsIn([wf]));
@@ -7200,7 +7445,7 @@ async function selfTest() {
 
     // Tier H by PATH: the six release, publish and deploy files, each on disk under its own name.
     const PINNED = WORKFLOW_TIER_H_FILES.map((f) => f.path);
-    assert('six-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-and-the-write-relay', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
+    assert('seven-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-the-write-relay-and-the-queue-guard-workflow', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write', 'governed-surface-guard'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
     assert('every-pinned-path-is-a-real-workflow-file-of-this-repository', PINNED.every((p) => existsSync(resolve(scriptDir, '..', '..', p))), PINNED.filter((p) => !existsSync(resolve(scriptDir, '..', '..', p))).join());
     assert('a-pinned-file-is-H-even-on-a-comment-only-edit', PINNED.every((p) => isH(classifyWorkflowChange({ path: p, base: BASE_WF, head: `# a comment\n${BASE_WF}`, inventory: INVENTORY }), /Tier H by path/)));
 
@@ -7721,7 +7966,7 @@ async function selfTest() {
   const ROOT_ROWS = Object.freeze(GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-')));
   const UI_SPECIMENS = { 'ui-adr': 'ui/docs/adr/0001-master-detail-subform.md', 'ui-claude-tree': 'ui/.claude/skills/verify/SKILL.md', 'ui-skills-catalog': 'ui/skills/objectui/SKILL.md', 'ui-agents-md': 'ui/AGENTS.md', 'ui-claude-md': 'ui/CLAUDE.md', 'ui-workflows': 'ui/.github/workflows/ci.yml' };
   assert('the-ui-rows-are-six-well-formed-register-rows', UI_ROWS.length === 6 && UI_ROWS.every((r) => (r.prefix ? r.prefix.endsWith('/') && r.glob === `${r.prefix}**` && r.exact === undefined : r.glob === r.exact) && r.tier === GOVERNED_TIER_H && r.tierRepos === undefined && surfaceRepos(r).join() === 'objectstack') && new Set(GOVERNED_SURFACES.map((r) => r.id)).size === GOVERNED_SURFACES.length, JSON.stringify(UI_ROWS.map((r) => r.id)));
-  assert('the-ui-rows-mirror-the-six-rows-objectui-governs-each-under-ui', UI_ROWS.map((r) => r.glob).join() === ROOT_ROWS.filter((s) => s.id !== 'north-star').map((s) => `ui/${s.glob}`).join(), UI_ROWS.map((r) => r.glob).join());
+  assert('the-ui-rows-mirror-the-six-rows-objectui-governs-each-under-ui', UI_ROWS.map((r) => r.glob).join() === ROOT_ROWS.filter((s) => s.id !== 'north-star' && surfaceRepos(s).includes('objectui')).map((s) => `ui/${s.glob}`).join(), UI_ROWS.map((r) => r.glob).join());
   for (const row of UI_ROWS) {
     assert(`the-${row.id}-specimen-is-governed-by-its-own-row-alone`, ids([UI_SPECIMENS[row.id]]).join() === row.id, ids([UI_SPECIMENS[row.id]]).join());
   }
@@ -7732,7 +7977,7 @@ async function selfTest() {
   assert('the-root-rows-do-not-reach-into-ui-and-the-ui-rows-do-not-reach-the-root', ids(['ui/.github/workflows/ci.yml', '.github/workflows/lint.yml', 'ui/AGENTS.md', 'AGENTS.md']).join() === 'agents-md,workflows,ui-agents-md,ui-workflows');
   assert('the-ui-rows-govern-objectstack-alone', ['objectui', 'cloud', 'objectos', 'hotcrm'].every((r) => governedPathsIn(Object.values(UI_SPECIMENS), r).length === 0) && governedSurfacesFor('objectui').length === 7);
   assert('a-register-handed-in-is-counted-by-the-same-reader', governedSurfacesFor(REPO, ROOT_ROWS).length === governedSurfacesFor(REPO).length - UI_ROWS.length && governedPathsIn(Object.values(UI_SPECIMENS), REPO, ROOT_ROWS).length === 0);
-  assert('the-register-knows-ui-the-rows-are-live', ids(Object.values(UI_SPECIMENS)).length === UI_ROWS.length && governedSurfacesFor(REPO).length === 13);
+  assert('the-register-knows-ui-the-rows-are-live', ids(Object.values(UI_SPECIMENS)).length === UI_ROWS.length && governedSurfacesFor(REPO).length === 20);
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
   //
@@ -7771,8 +8016,8 @@ async function selfTest() {
   assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
   assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
   assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
-  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md-the-workflows-row-and-the-six-ui-rows', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows');
-  assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh'], REPO) === GOVERNED_TIER_S);
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md-the-workflows-row-the-six-ui-rows-hooks-settings-and-the-guard-instruments', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star,workflows,ui-adr,ui-claude-tree,ui-skills-catalog,ui-agents-md,ui-claude-md,ui-workflows,claude-hooks,claude-settings,claude-settings-local,guard-merges,guard-queue,guard-records,guard-dispatch-gates');
+  assert('settings-and-hooks-are-Tier-H-again-by-the-2026-11-19-ruling-each-alone', ['.claude/settings.json', '.claude/settings.local.json', '.claude/hooks/guard-main-checkout.sh'].every((p) => governedTierFor([p], REPO) === GOVERNED_TIER_H) && governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json'], REPO) === GOVERNED_TIER_H);
   assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md'], REPO) === GOVERNED_TIER_S);
   assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p], REPO) === GOVERNED_TIER_H));
   assert('ALL-not-ANY-one-Tier-H-path-makes-the-whole-list-Tier-H', governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json', 'AGENTS.md'], REPO) === GOVERNED_TIER_H);
@@ -7817,7 +8062,9 @@ async function selfTest() {
   assert('the-claude-tree-row-holds-Tier-S-in-objectstack-alone', claudeRow.tier === GOVERNED_TIER_S && claudeRow.tierRepos?.join() === 'objectstack' && claudeRow.repos === undefined, JSON.stringify(claudeRow));
   assert('it-is-the-only-row-that-scopes-its-tier', GOVERNED_SURFACES.filter((s) => s.tierRepos !== undefined).map((s) => s.id).join() === 'claude-tree');
   assert('every-tier-scope-is-a-non-empty-duplicate-free-subset-of-the-rows-own-repositories-on-a-Tier-S-row', GOVERNED_SURFACES.every((s) => s.tierRepos === undefined || (s.tier === GOVERNED_TIER_S && Array.isArray(s.tierRepos) && s.tierRepos.length > 0 && new Set(s.tierRepos).size === s.tierRepos.length && s.tierRepos.every((id) => surfaceRepos(s).includes(id)))));
-  assert('an-objectstack-claude-path-is-Tier-S-unchanged', governedTierFor([HOOK], 'objectstack') === GOVERNED_TIER_S && testVerdict([HOOK], { repo: 'objectstack' }).tier === GOVERNED_TIER_S);
+  const AGENT_DEF = '.claude/agents/x.md';
+  assert('an-objectstack-claude-path-is-Tier-S-unchanged', governedTierFor([AGENT_DEF], 'objectstack') === GOVERNED_TIER_S && testVerdict([AGENT_DEF], { repo: 'objectstack' }).tier === GOVERNED_TIER_S);
+  assert('but-an-objectstack-hook-path-reads-Tier-H-by-its-own-row-2026-11-19', governedTierFor([HOOK], 'objectstack') === GOVERNED_TIER_H && governedPathsIn([HOOK], 'objectstack').map((s) => `${s.id}:${s.tier}`).join() === 'claude-tree:S,claude-hooks:H');
   assert('an-objectui-claude-path-is-governed-by-the-same-row-and-lands-Tier-H', governedPathsIn([HOOK], 'objectui').map((s) => `${s.id}:${s.tier}`).join() === 'claude-tree:H' && governedTierFor([HOOK], 'objectui') === GOVERNED_TIER_H && testVerdict([HOOK], { repo: 'objectui' }).governed === true);
   assert('cloud-objectos-and-hotcrm-read-Tier-H-their-guards-unread-so-fail-closed', elsewhere.every((r) => governedTierFor([HOOK], r) === GOVERNED_TIER_H && governedPathsIn([HOOK], r).map((s) => s.id).join() === 'claude-tree'));
   assert('a-repository-the-scope-does-not-name-answers-H-including-one-added-later', surfaceTierIn(claudeRow, 'objectstack') === GOVERNED_TIER_S && surfaceTierIn(claudeRow, 'a-future-repo') === GOVERNED_TIER_H && GOVERNED_SURFACES.filter((s) => s.tierRepos === undefined).every((s) => everyRepo.every((r) => surfaceTierIn(s, r) === s.tier)));
@@ -7826,8 +8073,77 @@ async function selfTest() {
   const ui13320 = testVerdict(PR_13320, { repo: 'objectui' });
   const ui13320Text = renderTestVerdict(ui13320);
   assert('the-objectui-13320-replay-reads-GOVERNED-Tier-H-and-says-so', ui13320.governed === true && ui13320.tier === GOVERNED_TIER_H && ui13320.hitPaths.length === 6 && /landing tier: H/.test(ui13320Text) && !/Tier S/.test(ui13320Text), ui13320Text);
-  assert('and-the-same-six-paths-in-objectstack-still-read-Tier-S', testVerdict(PR_13320, { repo: 'objectstack' }).tier === GOVERNED_TIER_S && /Tier S/.test(renderTestVerdict(testVerdict(PR_13320, { repo: 'objectstack' }))));
+  assert('and-the-same-six-paths-in-objectstack-now-read-Tier-H-by-the-hooks-row-2026-11-19', testVerdict(PR_13320, { repo: 'objectstack' }).tier === GOVERNED_TIER_H && /landing tier: H/.test(renderTestVerdict(testVerdict(PR_13320, { repo: 'objectstack' }))));
   assert('an-objectui-mixed-diff-stays-H-and-the-exit-stays-the-shared-3', governedTierFor([HOOK, 'README.md'], 'objectui') === GOVERNED_TIER_H && governedTierFor([HOOK, 'AGENTS.md'], 'objectui') === GOVERNED_TIER_H && runTestModeExitFor([HOOK], 'objectui') === EXIT_TEST_GOVERNED);
+
+  // ── the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19) ──
+  //
+  // Each branch the ruling names, both ways: a guard instrument, a hook or a settings file is Tier H by
+  // its own row whatever the body says; a `.claude/**` path is Tier S only on one bare `Rule-change: none`
+  // (or `ruled` beside a `Ruling-ref:` line) that the record on this head verifies with the SAME value.
+  battery('⚖️ the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19)');
+  {
+    const GUARDS = ['scripts/pm/check-governed-merges.mjs', 'scripts/pm/check-governed-queue-guard.mjs', 'scripts/pm/record-recognisers.mjs', 'scripts/pm/dispatch-gates.mjs'];
+    const NEW_ROWS = ['claude-hooks', 'claude-settings', 'claude-settings-local', 'guard-merges', 'guard-queue', 'guard-records', 'guard-dispatch-gates'];
+    const rows = NEW_ROWS.map((id) => GOVERNED_SURFACES.find((s) => s.id === id));
+    assert('the-seven-rows-are-Tier-H-and-govern-objectstack-alone', rows.every((s) => s && s.tier === GOVERNED_TIER_H && surfaceRepos(s).join() === 'objectstack' && s.tierRepos === undefined && !s.split && !s.lowRisk && !s.ruleChange), JSON.stringify(rows.map((s) => s?.id)));
+    assert('the-four-guard-rows-match-each-instrument-by-its-exact-path-and-it-exists', GUARDS.every((p, i) => rows[3 + i].exact === p && rows[3 + i].prefix === undefined && existsSync(resolve(scriptDir, '..', '..', p))), GUARDS.join());
+    assert('each-guard-instrument-alone-lands-Tier-H-in-objectstack-and-is-ungoverned-in-objectui', GUARDS.every((p) => governedTierFor([p], 'objectstack') === GOVERNED_TIER_H && governedPathsIn([p], 'objectstack').length === 1 && governedPathsIn([p], 'objectui').length === 0));
+    const SKILL = '.claude/skills/pm-dispatch/SKILL.md';
+    const REC = (value, extra = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 7, carried: null, ruleChangeVerified: value === undefined ? { state: 'missing' } : { state: 'read', value }, ...extra });
+    const READ = (body, record) => ({ measured: true, reason: null, body, ...(record === undefined ? {} : { record }) });
+    const tierWith = (paths, reading, repo = 'objectstack') => governedTierFor(paths, repo, GOVERNED_SURFACES, null, null, reading);
+    const verdictOf = (reading, paths = [SKILL], repo = 'objectstack') => applyRuleChangeSplit(governedPathsIn(paths, repo), repo, reading).find((s) => s.ruleChangeVerdict)?.ruleChangeVerdict ?? null;
+    const NONE = 'Fixes #1\n\nRule-change: none\n';
+    const RULED = 'Fixes #1\n\nRule-change: ruled\nRuling-ref: 「以上都同意」 — the maintainer, review-split thread, 2026-11-19T03:16Z\n';
+    const S_NONE = READ(NONE, REC('none'));
+    for (const p of ['.claude/settings.json', '.claude/settings.local.json', '.claude/hooks/guard-x.sh']) {
+      assert(`${p}-is-Tier-H-even-beside-a-verified-declaration`, tierWith([p], S_NONE) === GOVERNED_TIER_H && governedTierFor([p], 'objectstack') === GOVERNED_TIER_H);
+    }
+    assert('only-the-claude-tree-row-carries-the-split-and-only-in-objectstack', GOVERNED_SURFACES.filter((s) => s.ruleChange).map((s) => s.id).join() === 'claude-tree' && ruleChangeSplitIn(GOVERNED_SURFACES.find((s) => s.id === 'claude-tree'), 'objectstack') && !ruleChangeSplitIn(GOVERNED_SURFACES.find((s) => s.id === 'claude-tree'), 'objectui'));
+    const pathOnly = governedPathsIn([SKILL], 'objectstack');
+    assert('a-path-only-reader-passes-the-slice-through-as-is-and-still-reads-Tier-S', applyRuleChangeSplit(pathOnly, 'objectstack', undefined) === pathOnly && governedTierFor([SKILL], 'objectstack') === GOVERNED_TIER_S && testVerdict([SKILL], { repo: 'objectstack' }).tier === GOVERNED_TIER_S);
+    assert('none-declared-and-verified-none-is-Tier-S', tierWith([SKILL], S_NONE) === GOVERNED_TIER_S && verdictOf(S_NONE)?.declared === 'none', JSON.stringify(verdictOf(S_NONE)));
+    assert('ruled-beside-a-Ruling-ref-and-verified-ruled-is-Tier-S', tierWith([SKILL], READ(RULED, REC('ruled'))) === GOVERNED_TIER_S, JSON.stringify(verdictOf(READ(RULED, REC('ruled')))));
+    const noRef = verdictOf(READ('Rule-change: ruled\n', REC('ruled')));
+    assert('ruled-with-no-Ruling-ref-line-is-Tier-H-and-says-so', noRef?.tier === GOVERNED_TIER_H && /no line-start `Ruling-ref:`/.test(noRef.reasons.join()), JSON.stringify(noRef));
+    assert('a-quoted-fenced-or-empty-Ruling-ref-does-not-count', ['> Ruling-ref: x', '```\nRuling-ref: x\n```', 'Ruling-ref:   '].every((ref) => tierWith([SKILL], READ(`Rule-change: ruled\n${ref}\n`, REC('ruled'))) === GOVERNED_TIER_H));
+    const missing = verdictOf(READ('Fixes #1\n', REC('none')));
+    assert('a-missing-line-is-Tier-H-and-asks-for-no-record', missing?.tier === GOVERNED_TIER_H && /no `Rule-change:` line/.test(missing.reasons.join()) && missing.reasons.length === 1, JSON.stringify(missing));
+    assert('yes-is-Tier-H-even-when-the-record-verifies-yes', tierWith([SKILL], READ('Rule-change: yes\n', REC('yes'))) === GOVERNED_TIER_H);
+    for (const [name, body] of [['a-second-line', `${NONE}Rule-change: none\n`], ['a-quoted-line', '> Rule-change: none\n'], ['a-fenced-line', '```\nRule-change: none\n```\n'], ['trailing-words', 'Rule-change: none (prose only)\n'], ['a-lowercase-key', 'rule-change: none\n'], ['only-a-Rule-change-verified-line', 'Rule-change-verified: none\n']]) {
+      assert(`${name}-in-the-body-is-Tier-H`, tierWith([SKILL], READ(body, REC('none'))) === GOVERNED_TIER_H);
+    }
+    assert('a-bulleted-bold-or-backticked-bare-line-still-reads', ['- Rule-change: none', '**Rule-change:** none', '`Rule-change:` none'].every((line) => tierWith([SKILL], READ(`${line}\n`, REC('none'))) === GOVERNED_TIER_S));
+    const unverified = verdictOf(READ(NONE, REC(undefined)));
+    assert('a-record-with-no-Rule-change-verified-line-is-Tier-H', unverified?.tier === GOVERNED_TIER_H && /carries no `Rule-change-verified:` line/.test(unverified.reasons.join()), JSON.stringify(unverified));
+    assert('a-record-verifying-the-other-value-or-yes-is-Tier-H', tierWith([SKILL], READ(NONE, REC('ruled'))) === GOVERNED_TIER_H && tierWith([SKILL], READ(RULED, REC('none'))) === GOVERNED_TIER_H && tierWith([SKILL], READ(NONE, REC('yes'))) === GOVERNED_TIER_H);
+    assert('an-unreadable-line-an-unsigned-an-absent-or-an-unread-record-is-Tier-H', [
+      REC('none', { ruleChangeVerified: { state: 'unreadable', reason: '2 lines' } }),
+      REC('none', { located: 'unsigned' }),
+      { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null },
+      { measured: false, reason: 'the threads could not be read' },
+    ].every((record) => tierWith([SKILL], READ(NONE, record)) === GOVERNED_TIER_H));
+    assert('a-record-carried-over-hops-that-moved-a-claude-path-is-Tier-H-and-a-standing-carry-is-S', tierWith([SKILL], READ(NONE, REC('none', { carried: { from: 'abc', ok: false, reason: 'was carried from `abc` over hops that moved .claude/x' } }))) === GOVERNED_TIER_H && tierWith([SKILL], READ(NONE, REC('none', { carried: { from: 'abc', ok: true, reason: null } }))) === GOVERNED_TIER_S);
+    const pending = verdictOf(READ(NONE));
+    assert('the-body-alone-with-no-record-is-pending-and-Tier-H', pending?.tier === GOVERNED_TIER_H && pending.recordStage === LOW_RISK_RECORD_STAGE.pending && pending.reasons.join() === RULE_CHANGE_PENDING_REASON, JSON.stringify(pending));
+    assert('a-body-that-fails-is-not-reached-never-pending', verdictOf(READ('Fixes #1\n'))?.recordStage === LOW_RISK_RECORD_STAGE.notReached);
+    const unread = verdictOf(null);
+    assert('a-null-reading-is-NOT-MEASURED-Tier-H', unread?.tier === GOVERNED_TIER_H && unread.measured === false && tierWith([SKILL], { measured: false, reason: 'x' }) === GOVERNED_TIER_H);
+    const mixed = applyRuleChangeSplit(governedPathsIn([SKILL, '.claude/hooks/x.sh'], 'objectstack'), 'objectstack', S_NONE);
+    assert('a-mixed-diff-with-a-hook-stays-H-and-the-split-decides-nothing', landingTierOf(mixed) === GOVERNED_TIER_H && mixed.every((s) => !s.ruleChangeVerdict) && renderRuleChangeLines(mixed) === '');
+    assert('an-ungoverned-path-beside-it-does-not-move-the-S', tierWith([SKILL, 'README.md'], S_NONE) === GOVERNED_TIER_S);
+    assert('objectui-reads-H-whatever-the-declaration-and-the-split-is-not-read-there', tierWith([SKILL], S_NONE, 'objectui') === GOVERNED_TIER_H && verdictOf(S_NONE, [SKILL], 'objectui') === null);
+    assert('the-record-line-reader-reads-read-missing-and-unreadable', ruleChangeVerifiedReading('Rule-change-verified: ruled').value === 'ruled' && ruleChangeVerifiedReading('PASS').state === 'missing' && ruleChangeVerifiedReading('Rule-change-verified: maybe').state === 'unreadable' && ruleChangeVerifiedReading('Rule-change-verified: none\nRule-change-verified: none').state === 'unreadable');
+    let threw = false;
+    try { keyLineReader('Rule.change'); } catch (error) { threw = error instanceof TypeError; }
+    assert('the-key-reader-refuses-a-key-it-cannot-spell-as-a-plain-pattern', threw && keyLineReader(RULE_CHANGE_KEY)('Rule-change-verified: none') === null && keyLineReader(RULE_CHANGE_KEY)('Rule-change: none')?.kind === 'declared');
+    const sWords = renderRuleChangeLines(applyRuleChangeSplit(governedPathsIn([SKILL], 'objectstack'), 'objectstack', S_NONE));
+    const hWords = renderRuleChangeLines(applyRuleChangeSplit(governedPathsIn([SKILL], 'objectstack'), 'objectstack', READ(NONE, REC(undefined))));
+    const nmWords = renderRuleChangeLines(applyRuleChangeSplit(governedPathsIn([SKILL], 'objectstack'), 'objectstack', null));
+    assert('the-words-in-each-branch-name-the-ruling-and-the-two-lines', sWords.includes(RULE_CHANGE_RULING) && /Tier S/.test(sWords) && sWords.includes('`Rule-change: none`') && sWords.includes('`Rule-change-verified: none`') && /Tier H —\n {8}- /.test(hWords) && /NOT MEASURED/.test(nmWords) && renderRuleChangeLines(pathOnly) === '', `${sWords}\n${hWords}\n${nmWords}`);
+    assert('the-queue-guard-workflow-is-Tier-H-by-path-on-a-comment-only-edit', classifyWorkflowChange({ path: '.github/workflows/governed-surface-guard.yml', base: 'on: push\n', head: '# c\non: push\n', inventory: null }).tier === GOVERNED_TIER_H);
+  }
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
@@ -8711,9 +9027,9 @@ async function selfTest() {
   const mixedCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'README.md'], { repo: REPO });
   assert('--test-on-a-mixed-diff-answers-GOVERNED-on-one-hit', mixedCase.governed === true && mixedCase.hitPaths.join() === '.claude/agents/os-dev.md', JSON.stringify(mixedCase.hitPaths));
   assert('--test-lists-the-paths-that-are-NOT-on-the-register-too', mixedCase.clearPaths.join() === 'packages/spec/src/index.ts,README.md', JSON.stringify(mixedCase.clearPaths));
-  const clearCase = testVerdict(['packages/spec/src/index.ts', 'scripts/pm/check-governed-merges.mjs'], { repo: REPO });
+  const clearCase = testVerdict(['packages/spec/src/index.ts', 'scripts/pm/check-half-states.mjs'], { repo: REPO });
   assert('--test-on-an-ordinary-diff-answers-NOT-governed', clearCase.governed === false && clearCase.hitPaths.length === 0, JSON.stringify(clearCase));
-  assert('this-very-file-is-not-itself-a-governed-surface', testVerdict(['scripts/pm/check-governed-merges.mjs'], { repo: REPO }).governed === false);
+  assert('this-very-file-IS-a-governed-surface-since-2026-11-19-Tier-H-in-objectstack-and-ungoverned-elsewhere', testVerdict(['scripts/pm/check-governed-merges.mjs'], { repo: REPO }).governed === true && testVerdict(['scripts/pm/check-governed-merges.mjs'], { repo: REPO }).tier === GOVERNED_TIER_H && testVerdict(['scripts/pm/check-governed-merges.mjs'], { repo: 'cloud' }).governed === false);
   assert('--test-not-governed-renders-the-re-run-on-the-final-list-warning', renderTestVerdict(clearCase).includes('NOT governed') && renderTestVerdict(clearCase).includes('recall'), renderTestVerdict(clearCase));
   // Near misses on the predicate, the class the incident turns on: the seat
   // reasoned about a name, not a register.
@@ -9229,13 +9545,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (13 surfaces govern objectstack).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (20 surfaces govern objectstack).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'], { repo: REPO })).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (13 surfaces govern objectstack).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (20 surfaces govern objectstack).',
     plainHead,
   );
 
