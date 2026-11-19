@@ -2219,9 +2219,12 @@ function checkFilterConditionComparands(
  *    field permissions apply, so a condition on a field the caller cannot read
  *    is refused, never answered empty — and matches the relation field against
  *    the ids it returns (`$in` on a single-valued relation; any member, an
- *    `$or` of `$contains` per id, on a multi-valued one). One level: every key
- *    must be a field the related object declares, and a relation condition
- *    beneath it, or a dotted key, is refused. A condition matching more related
+ *    `$or` of `$contains` per id, on a multi-valued one). Up to three
+ *    relationships deep (ADR-0071's 3-hop limit, `RELATION_CONDITION_MAX_HOPS`
+ *    in `packages/objectql/src/relation-filter-lowering.ts`): every key must be
+ *    a field the related object declares, a relation key may hold a condition
+ *    of its own, and a condition past the third relationship, or a dotted key,
+ *    is refused (`INVALID_FILTER` / 400). A condition matching more related
  *    records than the engine's cap is refused rather than truncated; filter the
  *    related object yourself then, and match its ids the same way. An
  *    aggregation's own `filter` and `having` do not serve the form. The same
@@ -2232,7 +2235,7 @@ export type FilterCondition = {
   [key: string]: 
     | any  // Implicit equality: key: value
     | z.infer<typeof FieldOperatorsSchema>  // Explicit operators: key: { $op: value }
-    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, one level (form 4 above)
+    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, up to three relationships deep (form 4 above)
 } & {
   /** Logical AND - combines all conditions that must be true */
   $and?: FilterCondition[];
@@ -2370,7 +2373,7 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  *       { email: { $contains: "@company.com" } }
  *     ],
  *     account: {                           // Nested relation (form 4): a field
- *       industry: "tech"                   // of the related record, one level
+ *       industry: "tech"                   // of the related record (up to 3 hops)
  *     }
  *   }
  * }
@@ -2461,7 +2464,7 @@ export type Filter<T = any> = {
         $null?: boolean;
         $exists?: boolean;
       }
-    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves one level, in `where` (see FilterCondition)
+    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves up to three relationships, in `where` (see FilterCondition)
 } & {
   $and?: Filter<T>[];
   $or?: Filter<T>[];
