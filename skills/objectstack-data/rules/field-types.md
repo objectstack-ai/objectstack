@@ -157,15 +157,16 @@ Stored as JSON on the parent row — no separate table / FK:
   type: 'currency',
   currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
-// per record: { currencyMode: 'record', currencyField: 'currency_code',
-//   homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' } }
 ```
 
 **Currency resolution.** The value is a bare number in every mode, never
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names, with `valueDomain: 'iso_4217_currency'`. A dataset measure's `currency`
+names, with `valueDomain: 'iso_4217_currency'`. A time zone or a country is the
+same key on a `text` field, `valueDomain: 'iana_time_zone'` (`Asia/Shanghai`) or
+`'iso_3166_alpha2'` (`CN`): the write refuses a non-member, so never a free-text
+or picklist copy of the standard. A dataset measure's `currency`
 (refused `DATASET_INVALID`): objectstack-ui → Dashboards. Switched a
 stored field to `'record'`? Backfill: `os migrate record-currency-codes --org <id>`
 (or `--all-organizations` for every one); a multi-organization database refuses
@@ -179,7 +180,7 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 **A roll-up of the home field.** A `sum` / `min` / `max` / `avg` `summary` over a
 child's `homeAmount.field` declares `currencyMode: 'dynamic'`, no `defaultCurrency`
 (ADR-0144: metadata never names the home currency, so never `'fixed'` with it).
-It shows in `localization.currency`; undeclared, a bare number. `defineStack`
+`defineStack`
 (`os validate`, the build) refuses `'dynamic'` on any other roll-up, and any
 `currencyConfig` on a `count`.
 

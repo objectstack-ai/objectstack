@@ -2047,7 +2047,24 @@ export const CEILINGS = new Map([
   // 10011). The PR that adds the row is Tier H and lands only on an authorized
   // approval, which is the pricing act the header reserves to the maintainer.
   //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11603 / 4)
-  ['skills/objectstack-project/SKILL.md', 2901],
+  // 2901 -> 2990 (2026-11-19): §0 gains its third question — check the generated
+  // platform catalog before adding an object, a field or a flow; use what the
+  // platform ships; a missing capability a second app would copy is a platform
+  // card, built meanwhile under a `PLATFORM-CANDIDATE` marker — and §5 step 4
+  // sweeps those markers beside the `PLATFORM-GAP` tests. Authorised by the
+  // ruling of record that orders this text into the file: the maintainer's
+  // 「同意」 on the skills platform-first analysis and then 「立卡 p1」 on the
+  // card that carries exactly this scope (ruling record 7000955097 on the
+  // shared-master-data decision, 2026-11-19). PAID DOWN FIRST by two same-file
+  // restatement cuts, 142 bytes: §2's "Unsure whether a check exists? Inject the
+  // defect and run the command: if it fails, the platform checks it." (home:
+  // §2's retire sentence, which states the same technique) and §0's "and read
+  // it from there afterwards" (home: the same sentence's "Record the answer ...
+  // once"). `wc -c` = 11977 bytes, stamp line 20 -> ceil(11957 / 4) = 2990
+  // tokens, zero headroom, ceiling +89, pinned AT the measurement. Raise path:
+  // the standing ruling (2026-10-27, verbatim and untranslated)
+  // 「A:先削重复,余额按实测提高」, recognised per ruling record 6513306068.
+  ['skills/objectstack-project/SKILL.md', 2990],
 ]);
 
 /**
@@ -2849,6 +2866,7 @@ function selfTest() {
       'skills/objectstack-formula/references/_index.md',
       'skills/objectstack-i18n/references/_index.md',
       'skills/objectstack-platform/references/_index.md',
+      'skills/objectstack-project/references/platform-catalog.md',
       'skills/objectstack-query/references/_index.md',
       'skills/objectstack-ui/references/_index.md',
       'skills/objectstack-ui/references/react-blocks.md',

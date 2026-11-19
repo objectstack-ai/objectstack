@@ -1448,7 +1448,7 @@ export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
   Object.freeze({
     id: 'spec-skill-refs',
     ruling: '#11705',
-    candidate: /^skills\/[^/]+\/references\/_index\.md$/,
+    candidate: /^skills\/[^/]+\/references\/(?:_index|platform-catalog)\.md$/,
     surfaceId: 'skills-catalog',
     generator: 'pnpm --filter @objectstack/spec gen:skill-refs',
     verify: Object.freeze({ pkg: '@objectstack/spec', script: 'scripts/build-skill-references.ts', gate: 'check:skill-refs' }),

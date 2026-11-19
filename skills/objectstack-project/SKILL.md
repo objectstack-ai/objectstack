@@ -23,7 +23,7 @@ metadata:
 The domain skills teach how to write metadata. This one teaches how a change
 moves through the project.
 
-## 0 · Two questions before any work
+## 0 · Three questions before any work
 
 **1. App or platform?** Could someone who has only the metadata, and knows
 nothing of this business, have written the change?
@@ -36,8 +36,15 @@ nothing of this business, have written the change?
 
 **2. Own use or product?** Ask the owner once: is the app used by its own team,
 or installed and upgraded by customers? Record the answer as one line in the
-project's `AGENTS.md` (`Project kind: own use` or `Project kind: product`) and
-read it from there afterwards. Steps marked ★ apply only to a product.
+project's `AGENTS.md` (`Project kind: own use` or `Project kind: product`).
+Steps marked ★ apply only to a product.
+
+**3. Does the platform ship it?** Before adding an object, a field or a flow,
+read [the platform catalog](./references/platform-catalog.md); use what it
+lists. Absent, and a second app would copy it: file a platform card at
+`objectstack-ai/objectstack`, and build the app's own meanwhile, marked
+`// PLATFORM-CANDIDATE: <link>`. Not §3: a defect is never worked around; a
+missing capability may be built and marked.
 
 Default to own use, and keep it light: a one-person app changing a label needs
 the edit, the four checks (§2) and a commit. ⛔ Do not ask it for a requirement
@@ -97,8 +104,7 @@ What the platform checks at 18.x:
 ⛔ `os verify` is not one of the four and not in the scaffold's CI: run
 `npx os verify --rls` before a release, or as a CI step.
 `npx os explain` lists only the rules that carry an explanation, not every
-check. Unsure whether a check exists? Inject the defect and run the command: if
-it fails, the platform checks it.
+check.
 
 What the app tests, with `bootStack` from `@objectstack/verify` on the real
 engine (the scaffold's `note.test.ts` is the shape): the numbers in its rules,
@@ -169,8 +175,9 @@ Bump:
    entries. Crossing a protocol major: objectstack-upgrade.
 3. Run the four checks. A new rule that reports existing metadata is fixed in
    the metadata, ⛔ never silenced.
-4. Sweep the blocked issues (unblock each whose fix is now installed) and the
-   `PLATFORM-GAP` tests (retire each one the platform now checks, §2).
+4. Sweep the blocked issues (unblock each whose fix is now installed), the
+   `PLATFORM-GAP` tests (retire each one the platform now checks, §2) and the
+   `PLATFORM-CANDIDATE` markers (replace each the catalog now lists, §0).
 
 Data already installed:
 - Added objects, fields and indexes apply on boot. A rename carries
