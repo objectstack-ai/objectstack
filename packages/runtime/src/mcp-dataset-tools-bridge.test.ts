@@ -12,7 +12,8 @@
  * layer's page cap; and every call runs as the request's own principal.
  * Also pinned (its own describes below): an i18n service that resolves but
  * whose `getLocales` / `getTranslations` throws, over the REAL executor, serves
- * the datasets untranslated with a warning (#34993).
+ * the datasets untranslated with a warning (#34993); and a `?locale=` with no
+ * `Accept-Language` answers labels and sentences in that one locale (#35083).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -182,10 +183,13 @@ describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves bu
         };
     }
 
-    async function bridgeOverRealExecutor(i18n: unknown) {
+    async function bridgeOverRealExecutor(i18n: unknown, request?: { url?: string; headers?: Record<string, string>; locale?: string }) {
         const analytics = await wiredAnalytics();
         const protocol = { getMetaItems: async ({ type }: { type: string }) => ({ type, items: type === 'dataset' ? [METRICS] : [] }) };
         const { ctx, deps } = harness({ analytics, i18n, protocol });
+        if (request?.url) ctx.request.url = request.url;
+        if (request?.headers) Object.assign(ctx.request.headers, request.headers);
+        if (request?.locale) ctx.executionContext = { ...EC, locale: request.locale };
         expect(await resolveMcpDatasetToolsService(deps, ctx)).toBe(analytics);
         return buildMcpBridge(deps, ctx, { datasetTools: analytics });
     }
@@ -219,5 +223,31 @@ describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves bu
         const answer = await bridge.queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 });
         expect(answer.rowCount).toBe(1);
         expect(answer.provenance.dataset).toEqual({ name: 'sales_analysis', label: 'Sales analysis' });
+    });
+
+    /**
+     * [#35083] `?locale=zh-CN` with no `Accept-Language`, an i18n default of
+     * `en`: the labels AND the executor's sentences (`nextStep`, `sourceLine`)
+     * answer what an `Accept-Language: zh-CN` caller is answered — one language.
+     */
+    it('a ?locale= with no Accept-Language answers labels and sentences in that one locale', async () => {
+        const enDefault = {
+            getLocales: () => ['zh-CN', 'en'],
+            getTranslations: (locale: string) => (locale === 'zh-CN' ? ZH_CN : {}),
+            getDefaultLocale: () => 'en',
+        };
+        const ask = async (bridge: any) => ({
+            list: await bridge.listDatasets({ terms: ['revenue'] }),
+            query: await bridge.queryDataset({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 }),
+        });
+        const viaQuery = await ask(await bridgeOverRealExecutor(enDefault, { url: '/api/v1/mcp?locale=zh-CN' }));
+        const viaHeader = await ask(await bridgeOverRealExecutor(enDefault, { headers: { 'accept-language': 'zh-CN' }, locale: 'zh-CN' }));
+        const plain = await ask(await bridgeOverRealExecutor(enDefault));
+        expect(viaQuery.list.datasets[0].label).toBe('销售分析');
+        expect(viaQuery.list.nextStep).toEqual(viaHeader.list.nextStep);
+        expect(viaQuery.query.sourceLine).toBe(viaHeader.query.sourceLine);
+        // Control: without the parameter, the default's language, so the two above are the locale's doing.
+        expect(plain.list.datasets[0].label).toBe('Sales analysis');
+        expect(plain.query.sourceLine).not.toBe(viaHeader.query.sourceLine);
     });
 });

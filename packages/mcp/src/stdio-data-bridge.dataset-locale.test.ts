@@ -24,7 +24,8 @@
  *   the untranslated list, never an error;
  * - an i18n service that resolves but whose `getLocales` / `getTranslations`
  *   throws, over the REAL executor: the datasets untranslated, with a warning,
- *   on both dataset tools and the object tools (#34993, its own describe below).
+ *   on both dataset tools and the object tools (#34993, its own describe below);
+ * - a header-less call answers labels and sentences in one language (#35083).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -216,12 +217,12 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     };
   }
 
-  async function bridgeOverRealExecutor(i18n: () => unknown) {
+  async function bridgeOverRealExecutor(i18n: () => unknown, principal: object = PRINCIPAL) {
     return createStdioDataBridge({
       engine: {} as any,
       metadataService: { list: async () => [] } as any,
       protocol: () => ({ getMetaItems: async () => ({ items: [METRICS] }) }) as any,
-      resolvePrincipal: async () => PRINCIPAL as any,
+      resolvePrincipal: async () => principal as any,
       datasetTools: await wiredAnalytics(),
       i18n,
     });
@@ -262,5 +263,28 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     const [listed] = (await view.listObjects()) as Array<typeof deal>;
     expect([listed.label, listed.fields.stage.label]).toEqual(['Opportunity', 'Stage']);
     expect(((await view.getObject('crm_opportunity')) as typeof deal).label).toBe('Opportunity');
+  });
+
+  /**
+   * [#35083] A header-less stdio call, an i18n default of zh-CN and a
+   * workspace of `en`: the labels AND the executor's sentences answer what a
+   * zh-CN principal is answered — one language, the labels'.
+   */
+  it('a header-less call answers labels and sentences in one language', async () => {
+    const ask = async (principal: object, defaultLocale = 'zh-CN') => {
+      const bridge = await bridgeOverRealExecutor(() => i18nService(defaultLocale), principal);
+      return {
+        list: await bridge.listDatasets!({ terms: ['total_amount'] }),
+        query: await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 }),
+      };
+    };
+    const headerless = await ask({ ...PRINCIPAL, workspaceLocale: 'en' });
+    const zh = await ask({ ...PRINCIPAL, locale: 'zh-CN' });
+    const en = await ask({ ...PRINCIPAL, locale: 'en' }, 'en');
+    expect(headerless.list.datasets[0].label).toBe('商机指标');
+    expect(headerless.list.nextStep).toEqual(zh.list.nextStep);
+    expect(headerless.query.sourceLine).toBe(zh.query.sourceLine);
+    // Control: the two languages' sentences differ, so the equalities above are the locale's doing.
+    expect(en.query.sourceLine).not.toBe(zh.query.sourceLine);
   });
 });

@@ -1614,7 +1614,7 @@ export function buildMcpBridge(
                     ec as Record<string, unknown> | undefined,
                     (name) => deps.resolveService(context, name),
                 ),
-                locale: metaRequestLocale({ headers: context.request?.headers }),
+                locale: metaRequestLocale(mcpRequestHttp(context)),
             }))
             : {}),
     };
@@ -1631,6 +1631,7 @@ export function buildMcpBridge(
 export interface McpDatasetToolsService {
     datasetTools(deps: {
         loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+        translationLocale?: (context: unknown) => Promise<string | undefined>;
         diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
         maxQueryLimit?: number;
     }): {
@@ -1680,6 +1681,29 @@ export async function resolveMcpPackageDocsProtocol(
 }
 
 /**
+ * [#35083] This request's two locale members, as the REST door reads them: its
+ * headers, and its query — the host's parsed `query` where the request carries
+ * one, else its URL's (a repeated `?locale=` stays an array, which the locale
+ * read sends to the i18n default).
+ */
+function mcpRequestHttp(context: HttpProtocolContext): { headers?: unknown; query?: Record<string, unknown> } {
+    const request: any = context.request;
+    if (request?.query && typeof request.query === 'object') return { headers: request.headers, query: request.query };
+    let params: URLSearchParams | undefined;
+    try {
+        params = typeof request?.url === 'string' ? new URL(request.url, 'http://localhost').searchParams : undefined;
+    } catch {
+        params = undefined;
+    }
+    const query: Record<string, unknown> = {};
+    for (const key of new Set(params?.keys() ?? [])) {
+        const values = params!.getAll(key);
+        query[key] = values.length > 1 ? values : values[0];
+    }
+    return { headers: request?.headers, query };
+}
+
+/**
  * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
  * the request's i18n service (a lookup that throws is none, and the text is
  * then served untranslated), its protocol (an object's packaged base and a
@@ -1703,7 +1727,7 @@ function metaTranslationSources(
             }
         },
         resolveProtocol: getProtocol,
-        requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+        requestLocale: (i18n?: unknown) => metaRequestLocale(mcpRequestHttp(context), i18n),
     };
 }
 
@@ -1718,6 +1742,8 @@ function metaTranslationSources(
  *   the executor answers it as a degraded read (`partial` / 503), never as an
  *   empty catalogue. [#34993] A translation fault is no failed read: the rows
  *   are handed over untranslated, with the fault's sentence as their `warning`.
+ * - [#35083] `translationLocale` is the locale that translation read, so the
+ *   executor's labels and its sentences speak one language.
  * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
  *   of this request's security service, so `query_dataset` states a narrowing
  *   exactly where `query_records` does.
@@ -1744,6 +1770,10 @@ function datasetToolMembers(
         const rows = Array.isArray(translated) ? translated : items;
         return warning === undefined ? rows : { items: rows, warning };
     };
+    const translationLocale = async () => {
+        const sources = metaTranslationSources(deps, context, getProtocol);
+        return sources.requestLocale(await sources.resolveI18nService());
+    };
     const diagnoseDelegation = async (object: string) => {
         try {
             const security = await deps.resolveService(context, 'security', envId) as
@@ -1755,7 +1785,7 @@ function datasetToolMembers(
         }
     };
     const executor = (maxQueryLimit?: number) =>
-        service.datasetTools({ loadDatasets, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+        service.datasetTools({ loadDatasets, translationLocale, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
     return {
         listDatasets: (input: unknown) => executor().listDatasets(input, ec),
         queryDataset: (input: unknown, opts: { maxRows: number }) => executor(opts.maxRows).queryDataset(input, ec),
