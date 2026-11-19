@@ -194,8 +194,9 @@ describe('[#34973] driver-sql — boot converges legacy text booleans to 1 / 0 (
       } as DriverQuery)) as Array<{ flag: unknown; n: number }>;
       return rows.map((r) => [r.flag, Number(r.n)]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     };
-    // Before: four groups, and the text 'false' group presents as true.
-    expect(await groups()).toEqual([[false, 1], [null, 1], [true, 1], [true, 1], [true, 1]]);
+    // Before: SQL groups the raw cells apart (five groups); since #34974 each
+    // presents as find() does, so the text 'false' group reads as false.
+    expect(await groups()).toEqual([[false, 1], [false, 1], [null, 1], [true, 1], [true, 1]]);
     await driver.initObjects([CONV_OBJECT]);
     expect(await groups()).toEqual([[false, 2], [null, 1], [true, 2]]);
   });
