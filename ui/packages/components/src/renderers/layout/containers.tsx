@@ -3480,6 +3480,13 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 : undefined
             }
           />
+          {/* objectstack#35593 — the record state's tags (an approval's
+              status) where no host bar takes the record's header. */}
+          {headerStateTags && (
+            <div className="mt-1 flex flex-wrap items-center gap-2" data-record-header-tags="">
+              {headerStateTags}
+            </div>
+          )}
           {(subtitle || phoneFace?.subtitle) && (
             <p
               className={cn('text-sm text-muted-foreground mt-1', !subtitle && 'truncate')}

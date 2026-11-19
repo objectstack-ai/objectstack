@@ -149,7 +149,9 @@ async function mountRecordPage(record: Record<string, unknown>, fields: Record<s
     </MemoryRouter>,
   );
   await waitFor(() => expect(dataSource.findOne).toHaveBeenCalled());
-  await waitFor(() => expect(headerEditButton()).toBeTruthy());
+  // The header's group, not its Edit: an approval lock draws no Edit
+  // (objectstack#35593).
+  await waitFor(() => expect(headerToolbar()).toBeTruthy());
 }
 
 beforeEach(() => {
@@ -198,7 +200,10 @@ describe('console record header — a record whose state locks every edit-form f
     expect(stateLockBadge()).toBeNull();
   });
 
-  it('the approval lock is unchanged: Edit stays disabled and only the lock band explains it', async () => {
+  // objectstack#35593 — under an approval lock the header draws no Edit at all
+  // (it was drawn disabled): the approval tag in the header and the lock band
+  // say why, and the state's lock badge still stays out of it.
+  it('the approval lock speaks alone: no Edit, no state badge, the approval tag and the lock band', async () => {
     // A locking approval request on the record, answered by the approvals list.
     const request = {
       id: 'req_1',
@@ -222,18 +227,18 @@ describe('console record header — a record whose state locks every edit-form f
       }),
     );
 
-    // Writable record under the lock: Edit off, as before this change.
+    // Writable record under the lock: no Edit once the approvals read lands.
     await mountRecordPage(DRAFT, LOCKED_FIELDS);
-    await waitFor(() => expect(headerEditButton()).toBeDisabled());
+    await waitFor(() => expect(screen.getByText('Locked for approval')).toBeInTheDocument());
+    await waitFor(() => expect(headerEditButton()).toBeNull());
+    expect(screen.getByTestId('record-approval-tag')).toBeInTheDocument();
     expect(stateLockBadge()).toBeNull();
 
     // Every field also state-locked: still the approval lock alone that speaks.
     cleanup();
     await mountRecordPage(APPROVED, LOCKED_FIELDS);
-    // Wait for the lock band itself: Edit is off from the state alone before
-    // the approvals read lands, so a disabled Edit proves nothing here.
     await waitFor(() => expect(screen.getByText('Locked for approval')).toBeInTheDocument());
-    expect(headerEditButton()).toBeDisabled();
+    await waitFor(() => expect(headerEditButton()).toBeNull());
     expect(stateLockBadge()).toBeNull();
   });
 });

@@ -586,10 +586,11 @@ export function RecordStackDrawer({
     </nav>
     {headerTitleSlotEl}
     </>
-  ) : headerClaimed ? (
-    headerTitleSlotEl
   ) : (
     <>
+    {/* While the record's header holds the bar, its name is the bar's:
+        no 「对象 › 记录名」 crumb (objectstack#35593). */}
+    {!headerClaimed && (
     <nav
       aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
       className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
@@ -603,6 +604,7 @@ export function RecordStackDrawer({
         {titleOf(current)}
       </span>
     </nav>
+    )}
     {headerTitleSlotEl}
     </>
   );

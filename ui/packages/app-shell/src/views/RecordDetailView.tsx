@@ -87,6 +87,7 @@ import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
   RECORD_APPROVAL_ACTION_LOCATION,
+  RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
@@ -853,6 +854,20 @@ function readableRow<T>(
   if (cached && cached.kept === kept) return cached.row as T;
   READABLE_ROWS.set(record as object, { kept, row });
   return row;
+}
+
+/**
+ * objectstack#35593 — mounted beside the approval's button group wherever a
+ * record header draws it, so the page knows a header hosts the decisions and
+ * draws no fallback band. A count, not a flag: a phone draws the group in its
+ * bottom bar while the header's row may draw it too.
+ */
+function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => number) => void }) {
+  useLayoutEffect(() => {
+    onHosted((n) => n + 1);
+    return () => onHosted((n) => n - 1);
+  }, [onHosted]);
+  return null;
 }
 
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
@@ -2376,9 +2391,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // off whether it is mounted: before the request's definition loads, or on a
   // backend too old to send a `viewer` block (every declared gate fails
   // closed), the bar draws no recall and the band stays the lever.
+  //
+  // objectstack#35593 — the bar is the record header's button group, and only
+  // a page whose layout has no `page:header` falls back to drawing it as a band
+  // of its own above the body (`approvalGroupHosts` counts the headers drawing
+  // it). Each reports what it draws into its own list, so the band's
+  // unmount, which reports "nothing", never clears what the header draws.
   const [approvalBarDrawn, setApprovalBarDrawn] = useState<string[]>([]);
+  const [approvalBandDrawn, setApprovalBandDrawn] = useState<string[]>([]);
+  const [approvalGroupHosts, setApprovalGroupHosts] = useState(0);
   const approvalRecallDrawnByHost =
-    approvalBarMounted && approvalBarDrawn.includes(APPROVAL_RECALL_ACTION);
+    approvalBarMounted
+    && (approvalGroupHosts > 0 ? approvalBarDrawn : approvalBandDrawn).includes(APPROVAL_RECALL_ACTION);
 
   // A decision landed through the declared-action bar (objectui#3055). The
   // action itself already POSTed and the runtime already toasted; what the HOST
@@ -5158,10 +5182,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#35593 — where the record header draws the record's name and
   // tags, after the crumb, and the 「/」 that separates the two once it does.
   // Hidden while empty: a page with no `page:header` keeps 「› 记录名」.
+  // While a step reads the next record the header still holds the record
+  // left, so the bar names the route's record by its object until the page
+  // holds it (objectstack#35412), and the header's name waits hidden.
+  const barNamesRecord = barClaimed && holdsRouteRecord;
   const barTitleSlotEl = (
-    <span ref={setBarTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
+    <span
+      ref={setBarTitleSlot}
+      className="flex min-w-0 items-center empty:hidden"
+      hidden={barClaimed && !holdsRouteRecord}
+      data-record-bar-title=""
+    />
   );
-  const barTitleSeparator = barClaimed ? (
+  const barTitleSeparator = barNamesRecord ? (
     <span aria-hidden="true" className="shrink-0 px-0.5 text-muted-foreground/70" data-record-bar-separator="">/</span>
   ) : null;
   const objectIconName = typeof (objectDef as any)?.icon === 'string' ? ((objectDef as any).icon as string) : undefined;
@@ -5198,7 +5231,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             </span>
           );
         })}
-        <span className="truncate" aria-current={barClaimed ? undefined : 'page'}>{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
+        <span className="truncate" aria-current={barNamesRecord ? undefined : 'page'}>{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
       </nav>
       {barTitleSeparator}
       {barTitleSlotEl}
@@ -5242,7 +5275,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
         return <span className="shrink-0 px-1">{plural}</span>;
       })()}
-      {!barClaimed && (
+      {!barNamesRecord && (
         <>
           <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
@@ -5403,6 +5436,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     ) : undefined,
     group: approvalBarMounted
       ? (parts: RecordHeaderGroupParts) => (
+        <>
+        <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
         <DeclaredActionsBar
           objectName={SYS_APPROVAL_REQUEST_OBJECT}
           record={approvals.pendingRequest}
@@ -5413,6 +5448,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           requireRejectReason
           onDrawnActionsChange={setApprovalBarDrawn}
         />
+        </>
       )
       : undefined,
   };
@@ -5631,7 +5667,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   in the page's top bar, in a pane's bar, or in a phone's bottom
                   bar. The step, the submitter and the tally the band's status
                   line named are the approvals panel's to show until the
-                  审批 tab takes them. */}
+                  审批 tab takes them.
+
+                  The band below is the fallback for a page whose layout has
+                  no `page:header` to draw the group in: no header hosts it
+                  (`approvalGroupHosts`), so the decisions keep the band they
+                  had (objectstack#34361 ruling A), with remind left to the
+                  approvals panel. A header that mounts takes them over in
+                  its layout effect, before the page paints. */}
+              {approvalBarMounted && approvalGroupHosts === 0 && (
+                <DeclaredActionsBar
+                  className="mb-4"
+                  objectName={SYS_APPROVAL_REQUEST_OBJECT}
+                  record={approvals.pendingRequest}
+                  location={RECORD_APPROVAL_ACTION_LOCATION}
+                  exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
+                  onDone={handleApprovalActionDone}
+                  foldOverrides
+                  foldDecisions
+                  requireRejectReason
+                  onDrawnActionsChange={setApprovalBandDrawn}
+                />
+              )}
               {/* objectstack#27058 — on a phone the header's actions are drawn
                   into the bottom bar below, and the default page's header
                   takes its subtitle from the declared text highlights. */}

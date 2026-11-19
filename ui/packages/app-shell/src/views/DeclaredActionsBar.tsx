@@ -189,8 +189,9 @@ export interface DeclaredActionsBarProps {
    * - the submitter (`is_submitter`, no slot): the submitter's levers —
    *   resubmit, recall, remind, read off their routes — as buttons, then the
    *   same `⋯`;
-   * - an override-only administrator: the record's row, with the override
-   *   levers behind their one marked menu ahead of it;
+   * - an override-only administrator: the override levers behind their one
+   *   marked menu, ahead of the group the rest of their levers make (the
+   *   submitter's, when they raised the request; the record's row otherwise);
    * - anyone else, or before the request's definition has loaded: the
    *   record's row unchanged.
    *
@@ -768,6 +769,7 @@ const DeclaredActionButton: React.FC<{
       data-testid={`declared-action-${action.name}`}
       // Pinnable, and readable by an E2E/QA pass without matching on copy.
       data-override-decision={isOverride ? 'true' : undefined}
+      data-header-tone={headerTone}
     >
       {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {/* An override replaces the declared icon: the declared one describes the
@@ -1076,61 +1078,65 @@ const DeclaredActionsToolbar: React.FC<
   const decisionOthersDrawn = decisionOthers.some((action) => !!action.name && drawnByName[action.name] === true);
 
   // objectstack#35593 — the record header's ONE group. Which levers lead it
-  // is read off the server's `viewer` block (see `headerParts`); the rest of
-  // the request's levers go into the group's `⋯` ahead of the record's own.
-  const headerLeads = headerParts && folded.length === 0
-    ? isActingApprover(record)
-      ? permitted.filter((action) => isLeadDecision(action))
+  // is read off the server's `viewer` block (see `headerParts`), among the
+  // levers the override fold left as buttons; the rest of those go into the
+  // group's `⋮` ahead of the record's own. An override-only viewer's folded
+  // levers keep their one marked menu, ahead of the group.
+  const unfolded = headerParts ? permitted.filter((action) => !folded.includes(action)) : [];
+  const headerLeads = !headerParts
+    ? []
+    : isActingApprover(record)
+      ? unfolded.filter((action) => isLeadDecision(action))
       : isSubmitterViewer(record)
-        ? permitted
+        ? unfolded
             .filter((action) => SUBMITTER_LEAD_VERBS.includes(approvalRouteVerb(action) as ApprovalRouteVerb))
             .sort((a, b) => SUBMITTER_LEAD_VERBS.indexOf(approvalRouteVerb(a)!) - SUBMITTER_LEAD_VERBS.indexOf(approvalRouteVerb(b)!))
-        : []
-    : [];
-  const headerOthers = headerLeads.length > 0 ? permitted.filter((action) => !headerLeads.includes(action)) : [];
+        : [];
+  const headerOthers = headerLeads.length > 0 ? unfolded.filter((action) => !headerLeads.includes(action)) : [];
   const headerOthersDrawn = headerOthers.some((action) => !!action.name && drawnByName[action.name] === true);
 
   if (headerParts) {
     const barFace = headerParts.face === 'bar';
-    if (headerLeads.length === 0 && folded.length === 0) {
-      // Nothing of the request's leads this viewer: the record's row.
-      return <>{headerParts.recordRow}</>;
-    }
+    const overrideMenuLabel = String(t('approvalsInbox.viaOverrideChip', { defaultValue: 'Admin override' }));
+    const overrideMenu = folded.length > 0 ? (
+      <>
+        {folded.map((action) => (
+          <DeclaredActionVisibilityProbe key={action.name} action={action} record={record} onDrawn={reportDrawn} />
+        ))}
+        {foldedDrawn && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={cn(
+                  'gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
+                  barFace ? 'h-11 shrink-0' : 'h-8',
+                )}
+                aria-label={overrideMenuLabel}
+                title={overrideMenuLabel}
+                data-testid="declared-actions-override-menu"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-48">
+              {folded.map((action) => (
+                <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem requireReason={requireRejectReason} />
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </>
+    ) : null;
     if (headerLeads.length === 0) {
-      // The override-only administrator: the record's row, and the override
-      // levers behind their one marked menu ahead of it.
-      const overrideMenuLabel = String(t('approvalsInbox.viaOverrideChip', { defaultValue: 'Admin override' }));
+      // None of the request's levers leads for this viewer: the record's own
+      // row, after the override menu when the viewer holds one.
       return (
         <>
-          {folded.map((action) => (
-            <DeclaredActionVisibilityProbe key={action.name} action={action} record={record} onDrawn={reportDrawn} />
-          ))}
-          {foldedDrawn && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    'gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
-                    barFace ? 'h-11 shrink-0' : 'h-8',
-                  )}
-                  aria-label={overrideMenuLabel}
-                  title={overrideMenuLabel}
-                  data-testid="declared-actions-override-menu"
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-48">
-                {folded.map((action) => (
-                  <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem />
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          {overrideMenu}
           {headerParts.recordRow}
         </>
       );
@@ -1139,6 +1145,7 @@ const DeclaredActionsToolbar: React.FC<
     const hasRecordItems = headerParts.recordMenuItems !== null && headerParts.recordMenuItems !== undefined;
     return (
       <>
+        {overrideMenu}
         {headerLeads.map((action) => (
           <DeclaredActionButton
             key={action.name}
@@ -1170,7 +1177,7 @@ const DeclaredActionsToolbar: React.FC<
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-48" data-testid="declared-actions-header-menu-content">
               {headerOthers.map((action) => (
-                <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem />
+                <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem requireReason={requireRejectReason} />
               ))}
               {headerOthersDrawn && hasRecordItems && (
                 <DropdownMenuSeparator data-testid="declared-actions-header-menu-separator" />
@@ -1209,6 +1216,7 @@ const DeclaredActionsToolbar: React.FC<
           >
             {decisionLeads.map((action) => (
               <DeclaredActionButton
+                requireReason={requireRejectReason}
                 key={action.name}
                 action={action}
                 objectName={objectName}
@@ -1226,6 +1234,7 @@ const DeclaredActionsToolbar: React.FC<
               />
             ) : (
               <DeclaredActionButton
+                requireReason={requireRejectReason}
                 key={action.name}
                 action={action}
                 objectName={objectName}
@@ -1260,6 +1269,7 @@ const DeclaredActionsToolbar: React.FC<
                 <DropdownMenuContent align="end" className="min-w-48">
                   {decisionOthers.map((action) => (
                     <DeclaredActionButton
+                      requireReason={requireRejectReason}
                       key={action.name}
                       action={action}
                       objectName={objectName}
@@ -1296,6 +1306,7 @@ const DeclaredActionsToolbar: React.FC<
           >
             {inline.map((action) => (
               <DeclaredActionButton
+                requireReason={requireRejectReason}
                 key={action.name}
                 action={action}
                 objectName={objectName}
@@ -1335,6 +1346,7 @@ const DeclaredActionsToolbar: React.FC<
                 <DropdownMenuContent align="end" className="min-w-48">
                   {folded.map((action) => (
                     <DeclaredActionButton
+                      requireReason={requireRejectReason}
                       key={action.name}
                       action={action}
                       objectName={objectName}
@@ -1362,6 +1374,7 @@ const DeclaredActionsToolbar: React.FC<
       <div role="toolbar" aria-label={label || t('common.actions')} className="flex flex-row flex-wrap items-center gap-2">
         {permitted.map((action) => (
           <DeclaredActionButton
+            requireReason={requireRejectReason}
             key={action.name}
             action={action}
             objectName={objectName}
