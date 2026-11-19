@@ -7126,6 +7126,99 @@
           "ref": "#32269"
         }
       ]
+    },
+    {
+      "id": "records-forms.master-detail-body-tables",
+      "title": "A master_detail child is a table in the record overview by default: above the field sections, drawn when empty, capped with show-all, totalled by the server, and never a tab or a side card",
+      "since": "v18.6",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "showcase_task.project is a master_detail FK to showcase_project with no relatedList and no inlineEdit, relatedListTitle 'Tasks' (examples/app-showcase/src/data/objects/task.object.ts); the seed gives 'Website Relaunch' five tasks",
+          "a project with no task: create one ('QA Empty Project') before step 3"
+        ]
+      },
+      "steps": [
+        "open the 'Website Relaunch' project's full record page at a column-tier width (1440×900) and screenshot the overview",
+        "read the tab row and the right column",
+        "open 'QA Empty Project' the same way and screenshot the Tasks table",
+        "on 'Website Relaunch', click the Tasks table's ↗ button; read the address bar and the list",
+        "open 'Website Relaunch' from the project list in the record drawer and screenshot it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section",
+          "oracle": "dom",
+          "verify": "in the details column the record:related_list node for showcase_task precedes the first record:details node (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "the body table has no tab of its own and no card in the right column",
+          "oracle": "dom",
+          "verify": "the tab row names no 'Tasks' tab (also not in its '+N' dropdown) and the right column holds no Tasks card",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "an empty body table still draws its column headers and one empty row with an add entry",
+          "oracle": "dom",
+          "verify": "the Tasks table on 'QA Empty Project' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with a New button; clicking New opens a task create form with Project filled",
+          "evidence": "the empty-project screenshot"
+        },
+        {
+          "clause": "↗ opens the child list filtered to this parent",
+          "oracle": "dom",
+          "verify": "the showcase_task list opens holding exactly the five Website Relaunch tasks",
+          "evidence": "the list screenshot and the URL"
+        },
+        {
+          "clause": "the drawer draws the same overview: the Tasks table above the field sections",
+          "oracle": "dom",
+          "verify": "the drawer's overview shows the Tasks table before the first field section",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList → body; false → hidden; true → side; lookup → side), and an authored page's master_detail list getting the body treatment",
+          "oracle": "test",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a Tasks tab on the tab row, or a Tasks card in the right column, is a FAIL: a body table is drawn once, in the overview",
+        "an empty Tasks table collapsing to a one-line sentence with no headers is a FAIL",
+        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type decides, objectstack#35597), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the overview"
+      },
+      "source": [
+        "packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship",
+        "ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement",
+        "ui/packages/plugin-detail/src/RelatedList.tsx#useBodyTableTotals",
+        "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#authoredBodyTableIds",
+        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-19)",
+        "#35597"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-19",
+          "change": "initial — master_detail children are overview body tables by default (#35597, epic #35590), read from source on the PR branch; no live run made",
+          "ref": "#35597"
+        }
+      ]
     }
   ]
 }

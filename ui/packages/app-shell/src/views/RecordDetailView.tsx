@@ -26,7 +26,7 @@ import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
-import { deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -5094,9 +5094,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#27055, Target 8 — the related lists the synthesized page
   // places in its Details tab are the record's body tables (a page drawn as
   // its strip; the laid-out page reads the same off its details column).
+  // objectstack#35597 — an AUTHORED page's body tables are the related lists
+  // it places whose relationship is one (a `master_detail` FK with no
+  // `relatedList`, or `'primary'`): drawn when empty, with the server's totals.
   // A plain computation: this point is below the view's early returns, where
   // no hook may run.
-  const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
+  const bodyTableIds = namedPageBlocked
+    ? new Set<string>()
+    : assignedPage
+      ? authoredBodyTableIds(renderedPage, childRelations)
+      : bodyTableIdsOf(renderedPage);
 
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step

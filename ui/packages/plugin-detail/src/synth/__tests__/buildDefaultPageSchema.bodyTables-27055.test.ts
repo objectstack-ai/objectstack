@@ -47,7 +47,7 @@ const tabOf = (tabs: any, value: string) => items(tabs).find((i: any) => i.value
 const shape = (nodes: any[]) =>
   nodes.map((n) =>
     n.type === 'record:details'
-      ? `details(${(n.properties.sections ?? []).map((s: any) => s.label ?? s.group).join(',')})`
+      ? `details(${(n.properties?.sections ?? []).map((s: any) => s.label ?? s.group).join(',')})`
       : `${n.type === 'record:related_list' ? 'table' : n.type}(${n.properties.objectName})`,
   );
 
