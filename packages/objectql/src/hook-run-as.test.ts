@@ -453,7 +453,10 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       // exported, only the reader `platformSystemApi` is.
       expect('PLATFORM_SYSTEM_API' in entry).toBe(false);
       expect(typeof (entry as Record<string, unknown>).platformSystemApi).toBe('function');
-      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(4);
+      // The action door's api (`ACTION_DOOR_API`, `platform-system-api.ts`) is the fifth: runtime names
+      // its key through `Symbol.for`, and the package entry does not export it.
+      expect('ACTION_DOOR_API' in entry).toBe(false);
+      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(5);
     });
 
     it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {
