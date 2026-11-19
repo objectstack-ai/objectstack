@@ -240,8 +240,8 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // a collection and never a fixture that shipped an empty package.
     // `probe_federated_order` is the ADR-0015 federated object #15229 added to
     // the zoo: `deriveCrudCases`'s datasource-by-name map decides exactly one
-    // thing — whether that object's probe insert clears the double write gate —
-    // so watching the map required carrying one. It registers like any other
+    // thing — whether the reason it skips that object with names the double
+    // write gate open — so watching the map required carrying one. It registers like any other
     // object, which is why it is in this control's list.
     expect(additive.registryObjectsFromArtifact).toEqual(
       ['probe_account', 'probe_federated_order', 'probe_order'],
