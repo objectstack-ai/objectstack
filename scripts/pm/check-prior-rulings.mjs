@@ -10,6 +10,8 @@
  *   node scripts/pm/check-prior-rulings.mjs --card 16934 --terms single,posture,tenant
  *   node scripts/pm/check-prior-rulings.mjs --terms single,posture,tenant
  *   node scripts/pm/check-prior-rulings.mjs --card 16934 --json
+ *   node scripts/pm/check-prior-rulings.mjs --card 16934 --paths 'scripts/pm/**,packages/core/src/x.ts'
+ *   node scripts/pm/check-prior-rulings.mjs --paths 'scripts/pm/**'
  *   node scripts/pm/check-prior-rulings.mjs --self-test
  *
  * `--card` reads the card AND its comment thread from the board (a token, and
@@ -27,6 +29,26 @@
  * one repo and answer it out of another repo's rulings, with nothing in the
  * output saying so. The thread corpus is the one corpus that lives on the
  * board, and it is read from the same board the card is.
+ *
+ * `--paths` adds the PRE-DISPATCH PREMISE READINGS over a declared file surface
+ * (pm-dispatch `references/execution-duties.md`'s ruling-area and staleness
+ * steps, which a seat typed as three command families per candidate card):
+ *
+ *   ① the surface ruling grep — `SURFACE_RULING_PATTERNS` (`ruling`,
+ *      `Ruling-ref`, `maintainer`, `⛔`) over the paths at the revision, each
+ *      hit `file:line`, the count per pattern, and the rule's verdict words:
+ *      zero hits ⇒ 「零命中 → 无裁决」; hits citing no ruling id ⇒ the count;
+ *   ② the action face — `git log -20` on the paths, and the same-day churn
+ *      line verbatim (`SAME_DAY_LINE`, pinned to `dispatch-runbook.md`) when one
+ *      of them is dated today (UTC);
+ *   ③ the card-ref face — every `#N` / `owner/repo#N` the card body and its
+ *      thread name, each read NOW for its state, merge and assignees (needs
+ *      `--card`; without it the face says `not read`, ⛔ never `none`).
+ *
+ * `--paths` alone runs ① and ② and skips the term search; with `--card` or
+ * `--terms` the term search runs as before and the readings follow it. A git
+ * read that fails is exit 3; a ref whose row cannot be read is `unresolved` on
+ * its row and the run exits 3 — never a state it did not read.
  *
  * ## Why this file exists at all
  *
@@ -916,6 +938,167 @@ export function search({ terms, adrUnits, agentsLines, docblocks, top = DEFAULT_
 }
 
 // ---------------------------------------------------------------------------
+// Premise readings — `--paths` (execution-duties.md's ruling-area and staleness steps)
+// ---------------------------------------------------------------------------
+
+/** The words the ruling-area step greps a declared surface for, exactly as the rule spells them. */
+export const SURFACE_RULING_PATTERNS = Object.freeze(['ruling', 'Ruling-ref', 'maintainer', '⛔']);
+/** A hit that cites a ruling by id: a comment/record id or an ADR number on the hit line. */
+export const RULING_ID_RE = /\bADR-\d{3,4}\b|\b\d{9,11}\b/u;
+/** How many hits per pattern the report names before it counts the rest. ⛔ The count is never suppressed. */
+export const SURFACE_HIT_NAME_CAP = 12;
+export const LOG_DEPTH = 20;
+/** How many card refs one run reads; the rest are counted as not read, ⛔ never as clean. */
+export const MAX_REF_READS = 60;
+export const ZERO_HIT_VERDICT = '零命中 → 无裁决';
+/** `dispatch-runbook.md`'s same-day churn line, verbatim — the self-test pins it present there. */
+export const SAME_DAY_LINE = '基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。';
+export const SAME_DAY_RULE_PATH = '.claude/skills/pm-dispatch/references/dispatch-runbook.md';
+export const PREMISE_RULE_PATH = '.claude/skills/pm-dispatch/references/execution-duties.md';
+export const PREMISE_RULE_PHRASES = Object.freeze([
+  '`check-prior-rulings.mjs --card <n> --paths <面>`',
+  '零命中才写无裁决,命中无裁决写命中数',
+]);
+
+/** A declared path as a git pathspec: `**` needs the glob magic; one already carrying magic is left alone. Pure. */
+export function pathspecOf(path) {
+  const p = String(path).trim();
+  return p.startsWith(':') ? p : `:(glob)${p}`;
+}
+
+/** `--paths a,b` split, empties dropped. Pure. */
+export function parsePaths(text) {
+  return String(text ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * `git grep -n` output at a revision (`REV:file:line:text`) as hits. Pure.
+ * The revision prefix is stripped by its known length, so a `:` inside a path or a line survives.
+ */
+export function parseGrepAtRev(out, rev) {
+  const hits = [];
+  for (const raw of String(out ?? '').split('\n')) {
+    if (!raw) continue;
+    const rest = raw.startsWith(`${rev}:`) ? raw.slice(rev.length + 1) : raw;
+    const m = /^(.*?):(\d+):(.*)$/.exec(rest);
+    if (m) hits.push({ file: m[1], line: Number(m[2]), text: m[3] });
+  }
+  return hits;
+}
+
+/** The ruling-area verdict from the hits, in the rule's words. Pure. */
+export function surfaceVerdict(byPattern) {
+  const lines = new Map();
+  for (const hits of Object.values(byPattern)) for (const h of hits) lines.set(`${h.file}:${h.line}`, h);
+  const all = [...lines.values()];
+  if (all.length === 0) return { lines: 0, cited: [], text: ZERO_HIT_VERDICT };
+  const cited = all.filter((h) => RULING_ID_RE.test(h.text));
+  if (cited.length === 0) return { lines: all.length, cited, text: `命中 ${all.length} 行,无裁决 id → 写命中数 ${all.length}` };
+  return { lines: all.length, cited, text: `命中 ${all.length} 行,其中 ${cited.length} 行引裁决 id → 逐字入区(id+原句)` };
+}
+
+/** `git log --format=%h%x09%cI%x09%s` lines, and which were committed on `todayUtc` (YYYY-MM-DD, UTC). Pure. */
+export function parseLog(out, todayUtc) {
+  const commits = String(out ?? '')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, at, ...subject] = l.split('\t');
+      const ms = Date.parse(at);
+      return { sha, at, day: Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null, subject: subject.join('\t') };
+    });
+  return { commits, sameDay: commits.filter((c) => c.day === todayUtc) };
+}
+
+/**
+ * Every issue or PR a card's body and thread name, in order, deduplicated, the card itself left out. A bare `#N`
+ * must not touch a word character on its left, so a seat signature's `LANE#N` and a `repo:x#5` name nothing; an
+ * `owner/repo#N` is read in its own repo. Pure.
+ */
+export function cardRefs(texts, repo, self) {
+  const out = [];
+  const seen = new Set();
+  const re = /(?<![\w/.#-])(?:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+))?#(\d+)\b/gu;
+  for (const text of texts) {
+    for (const m of String(text ?? '').matchAll(re)) {
+      const r = m[1] ?? repo;
+      const number = Number(m[2]);
+      if (r === repo && number === self) continue;
+      const key = `${r}#${number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ repo: r, number, key, local: r === repo });
+    }
+  }
+  return out;
+}
+
+/** One issue row as the card-ref face prints it. Pure. */
+export function refStateOf(row) {
+  const pr = row?.pull_request != null;
+  const merged = pr && Boolean(row.pull_request.merged_at);
+  const state = row?.state === 'closed' ? (pr ? (merged ? 'merged' : 'closed unmerged') : 'closed') : 'open';
+  const who = (row?.assignees ?? []).map((a) => a?.login).filter(Boolean);
+  return { kind: pr ? 'PR' : 'issue', state, assignees: who, title: row?.title ?? '' };
+}
+
+/**
+ * The three readings. `git` and `getRow` are injected so the self-test drives every branch offline:
+ * `git(args)` returns stdout or throws (an exit 1 from `git grep` is "no match" and must be passed as `''`);
+ * `getRow(ref)` answers `{ ok, row }`, `{ ok: false, notFound: true }` or `{ ok: false, error }`.
+ */
+export async function premiseReadings({ paths, rev, todayUtc, card = null, thread = null, repo, git: gitImpl, getRow }) {
+  const specs = paths.map(pathspecOf);
+  const byPattern = {};
+  for (const pat of SURFACE_RULING_PATTERNS) {
+    byPattern[pat] = parseGrepAtRev(gitImpl(['grep', '-n', '-I', '-F', '-e', pat, rev, '--', ...specs]), rev);
+  }
+  const verdict = surfaceVerdict(byPattern);
+  const log = parseLog(gitImpl(['log', `-${LOG_DEPTH}`, '--format=%h%x09%cI%x09%s', rev, '--', ...specs]), todayUtc);
+  let refs = null;
+  if (card) {
+    const found = cardRefs([card.body, ...(thread?.comments ?? []).map((c) => c.body)], repo, card.number);
+    refs = { total: found.length, rows: [], notRead: Math.max(0, found.length - MAX_REF_READS), unresolved: 0 };
+    for (const ref of found.slice(0, MAX_REF_READS)) {
+      const r = await getRow(ref);
+      if (r.ok) refs.rows.push({ ...ref, ...refStateOf(r.row) });
+      else if (r.notFound) refs.rows.push({ ...ref, kind: '-', state: 'no such issue (404)', assignees: [], title: '' });
+      else {
+        refs.unresolved += 1;
+        refs.rows.push({ ...ref, kind: '-', state: `unresolved (${r.error})`, assignees: [], title: '' });
+      }
+    }
+  }
+  return { paths, rev, todayUtc, byPattern, verdict, log, refs };
+}
+
+export function renderPremise(p) {
+  const L = [];
+  L.push(`  Premise readings (--paths ${p.paths.join(',')}) at ${p.rev}:`);
+  L.push(`  ① surface ruling grep — ${SURFACE_RULING_PATTERNS.map((pat) => `\`${pat}\` ${p.byPattern[pat].length}`).join(' · ')}`);
+  for (const pat of SURFACE_RULING_PATTERNS) {
+    const hits = p.byPattern[pat];
+    for (const h of hits.slice(0, SURFACE_HIT_NAME_CAP)) L.push(`      [${pat}] ${h.file}:${h.line}  ${truncate(h.text, 96)}`);
+    if (hits.length > SURFACE_HIT_NAME_CAP) L.push(`      [${pat}] +${hits.length - SURFACE_HIT_NAME_CAP} more (counted, not named)`);
+  }
+  L.push(`     verdict: ${p.verdict.text}`);
+  L.push(`  ② action face — git log -${LOG_DEPTH} -- the paths: ${p.log.commits.length} commit(s)`);
+  for (const c of p.log.commits) L.push(`      ${c.sha} ${c.at.slice(0, 16)}  ${truncate(c.subject, 90)}`);
+  if (p.log.sameDay.length > 0) {
+    L.push(`     same-day churn (${p.todayUtc} UTC): ${p.log.sameDay.map((c) => c.sha).join(', ')} — paste this line:`);
+    L.push(`       ${SAME_DAY_LINE}`);
+  } else L.push(`     same-day churn (${p.todayUtc} UTC): none on these paths — no line owed`);
+  if (p.refs === null) L.push('  ③ card-ref face: not read — no --card names a card; ⛔ not `none`');
+  else {
+    L.push(`  ③ card-ref face — ${p.refs.total} ref(s) named by the body and thread, read now (cite the state, ⛔ never an old account):`);
+    for (const r of p.refs.rows) L.push(`      ${r.local ? `#${r.number}` : r.key}  ${r.kind} ${r.state}${r.assignees.length ? ` · assignee ${r.assignees.join(', ')}` : r.state === 'open' ? ' · unassigned' : ''}${r.title ? `  — ${truncate(r.title, 70)}` : ''}`);
+    if (p.refs.notRead > 0) L.push(`      +${p.refs.notRead} ref(s) NOT read (cap ${MAX_REF_READS}) — read them by hand`);
+    if (p.refs.unresolved > 0) L.push(`     ⚠️ ${p.refs.unresolved} ref(s) unresolved — their state was NOT read; exit ${EXIT_PREREQUISITE_NOT_MET}`);
+  }
+  return L.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Card read — ONE request, no retry loop
 // ---------------------------------------------------------------------------
 
@@ -1020,6 +1203,21 @@ export async function readThread(number, repo, env, fetchImpl = fetch) {
     };
   }
   return { verdict: classifyCardRead({ hasToken: true, status: 200, what }), thread: { comments, pages, bytes, ms } };
+}
+
+/** One ref's row for the card-ref face: a single GET in the ref's own repo, no retry (see `classifyCardRead`). */
+export async function readRefRow(ref, env, fetchImpl = fetch) {
+  const token = env.GITHUB_TOKEN || env.GH_TOKEN || '';
+  if (!token) return { ok: false, error: 'no token' };
+  let res;
+  try {
+    res = await fetchImpl(`https://api.github.com/repos/${ref.repo}/issues/${ref.number}`, { headers: boardHeaders(token) });
+  } catch (err) {
+    return { ok: false, error: err?.message ?? 'network' };
+  }
+  if (res.status === 404) return { ok: false, notFound: true };
+  if (res.status !== 200) return { ok: false, error: `HTTP ${res.status}` };
+  return { ok: true, row: await res.json() };
 }
 
 // ---------------------------------------------------------------------------
@@ -1158,7 +1356,7 @@ export function reportPrerequisiteNotMet(verdict, extra = [], corpusRepo = null)
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { card: null, terms: null, rev: DEFAULT_REV, top: DEFAULT_TOP, json: false };
+  const opts = { card: null, terms: null, paths: null, rev: DEFAULT_REV, top: DEFAULT_TOP, json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--self-test') continue;
@@ -1177,6 +1375,12 @@ export function parseArgs(argv) {
       if (opts.terms.length === 0) return { error: '--terms wants at least one term' };
       continue;
     }
+    if (a === '--paths') {
+      const v = take();
+      opts.paths = parsePaths(v);
+      if (opts.paths.length === 0) return { error: '--paths wants a comma-separated list of the declared file surface' };
+      continue;
+    }
     if (a === '--rev') {
       const v = take();
       if (!v) return { error: '--rev wants a revision' };
@@ -1191,8 +1395,8 @@ export function parseArgs(argv) {
     }
     return { error: `unknown argument ${JSON.stringify(a)}` };
   }
-  if (opts.card === null && opts.terms === null) {
-    return { error: 'nothing to search for — pass --card <n>, or --terms a,b,c' };
+  if (opts.card === null && opts.terms === null && opts.paths === null) {
+    return { error: 'nothing to search for — pass --card <n>, --terms a,b,c, or --paths a/**,b.ts' };
   }
   return { opts };
 }
@@ -1264,7 +1468,51 @@ async function run(argv) {
         '     cheapest ruling lives, and the one this corpus was added for.',
       ], corpusRepo);
     }
-    thread = { ...readThreadRulings(th.thread.comments), pages: th.thread.pages, bytes: th.thread.bytes, ms: th.thread.ms };
+    thread = { ...readThreadRulings(th.thread.comments), pages: th.thread.pages, bytes: th.thread.bytes, ms: th.thread.ms, commentRows: th.thread.comments };
+  }
+
+  // The premise readings (`--paths`), taken before the term search so a git
+  // failure here is exit 3 with nothing searched, like every refusal above.
+  let premise = null;
+  if (opts.paths !== null) {
+    const premiseGit = (args) => {
+      try {
+        return git(args);
+      } catch (err) {
+        if (args[0] === 'grep' && err?.status === 1) return '';
+        throw err;
+      }
+    };
+    try {
+      premise = await premiseReadings({
+        paths: opts.paths,
+        rev: opts.rev,
+        todayUtc: new Date().toISOString().slice(0, 10),
+        card,
+        thread: card ? { comments: thread?.commentRows ?? [] } : null,
+        repo: sweep.repo,
+        git: premiseGit,
+        getRow: (ref) => readRefRow(ref, process.env),
+      });
+      premise.shallow = git(['rev-parse', '--is-shallow-repository']).trim() === 'true';
+    } catch (err) {
+      return reportPrerequisiteNotMet(
+        { kind: 'premise-git', headline: `the premise readings could not read git at ${opts.rev} (${err?.message ?? 'unknown'})` },
+        [],
+        corpusRepo,
+      );
+    }
+  }
+  const premiseExit = premise?.refs?.unresolved > 0 ? EXIT_PREREQUISITE_NOT_MET : EXIT_OK;
+  const premiseText = () => {
+    if (!premise) return '';
+    const text = renderPremise(premise);
+    return premise.shallow ? `${text}\n     ⚠️ shallow checkout: the log above may stop short of ${LOG_DEPTH} — deepen before reading it as complete` : text;
+  };
+  if (premise && opts.card === null && opts.terms === null) {
+    if (opts.json) console.log(JSON.stringify({ rev: opts.rev, tip, corpusRepo, premise }, null, 2));
+    else console.log(`check-prior-rulings: ${corpusRepo ?? 'an unresolved repo'} at ${opts.rev} (${tip})\n\n${premiseText()}\n\n  Report-only: this file writes nothing and decides nothing.`);
+    return premiseExit;
   }
 
   const built = buildTermSet({ title: card?.title ?? '', body: card?.body ?? '', override: opts.terms });
@@ -1320,11 +1568,13 @@ async function run(argv) {
       })),
       accepted: result.accepted,
       pasteLine: result.pasteLine,
+      premise,
     }, null, 2));
   } else {
     console.log(renderReport(result, meta));
+    if (premise) console.log(`\n${premiseText()}`);
   }
-  return EXIT_OK;
+  return premiseExit;
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,6 +1930,44 @@ export async function selfTest() {
   t('…and having re-armed once, does not loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:1', [PROXY_REARM_GUARD]: '1' }, flagSupported: true }).rearm, false);
   t('an unproxied environment plans nothing', proxyRearmPlan({ env: {}, flagSupported: true }).rearm, false);
 
+  // ---- premise readings: --paths (execution-duties.md's ruling-area and staleness steps) ----
+  {
+    const J = (v) => JSON.stringify(v);
+    const ROOT = new URL('../../', import.meta.url);
+    t('--paths: the ruling-area rule still names this command and its verdict words (a reworded rule reds here)', PREMISE_RULE_PHRASES.every((ph) => readFileSync(new URL(PREMISE_RULE_PATH, ROOT), 'utf8').includes(ph)), true);
+    t('--paths: the same-day churn line is dispatch-runbook.md\'s, verbatim', readFileSync(new URL(SAME_DAY_RULE_PATH, ROOT), 'utf8').includes(`该行原文:${SAME_DAY_LINE}`), true);
+    t('--paths: the grep words are the rule\'s four', SURFACE_RULING_PATTERNS.join(' '), 'ruling Ruling-ref maintainer ⛔');
+    t('--paths: a ** path becomes a glob pathspec; one carrying magic is left alone', J([pathspecOf('scripts/pm/**'), pathspecOf(':(top)x.ts')]), J([':(glob)scripts/pm/**', ':(top)x.ts']));
+    t('--paths: a grep line at a revision keeps a colon inside the text', J(parseGrepAtRev('origin/main:a/b.ts:12:x: ruling 6181973363\n', 'origin/main')), J([{ file: 'a/b.ts', line: 12, text: 'x: ruling 6181973363' }]));
+    t('--paths: ⭐ zero hits read 零命中 → 无裁决', surfaceVerdict({ ruling: [], '⛔': [] }).text, ZERO_HIT_VERDICT);
+    const h = (line, text) => ({ file: 'a.ts', line, text });
+    t('--paths: hits with no ruling id are a COUNT, and a line two words hit counts once', surfaceVerdict({ ruling: [h(1, 'ruling text')], maintainer: [h(1, 'ruling text'), h(2, 'the maintainer said')] }).text, '命中 2 行,无裁决 id → 写命中数 2');
+    t('--paths: a hit citing a ruling id or an ADR is named for verbatim entry', surfaceVerdict({ ruling: [h(1, 'ruling record 6181973363'), h(2, 'ruling')], '⛔': [h(3, '⛔ ADR-0131 D8')] }).cited.length, 2);
+    const log = parseLog('abc1234\t2026-11-19T10:03:00+00:00\tfeat: today\ndef5678\t2026-11-19T07:00:00+08:00\tfix: yesterday in UTC\n', '2026-11-19');
+    t('--paths: ⭐ same-day is the UTC day of the commit, an offset date converted', J(log.sameDay.map((c) => c.sha)), J(['abc1234']));
+    const refs = cardRefs(['repo:objectstack#5 · os-bill · session_01ABCDEF\nsee #12 and #12, epic:#35205#1, objectstack-ai/cloud#7, PR #99 and #500 itself'], 'objectstack-ai/objectstack', 500);
+    t('--paths: card refs — a signature\'s LANE#N names nothing, dedup, cross-repo kept, the card itself out', J(refs.map((r) => r.key)), J(['objectstack-ai/objectstack#12', 'objectstack-ai/objectstack#35205', 'objectstack-ai/cloud#7', 'objectstack-ai/objectstack#99']));
+    t('--paths: a PR is read as merged, closed unmerged or open; an issue names its assignees', J([refStateOf({ state: 'closed', pull_request: { merged_at: 'x' } }).state, refStateOf({ state: 'closed', pull_request: { merged_at: null } }).state, refStateOf({ state: 'open', assignees: [{ login: 'os-bill' }] }).assignees]), J(['merged', 'closed unmerged', ['os-bill']]));
+    const asked = [];
+    const fakeGit = (args) => {
+      asked.push(args);
+      if (args[0] === 'grep') return args[5] === 'ruling' ? 'origin/main:x.ts:3:a ruling\n' : '';
+      return 'abc1234\t2026-11-19T10:03:00Z\tfeat: today\n';
+    };
+    const rows = { 12: { ok: true, row: { state: 'open', assignees: [] } }, 13: { ok: false, notFound: true }, 14: { ok: false, error: 'HTTP 502' } };
+    const card = { number: 500, body: 'needs #12 and #13' };
+    const pr = await premiseReadings({ paths: ['x/**'], rev: 'origin/main', todayUtc: '2026-11-19', card, thread: { comments: [{ body: 'and #14' }] }, repo: 'o/r', git: fakeGit, getRow: (ref) => rows[ref.number] });
+    t('--paths: every word is grepped fixed-string over the glob pathspec at the revision', J(asked.filter((a) => a[0] === 'grep').map((a) => [a[4], a[5], a.at(-1)])), J(SURFACE_RULING_PATTERNS.map((w) => ['-e', w, ':(glob)x/**'])));
+    t('--paths: the log is -20 at the revision on the same paths', J(asked.find((a) => a[0] === 'log').slice(0, 2).concat(asked.find((a) => a[0] === 'log').slice(-1))), J(['log', '-20', ':(glob)x/**']));
+    const text = renderPremise(pr);
+    t('--paths: the same-day line is printed verbatim when one commit is today', text.includes(SAME_DAY_LINE), true);
+    t('--paths: refs read from the body AND the thread; a 404 is a reading, an unreadable row is unresolved', J([pr.refs.total, pr.refs.rows.map((r) => r.state), pr.refs.unresolved]), J([3, ['open', 'no such issue (404)', 'unresolved (HTTP 502)'], 1]));
+    const noCard = await premiseReadings({ paths: ['x'], rev: 'origin/main', todayUtc: '2000-01-01', repo: 'o/r', git: () => '', getRow: () => ({ ok: false }) });
+    t('--paths: without a card the ref face says not read, ⛔ never none; no hits read 零命中', [noCard.refs, renderPremise(noCard).includes('③ card-ref face: not read'), renderPremise(noCard).includes(ZERO_HIT_VERDICT)].join('|'), '|true|true');
+    t('--paths: alone is a legal run (no card, no terms)', J(parseArgs(['--paths', 'a/**,b.ts']).opts?.paths), J(['a/**', 'b.ts']));
+    t('--paths: an empty list is refused', parseArgs(['--paths', ' , ']).error !== undefined, true);
+  }
+
   // ---- structural: this file has no write path ---------------------------
   // The report-only property, held mechanically rather than promised. A `POST`
   // to the API from here would make it a tool that mutates the board, and the
@@ -1740,7 +2028,7 @@ export async function selfTest() {
       'content-line anchoring, the fixture thread with its two rulings oldest-first, `none` against ' +
       '`not read` against the whole-line `unresolved`, and the offline board read (paged to a short ' +
       'page with bytes and ms measured, a refusal, no token, the page bound, a network failure, a ' +
-      'malformed page); the THIRD (fallback) decision shape on objectui\'s real `## Decision` structure, with its empty-anchor, prose-sentence, already-carries-a-D-unit and non-ADR-path controls; the corpus repo named in BOTH arms of the paste line; the structural no-write-path, no-retry-loop and no-Link-walk assertions; and ' +
+      'malformed page); the THIRD (fallback) decision shape on objectui\'s real `## Decision` structure, with its empty-anchor, prose-sentence, already-carries-a-D-unit and non-ADR-path controls; the corpus repo named in BOTH arms of the paste line; the structural no-write-path, no-retry-loop and no-Link-walk assertions; the --paths premise readings (the rule\'s four grep words, the zero-hit and count verdicts, the UTC same-day line pinned to dispatch-runbook.md, the card-ref face with its 404 and unresolved rows); and ' +
       'the one live-tree D8 existence pin).',
   );
   return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };
