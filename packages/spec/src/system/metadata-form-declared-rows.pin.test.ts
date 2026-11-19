@@ -43,6 +43,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { METADATA_FORM_REGISTRY } from './metadata-form-registry';
+import { ActionTextSchema } from '../ui/action.zod';
 
 type FormEntry = {
   field?: string;
@@ -250,5 +251,58 @@ describe('hook.condition declares the CEL predicate language it edits', () => {
     const [row] = rowFor('field', 'visibleWhen');
     expect(row.type).toBe('code');
     expect(row.language).toBe('expression');
+  });
+});
+
+/**
+ * **The action form edits the action's declared sentences beside its script
+ * body** (ruling 6913660232, parameter 7: an action declares its sentences).
+ *
+ * `ActionSchema.texts` is a record keyed by the snake_case key the body asks
+ * for with `ctx.text`, each entry `{ message, params? }` with no member that
+ * echoes its key, so its row is the hook form's: a `key-only-record`, which
+ * adds, renames and removes keys and never writes the key into the entry. The
+ * reconciliation gate proves the key and its entry keys are offered somewhere
+ * on the form; it does not read the control, the gate or where the row sits,
+ * so this pin keeps all three.
+ */
+describe('action.texts is a key-only record beside the script body', () => {
+  type Section = { label?: string; fields?: FormEntry[] };
+  const behaviorRows = () =>
+    ((((METADATA_FORM_REGISTRY.action as any)?.sections ?? []) as Section[]).find((s) => s.label === 'Behavior')
+      ?.fields ?? []) as FormEntry[];
+  const indexOf = (key: string) => behaviorRows().findIndex((r) => r?.field === key);
+  /** A row's entry controls, as `field:type[:widget][!]` (`!` = required). */
+  const entryFaces = (row: FormEntry | undefined) =>
+    (row?.fields ?? []).map(
+      (f) => `${f.field}:${f.type}${f.widget ? `:${f.widget}` : ''}${(f as { required?: boolean }).required ? '!' : ''}`,
+    );
+
+  it('CONTROLS: the probe reads the hook form texts row it mirrors, and reports a known absence', () => {
+    const [hookRow] = rowFor('hook', 'texts');
+    expect(hookRow?.widget, 'lit control: the hook form row this one copies').toBe('key-only-record');
+    expect(entryFaces(hookRow)).toEqual(['message:textarea!', 'params:tags']);
+    expect(rowFor('action', 'noSuchKeyAtAll'), 'dark control: a key the action form does not offer').toHaveLength(0);
+    expect(indexOf('body'), 'the Behavior section holds the script body').toBeGreaterThanOrEqual(0);
+  });
+
+  it('is offered once, as a key-only record whose entry controls are the served entry keys', () => {
+    const [row, ...extra] = rowFor('action', 'texts');
+    expect(row, '`texts` is declared by ActionSchema and live; the action form must offer it').toBeDefined();
+    expect(extra, 'one row only').toEqual([]);
+    expect(row.type).toBe('record');
+    expect(row.widget).toBe('key-only-record');
+    expect(row.helpText).toContain('ctx.text');
+    expect(entryFaces(row)).toEqual(['message:textarea!', 'params:tags']);
+    expect((row.fields ?? []).map((f) => f.field)).toEqual(Object.keys((ActionTextSchema as any).shape));
+  });
+
+  it('is gated like the body, and sits after it in the Behavior section', () => {
+    const [body] = rowFor('action', 'body');
+    const [row] = rowFor('action', 'texts');
+    expect(row.visibleWhen).toEqual({ dialect: 'cel', source: "data.type == 'script'" });
+    expect(row.visibleWhen).toEqual(body.visibleWhen);
+    expect(indexOf('texts')).toBeGreaterThan(indexOf('body'));
+    expect(indexOf('texts'), 'beside the body, before the param dialog rows').toBeLessThan(indexOf('params'));
   });
 });

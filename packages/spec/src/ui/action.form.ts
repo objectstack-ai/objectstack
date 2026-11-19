@@ -63,6 +63,23 @@ export const actionForm = defineForm({
             { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
           ],
         },
+        // The action's declared texts sit beside the body that asks for them,
+        // as on the hook form, and take its row: a record keyed by the
+        // snake_case key the code asks for, an entry `{ message, params? }`
+        // with no member that echoes its key, so the key-only record control.
+        // Gated like `body`: the parse refuses `texts` on every action but a
+        // `script` one (and on its `expression` body, which the help text says).
+        {
+          field: 'texts',
+          type: 'record',
+          widget: 'key-only-record',
+          visibleWhen: "data.type == 'script'",
+          helpText: "Sentences the action writes into records, keyed by the snake_case key its body asks for with ctx.text (e.g. email_subject). The body gets the declared message in the organization's language, translated, with the declared message as the fallback. For a script action's JavaScript (L2) body; refused on an expression body",
+          fields: [
+            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the action writes when its body asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },
+            { field: 'params', type: 'tags', helpText: 'Names the sentence may fill (e.g. subject): the body asks for ctx.text(key, { subject }), and a {{ subject }} hole renders it. Absent: the sentence is plain text' },
+          ],
+        },
         {
           field: 'params',
           type: 'repeater',
