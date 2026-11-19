@@ -10,6 +10,11 @@ import { t, tFormat } from './i18n';
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches dynamic `import('@objectstack/formula')` and
+// `import('@objectstack/lint')` (the spec form's CEL fields); pay those loads
+// during collection, never inside a case's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 // Which console language the dialog renders in. Only `useMetadataLocale` is
