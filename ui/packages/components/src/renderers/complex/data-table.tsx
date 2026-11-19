@@ -4077,7 +4077,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             key={colIndex} 
                             className={cn(
                               col.cellClassName,
-                              col.align === 'right' && 'text-right',
+                              // Figures line up digit under digit (objectstack#35548).
+                              col.align === 'right' && 'text-right tabular-nums',
                               col.align === 'center' && 'text-center',
                               // `fitContent` cells must not clip their inline
                               // content (row-action buttons); every other column
