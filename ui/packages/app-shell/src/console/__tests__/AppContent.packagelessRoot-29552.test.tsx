@@ -249,6 +249,7 @@ function boot(url: string, options: { listsLoaded?: boolean } = {}) {
 /** The calls that read a whole list of one of the three types. */
 const listCalls = () => server.calls.filter((c) => c === 'object' || c === 'view' || c === 'page');
 const byNameCalls = () => server.calls.filter((c) => c.startsWith('object/') || c.startsWith('page/'));
+const presenceCalls = () => server.calls.filter((c) => c.startsWith('object?names='));
 
 beforeEach(() => {
   server.calls = [];
@@ -263,11 +264,14 @@ afterEach(() => {
 });
 
 describe('a package-less app’s root reads the objects it requires by name (objectstack#29552)', () => {
-  it('(a) a root with no landing asks the object its entry requires by name, and no list', async () => {
+  it('(a) a root with no landing asks the object its entry requires, and no list', async () => {
     boot('/apps/links');
     await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
-    await waitFor(() => expect(byNameCalls()).toContain('object/note'));
+    await waitFor(() => expect(presenceCalls().some((c) => c.split(/[=,]/).includes('note'))).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // objectstack#35306 — the presence read served it, and is its one read.
+    expect(byNameCalls()).not.toContain('object/note');
 
     expect(screen.queryByTestId('object-view')).toBeNull();
     expect(listCalls()).toEqual([]);
@@ -278,7 +282,9 @@ describe('a package-less app’s root reads the objects it requires by name (obj
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toHaveTextContent('Notes home'));
     await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
 
-    expect(byNameCalls()).toContain('object/note');
+    // objectstack#35306 — asked in the presence read, which answers it: no by-name read.
+    expect(presenceCalls().some((c) => c.split(/[=,]/).includes('note'))).toBe(true);
+    expect(byNameCalls()).not.toContain('object/note');
     expect(listCalls()).toEqual([]);
   });
 

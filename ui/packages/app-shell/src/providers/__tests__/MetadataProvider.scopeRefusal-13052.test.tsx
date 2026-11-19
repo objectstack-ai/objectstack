@@ -180,3 +180,95 @@ describe('a definite refusal is an answer; a failed read settles once (objectui#
     expect(byName(m.server.calls)).toBe(1);
   });
 });
+
+describe('a name the presence read SERVED is answered from it; one it left out is still asked by name (objectstack#35306)', () => {
+  type Presence = 'serves' | 'leaves-out';
+  const PRESENCE = `/api/v1/meta/object?names=${NAME}`;
+  const SERVED_DEF = { name: NAME, label: 'Probe widget', fields: { title: { type: 'text', label: 'Title' } } };
+
+  /**
+   * The presence read first (`views: false`, `batch: true`, the `?names=`
+   * list door), then, once it has answered, the route's by-name read of the
+   * same name (`views: false`, as a lookup target is read).
+   */
+  function mountAfterPresence(presence: Presence, byNameAnswer: Answer) {
+    const server = { calls: [] as string[] };
+    const adapter = new ObjectStackAdapter({
+      baseUrl: `http://presence-35306-${(seq += 1)}.test`,
+      autoReconnect: false,
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith('/discovery')) return json(200, { success: true, data: {} });
+        server.calls.push(url.pathname + url.search);
+        if (url.pathname === BY_NAME) return respond(byNameAnswer);
+        if (url.pathname === '/api/v1/meta/object' && url.searchParams.get('names') === NAME) {
+          // The list door leaves an absent or refused name out alike.
+          const items = presence === 'serves' ? [SERVED_DEF] : [];
+          return json(200, { success: true, data: { type: 'object', items, disabledActions: {} } });
+        }
+        const list = /^\/api\/v1\/meta\/([a-z_]+)$/.exec(url.pathname);
+        if (list) return json(200, { success: true, data: { type: list[1], items: [] } });
+        return json(404, { success: false, error: { message: `no route ${url.pathname}` } });
+      }) as typeof fetch,
+    });
+    let latest: Ctx | null = null;
+    function Probe() {
+      latest = useMetadata();
+      const read = latest.readObjectScope! as unknown as (scope: Record<string, unknown>) => { settled: boolean };
+      if (read({ names: [NAME], views: false, batch: true }).settled) read({ names: [NAME], views: false });
+      return null;
+    }
+    render(
+      <MetadataProvider adapter={adapter}>
+        <Probe />
+      </MetadataProvider>,
+    );
+    const read = (scope: Record<string, unknown>) =>
+      (latest as unknown as Ctx).readObjectScope!(scope as Parameters<NonNullable<Ctx['readObjectScope']>>[0]) as ReturnType<
+        NonNullable<Ctx['readObjectScope']>
+      > & { refused?: Readonly<Record<string, string>>; failed?: readonly string[] };
+    // The test reads the route's scope only once the presence read has
+    // answered, as the route asks it: a read made before then is asked by
+    // name, as it always was.
+    const presenceSettled = () => read({ names: [NAME], views: false, batch: true }).settled;
+    const routeScope = () => read({ names: [NAME], views: false });
+    return { server, presenceSettled, routeScope };
+  }
+
+  it('a served name joins the route scope with the definition the presence read carried, and is not asked by name', async () => {
+    const m = mountAfterPresence('serves', 'served');
+    await waitFor(() => expect(m.presenceSettled()).toBe(true));
+    await waitFor(() => expect(m.routeScope().settled).toBe(true));
+    await settle();
+    const scope = m.routeScope();
+    expect(scope.objects).toEqual([SERVED_DEF]);
+    expect(scope.missing).toEqual([]);
+    expect(scope.refused).toEqual({});
+    expect(byName(m.server.calls)).toBe(0);
+    expect(m.server.calls.filter((c) => c === PRESENCE)).toHaveLength(1);
+  });
+
+  for (const envelope of ['disabled-flat', 'disabled-wrapped'] as const) {
+    it(`a name the presence read left out is asked by name, and its refusal is named (${envelope})`, async () => {
+      const m = mountAfterPresence('leaves-out', envelope);
+      await waitFor(() => expect(m.presenceSettled()).toBe(true));
+    await waitFor(() => expect(m.routeScope().settled).toBe(true));
+      await settle();
+      const scope = m.routeScope();
+      expect(scope.missing).toEqual([NAME]);
+      expect(scope.refused).toEqual({ [NAME]: 'OBJECT_PACKAGE_DISABLED' });
+      expect(byName(m.server.calls)).toBe(1);
+    });
+  }
+
+  it('CONTROL: a name the presence read left out that the by-name door answers absent is the plain absence', async () => {
+    const m = mountAfterPresence('leaves-out', 'absent');
+    await waitFor(() => expect(m.presenceSettled()).toBe(true));
+    await waitFor(() => expect(m.routeScope().settled).toBe(true));
+    await settle();
+    const scope = m.routeScope();
+    expect(scope.missing).toEqual([NAME]);
+    expect(scope.refused).toEqual({});
+    expect(byName(m.server.calls)).toBe(1);
+  });
+});
