@@ -50,7 +50,7 @@
  *
  *   1. it is tried ONCE, only after a refusal, never as a first choice;
  *   2. it echoes the CURRENT assignees back into the body. `issue_write`'s
- *      measured hazards (`references/platform-readings.md`) are whole-set
+ *      measured hazards (`references/readings-issue-fields.md`) are whole-set
  *      replacement AND the clearing of every field the write did not pass, so
  *      a body carrying `labels` alone silently un-assigns the card. The echo is
  *      what makes a label write a label write;
@@ -173,7 +173,7 @@
  *             post-stamped's `readBackVerdict` (stamp drift, byte class); under `--land`, `④ pull` — `draft`
  *             false on the REST read, and the arming the executor's landed check on `automerge_enable`'s own
  *             answer (an `autoMergeRequest`, or `isInMergeQueue`): REST `auto_merge` is unstable and ⛔ never
- *             a reason to re-arm (`platform-readings.md`), so it is printed and not judged. A part that
+ *             a reason to re-arm (`readings-queue.md`), so it is printed and not judged. A part that
  *             disagrees is exit 4 and is NOT repaired — under the relay a re-send is a second write.
  *
  * ⛔ RELAY-ONLY, as `--release`: a fold exists only where a stroke does, so a route that resolves to `direct`

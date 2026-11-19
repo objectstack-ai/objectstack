@@ -1,0 +1,27 @@
+# 平台读数:标签、指派、评论计数与 issue type
+
+- `issue_write` 的 `labels` 是整组替换不是追加:同一动作内重读现值合并再写。
+- 隔轮旧读数是无效快照,按其回写静默剥别的标签;真追加走 REST `POST /issues/{n}/labels`。
+- `issue_write` 还清空每个未传字段(assignees 在内)⇒ 单字段更新必须把现值带齐重写。
+- 追加端点同样先过探针:403 会话没有真追加通道,只能整组替换。
+- PR 标签走 issue 形通道的三条读腿全盲、两条静默,PR 原生端点见腿 ④。
+- 腿 ①:`issue_read get_labels` 传 PR 号回 Could not resolve to an Issue。
+- REST 的 PR 也是 issue 惯例在此方法不成立;响亮失败即路由信号,改走腿 ③。
+- 腿 ②:`pull_request_read get` 的 `labels` 时缺时滞,可整字段缺席;连盲都不稳定,更险。
+- 腿 ③:payload 档 —— issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中零。
+- PR 侧拼写是 `data-name="NAME"`,片链到 `issues?q=…label%3A…`。
+- 腿 ④:`list_pull_requests` 与 `search_pull_requests` 传 PR 号回完整 `labels`,是可用读腿。
+- 同接口按 `head: owner:分支` 加 `fields` 一次回全 draft、labels、assignees 与请审人。
+- 反向不对称:`issue_write update` 传 PR 号写 `labels` 与 `assignees` 生效,而读腿 ① 拒 PR 号。
+- ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
+- 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
+- ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
+- `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
+- 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
+- `comments` 计数会多读:实测 1 而列表与 timeline 双 0 ⇒ 线程空否读那两条,⛔ 不读计数。
+- `comments` 与枚举不等是瞬态旗:计数收敛后记录已失而差值归零 ⇒ ⛔ 不作唯一防线。
+- 可指派性是仓+账号属性且会话中可变:`GET /repos/{o}/{r}/assignees/USER` 204/404,指派后回读。
+- `list_issue_types` 对本集成 403 而 `issue_write type:` 正常,是读权限缺口。
+- ⇒ 直接写已知好值(`Bug`/`Feature`/`Task`),写侧报错才是真信号;列表 403 不等于类型不可用。
+- 非法值是响错还是静默丢弃未实测,写非已知值前先小样验证。
+- MCP `get_comments` 结果超 ~100 KB 溢出成文件:返回体是路径不是评论,读前先判形。
