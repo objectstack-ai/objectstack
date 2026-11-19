@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
 import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
-import { EmptySectionsLineContext, useDefaultRecordPage } from './defaultRecordPage';
+import { ApprovalBandContext, EmptySectionsLineContext, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -325,6 +325,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // approval band below is live, per-viewer workflow state, not document
   // content, so it does not print.
   const isPrintPage = usePrintPage() !== null;
+  // objectstack#35253 — `false` on every details part of a split default page
+  // but the first: the approval band is the record's, drawn once per page.
+  const drawsApprovalBand = React.useContext(ApprovalBandContext);
   // objectstack#27055, objectstack#35019 — a record page's details body folds
   // its entirely empty sections into one line (`EmptySectionsLine`): every
   // `record:details` body, authored page or synthesized default page alike,
@@ -1703,8 +1706,12 @@ export const DetailView: React.FC<DetailViewProps> = ({
           `record:approval_decision` inside a print page. A printed record
           that should say where its approval stands prints the record's own
           status field through `record:details`, the way `record:path` leaves
-          the current stage to it. */}
-      {inlineEdit && schema.showHeader === false && !isPrintPage && (() => {
+          the current stage to it.
+
+          objectstack#35253 — and once per page: a default page split around a
+          body table draws it on its first details part only
+          (`ApprovalBandContext`). */}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && (() => {
         // Two independent facts, not one (objectui#2902):
         //
         //   isPending — an approval is running on this record.
