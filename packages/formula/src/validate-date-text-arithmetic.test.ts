@@ -491,3 +491,100 @@ describe('a flow value envelope typed for the date-text family alone (#34451)', 
     expect(codes(MEASURED, { flowValueEnvelope: true })).toEqual([]);
   });
 });
+
+describe('a flow condition\'s record.<field> / previous.<field> read takes the date-text family as its bare name does (#34662)', () => {
+  /** A record-triggered flow's condition over a loan: the hint `@objectstack/lint` hands a start, edge or decision condition. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const CONDITION: ExprSchemaHint = { fields: Object.keys(fieldTypes), fieldTypes, faultOutcome: 'run-fails' };
+  const errorsOf = (source: string, hint: ExprSchemaHint = CONDITION) =>
+    validateExpression('predicate', source, hint).errors;
+  const codes = (source: string, hint: ExprSchemaHint = CONDITION) => errorsOf(source, hint).map((e) => e.code);
+  /** What the run binds: the row under `record` (and `previous`), and its fields flattened bare. */
+  const ROW = { title: 'Dune', borrow_date: '2026-11-16', due_date: '2026-11-30', picked_up_at: '2026-11-16T09:30:00.000Z' };
+  const run = (source: string) => celEngine.evaluate({ dialect: 'cel', source }, { ...ROW, record: ROW, previous: ROW });
+
+  it('refuses timestamp() over a date field through record. and previous. under the same code as the bare name, naming the read', () => {
+    expect(codes('timestamp(borrow_date) < now()')).toEqual(['date-text-call-run-fails']);
+    for (const root of ['record', 'previous'] as const) {
+      const source = `timestamp(${root}.borrow_date) < now()`;
+      const errors = errorsOf(source);
+      expect(errors.map((e) => ({ code: e.code, params: e.params })), source).toEqual([{
+        code: 'date-text-call-run-fails',
+        params: {
+          call: `timestamp(${root}.borrow_date)`,
+          reference: `${root}.borrow_date`,
+          rewrite: `date(${root}.borrow_date)`,
+          shift: `isoDate(addDays(${root}.borrow_date, N))`,
+        },
+      }]);
+      expect(errors[0].message).toContain(`\`isoDate(addDays(${root}.borrow_date, N))\``);
+      // The run faults on the date-only text, exactly as the bare spelling does.
+      expect(run(source), source).toMatchObject({ ok: false });
+    }
+    expect(run('timestamp(borrow_date) < now()')).toMatchObject({ ok: false });
+  });
+
+  it('CONTROL: a datetime field under timestamp(), and the prescribed parse, stay clean and evaluate', () => {
+    for (const source of [
+      'timestamp(record.picked_up_at) < now()',
+      'timestamp(previous.picked_up_at) < now()',
+      'date(record.borrow_date) < now()',
+    ]) {
+      expect(validateExpression('predicate', source, CONDITION), source).toEqual({ ok: true, errors: [], warnings: [] });
+      expect(run(source), source).toEqual({ ok: true, value: true });
+    }
+  });
+
+  it('takes the row\'s outcome arm: run-may-fail where none is declared, and run-fails kept when bare names are unproven', () => {
+    const undeclared: ExprSchemaHint = { ...CONDITION, faultOutcome: undefined };
+    expect(codes('timestamp(record.borrow_date) < now()', undeclared)).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(borrow_date) < now()', undeclared)).toEqual(['date-text-call-run-may-fail']);
+    // A node that can bind a name no reader sees moves a bare name's arm, never a root read's.
+    const unproven: ExprSchemaHint = { ...CONDITION, bareNamesUnproven: true };
+    expect(codes('timestamp(borrow_date) < now()', unproven)).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(record.borrow_date) < now()', unproven)).toEqual(['date-text-call-run-fails']);
+  });
+
+  it('a flow variable shadowing the bare name leaves the root read the field\'s', () => {
+    const shadowed: ExprSchemaHint = { ...CONDITION, flowVariables: ['borrow_date'] };
+    expect(codes('timestamp(borrow_date) < now()', shadowed)).toEqual([]);
+    expect(codes('timestamp(record.borrow_date) < now()', shadowed)).toEqual(['date-text-call-run-fails']);
+  });
+
+  it('refuses the other date-text verdicts over a root read too: a call and arithmetic on the text', () => {
+    expect(codes("isoDate(record.picked_up_at) == '2026-11-16'")).toEqual(['date-text-call-run-fails']);
+    const arithmetic = errorsOf("record.due_date - record.borrow_date > duration('24h')");
+    expect(arithmetic.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-arithmetic-run-fails',
+      params: { operands: 'DateText - DateText', reference: 'record.borrow_date' },
+    }]);
+    expect(run("record.due_date - record.borrow_date > duration('24h')")).toMatchObject({ ok: false });
+  });
+
+  it('stands down only on date arithmetic against a number: another Timestamp-typing fault leaves the root read judged, as the bare name is', () => {
+    // A Duration ordered against a number faults the Timestamp typing, but it is no date-arith shape.
+    expect(codes('due_date - borrow_date > 3')).toEqual(['date-text-arithmetic-run-fails']);
+    const span = errorsOf('record.due_date - record.borrow_date > 3');
+    expect(span.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-arithmetic-run-fails',
+      params: { operands: 'DateText - DateText', reference: 'record.borrow_date' },
+    }]);
+    // An ordering of the date text against a text literal (which the runtime answers) does not mask a later call, in either order.
+    for (const [bare, root] of [
+      ['due_date >= "2026-01-01" && timestamp(borrow_date) < now()', 'record.due_date >= "2026-01-01" && timestamp(record.borrow_date) < now()'],
+      ['timestamp(borrow_date) < now() && due_date >= "2026-01-01"', 'timestamp(record.borrow_date) < now() && record.due_date >= "2026-01-01"'],
+    ]) {
+      expect(codes(bare), bare).toEqual(['date-text-call-run-fails']);
+      const errors = errorsOf(root);
+      expect(errors.map((e) => e.code), root).toEqual(['date-text-call-run-fails']);
+      expect(errors[0].params, root).toMatchObject({ call: 'timestamp(record.borrow_date)', reference: 'record.borrow_date' });
+    }
+  });
+
+  it('CONTROL: what the Timestamp typing of the roots faults on, and an input read, are not this family\'s', () => {
+    // `record.due_date + 1` is the date-arithmetic family's shape, not the date-text check's.
+    expect(codes('record.due_date + 1 > 5').filter((c) => c.startsWith('date-text-'))).toEqual([]);
+    // A flow does not bind `input` to the row the types describe.
+    expect(codes('timestamp(input.borrow_date) < now()').filter((c) => c.startsWith('date-text-'))).toEqual([]);
+  });
+});

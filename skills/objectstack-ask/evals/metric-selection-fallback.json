@@ -110,6 +110,46 @@
         "must_contain": ["trip request"],
         "must_not_contain": ["aggregate_records", "query_records", "query_dataset", "非指标口径"]
       }
+    },
+    {
+      "id": 12,
+      "prompt": "The user asks: \"List the open opportunities with their probability.\" No dataset matches, so you fell back: `describe_object({ objectName: 'opportunity' })` lists the fields `name`, `stage` and `probability`, and `query_records` answered three open opportunities (Acme Renewal, Globex Expansion, Initech Pilot), each with `name` and `stage` but no `probability`, plus `withheldFields: ['probability']`. How do you write the answer?",
+      "expected_output": "Opens with one line saying the list is not from a governed metric and names the Opportunity object and its fields. Lists the three opportunities by name and stage, and says the probability field exists but is not visible to it, because `withheldFields` names it. It never says the probability is empty, blank or zero, and gives no probability value.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["not visible", "Acme Renewal"],
+        "must_not_contain": ["is empty", "is blank", "are empty", "are blank"]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "The user asks: \"Which 5 industries bring in the most revenue, and how many industries are there?\" `revenue` and `industry` match one measure and one dimension of `sales_analysis` (label Sales Analysis). `query_dataset` with `order` on revenue descending and `limit: 5` answered five rows (Software, Retail, Banking, Energy, Health), `rowCount: 5`, `truncated: true`, and no `totalGroups`. How do you write the answer?",
+      "expected_output": "Cites the answer's source, then lists the five industries by revenue and says the result is partial: more industries exist than came back. Because the answer carries no `totalGroups`, it says the total number of industries is unknown. It never gives 5 (`rowCount`) as how many industries there are.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Software", "Health", "partial", "unknown"],
+        "must_not_contain": ["there are 5", "there are five"]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "The user asks: \"Which 3 accounts have the most open opportunities, and how many accounts have any?\" No dataset matches, so you fell back on `opportunity`. `aggregate_records` with a count grouped by `account`, `orderBy` on the count descending and `limit: 3` answered three groups (Acme 12, Globex 9, Initech 7), `truncated: true` and `totalGroups: 41`. How do you write the answer?",
+      "expected_output": "Opens with one line saying it is not from a governed metric, naming the Opportunity object and its account field. Lists the three accounts with their counts, says the result is partial, and cites 41 as how many accounts have open opportunities (the groups before the cut). It does not give 3 as that number.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Acme", "41", "partial"],
+        "must_not_contain": ["unknown"]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "The user asks: \"List the open support tickets and how many there are.\" No dataset matches, so you fell back: `query_records` on `support_ticket` answered a page of 50 records with `total: 240` and `truncated: true`, and no `totalGroups`. How do you write the answer?",
+      "expected_output": "Opens with one line saying it is not from a governed metric, naming the Support Ticket object. Says there are 240 open tickets, from the answer's `total`, shows the 50 that came back and says the list is partial. It never says the total is unknown, and never gives 50 as the total.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["240", "partial"],
+        "must_not_contain": ["unknown"]
+      }
     }
   ]
 }

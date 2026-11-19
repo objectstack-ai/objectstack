@@ -36,10 +36,10 @@ metadata:
    go). Add beside what is there; reuse a declared dataset, field group or view.
 3. **Read the type's contract.** [references/_index.md](./references/_index.md)
    points at each type's Zod source in `node_modules/@objectstack/spec/src/`.
-   `Read` it for exact keys, enum members and refusals, never from memory: it
-   decides what to write. A running environment serves the parsed shape as
-   JSON Schema (`GET /api/v1/meta/types`, `entries[].schema`): a defaulted
-   key reads as required and a bare-string predicate as `{}`.
+   `Read` it for exact keys, enum members and refusals, never from memory. A
+   running environment serves the parsed shape as JSON Schema
+   (`GET /api/v1/meta/types`, `entries[].schema`): a defaulted key reads as
+   required and a bare-string predicate as `{}`.
 4. **Verify before reporting done.** `os validate` (`npm run validate` in a
    scaffolded project; `os build` runs the same gates). Most traps below pass
    it.
@@ -82,7 +82,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 | A form (`simple` / `tabbed` / `wizard`): width, columns and `sections`; master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
 | An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
 | What a record page shows: related lists, a slotted or full page, drawer or page | the object | [Record Page](./rules/record-page.md) |
-| A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx` | `src/actions/*.actions.ts` | [Actions](./rules/actions.md) |
+| A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`, refusing by code (`refusals`) | `src/actions/*.actions.ts` | [Actions](./rules/actions.md) |
 | A number, chart, KPI or report over records: datasets, widgets, dashboard filters, `compareTo`, date bucketing, drilldown, cubes | `src/datasets/*.dataset.ts`, `src/dashboards/*.dashboard.ts`, `src/reports/*.report.ts` | [Dashboards](./rules/dashboards.md) |
 | A page (regions, components, print, `kind: 'html'` / `'react'` source, styling) or package docs | `*.page.ts`, `src/docs/*.md` | [Pages & Docs](./rules/pages.md) |
 | The props of a block in a `kind: 'react'` page | | [react-blocks.md](./references/react-blocks.md) |

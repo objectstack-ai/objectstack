@@ -97,6 +97,7 @@ export const ExchangeRateSyncFlow = defineFlow({
       config: {
         url: '{{ rate_feed_url }}',
         method: 'GET',
+        timeoutMs: 10000,
       },
     },
     {
