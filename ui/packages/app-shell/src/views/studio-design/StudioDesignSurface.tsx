@@ -3529,14 +3529,26 @@ export function InterfacesPillar({
     listViewDoorRef.current = { of: listViewDoorOf, objectSurface: objectSurfaceOf, open: openListViewDoor };
   });
   const listViewTargetId = listView.target?.viewId ?? null;
-  const listViewCustomizable = customizing && listViewTargetId !== null;
+  const listViewAsked = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
     client,
-    listViewCustomizable && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
+    listViewAsked && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
     customizeBase,
     customizePair,
     `${servedKey}:${listViewRestoreNonce}`,
   );
+  // objectstack#35600 (ADR-0146 D2, D11) — the object's page lists every view
+  // of the object, the base's and any other. Customize declares an override of
+  // the base's view, so it is offered only on a view the base ships (or one
+  // the pair already overrides); the server refuses that declaration for any
+  // other view. A view no package ships (one created in the app) is
+  // environment metadata, edited where it was created, and the panel says so.
+  const listViewCustomizable =
+    listViewAsked && (listViewServed.declaration !== null || listViewServed.shipped === 'base');
+  const listViewNotShipped =
+    listViewAsked && listViewServed.declaration === null && (listViewServed.shipped === 'environment' || listViewServed.shipped === 'none')
+      ? listViewServed.shipped
+      : null;
   const listViewCustomizeKey =
     listViewTargetId && customizeBase ? customizeItemKey(customizeBase, 'view', listViewTargetId) : '';
   const listViewInPair = listViewCustomizable && listViewServed.declaration !== null;
@@ -4825,6 +4837,21 @@ export function InterfacesPillar({
             listView={listView}
             // objectstack#28562 — a customized view is edited.
             readOnly={listViewReadOnly}
+            // objectstack#35600 — a view the base does not ship: why it is not customized, and where it is edited.
+            readOnlyNote={
+              listViewNotShipped
+                ? {
+                    reason: listViewNotShipped,
+                    text: tFormat(
+                      listViewNotShipped === 'environment'
+                        ? 'engine.studio.inspector.listView.environmentView'
+                        : 'engine.studio.inspector.listView.notShipped',
+                      locale,
+                      { package: customizeBaseLabel },
+                    ),
+                  }
+                : null
+            }
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
