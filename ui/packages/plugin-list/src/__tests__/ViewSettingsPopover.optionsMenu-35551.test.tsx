@@ -17,7 +17,8 @@
  *     one or adds an addable one; three clicks from the trigger hide a column
  *     and three show it again;
  *   - dragging (and the arrow keys on the handle) reorders the SHOWN fields
- *     and writes the whole order, a hidden field keeping its slot;
+ *     and writes the whole order, a hidden field keeping its relative place
+ *     (the level is the list's shared `FieldList`);
  *   - Row height lists three heights when the host can set one;
  *   - 保存 sits beside 恢复默认 when the host hands a save over, and the host
  *     may say when 恢复默认 is live (`resetDisabled`);
@@ -31,7 +32,6 @@ import { en, zh as zhPack } from '@object-ui/i18n/locales';
 import {
   ViewSettingsPopover,
   orderFields,
-  reorderShownFields,
   type ViewSettingsPopoverProps,
 } from '../components/ViewSettingsPopover';
 import { ViewSwitcherDropdown } from '../ViewSwitcher';
@@ -220,14 +220,14 @@ describe('Options menu — Fields', () => {
     openMenu({ updateHiddenFields });
     // 1 = the trigger (openMenu), 2 = Fields, 3 = the eye.
     fireEvent.click(screen.getByTestId('options-row-fields'));
-    fireEvent.click(screen.getByTestId('options-field-hide-probability'));
+    fireEvent.click(screen.getByTestId('options-fields-hide-probability'));
     expect([...updateHiddenFields.mock.calls[0][0]]).toEqual(['probability']);
     cleanup();
 
     const show = vi.fn();
     openMenu({ hiddenFields: new Set(['probability']), updateHiddenFields: show });
     fireEvent.click(screen.getByTestId('options-row-fields'));
-    fireEvent.click(screen.getByTestId('options-field-show-probability'));
+    fireEvent.click(screen.getByTestId('options-fields-item-probability'));
     expect([...show.mock.calls[0][0]]).toEqual([]);
   });
 
@@ -237,41 +237,41 @@ describe('Options menu — Fields', () => {
     fireEvent.click(screen.getByTestId('options-row-fields'));
     fireEvent.change(screen.getByTestId('options-fields-search'), { target: { value: 'clo' } });
     expect(screen.queryByTestId('options-fields-shown')).toBeNull();
-    fireEvent.click(screen.getByTestId('options-field-show-close_date'));
+    fireEvent.click(screen.getByTestId('options-fields-item-close_date'));
     expect(onAddField).toHaveBeenCalledWith('close_date');
     fireEvent.change(screen.getByTestId('options-fields-search'), { target: { value: 'zzz' } });
     expect(screen.getByTestId('options-fields-empty')).toBeTruthy();
   });
 
-  it('dragging a shown field writes the whole order, a hidden field keeping its slot', () => {
+  it('dragging a shown field writes the whole order, a hidden field keeping its relative place', () => {
     const onFieldOrderChange = vi.fn();
     openMenu({ hiddenFields: new Set(['stage']), onFieldOrderChange, fieldOrder: ['name', 'stage', 'amount', 'probability'] });
     fireEvent.click(screen.getByTestId('options-row-fields'));
     const dataTransfer = { setData: vi.fn(), getData: vi.fn(() => 'probability'), effectAllowed: '', dropEffect: '' };
-    fireEvent.dragStart(screen.getByTestId('options-field-probability'), { dataTransfer });
-    fireEvent.dragOver(screen.getByTestId('options-field-name'), { dataTransfer });
-    fireEvent.drop(screen.getByTestId('options-field-name'), { dataTransfer });
-    expect(onFieldOrderChange).toHaveBeenCalledWith(['probability', 'stage', 'name', 'amount']);
+    fireEvent.dragStart(screen.getByTestId('options-fields-row-probability'), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId('options-fields-row-name'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('options-fields-row-name'), { dataTransfer });
+    expect(onFieldOrderChange).toHaveBeenCalledWith(['probability', 'name', 'stage', 'amount']);
   });
 
   it('the handle moves a field with the arrow keys', () => {
     const onFieldOrderChange = vi.fn();
     openMenu({ onFieldOrderChange });
     fireEvent.click(screen.getByTestId('options-row-fields'));
-    fireEvent.keyDown(screen.getByTestId('options-field-move-name'), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByTestId('options-fields-move-name'), { key: 'ArrowDown' });
     expect(onFieldOrderChange).toHaveBeenCalledWith(['stage', 'name', 'amount', 'probability']);
   });
 
   it('offers no drag without a host to write the order, and none while searching', () => {
     openMenu({ onFieldOrderChange: undefined });
     fireEvent.click(screen.getByTestId('options-row-fields'));
-    expect(screen.queryByTestId('options-field-move-name')).toBeNull();
+    expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
     cleanup();
     openMenu({ onFieldOrderChange: () => {} });
     fireEvent.click(screen.getByTestId('options-row-fields'));
-    expect(screen.getByTestId('options-field-move-name')).toBeTruthy();
+    expect(screen.getByTestId('options-fields-move-name')).toBeTruthy();
     fireEvent.change(screen.getByTestId('options-fields-search'), { target: { value: 'a' } });
-    expect(screen.queryByTestId('options-field-move-name')).toBeNull();
+    expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
   });
 });
 
@@ -325,12 +325,5 @@ describe('field order helpers', () => {
   it('orderFields puts the listed names first, the rest in their own order', () => {
     expect(orderFields(FIELDS, ['amount', 'name']).map((f) => f.name)).toEqual(['amount', 'name', 'stage', 'probability']);
     expect(orderFields(FIELDS, undefined).map((f) => f.name)).toEqual(['name', 'stage', 'amount', 'probability']);
-  });
-
-  it('reorderShownFields keeps keys it does not know, after the fields', () => {
-    expect(reorderShownFields(FIELDS, ['secret', 'name', 'stage'], new Set(), 'stage', 'name'))
-      .toEqual(['stage', 'name', 'amount', 'probability', 'secret']);
-    expect(reorderShownFields(FIELDS, undefined, new Set(), 'name', 'name')).toBeNull();
-    expect(reorderShownFields(FIELDS, undefined, new Set(['stage']), 'stage', 'name')).toBeNull();
   });
 });

@@ -197,8 +197,8 @@ function checkboxLabels(scope: HTMLElement): string[] {
 
 /** The Options menu's Fields level: the shown fields' names, then the hidden and addable ones'. */
 function fieldsLevelLabels(scope: HTMLElement): string[] {
-  const shown = Array.from(scope.querySelectorAll('[data-testid="options-fields-shown"] [role="listitem"]')).map(text);
-  const hidden = Array.from(scope.querySelectorAll('[data-testid^="options-field-show-"]')).map(text);
+  const shown = Array.from(scope.querySelectorAll('[data-testid="options-fields-shown"] li')).map(text);
+  const hidden = Array.from(scope.querySelectorAll('[data-testid="options-fields-hidden"] li, [data-testid="options-fields-addable"] li')).map(text);
   return [...shown, ...hidden];
 }
 
@@ -718,7 +718,7 @@ describe('both hide-fields lists offer the fields a reader may add, and only fie
     await definitionLoaded();
     await waitFor(async () => expect(await displayHideFields(fieldsLevelLabels)).toContain('Priority'));
     await displayHideFields((level) => {
-      fireEvent.click(within(level).getByTestId('options-field-show-priority'));
+      fireEvent.click(within(level).getByTestId('options-fields-item-priority'));
     });
     expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
   });

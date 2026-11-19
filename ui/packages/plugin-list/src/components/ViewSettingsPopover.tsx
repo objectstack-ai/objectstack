@@ -51,9 +51,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
-  GripVertical,
   RotateCw,
   Download,
   Loader2,
@@ -62,6 +59,7 @@ import {
 } from 'lucide-react';
 import { TOOLBAR_TEXT_TRIGGER } from '../listToolbarRow';
 import { ViewSwitcherFaceContext } from '../ViewSwitcher';
+import { FieldList, type FieldListItem } from '../conditions/FieldList';
 
 /**
  * A bar or panel control's touch size below `sm`: 44 px on both sides (WCAG
@@ -538,35 +536,6 @@ export function orderFields(
     .map(({ entry }) => entry);
 }
 
-/**
- * The column order after `moved` is dropped where `target` is, among the
- * SHOWN fields: the shown fields take their new order in the slots they held,
- * so a hidden field keeps its place for when it is shown again. Every key of
- * `order` that names no field of `allFields` (a column the reader cannot read,
- * say) is kept, after them, as it was. `null` when nothing moves.
- */
-export function reorderShownFields(
-  allFields: readonly ViewSettingsField[],
-  order: readonly string[] | undefined,
-  hidden: ReadonlySet<string>,
-  moved: string,
-  target: string,
-): string[] | null {
-  if (moved === target) return null;
-  const full = orderFields(allFields, order).map((f) => f.name);
-  const shown = full.filter((name) => !hidden.has(name));
-  const from = shown.indexOf(moved);
-  const to = shown.indexOf(target);
-  if (from === -1 || to === -1) return null;
-  const nextShown = [...shown];
-  nextShown.splice(from, 1);
-  nextShown.splice(to, 0, moved);
-  let at = 0;
-  const next = full.map((name) => (hidden.has(name) ? name : nextShown[at++]));
-  const known = new Set(full);
-  return [...next, ...(order ?? []).filter((name) => !known.has(name))];
-}
-
 /** The words a density mode is shown by, on the Row height row and its level. */
 function rowHeightLabel(t: ViewSettingsPopoverProps['t'], mode: ViewSettingsDensityMode): string {
   return mode === 'compact'
@@ -637,13 +606,15 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
 }
 
 /**
- * The Fields level: a search box, the shown fields (drag to reorder, eye to
- * hide), then the hidden ones, the view's columns the reader hid and the
- * object's fields they may add, each shown again with one click. Every change
- * applies at once.
+ * The Fields level: the list's shared field list (`../conditions/FieldList`,
+ * the one the Filter and Sort controls open) as the view's field manager. A
+ * search box; the shown fields in column order, reordered by drag or by a grip
+ * handle and the arrow keys, each hidden by its eye; then the view's columns
+ * the reader hid and the object's fields they may add, each shown or added
+ * with one click. Every change applies at once. `allFields` holds only the
+ * fields the reader may read: the host withholds the rest.
  */
 function FieldsPage({
-  t,
   allFields,
   hiddenFields,
   updateHiddenFields,
@@ -652,7 +623,6 @@ function FieldsPage({
   fieldOrder,
   onFieldOrderChange,
 }: {
-  t: ViewSettingsPopoverProps['t'];
   allFields: readonly ViewSettingsField[];
   hiddenFields: Set<string>;
   updateHiddenFields: (next: Set<string>) => void;
@@ -661,157 +631,26 @@ function FieldsPage({
   fieldOrder?: readonly string[];
   onFieldOrderChange?: (order: string[]) => void;
 }) {
-  const [query, setQuery] = React.useState('');
-  const [dragging, setDragging] = React.useState<string | null>(null);
-  const needle = query.trim().toLocaleLowerCase();
-  const matches = (field: ViewSettingsField) => !needle || (field.label || field.name).toLocaleLowerCase().includes(needle);
-  const ordered = orderFields(allFields, fieldOrder);
-  const shown = ordered.filter((f) => !hiddenFields.has(f.name));
-  const hiddenColumns = ordered.filter((f) => hiddenFields.has(f.name));
   const addable = onAddField ? addableFields ?? [] : [];
-  // Dragging reorders the whole shown list, so it is offered on the unfiltered list only.
-  const canDrag = !!onFieldOrderChange && !needle && shown.length > 1;
-  const nameOf = (field: ViewSettingsField) => field.label || field.name;
-
-  const move = (moved: string, target: string) => {
-    const next = reorderShownFields(allFields, fieldOrder, hiddenFields, moved, target);
-    if (next) onFieldOrderChange?.(next);
-  };
-  const hide = (name: string) => updateHiddenFields(new Set([...hiddenFields, name]));
-  const show = (name: string) => updateHiddenFields(new Set([...hiddenFields].filter((n) => n !== name)));
-
-  const iconButton = cn(
-    'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground max-sm:h-11 max-sm:w-11',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-  );
-  const shownMatches = shown.filter(matches);
-  const hiddenMatches = [...hiddenColumns.filter(matches), ...addable.filter(matches)];
-
+  const columns = new Set(allFields.map((f) => f.name));
+  const items: FieldListItem[] = [
+    ...allFields,
+    ...addable.filter((f) => !columns.has(f.name)),
+  ].map((f) => ({ value: f.name, label: f.label || f.name }));
+  const shown = orderFields(allFields, fieldOrder).filter((f) => !hiddenFields.has(f.name)).map((f) => f.name);
   return (
-    <div>
-      <div className="border-b p-2">
-        <Input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('list.optionsMenu.searchFields', { defaultValue: 'Search fields' })}
-          aria-label={t('list.optionsMenu.searchFields', { defaultValue: 'Search fields' })}
-          className="h-8 text-[13px] max-sm:h-11"
-          data-testid="options-fields-search"
-        />
-      </div>
-      <div className="max-h-[min(50vh,360px)] overflow-y-auto p-1">
-        {shownMatches.length > 0 && (
-          <div role="list" aria-label={t('list.optionsMenu.shownFields', { defaultValue: 'Shown fields' })} data-testid="options-fields-shown">
-            <div className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">
-              {t('list.optionsMenu.shownFields', { defaultValue: 'Shown fields' })}
-            </div>
-            {shownMatches.map((field, index) => {
-              const name = nameOf(field);
-              return (
-                <div
-                  key={field.name}
-                  role="listitem"
-                  draggable={canDrag}
-                  onDragStart={canDrag ? (e) => {
-                    setDragging(field.name);
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', field.name);
-                  } : undefined}
-                  onDragOver={canDrag ? (e) => {
-                    if (!dragging) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                  } : undefined}
-                  onDrop={canDrag ? (e) => {
-                    e.preventDefault();
-                    const moved = dragging ?? e.dataTransfer.getData('text/plain');
-                    setDragging(null);
-                    if (moved) move(moved, field.name);
-                  } : undefined}
-                  onDragEnd={canDrag ? () => setDragging(null) : undefined}
-                  data-testid={`options-field-${field.name}`}
-                  data-dragging={dragging === field.name ? 'true' : undefined}
-                  className={cn(
-                    'group flex items-center gap-1 rounded-sm px-1 text-[13px] hover:bg-muted max-sm:min-h-11',
-                    dragging === field.name && 'opacity-50',
-                  )}
-                >
-                  {canDrag ? (
-                    <button
-                      type="button"
-                      aria-label={t('list.optionsMenu.moveField', { field: name, defaultValue: `Move ${name}` })}
-                      title={t('list.optionsMenu.moveFieldHint', { defaultValue: 'Drag, or use the up and down arrow keys' })}
-                      onKeyDown={(e) => {
-                        const neighbour = e.key === 'ArrowUp' ? shown[index - 1] : e.key === 'ArrowDown' ? shown[index + 1] : undefined;
-                        if (!neighbour) return;
-                        e.preventDefault();
-                        move(field.name, neighbour.name);
-                      }}
-                      className={cn(iconButton, 'cursor-grab')}
-                      data-testid={`options-field-move-${field.name}`}
-                    >
-                      <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  ) : (
-                    <span className="w-1" aria-hidden="true" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate py-1.5" title={name}>{name}</span>
-                  <button
-                    type="button"
-                    aria-label={t('list.optionsMenu.hideField', { field: name, defaultValue: `Hide ${name}` })}
-                    title={t('list.optionsMenu.hideField', { field: name, defaultValue: `Hide ${name}` })}
-                    onClick={() => hide(field.name)}
-                    className={iconButton}
-                    data-testid={`options-field-hide-${field.name}`}
-                  >
-                    <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {hiddenMatches.length > 0 && (
-          <div
-            role="list"
-            aria-label={t('list.optionsMenu.hiddenFields', { defaultValue: 'Hidden fields' })}
-            className={cn(shownMatches.length > 0 && 'mt-1 border-t pt-1')}
-            data-testid="options-fields-hidden"
-          >
-            <div className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">
-              {t('list.optionsMenu.hiddenFields', { defaultValue: 'Hidden fields' })}
-            </div>
-            {hiddenMatches.map((field) => {
-              const name = nameOf(field);
-              const isColumn = hiddenFields.has(field.name);
-              return (
-                <div key={field.name} role="listitem">
-                  <button
-                    type="button"
-                    onClick={() => (isColumn ? show(field.name) : onAddField?.(field.name))}
-                    aria-label={t('list.optionsMenu.showField', { field: name, defaultValue: `Show ${name}` })}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    )}
-                    data-testid={`options-field-show-${field.name}`}
-                  >
-                    <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
-                    <EyeOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {shownMatches.length === 0 && hiddenMatches.length === 0 && (
-          <p className="px-2 py-3 text-center text-[13px] text-muted-foreground" data-testid="options-fields-empty">
-            {t('list.optionsMenu.noFieldsMatch', { defaultValue: 'No fields match' })}
-          </p>
-        )}
-      </div>
-    </div>
+    <FieldList
+      fields={items}
+      shownFields={shown}
+      order={fieldOrder}
+      onOrderChange={onFieldOrderChange}
+      onHide={(name) => updateHiddenFields(new Set([...hiddenFields, name]))}
+      onShow={(name) => updateHiddenFields(new Set([...hiddenFields].filter((n) => n !== name)))}
+      addable={addable.map((f) => f.name)}
+      onAdd={onAddField}
+      testId="options-fields"
+      className="w-full"
+    />
   );
 }
 
@@ -1001,7 +840,6 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           : undefined}
       >
         <FieldsPage
-          t={t}
           allFields={allFields}
           hiddenFields={hiddenFields!}
           updateHiddenFields={updateHiddenFields!}

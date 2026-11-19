@@ -303,7 +303,7 @@ async function hideThroughToggle(field: string): Promise<void> {
   if (!within(panel).queryByTestId('options-page-fields')) {
     fireEvent.click(within(panel).getByTestId('options-row-fields'));
   }
-  fireEvent.click(await within(panel).findByTestId(`options-field-hide-${field}`));
+  fireEvent.click(await within(panel).findByTestId(`options-fields-hide-${field}`));
 }
 
 /** The data source's view writes, each a spy: what a write to the shared view would call. */

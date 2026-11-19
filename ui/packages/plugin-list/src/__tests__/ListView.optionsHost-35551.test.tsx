@@ -93,10 +93,10 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     await screen.findByTestId('object-grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     fireEvent.click(await screen.findByTestId('options-row-fields'));
-    const shown = Array.from(document.querySelectorAll('[data-testid^="options-field-move-"]'))
-      .map((el) => el.getAttribute('data-testid')!.replace('options-field-move-', ''));
+    const shown = Array.from(document.querySelectorAll('[data-testid^="options-fields-move-"]'))
+      .map((el) => el.getAttribute('data-testid')!.replace('options-fields-move-', ''));
     expect(shown).toEqual(['amount', 'name', 'stage']);
-    fireEvent.keyDown(screen.getByTestId('options-field-move-amount'), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByTestId('options-fields-move-amount'), { key: 'ArrowDown' });
     expect(onColumnStateChange).toHaveBeenCalledWith({ order: ['name', 'amount', 'stage'], widths: { name: 120 } });
   });
 
@@ -105,7 +105,7 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     await screen.findByTestId('object-grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     fireEvent.click(await screen.findByTestId('options-row-fields'));
-    expect(screen.queryByTestId('options-field-move-name')).toBeNull();
+    expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
   });
 });
 
