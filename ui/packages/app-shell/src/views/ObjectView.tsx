@@ -74,7 +74,7 @@ import {
     loadViewOverrides,
     buildViewTabs,
 } from './objectViewTabs.js';
-import { ObjectNotFoundState, useViewTabsFit } from './objectViewChrome.js';
+import { ObjectNotFoundState } from './objectViewChrome.js';
 import { useObjectViewLiveData } from './objectViewLiveData.js';
 import { useObjectViewIdentity } from './objectViewIdentity.js';
 import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -976,9 +976,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    // Below `sm` the page header, and the switcher in its title, is not drawn:
-    // the switcher leads the list's toolbar row instead (objectstack#27058).
-    const pageHeaderShown = useViewTabsFit();
     const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
@@ -1033,7 +1030,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher, titleLabel } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -1095,8 +1092,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',
-        phoneTitle: !pageHeaderShown && titleSwitcher ? (
-            <span className="flex min-w-0 max-w-full items-center gap-1.5 text-base font-semibold" data-testid="list-phone-title">
+        // objectstack#35548 — the view switcher leads the list's view bar at
+        // every width (on a phone since objectstack#27058); the page bar only
+        // names the object.
+        phoneTitle: titleSwitcher ? (
+            <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
                 <span className="flex min-w-0">{titleSwitcher}</span>
                 {personalizedMarker}
             </span>
@@ -1211,11 +1211,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
              <ObjectViewPageHeader
                  objectDef={objectDef}
-                 // Below `sm` the switcher is drawn in the list's toolbar row,
-                 // so the hidden header does not hold a second one.
-                 titleSwitcher={pageHeaderShown ? titleSwitcher : null}
-                 titleLabel={titleLabel}
-                 objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
                  objectPluralLabel={listTitleOf}
                  objectDesc={objectDesc}
                  createButton={createButton}
@@ -1229,7 +1224,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  environmentEntitlements={environmentEntitlements}
                  toolbarBar={toolbarBar}
                  listFavorite={listFavorite}
-                 personalizedMarker={personalizedMarker}
                  foldedHeaderActions={foldedHeaderActions}
              />
 

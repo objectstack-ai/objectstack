@@ -1,8 +1,10 @@
 /**
- * The view switcher of the Console `ObjectView` (`./ObjectView.tsx`): the list
- * title is the switcher (objectstack#27594). The title reads
- * 「VIEW LABEL ▾」, with no record count beside it (objectstack#34603: the
- * list's footer says how many records it holds), and opens a dropdown — a search box, then the
+ * The view switcher of the Console `ObjectView` (`./ObjectView.tsx`): it leads
+ * the list's view bar (objectstack#35548) and reads, as ONE trigger, the open
+ * layout's type icon, the view label, the record count and the caret
+ * 「▦ VIEW LABEL 23 ▾」. The count is the list's own (`ListRecordCountContext`,
+ * provided where the list hands the switcher its slot), so the switcher draws
+ * none where no list counts for it (a chart). It opens a dropdown — a search box, then the
  * reader's pinned view (📌), the views they opened lately, and every view, the
  * authored ones first — so an object with many views is switched the way it is
  * with two. It replaced the flat view-tab row (`ViewTabBar`), which overflowed
@@ -26,13 +28,13 @@
  * (`ManageViewsDialog`): the rename, delete, shared default and configure acts
  * that each tab's ▾ menu used to carry.
  *
- * Below `sm` the page header is not drawn. On a phone the same switcher leads
- * the list's toolbar row (`ListView`'s `toolbarLeading`) or heads a chart
- * (objectstack#27058): one switcher on every width, and the app bar draws no
- * view dropdown of its own.
+ * At every width the switcher leads the list's toolbar row (`ListView`'s
+ * `toolbarLeading`) or heads a chart (objectstack#27058, objectstack#35548):
+ * one switcher on every width, and neither the page bar nor the app bar draws
+ * a view dropdown of its own.
  */
 
-import { useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { cn, Input, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
@@ -50,6 +52,20 @@ import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
+
+/**
+ * What the list on screen tells the switcher that leads its view bar
+ * (objectstack#35548): how many records it holds (`null` while it does not say)
+ * and the layout it draws, which a reader's personal layout change can make
+ * differ from the view's own type. Absent (no provider) ⇒ the switcher shows
+ * no count and the view's own type icon.
+ */
+export interface ListRecordCountState {
+    count: number | null;
+    layout?: string;
+}
+
+export const ListRecordCountContext = createContext<ListRecordCountState | null>(null);
 
 /** How many views the dropdown's Recent section lists at most. */
 const RECENT_VIEW_LIMIT = 3;
@@ -139,6 +155,8 @@ export function ObjectViewTitleSwitcher({
 }: ObjectViewTitleSwitcherProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
+    const listState = useContext(ListRecordCountContext);
+    const displayLocale = useDisplayLocale();
 
     const byId = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
     const all = useMemo(() => authoredFirst(views), [views]);
@@ -152,6 +170,10 @@ export function ObjectViewTitleSwitcher({
         .slice(0, RECENT_VIEW_LIMIT);
     const needle = query.trim().toLocaleLowerCase();
     const matches = needle ? all.filter((v) => v.label.toLocaleLowerCase().includes(needle)) : all;
+
+    const activeType = listState?.layout ?? byId.get(activeViewId)?.type;
+    const ActiveIcon = activeType ? viewTypeIcons[activeType] : undefined;
+    const count = listState?.count ?? null;
 
     const onOpenChange = (next: boolean) => {
         setOpen(next);
@@ -284,14 +306,26 @@ export function ObjectViewTitleSwitcher({
                         // margin pulled out of it truncated the label it was sized for.
                         className={cn(
                             // Below `sm` the trigger is a 44 px touch target.
-                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11 max-sm:min-w-11',
+                            // One trigger, 28px tall and 13px like every control of the
+                            // view bar (objectstack#35548): type icon, label, count, caret.
+                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
                         )}
                     >
-                        <span className="truncate">{activeLabel}</span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        {ActiveIcon && (
+                            <span className="flex shrink-0 text-muted-foreground" data-testid="list-view-switcher-type-icon" aria-hidden="true">
+                                {createElement(ActiveIcon, { className: 'h-4 w-4' })}
+                            </span>
+                        )}
+                        <span className="truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
+                        {count !== null && (
+                            <span className="shrink-0 font-normal tabular-nums text-muted-foreground" data-testid="list-view-switcher-count">
+                                {count.toLocaleString(displayLocale)}
+                            </span>
+                        )}
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" data-testid="list-view-switcher-caret" aria-hidden="true" />
                     </button>
                 </PopoverTrigger>
                 <PopoverContent

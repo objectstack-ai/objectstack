@@ -70,10 +70,12 @@ export function useObjectViewHeaderChrome({
             size="sm"
             onClick={actions.create}
             disabled={createDisabled}
-            className="shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
+            // 28px and 13px, like every control of the list's two bars
+            // (objectstack#35548).
+            className="shadow-none gap-1 h-7 px-2.5 text-[13px]"
             data-testid="object-view-new-button"
         >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{t('console.objectView.new')}</span>
         </Button>
     ) : null;
