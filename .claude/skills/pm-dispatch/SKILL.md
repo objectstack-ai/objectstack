@@ -103,8 +103,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 内容写只走 REST 代理,⛔ 无 MCP 写;CI 红单次重跑亦经中继 `rerun-failed.mjs`,先核 head。
 - 写侧恒为 `objectstack-fleet[bot]`;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
-- GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。
-- 裁决引文照抄不译;四维中文只管新记录,存量英文块 ⛔ 不迁移;存量中文 ⛔ 不追溯改写。
+- GitHub 上一切新内容用英文;中文只留三通道(维护者速读、轮报、裁决引文)。
+- 裁决引文照抄不译;四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
 
 ## 状态模型
 
@@ -195,18 +195,18 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
 - 定档 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套含③请审,⛔ 无 Tier S 例外;读数=PR additions+deletions。
-- ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读六行+席位意见,其下 `## 席位核对`。
+- ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读四行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `pm:awaiting-merge`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠 ①–④,席只达档补审现 head 记录未盖处。
 - 核对六项:形态/前提实测/门禁 check-runs/接受的偏差/范围外去向+`Skills-docs:`/落地条款。
-- 草稿归 dev:PR 正文带 `## 维护者速读` 六行(见 os-dev.md),中文、业务角度,不写席位意见。
-- 终稿 = 席位对照自己读的 diff 校正六行、加席位意见行,置顶席位记录;维护者只读评论。
+- 草稿归 dev:PR 正文带 `## 维护者速读` 四行(见 os-dev.md),中文业务话,不写席位意见。
+- 终稿 = 席位对照自己读的 diff 校正四行、加席位意见行,置顶席位记录;维护者只读评论。
 - `pm:awaiting-merge` 只挂 PR、不入六态,与请审同为等人批清单,随获批或撤回判决离开。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
 - 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不请席位自身账号;Tier S 不交人。
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
-- 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
+- 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**`+下行 S 面(该面独占),余皆 Tier H;S 经达档 PASS 后 ready→入队。

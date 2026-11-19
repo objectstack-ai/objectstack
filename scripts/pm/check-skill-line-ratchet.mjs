@@ -662,7 +662,14 @@ export const CEILINGS = new Map([
   // seat-tier fallback line is removed) and 6999656302 (that thread runs at effort `xhigh`, `max`
   // only when he names it). The one fallback line becomes two rule lines. Measured delta +1.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 50],
+  // Raised 50 → 62 by the four-line maintainer brief (#35298): an ORDINARY ruled raise. The ruling
+  // of record is that card's body, which quotes the maintainer verbatim, 2026-11-19:
+  // 「目前的维护者速读，写的其实不是很好，感觉很多废话，应该从业务的角度写。」, then 「同意」 to the four-line
+  // shape. It orders the decision brief and its worked example into this file: the brief on top and its four
+  // lines (+3), the words it never carries (+1), what stays in the English analysis part (+1), the
+  // worked example (+6) and the blank line that closes its list (+1). Measured delta +12.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 62],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -2035,7 +2042,12 @@ export const CEILINGS = new Map([
   // dev run never asks the maintainer directly: it reports `needs_decision` and the seat takes it
   // to the decision thread, +1) and the card body (item 8 — a `blocked` report names the part that
   // can go first, +1). Measured delta +2. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/agents/os-dev.md', 407],
+  // 407 → 410 (#35298): an ordinary ruled raise. The ruling of record is that card's body (the
+  // maintainer, 2026-11-19, verbatim 「同意」 to the four-line brief). The six-line definition (4
+  // lines) becomes the four-line one with what each line says (4), the words it never carries (+1)
+  // and the two readings that move to the English part (+2). Measured delta +3.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/agents/os-dev.md', 410],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on

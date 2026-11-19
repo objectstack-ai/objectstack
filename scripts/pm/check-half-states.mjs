@@ -11670,7 +11670,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
 // ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body carries a
-// `## 维护者速读` section of its own — the six-line DRAFT, written before the
+// `## 维护者速读` section of its own — the four-line DRAFT, written before the
 // review happened, under the SAME heading — and reading it as the brief would
 // let the half this row exists to find satisfy itself. So this row reads
 // comment threads and nothing else, and the sentence says so where a reader
@@ -11861,7 +11861,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
 //
 // ## The rule this row patrols
 //
-// The seat's record on a governed PR — the six-line 维护者速读 with 席位意见
+// The seat's record on a governed PR — the four-line 维护者速读 with 席位意见
 // filled, then `## 席位核对` with the six-item check — is a PRECONDITION of
 // the maintainer being asked to look: before `pr_ready` on Tier H and before
 // a Tier S PR is queued, that record exists on the PR for the head the
@@ -34509,7 +34509,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
   const LABEL48 = GOVERNED_PR_AWAITING_MERGE_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
-  // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
+  // ⚠️ The fixture BODY always carries the dev's four-line draft under the SAME
   // `## 维护者速读` heading the comment marker reads, so every case below that
   // fires with no brief COMMENT is simultaneously the "a draft in the body does
   // not satisfy the brief half" case.
@@ -34518,7 +34518,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     state: 'open',
     draft: true,
     labels: labels.map((name) => ({ name })),
-    body: '## 维护者速读\n改了什么:dev 的六行草稿,不是评审后的最终速读。',
+    body: '## 维护者速读\n用户能看到什么变化:dev 的四行草稿,不是评审后的最终速读。',
     ...extra,
   });
   const h48row = (...args) => String(h48GovernedVerdictWithoutBrief(...args) ?? '');
@@ -34656,7 +34656,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     user: { login: 'objectstack-fleet[bot]' },
     requested_reviewers: (extra.requested ?? ['hotlong']).map((login) => ({ login })),
     assignees: (extra.assigned ?? []).map((login) => ({ login })),
-    body: '## 维护者速读\n改了什么:dev 的六行草稿。',
+    body: '## 维护者速读\n用户能看到什么变化:dev 的四行草稿。',
     ...(extra.fields ?? {}),
   });
   const RECORD69 = '## 席位核对\n\nACCEPT · domain:skills seat 2 · head `7cc88889`';
