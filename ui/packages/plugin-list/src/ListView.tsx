@@ -7435,6 +7435,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             <ViewSettingsPopover
               t={t as any}
               allFields={allFields as any}
+              fieldType={(name) => {
+                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
+                return typeof type === 'string' ? type : undefined;
+              }}
               layout={viewSwitcherOffered ? (closeMenu) => (
                 <ViewSwitcherDropdown
                   currentView={currentView}

@@ -190,6 +190,8 @@ export interface ViewSettingsPopoverProps {
    * does not list keep the `allFields` order after the listed ones.
    */
   fieldOrder?: readonly string[];
+  /** A field's type (the object's declaration), for the icon the Fields level draws beside it. */
+  fieldType?: (name: string) => string | undefined;
   /**
    * Store a new column order: the whole list, every field of `allFields`
    * (hidden ones in place) and any other key `fieldOrder` held, kept as it
@@ -622,6 +624,7 @@ function FieldsPage({
   onAddField,
   fieldOrder,
   onFieldOrderChange,
+  fieldType,
 }: {
   allFields: readonly ViewSettingsField[];
   hiddenFields: Set<string>;
@@ -630,13 +633,14 @@ function FieldsPage({
   onAddField?: (name: string) => void;
   fieldOrder?: readonly string[];
   onFieldOrderChange?: (order: string[]) => void;
+  fieldType?: (name: string) => string | undefined;
 }) {
   const addable = onAddField ? addableFields ?? [] : [];
   const columns = new Set(allFields.map((f) => f.name));
   const items: FieldListItem[] = [
     ...allFields,
     ...addable.filter((f) => !columns.has(f.name)),
-  ].map((f) => ({ value: f.name, label: f.label || f.name }));
+  ].map((f) => ({ value: f.name, label: f.label || f.name, type: fieldType?.(f.name) }));
   const shown = orderFields(allFields, fieldOrder).filter((f) => !hiddenFields.has(f.name)).map((f) => f.name);
   return (
     <FieldList
@@ -661,6 +665,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     viewName,
     fieldOrder,
     onFieldOrderChange,
+    fieldType,
     layout,
     recordOpen,
     sort,
@@ -846,6 +851,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           addableFields={addableFields}
           onAddField={onAddField}
           fieldOrder={fieldOrder}
+          fieldType={fieldType}
           onFieldOrderChange={onFieldOrderChange}
         />
       </SubPage>

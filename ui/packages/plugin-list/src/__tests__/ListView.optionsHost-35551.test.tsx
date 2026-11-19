@@ -107,6 +107,15 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     fireEvent.click(await screen.findByTestId('options-row-fields'));
     expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
   });
+
+  it('draws each row with its declared field type, not the text default for all', async () => {
+    mount({});
+    await screen.findByTestId('object-grid-stub');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('options-row-fields'));
+    expect(screen.getByTestId('options-fields-item-amount').getAttribute('data-field-type')).toBe('number');
+    expect(screen.getByTestId('options-fields-item-name').getAttribute('data-field-type')).toBe('text');
+  });
 });
 
 describe('Options — Row height on a gallery (objectstack#35551)', () => {
