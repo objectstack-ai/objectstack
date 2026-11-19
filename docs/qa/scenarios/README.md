@@ -21,6 +21,8 @@ obligation for it, and nothing in the loader calls a model.
 docs/qa/scenarios/
   README.md          ← this file
   <id>.json          ← one card per file; the file's basename IS the card's id
+  builds/<id>.json   ← a dataset card's verified build, the one ask rounds install (below)
+  builds/<id>.provenance.json ← its sha256, runner sha, packages and authoring model
 ```
 
 `pnpm --filter @objectstack/scenarios test` loads every `*.json` here and pins each
@@ -212,6 +214,12 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
   read back, or `absent: true`; `auditActor` is the persona the audit trail must name.
+  A `where` key may be a relation path through `expect.lookups` (`claim.trip`), so a row the
+  write created is found through the parent row it belongs to. An entry may instead be an
+  aggregate over every row its `where` matches (at least one; never by `id`): `sum` (per
+  field, the rows' total) and `each` (per field, the value every row holds). Use it where
+  the ask fixes a total but not how the agent splits it into rows: two hotel nights are one
+  line of quantity 2 or two lines of quantity 1, and `sum: {"amount": 860}` meets both.
   A value equal to the card's `asOf` is also met by the date the run happened on in a
   field the platform's clock stamps (a default or a flow writing a decision date, an
   order date), which cannot hold the card's fixed today. A field the agent's own write
@@ -354,6 +362,18 @@ name seed fields (a sum or average on a number field; a count on none). The buil
 states the datasets by name, with every synonym and description, and the Build half checks
 them (`dataset:NAME`, `dataset-measure:NAME.MEMBER`, `dataset-dimension:NAME.MEMBER`).
 `order_to_cash` and `travel_expense` carry them today.
+
+## Verified builds
+
+The ask round measures the MCP door, not authoring, so it runs every day on the same build: each
+dataset card's verified build is a fixture here, `builds/<id>.json`, byte for byte the
+`dist/objectstack.json` a passing scratch run built before its iterate turn. Its
+`builds/<id>.provenance.json` records the sha256, the card's sha256, the runner sha, the packages and
+the authoring model and effort. A round installs it with `--modes ask --template
+docs/qa/scenarios/builds/<id>.json` and builds nothing; its record names the file's sha256. A round never
+writes it: it changes only by a PR, when the card or the runner changes. Records, recordings and logs stay
+out of the tree. The loader and the packed library read this directory one level deep, so `builds/` is
+neither a card nor shipped.
 
 ## Build checks trace to the prompt
 

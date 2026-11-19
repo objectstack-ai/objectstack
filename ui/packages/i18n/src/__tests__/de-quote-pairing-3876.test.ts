@@ -132,7 +132,11 @@ function closersOf(value: string): Array<string | null> {
 const DE = flatten(builtInLocales.de);
 
 /**
- * The 20 keys the fix touched, with the exact quoted span each must now carry.
+ * The 20 keys the fix touched, with the exact quoted span each must now carry —
+ * 19 since objectstack-ai/objectstack#34740 retired
+ * `empty.objectNotFoundDescription` (the record and create routes now draw
+ * `console.objectView.objectNotFoundDescription`, still pinned below), taking
+ * one key and one span with it.
  * Byte-exact on the span under test rather than on the whole sentence, so a
  * legitimate German copy edit does not have to fight this file — while any
  * change to the *quotes* still fails here by key name. Four whole values are
@@ -149,7 +153,6 @@ const FIXED: Array<[string, string[]]> = [
   // objectui#11445 folded `search.resultsCountPlural` into the `resultsCount`
   // count family: the value objectui#3876 fixed, and this span, live in `_other`.
   ['search.resultsCount_other', ['„{{query}}“']],
-  ['empty.objectNotFoundDescription', ['„{{name}}“']],
   ['empty.pageNotFoundDescription', ['„{{name}}“']],
   ['empty.dashboardNotFoundDescription', ['„{{name}}“']],
   ['empty.reportNotFoundDescription', ['„{{name}}“']],
@@ -164,9 +167,9 @@ const FIXED: Array<[string, string[]]> = [
 ];
 
 describe('objectui#3876 — de pack closes „ with “ and not with a straight quote', () => {
-  it('pins the 20 fixed keys: 22 spans, each byte-exact, none holding a straight quote', () => {
-    expect(FIXED).toHaveLength(20);
-    expect(FIXED.reduce((n, [, spans]) => n + spans.length, 0)).toBe(22);
+  it('pins the fixed keys still in the pack (19 of the 20): 21 spans, each byte-exact, none holding a straight quote', () => {
+    expect(FIXED).toHaveLength(19);
+    expect(FIXED.reduce((n, [, spans]) => n + spans.length, 0)).toBe(21);
 
     for (const [key, spans] of FIXED) {
       const value = at(builtInLocales.de, key);
@@ -440,7 +443,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 119 once objectstack-ai/objectstack#33419 added
     // `chatbot.plan.suggestedFieldLegend`, the plan card's legend naming the
     // suggested-field mark („{{mark}}“) — one interpolated span, pack text.
-    expect(okSpans, 'correctly paired spans').toBe(119);
+    // 118 once objectstack-ai/objectstack#34740 retired
+    // `empty.objectNotFoundDescription` („{{name}}“) — one interpolated span fewer.
+    expect(okSpans, 'correctly paired spans').toBe(118);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -551,8 +556,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // objectstack-ai/objectstack#32478 added
     // `empty.recordPagePlacesNoComponentDescription`, one more matched pair.
     // 119 / 119 / 0 after objectstack-ai/objectstack#33419 added
-    // `chatbot.plan.suggestedFieldLegend`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 119, close: 119, rdq: 0 });
+    // `chatbot.plan.suggestedFieldLegend`, one more matched pair. 118 / 118 / 0
+    // after objectstack-ai/objectstack#34740 retired
+    // `empty.objectNotFoundDescription`, one matched pair fewer.
+    expect({ open, close, rdq }).toEqual({ open: 118, close: 118, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

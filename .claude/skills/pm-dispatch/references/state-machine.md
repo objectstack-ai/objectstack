@@ -14,7 +14,7 @@
 - 合法性:正文或评论带 `Restart-when: closed <owner/repo>#N`,由 `Blocked-by:` 同遍解锁扫描点火。
 - 或带 `Restart-when: <一行可执行判据>`;两种拼写之外的 hold ⛔ 不合法。
 - hold 评论写明日期、理由与出处(维护者裁或座位定级),⛔ 不设第二个标签区分两者。
-- 入 hold 同笔降 `priority:p3`,`Restart-when:` 行尾记 ` · Restart-grade: pN`;重启复原,跟踪卡/专题同。
+- 入 hold ⛔ 不降级(级只反映严重度);存量行尾的 ` · Restart-grade: pN` 即原级,照它复原。
 - 冻结(freeze)裁决与 `pm:on-hold`+`Restart-when:` 同笔落地;只写评论不挂标 = 半状态。
 - 机会主义重启的触发文件走 `Restart-touch: <仓内相对路径>`,一行一路径,值须为 tracked 文件。
 - 该行大小写敏感、行锚定,与另两行同双通道,喂 H17 触发文件索引;存量 hold ⛔ 不迁移。

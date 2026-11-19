@@ -319,6 +319,30 @@
  * applies the existing `needs-user-decision`, so it is refused like it. The
  * relay's own adding ops (`fleet-write/dispatch.mjs`: `labels_add`, `pr_create`,
  * `issue_create`) ask this same `refuseKindLabels` before they send.
+ *
+ * ## The hand-set grade — a `priority:*` a person set is not changed by this tool
+ *
+ * A maintainer changed a card's grade on GitHub and triage changed it back.
+ * `references/filing-gate.md` now says 「人定的级 ⛔ 不改」, and tells a person's
+ * hand from the fleet's by an ALLOW-LIST read off the label event itself: the
+ * newest `labeled` event of the grade the card carries is the fleet's only when
+ * it carries `performed_via_github_app` or its actor is a bot
+ * (`objectstack-fleet[bot]` through the relay, `github-actions[bot]` from a
+ * workflow). Every other event is a person's — and so is a grade with no
+ * `labeled` event at all, or an events read the platform did not answer:
+ * what cannot be shown to be the fleet's is not treated as the fleet's.
+ *
+ * So a write whose target changes the card's set of `priority:*` labels reads
+ * the card's events first (one extra GET per 100 events, only on such a write;
+ * a first grade on an ungraded card reads nothing), and a grade a person set
+ * is REFUSED at step ② (exit 2) with zero writes. `unlabeled` events are not
+ * read: GitHub drops the app field on them, so the removing half of a session's
+ * own stroke reads like a hand. The one way through is the rule's own: the
+ * maintainer has ruled, and the comment folded into the write (`--comment-file`)
+ * carries a `Ruling-ref:` line citing his words. To disagree without a ruling,
+ * leave one line with the reason on the card as a comment, and nothing else:
+ * the grade and the card's state stay. ⛔ This is the seat's label door and claims nothing about the
+ * others: a write that reaches the board another way is not judged here.
  */
 
 import process from 'node:process';
@@ -569,6 +593,78 @@ export function refuseStatelessWrite({ state = 'open', closes = false, kind = KI
     'has already let go. Clear the assignee in this same write (`--clear-assignees`), or keep the card in the state its ' +
     'holder is working it in.'
   );
+}
+
+/** Where the hand-set grade rule is written, and the phrase this file quotes from it (header: the hand-set grade). */
+export const HAND_SET_RULE_PATH = '.claude/skills/pm-dispatch/references/filing-gate.md';
+export const HAND_SET_RULE = '人定的级 ⛔ 不改';
+export const GRADE_LABEL_PREFIX = 'priority:';
+export const RULING_REF_KEY = 'Ruling-ref:';
+/** The grade read walks at most this many pages of a card's events (100 a page); a card with more is an incomplete read. */
+export const GRADE_EVENT_PAGE_CAP = 10;
+
+const gradeKeys = (labels) => dedupe((labels ?? []).map(labelKey).filter((l) => typeof l === 'string' && l.startsWith(GRADE_LABEL_PREFIX))).sort();
+
+/** The grades a write CHANGES: every `priority:*` the card carries, when the target's set of them differs. An ungraded card changes none. */
+export function gradesChanged({ current = [], target = [] } = {}) {
+  const carried = gradeKeys(current);
+  return carried.length === 0 || carried.join() === gradeKeys(target).join() ? [] : carried;
+}
+
+/** The allow-list (header): a label event is the fleet's only with an app on it or a bot for an actor. */
+export function isFleetLabelEvent(event) {
+  return Boolean(event?.performed_via_github_app) || event?.actor?.type === 'Bot';
+}
+
+/** A `Ruling-ref:` line in the folded comment: at a line start, with something after the key. */
+export function hasRulingRef(text) {
+  return String(text ?? '').split(/\r?\n/u).some((line) => line.startsWith(RULING_REF_KEY) && line.slice(RULING_REF_KEY.length).trim() !== '');
+}
+
+/**
+ * The hand-set grade (header), asked of the grades ONE write changes. Returns the refusal sentence, or null.
+ *
+ *   grades     `gradesChanged`'s answer — the carried `priority:*` labels, as `labelKey` spells them.
+ *   events     the card's issue events, oldest first as the platform lists them; null when the read did not answer or
+ *              ran past `GRADE_EVENT_PAGE_CAP`. Only `labeled` events are read (header: why not `unlabeled`).
+ *   rulingRef  the folded comment carries a `Ruling-ref:` line — the maintainer's ruling, cited; nothing is refused.
+ */
+export function refuseHandSetGrade({ grades = [], events = null, rulingRef = false, ref = 'the card' } = {}) {
+  if (grades.length === 0 || rulingRef) return null;
+  const rule = `${HAND_SET_RULE_PATH}: 「${HAND_SET_RULE}」`;
+  const exits =
+    'A grade a person set stays. To disagree, leave one line with the reason on the card as a comment, and nothing else: the grade ' +
+    `and the card's state stay as they are; where the maintainer has already ruled, fold the comment into this write (\`--comment-file\`) with a \`${RULING_REF_KEY}\` line citing his words.`;
+  if (!Array.isArray(events)) {
+    return (
+      `the write changes the grade of ${ref} and the card's label events could not be read in full (${GRADE_EVENT_PAGE_CAP} pages at most), so ` +
+      `nothing shows the fleet set ${grades.map((g) => `\`${g}\``).join(', ')} — ${rule}. ${exits}`
+    );
+  }
+  const byHand = [];
+  for (const grade of grades) {
+    const set = events.filter((e) => e?.event === 'labeled' && labelKey(e?.label?.name) === grade).at(-1);
+    if (set && isFleetLabelEvent(set)) continue;
+    byHand.push(
+      set
+        ? `\`${grade}\` (set by \`${set.actor?.login ?? 'an unread actor'}\` at ${set.created_at ?? 'an unread time'}: actor type ${set.actor?.type ?? 'unread'}, no \`performed_via_github_app\`)`
+        : `\`${grade}\` (no \`labeled\` event for it on the card)`,
+    );
+  }
+  if (byHand.length === 0) return null;
+  return `the write changes the grade of ${ref}, and ${byHand.join(' and ')} is not the fleet's label event — ${rule}. ${exits}`;
+}
+
+/** The card's issue events for the grade read, or null when a page did not answer or the cap was reached with more to come. */
+async function readLabelEvents({ doCall, base }) {
+  const all = [];
+  for (let page = 1; page <= GRADE_EVENT_PAGE_CAP; page += 1) {
+    const r = await doCall('events-list', `${base}/events?per_page=100&page=${page}`, {});
+    if (r.verdict !== 'ok' || !Array.isArray(r.json)) return null;
+    all.push(...r.json);
+    if (r.json.length < 100) return all;
+  }
+  return null;
 }
 
 /** Where the kind rule is written, and the three phrases of it this file quotes (header: the kind rule). */
@@ -1217,6 +1313,25 @@ export async function runLabelWrite(options, deps = {}) {
     record(`[${stamp()}] ② REFUSED — ${stateless}`);
     record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
     return result(EXIT_USAGE, { stoppedAt: 2, refusal: stateless });
+  }
+
+  // The hand-set grade (header) — asked only of a write that changes a grade the card carries: one events read, then.
+  const grades = gradesChanged({ current: currentLabels, target: labels.target });
+  if (grades.length) {
+    let folded = '';
+    try {
+      folded = options.commentFile ? (deps.readText ?? ((p) => readFileSync(p, 'utf8')))(options.commentFile) : '';
+    } catch {
+      folded = ''; // an unreadable comment file cites nothing here; the fold below reports the file itself
+    }
+    const rulingRef = hasRulingRef(folded);
+    const handSet = refuseHandSetGrade({ grades, events: rulingRef ? [] : await readLabelEvents({ doCall, base }), rulingRef, ref: `${repo}#${issue}` });
+    if (handSet) {
+      record(`[${stamp()}] ② REFUSED — ${handSet}`);
+      record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
+      return result(EXIT_USAGE, { stoppedAt: 2, refusal: handSet });
+    }
+    record(`[${stamp()}] ② grade — ${render(grades)} ${rulingRef ? `changes under the comment's \`${RULING_REF_KEY}\` line` : "was set by the fleet (its newest `labeled` event carries an app or a bot actor)"}.`);
   }
 
   // ── `--comment-file`: the comment (and `--land`) folded into this ONE stroke, RELAY-ONLY (header) ──
@@ -2058,6 +2173,7 @@ function reportPrerequisite(r) {
 
 /** Which op a (method, path) pair is — the same routing the live path uses. */
 export function classifyOp(method, path) {
+  if (/\/issues\/\d+\/events(\?|$)/.test(path)) return 'events-list';
   if (/\/issues\/comments\/\d+$/.test(path)) return 'comment-read';
   if (/\/issues\/\d+\/comments(\?|$)/.test(path)) return 'comments-list';
   if (/\/branches\//.test(path)) return 'branch-read';
@@ -2096,6 +2212,9 @@ export function fakeBoard(initial = {}) {
     comments: [...(initial.comments ?? [])],
     branches: { ...(initial.branches ?? {}) },
     pulls: [...(initial.pulls ?? [])],
+    // The card's issue events (the hand-set grade read). A fixture that names none is a board the FLEET labelled:
+    // one bot `labeled` event per label it carries, so only a fixture that says so has a grade set by hand.
+    events: initial.events ?? null,
     serverNow: initial.serverNow ?? null,
     // 'issue' (default) | 'pull' | 'unreadable' — what step ①'s card object says the target is.
     kind: initial.kind ?? 'issue',
@@ -2140,6 +2259,13 @@ export function fakeBoard(initial = {}) {
       return wrap(h.status, h.json ?? { message: 'canned' }, h.rateRemaining ?? 5000);
     }
 
+    if (op === 'events-list') {
+      const all = board.events ?? board.labels.map((name) => ({ event: 'labeled', label: { name }, actor: { login: RELAY_COMMENT_AUTHOR, type: 'Bot' }, performed_via_github_app: null, created_at: '2026-01-01T00:00:00Z' }));
+      const query = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      const size = Number(query.get('per_page') ?? 100);
+      const page = Number(query.get('page') ?? 1);
+      return wrap(200, all.slice((page - 1) * size, page * size));
+    }
     if (op === 'comment-read') {
       const id = Number(path.slice(path.lastIndexOf('/') + 1));
       const c = board.comments.find((x) => x.id === id);
@@ -2421,6 +2547,7 @@ const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a 
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
 const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull is not judged";
 const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
+const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor) is never changed — refused at step ② with zero writes unless the folded comment cites a `Ruling-ref:`";
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
@@ -2439,8 +2566,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
   [LAND_DOGFOOD_BATTERY]: 50,
+  [HAND_SET_BATTERY]: 23,
 });
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2992,6 +3120,54 @@ export async function selfTest() {
   }
 
   // ── the `--land` dogfood battery gate ────────────────────────────────────
+  battery(HAND_SET_BATTERY);
+  {
+    const labeled = (name, actor, type, app = null, at = '2026-11-18T10:00:00Z', event = 'labeled') => ({ event, label: { name }, actor: { login: actor, type }, performed_via_github_app: app, created_at: at });
+    const HAND = labeled('priority:p1', 'os-warren', 'User');
+    const RELAY = labeled('priority:p1', RELAY_COMMENT_AUTHOR, 'Bot');
+    const WORKFLOW = labeled('priority:p1', 'github-actions[bot]', 'Bot');
+    const SESSION = labeled('priority:p1', 'os-warren', 'User', { slug: 'claude' });
+    const hs = (events, extra = {}) => refuseHandSetGrade({ grades: ['priority:p1'], events, ref: 'o/r#7', ...extra });
+    t('a regrade changes the carried grade; an added domain, an ungraded card and an unchanged set change none', [gradesChanged({ current: ['priority:p1', 'pm:queue'], target: ['priority:p3', 'pm:queue'] }), gradesChanged({ current: ['priority:p1'], target: ['priority:p1', 'domain:ui'] }), gradesChanged({ current: ['pm:queue'], target: ['pm:queue', 'priority:p2'] })], [['priority:p1'], [], []]);
+    t('…a second grade beside the carried one, and the carried one taken off, are changes too', [gradesChanged({ current: ['priority:p2'], target: ['priority:p2', 'priority:p1'] }), gradesChanged({ current: ['Priority:P2'], target: [] })], [['priority:p2'], ['priority:p2']]);
+    t('the allow-list: the relay bot, a workflow bot and a session writing through an app are the fleet', [RELAY, WORKFLOW, SESSION].map(isFleetLabelEvent), [true, true, true]);
+    t('⭐ …and a user actor with no app is a person, whoever the login is', isFleetLabelEvent(HAND), false);
+    const refused = hs([RELAY, { ...HAND, created_at: '2026-11-18T15:18:00Z' }]);
+    t('⭐ a grade whose NEWEST labeled event is a person\'s is REFUSED, naming the label, the login and the time', typeof refused === 'string' && ['`priority:p1`', '`os-warren`', '2026-11-18T15:18:00Z', 'o/r#7'].every((s) => refused.includes(s)));
+    t('…quoting the rule and where it lives, naming the one exit, and parking the card in no state', [HAND_SET_RULE, HAND_SET_RULE_PATH, RULING_REF_KEY, 'pm:awaiting-maintainer'].map((s) => String(refused).includes(s)), [true, true, true, false]);
+    t('a grade the fleet set — by the relay, by a workflow, by a session through an app — passes', [hs([RELAY]), hs([WORKFLOW]), hs([SESSION])], [null, null, null]);
+    t('the newest event decides: a person\'s grade the fleet later re-set is the fleet\'s', hs([HAND, { ...RELAY, created_at: '2026-11-18T16:00:00Z' }]), null);
+    t('⭐ an `unlabeled` event is not read: a session\'s own removal carries no app and must not read as a hand', hs([RELAY, labeled('priority:p1', 'os-bill', 'User', null, '2026-11-18T16:00:00Z', 'unlabeled')]), null);
+    t('another label\'s event says nothing about this grade', typeof hs([RELAY, labeled('priority:p2', 'os-warren', 'User')]), 'object');
+    t('⭐ a grade with NO labeled event is not shown to be the fleet\'s: refused', String(hs([labeled('pm:queue', RELAY_COMMENT_AUTHOR, 'Bot')])).includes('no `labeled` event'));
+    t('⭐ an events read that did not answer is refused too, never passed', String(hs(null)).includes('could not be read in full'));
+    t('a `Ruling-ref:` line passes it, and the key must open a line and cite something', [hs([HAND], { rulingRef: true }), hasRulingRef('seat sig\nRuling-ref: 6982855148 「改回去」'), hasRulingRef('see Ruling-ref: x'), hasRulingRef('Ruling-ref:   ')], [null, true, false, false]);
+    t('two carried grades are each asked: one by hand refuses the write', typeof refuseHandSetGrade({ grades: ['priority:p1', 'priority:p2'], events: [RELAY, labeled('priority:p2', 'hotlong', 'User')] }), 'string');
+
+    const REGRADE = ['--repo', 'o/r', '--issue', '7', '--add', 'priority:p3', '--remove', 'priority:p1'];
+    const CARD = { labels: ['pm:queue', 'priority:p1'] };
+    const writes = (r) => r.fake.calls.filter((c) => c.method !== 'GET').length;
+    const byHand = await driveOffline(REGRADE, { ...CARD, events: [HAND] });
+    t('⭐ end to end: regrading a card whose grade a person set is exit 2 at step ② with ZERO writes', [byHand.exit, byHand.res.stoppedAt, writes(byHand), byHand.fake.board.labels], [EXIT_USAGE, 2, 0, ['pm:queue', 'priority:p1']], byHand.text);
+    const byFleet = await driveOffline(REGRADE, CARD);
+    t('…the same regrade of a grade the fleet set lands and reads back, after ONE events read', [byFleet.exit, byFleet.fake.board.labels, byFleet.fake.calls.filter((c) => c.op === 'events-list').length], [EXIT_OK, ['pm:queue', 'priority:p3'], 1], byFleet.text);
+    const first = await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'priority:p2,domain:ui'], { labels: ['pm:queue'], events: [] });
+    t('a first grade on an ungraded card, and a write that touches no grade, read no events', [first.exit, first.fake.calls.filter((c) => c.op === 'events-list').length, (await driveOffline(['--repo', 'o/r', '--issue', '7', '--add', 'domain:ui'], { ...CARD, events: [HAND] })).fake.calls.filter((c) => c.op === 'events-list').length], [EXIT_OK, 0, 0]);
+    const long = Array.from({ length: 100 }, () => labeled('pm:queue', RELAY_COMMENT_AUTHOR, 'Bot'));
+    const paged = await driveOffline(REGRADE, { ...CARD, events: [RELAY, ...long, HAND] });
+    t('⭐ the newest event is found on a later page: 101 events before it, two reads, refused', [paged.exit, paged.fake.calls.filter((c) => c.op === 'events-list').length], [EXIT_USAGE, 2]);
+    const dead = await driveOffline(REGRADE, { ...CARD, hooks: { 'events-list': [{ status: 502 }] } });
+    t('an events read answered 502 is exit 2 with zero writes — never a guess', [dead.exit, writes(dead)], [EXIT_USAGE, 0]);
+    const relayRoute = { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: relay', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' };
+    const RELAY_REGRADE = ['--repo', 'objectstack-ai/objectstack', ...REGRADE.slice(2)];
+    const viaRelay = await driveOffline(RELAY_REGRADE, { ...CARD, events: [HAND] }, { route: relayRoute, relay: 'success' });
+    t('…on the relay transport too: refused by THIS rule before the dispatch, nothing sent', [viaRelay.exit, viaRelay.sent.length, String(viaRelay.res.refusal).includes(HAND_SET_RULE)], [EXIT_USAGE, 0, true]);
+    const relayed = await driveOffline(RELAY_REGRADE, CARD, { route: relayRoute, relay: 'success' });
+    t('…control: the same relay regrade of a fleet-set grade is ONE dispatch, exit 0', [relayed.exit, relayed.sent.length], [EXIT_OK, 1], relayed.text);
+    t('structural: the plain write and the fold both pass the one predicate — it sits before the fold in runLabelWrite', String(runLabelWrite).indexOf('refuseHandSetGrade(') > 0 && String(runLabelWrite).indexOf('refuseHandSetGrade(') < String(runLabelWrite).indexOf('foldStroke('));
+    t('the quoted rule is a substring of the file it names', readFileSync(new URL(HAND_SET_RULE_PATH, REPO_ROOT), 'utf8').includes(HAND_SET_RULE));
+  }
+
   battery(LAND_DOGFOOD_BATTERY);
   {
     const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';

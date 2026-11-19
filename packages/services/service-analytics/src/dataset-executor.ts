@@ -28,6 +28,7 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import { datasetInvalidError } from './dataset-refusal.js';
 import { durationMeasureIn } from './duration-measure-sql.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
+import { noteWholeRead, withGroupCountRequest, type GroupCountRequest, type WholeGridProof } from './dataset-group-count.js';
 
 // Re-export the shared protocol shapes so existing importers keep working.
 export type { DatasetSelection } from '@objectstack/spec/contracts';
@@ -1223,18 +1224,26 @@ export class DatasetExecutor {
    * @param context - The request's ExecutionContext, threaded into every
    *   underlying `IAnalyticsService.query` so the tenant/RLS read scope is
    *   applied per request (ADR-0021 D-C).
+   * @param options.groupCount - [query_dataset totalGroups] Count the
+   *   selection's groups before its window cut them (`dataset-group-count.ts`).
+   *   For a selection that is ONE query whose order and window the strategy
+   *   applied, by that strategy, when it counted. For a grid this executor
+   *   windows in memory, as the grid's length before the window, when every
+   *   read that built it was vouched whole. The slot is left empty otherwise,
+   *   and no read is ever added to fill it.
    */
   async execute(
     compiledInput: CompiledDataset,
     selectionInput: DatasetSelection,
     context?: ExecutionContext,
+    options?: { groupCount?: GroupCountRequest },
   ): Promise<AnalyticsResult> {
     // framework#3582 — expand `{current_quarter_start}` / `{current_user_id}`
     // placeholders BEFORE any query is shaped, once for the whole call so every
     // sub-query (measure-scoped, totals, compareTo) shares one instant.
     const { compiled, selection } = resolveSelectionTokens(compiledInput, selectionInput, context);
 
-    const result = await this.executeSelection(compiled, selection, context);
+    const result = await this.executeSelection(compiled, selection, context, options?.groupCount);
 
     // Server-side totals (#1753) — re-run the selection grouped by each
     // requested dimension subset, so a subtotal/grand total is the measure's
@@ -1276,6 +1285,7 @@ export class DatasetExecutor {
     compiled: CompiledDataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
+    groupCount?: GroupCountRequest,
   ): Promise<AnalyticsResult> {
     // Base measures = selected non-derived + the aggregated measures the
     // selected derived ones reach through `of`, at any depth (#28127).
@@ -1317,6 +1327,12 @@ export class DatasetExecutor {
     const windowQuery = canPushDownWindow
       ? { order, limit: selection.limit, offset: selection.offset }
       : undefined;
+    // [query_dataset totalGroups] Two ways to count, never a read to count.
+    // Pushed down, the one query counts its own groups (`counted`). Windowed
+    // here, the grid before the window is the count — but only a grid every
+    // read of which came back whole, which `wholeness` records read by read.
+    const counted: GroupCountRequest | undefined = groupCount && canPushDownWindow ? {} : undefined;
+    const wholeness: WholeGridProof | undefined = groupCount && !canPushDownWindow ? { whole: true } : undefined;
 
     // The current-period pass: unfiltered base measures in one query plus one
     // supplementary query per measure-scoped filter, merged by dimension key.
@@ -1325,12 +1341,14 @@ export class DatasetExecutor {
       dimensions,
       baseFilter,
       window: windowQuery,
+      groupCount: counted,
+      wholeness,
       context,
     });
 
     // compareTo — run the SAME pass over the shifted window and attach.
     if (selection.compareTo) {
-      const compareRows = await this.runCompare(compiled, selection, [...baseMeasures], dimensions, baseFilter, context);
+      const compareRows = await this.runCompare(compiled, selection, [...baseMeasures], dimensions, baseFilter, context, wholeness);
       result.rows = mergeByDimensions(
         result.rows,
         compareRows,
@@ -1345,6 +1363,9 @@ export class DatasetExecutor {
     // the invented rows' measure cells their value.
     const bucketFill = this.timeBucketFillPlan(compiled, selection, dimensions, order, context);
     if (bucketFill) fillEmptyTimeBuckets(result.rows, bucketFill);
+    // [query_dataset totalGroups] Handed on only for a grid this pass did not
+    // grow: an invented bucket is a group the statement never counted.
+    if (groupCount && counted?.outcome && !bucketFill) groupCount.outcome = counted.outcome;
 
     // Empty-group fill (#4708) — a group a query never reported reads `0` for a
     // count/sum and stays null for avg/min/max. See {@link fillEmptyGroups} for
@@ -1413,6 +1434,12 @@ export class DatasetExecutor {
       if (labels && labels.size > 0) (sortKeys ??= {})[key] = labels;
     }
     result.rows = applyOrdering(result.rows, order, sortKeys);
+    // [query_dataset totalGroups] The grid in hand is every group the selection
+    // formed — each read that built it answered whole, and every merge and
+    // derived pass above keeps or appends rows, never drops one — so its
+    // length before the window is the count. Not for a grid the time-bucket
+    // fill grew: an invented bucket is no group any read formed.
+    if (groupCount && wholeness?.whole && !bucketFill) groupCount.outcome = { groupCount: result.rows.length };
     if (!canPushDownWindow) result.rows = applyWindow(result.rows, selection.limit, selection.offset);
 
     return result;
@@ -1456,10 +1483,18 @@ export class DatasetExecutor {
       dimensions: string[];
       baseFilter?: FilterCondition;
       window?: { order?: Record<string, 'asc' | 'desc'>; limit?: number; offset?: number };
+      /** [query_dataset totalGroups] Rides on the primary query; set only beside `window`. */
+      groupCount?: GroupCountRequest;
+      /**
+       * [query_dataset totalGroups] Set only WITHOUT `window`: every read this
+       * pass issues carries its own request, and the ledger turns `false` on
+       * the first one that does not come back vouched whole.
+       */
+      wholeness?: WholeGridProof;
       context?: ExecutionContext;
     },
   ): Promise<AnalyticsResult> {
-    const { measures, dimensions, baseFilter, window, context } = opts;
+    const { measures, dimensions, baseFilter, window, groupCount, wholeness, context } = opts;
     const { unfiltered, filtered } = splitMeasuresByFilter(measures, compiled.measureFilters);
 
     // Primary query: all unfiltered base measures in one pass. When every base
@@ -1467,14 +1502,17 @@ export class DatasetExecutor {
     const primary = unfiltered.length > 0 || filtered.length === 0;
     let result: AnalyticsResult;
     if (primary) {
-      result = await this.service.query(this.buildQuery(compiled, {
+      const query = this.buildQuery(compiled, {
         measures: unfiltered,
         dimensions,
         where: baseFilter,
         selection,
         contextTimezone: context?.timezone,
         window,
-      }), context);
+      });
+      const request: GroupCountRequest | undefined = groupCount ?? (wholeness ? {} : undefined);
+      result = await this.service.query(request ? withGroupCountRequest(query, request) : query, context);
+      if (wholeness && request) noteWholeRead(wholeness, request, result.rows);
     } else {
       result = { rows: [], fields: [] };
     }
@@ -1483,10 +1521,13 @@ export class DatasetExecutor {
     const measureNames = new Set(measures);
     for (const [i, m] of filtered.entries()) {
       const mFilter = combineFilters(baseFilter, compiled.measureFilters[m]);
-      const sub = await this.service.query(this.buildQuery(compiled, {
+      const subQuery = this.buildQuery(compiled, {
         measures: [m], dimensions, where: mFilter, selection,
         contextTimezone: context?.timezone,
-      }), context);
+      });
+      const subRequest: GroupCountRequest | undefined = wholeness ? {} : undefined;
+      const sub = await this.service.query(subRequest ? withGroupCountRequest(subQuery, subRequest) : subQuery, context);
+      if (wholeness && subRequest) noteWholeRead(wholeness, subRequest, sub.rows);
       result.rows = mergeByDimensions(result.rows, sub.rows, dimensions, [m]);
       // #5537 — with NO primary query there is nothing carrying the grid's
       // DIMENSION descriptors, and this loop only ever appends MEASURE ones. The
@@ -1747,6 +1788,7 @@ export class DatasetExecutor {
     dimensions: string[],
     baseFilter: FilterCondition | undefined,
     context?: ExecutionContext,
+    wholeness?: WholeGridProof,
   ): Promise<Record<string, unknown>[]> {
     const cmp = selection.compareTo!;
     // `dimension` is optional since #5011; resolve it (or fail loudly) before
@@ -1810,7 +1852,7 @@ export class DatasetExecutor {
     const sub = await this.runMeasurePass(
       compiled,
       { ...selection, timeDimensions: shiftedTd },
-      { measures, dimensions, baseFilter, context },
+      { measures, dimensions, baseFilter, wholeness, context },
     );
 
     // #6007 — when the anchor is ALSO a grid dimension, the comparison rows key

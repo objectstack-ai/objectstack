@@ -29,6 +29,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LookupField } from './LookupField';
 import { RecordPickerDialog } from './RecordPickerDialog';
 import { PeoplePicker } from './PeoplePicker';
+import { ActionProvider } from '@object-ui/react';
 
 const contacts = [
   { id: 'c1', name: 'Nora Field', account: 'a1' },
@@ -230,5 +231,75 @@ describe('PeoplePicker — baseFilter scopes the candidate query (#2215)', () =>
     });
     const lastParams = ds.find.mock.calls[ds.find.mock.calls.length - 1][1];
     expect(lastParams.$filter).toMatchObject({ account: 'a1' });
+  });
+});
+
+/**
+ * The picker's "+ New" creates a record its own cascade would list
+ * (objectstack#35050): the new record is seeded with the `dependsOn` value the
+ * picker filters by, under the remote field name the filter names (`param`).
+ * Before, the create opened blank, so the record the user made was one the
+ * scoped picker could not offer. Control: a lookup with no `dependsOn` seeds
+ * nothing.
+ */
+describe('LookupField — "+ New" seeds the dependsOn value it filters by (objectstack#35050)', () => {
+  const dependentField = {
+    name: 'contact',
+    label: 'Contact',
+    reference: 'contacts',
+    reference_field: 'name',
+    dependsOn: ['account'],
+  } as any;
+
+  async function openCreate(field: Record<string, unknown>, dependentValues: Record<string, unknown>, onModal?: ReturnType<typeof vi.fn>) {
+    const ds = { ...makeDataSource(), create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'c9', ...d })) };
+    const onChange = vi.fn();
+    const field$ = (
+      <LookupField
+        field={field as any}
+        value={undefined}
+        onChange={onChange}
+        readonly={false}
+        dataSource={ds as any}
+        {...({ dependentValues } as any)}
+      />
+    );
+    render(onModal ? <ActionProvider onModal={onModal as any}>{field$}</ActionProvider> : field$);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select/i }));
+    });
+    const input = await screen.findByRole('combobox');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'Pia Quill' } });
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText(/Create new "Pia Quill"/));
+    });
+    return { ds, onChange };
+  }
+
+  it('opens the create form seeded with the parent, under the filter\'s field name', async () => {
+    const onModal = vi.fn(async (_schema: unknown) => ({ success: true, data: { id: 'c9', name: 'Pia Quill', account: 'a1' } }));
+    await openCreate({ ...dependentField, dependsOn: [{ field: 'account', param: 'account_id' }] }, { account: 'a1' }, onModal);
+
+    await waitFor(() => expect(onModal).toHaveBeenCalled());
+    expect(onModal.mock.calls[0][0]).toMatchObject({ objectName: 'contacts', mode: 'create', initialValues: { account_id: 'a1' } });
+  });
+
+  it('the one-field inline create (no modal host) carries the parent too', async () => {
+    const { ds } = await openCreate(dependentField, { account: 'a1' });
+
+    await waitFor(() => expect(ds.create).toHaveBeenCalled());
+    expect(ds.create.mock.calls[0]).toEqual(['contacts', { account: 'a1', name: 'Pia Quill' }]);
+  });
+
+  it('control: a lookup with no dependsOn seeds nothing', async () => {
+    const onModal = vi.fn(async (_schema: unknown) => ({ success: false }));
+    const { dependsOn: _d, ...plain } = dependentField;
+    await openCreate(plain, { account: 'a1' }, onModal);
+
+    await waitFor(() => expect(onModal).toHaveBeenCalled());
+    expect(onModal.mock.calls[0][0]).toMatchObject({ objectName: 'contacts', mode: 'create' });
+    expect(onModal.mock.calls[0][0]).not.toHaveProperty('initialValues');
   });
 });

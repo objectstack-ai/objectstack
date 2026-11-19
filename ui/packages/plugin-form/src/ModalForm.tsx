@@ -39,6 +39,7 @@ import {
 } from '@object-ui/components';
 import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
+import { MasterDetailFrameContext, type MasterDetailFrame } from './masterDetailFrame';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
@@ -1296,8 +1297,13 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   );
 
   if (subforms?.length && schema.mode !== 'view') {
-    // The master-detail form owns its Save bar and pins it to the bottom of
-    // the body scroller below (objectstack#34599); it reports its unsaved
+    // The master-detail form owns its Save bar (objectstack#34599, ADR-0035
+    // Decision §6). This dialog hands it a frame of fixed height — the region
+    // between the header and the dialog's bottom — through
+    // `MasterDetailFrameContext`, so the form scrolls its body in a box of its
+    // own and draws the bar below it, at the dialog's bottom at every scroll
+    // position, with the gutters the flat arm's body and footer use
+    // (objectstack#34819). It reports its unsaved
     // input — header, lines, row editor — into this dialog's close guard, so
     // the close paths prompt here exactly as they do in the flat arm. Its
     // batch save carries no OCC token, so this arm has no conflict dialog.
@@ -1320,8 +1326,9 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               )}
             </DialogHeader>
           )}
-          <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            <Suspense fallback={<ModalFormBodyPending />}>
+          <div className="flex min-h-0 flex-1 flex-col" data-testid="modal-form-md-frame">
+            <Suspense fallback={<div className="px-4 sm:px-6 py-4"><ModalFormBodyPending /></div>}>
+            <MasterDetailFrameContext.Provider value={MODAL_MASTER_DETAIL_FRAME}>
             <FormDirtyReportContext.Provider value={setIsDirty}>
             <MasterDetailForm
               schema={{
@@ -1359,6 +1366,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               dataSource={dataSource}
             />
             </FormDirtyReportContext.Provider>
+            </MasterDetailFrameContext.Provider>
             </Suspense>
           </div>
           {discardDialog}
@@ -1394,7 +1402,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
 
         <FormSectionNavContext.Provider value={sectionNav.sink}>
         <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
-        <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+        {/* `relative`: the absolutely positioned hidden inputs in the form (a
+            Radix checkbox's or select's native stand-in) take this scroller as
+            their containing block, so it clips them and they scroll with it,
+            instead of overflowing the `overflow-hidden` dialog box, which a
+            scroll could then move off its title and footer (objectstack#35092). */}
+        <div className="@container relative flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>
@@ -1465,6 +1478,16 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       </MobileDialogContent>
     </Dialog>
   );
+};
+
+/**
+ * The frame the master-detail arm hands its form (objectstack#34819): the
+ * body scroller takes the flat arm's body gutters and container query, the
+ * action bar the flat arm's footer padding.
+ */
+const MODAL_MASTER_DETAIL_FRAME: MasterDetailFrame = {
+  bodyClassName: '@container px-4 sm:px-6 py-4',
+  actionsClassName: 'px-4 sm:px-6 py-3',
 };
 
 /**

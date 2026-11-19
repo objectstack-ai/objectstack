@@ -3323,7 +3323,9 @@ export function metaTranslateOptions(
  *    ADR-0131 D6), but a `.custom` pair's declared override replaces the
  *    base's item on every read (ADR-0146 D2), so the served document can
  *    differ from the one the catalog translates (`getPackagedPageBase`,
- *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`).
+ *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`);
+ *    an import `mapping` is an ADR-0146 D2 listed overridable type as well
+ *    (`getPackagedMappingBase`).
  *    The label order the base feeds is ruling record 6631250894's: a
  *    translation in the pair ({@link pairTranslationBundleOf}), then the
  *    override's own label, then the base's translation.
@@ -3344,6 +3346,7 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['dataset', 'getPackagedDatasetBase'],
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
+    ['mapping', 'getPackagedMappingBase'],
 ]);
 
 /**
@@ -3352,8 +3355,8 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
  * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
  * a `view` `getPackagedViewBase(name)`, a `report`
- * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app` or
- * `book` its own `getPackaged<Type>Base(name)`.
+ * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app`,
+ * `book` or `mapping` its own `getPackaged<Type>Base(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -3436,6 +3439,67 @@ function pairTranslationBundleOfBase(
         memo?.set(base, pending);
     }
     return pending;
+}
+
+/**
+ * [#33952, ADR-0146 D10] The translations each CODE package that patches a
+ * served object's fields ships itself, for `translateMetadataDocument`'s
+ * `patchBundles` — or `undefined` when no such package translates anything,
+ * or the type is not `object` (only an object carries `fieldPatches`).
+ *
+ * Two protocol questions, both the protocol's to answer:
+ * `getPackagedFieldPatchBases(name)` — which code packages patch this
+ * object's fields, each with the packaged base as that package patches it,
+ * highest precedence first (read off the registry's contributors; nothing is
+ * stamped on the served document, ADR-0029 D9.2a); then, per package,
+ * `getPackageTranslationBundle(packageId)` — that package's own translations.
+ * The deployment catalog cannot answer the second: it is every package's
+ * translations deep-merged, ids dropped, so a dependent's translation of its
+ * patch and the owner's of the text it replaced share one key. The translator
+ * decides which entry, if any, wrote a served slot (ruling 6942920667: the
+ * pair's translation, then the patching package's, then the served text).
+ *
+ * `undefined` on every uncertainty, {@link pairTranslationBundleOf}'s rule: a
+ * protocol without the accessors (server-only, feature-detected), an accessor
+ * that throws or rejects. A package that ships no translation adds no entry:
+ * its entry would read nothing. `memo` is one read's cache, by package id: a
+ * list serves many objects one package patches, and its translations are read
+ * once.
+ */
+export async function patchTranslationBundlesOf(
+    protocol: unknown,
+    type: string,
+    name: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<Array<{ patchedBase: unknown; bundle: unknown }> | undefined> {
+    if (type !== 'object' || typeof name !== 'string' || name === '') return undefined;
+    const p: any = protocol;
+    if (!p || typeof p.getPackagedFieldPatchBases !== 'function' || typeof p.getPackageTranslationBundle !== 'function') {
+        return undefined;
+    }
+    let entries: unknown;
+    try {
+        entries = p.getPackagedFieldPatchBases(name);
+    } catch {
+        return undefined;
+    }
+    if (!Array.isArray(entries) || entries.length === 0) return undefined;
+    const out: Array<{ patchedBase: unknown; bundle: unknown }> = [];
+    for (const entry of entries) {
+        const packageId = entry && typeof entry === 'object' ? (entry as { packageId?: unknown }).packageId : undefined;
+        if (typeof packageId !== 'string' || packageId === '') continue;
+        let pending = memo?.get(packageId);
+        if (pending === undefined) {
+            pending = Promise.resolve()
+                .then(() => p.getPackageTranslationBundle(packageId))
+                .catch(() => undefined);
+            memo?.set(packageId, pending);
+        }
+        const bundle = await pending;
+        if (bundle === undefined || bundle === null) continue;
+        out.push({ patchedBase: (entry as { base?: unknown }).base, bundle });
+    }
+    return out.length > 0 ? out : undefined;
 }
 
 /** A non-empty string, or `undefined`. */
@@ -3559,15 +3623,19 @@ export async function translateMetaList(
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // [#30062] A declared override's pair translations, read once per base for the page.
     const pairBundles = new Map<string, Promise<unknown>>();
+    // [#33952] A patching package's own translations, read once per package for the page.
+    const packageBundles = new Map<string, Promise<unknown>>();
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
     const translated = await Promise.all(arr.map(async (item) => {
         const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
+        const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, item?.name, packageBundles);
         const packagedBase = packagedObjectBaseOf(p, metaType, item?.name);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
             packagedBase,
             ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+            ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
         });
         if (!item || typeof item !== 'object') return out;
         if (metaType === 'view') return withoutInventedViewLabel(item, out);
@@ -3638,10 +3706,13 @@ export async function translateMetaDocument(
     const packagedBase = packagedObjectBaseOf(p, metaType, (document as any)?.name);
     // [#30062] A declared override's pair translations: the ruled order's first rank.
     const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, document);
+    // [#33952] Each patching package's own translations: a patched field slot's second rank.
+    const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, (document as any)?.name);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
         ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+        ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
     });
     if (metaType === 'view') return withoutInventedViewLabel(document as Record<string, unknown>, translated);
     if (metaType === 'object' && translated && typeof translated === 'object') {

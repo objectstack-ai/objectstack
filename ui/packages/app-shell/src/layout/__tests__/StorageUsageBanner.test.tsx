@@ -10,7 +10,7 @@
  * these cases exercise the same classifier the component ships with.
  */
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { StorageUsageSnapshot } from '../../hooks/useStorageUsageReading';
 
@@ -43,6 +43,7 @@ import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useStorageUsageReading } from '../../hooks/useStorageUsageReading';
 import { cloudConsoleUrl } from '../../console/marketplace/marketplaceApi';
 import { StorageUsageBanner } from '../StorageUsageBanner';
+import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 
 const asMock = (fn: unknown) => fn as unknown as ReturnType<typeof vi.fn>;
 
@@ -134,5 +135,83 @@ describe('StorageUsageBanner', () => {
     expect(asMock(useStorageUsageReading)).toHaveBeenCalledWith(
       expect.objectContaining({ enabled: false }),
     );
+  });
+});
+
+// objectstack#34622 — the full banner's upgrade entry opens the control plane's
+// declared `upgradeUrl` (served by /api/v1/runtime/config) when the runtime
+// serves one, and is unchanged when it does not. Driven through the REAL
+// runtime-config reader: only `fetch` is replaced, for the one config request.
+describe('StorageUsageBanner — declared upgradeUrl (objectstack#34622)', () => {
+  const UPGRADE = 'https://cloud.example.test/_console/billing?org=acme';
+
+  async function serveRuntimeConfig(payload: Record<string, unknown>) {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => payload })) as unknown as typeof fetch;
+    try {
+      await initRuntimeConfig();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRuntimeConfigForTesting();
+    setAdmin(true);
+    asMock(cloudConsoleUrl).mockReturnValue(CLOUD);
+  });
+  afterEach(() => resetRuntimeConfigForTesting());
+
+  it('declared: the upgrade entry links the declared address, not the Cloud origin', async () => {
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setSnapshot(BLOCKED);
+    render(<StorageUsageBanner />);
+
+    const upgrade = screen.getByTestId('storage-usage-upgrade');
+    expect(upgrade).toHaveAttribute('href', UPGRADE);
+    expect(upgrade).toHaveAttribute('target', '_blank');
+    expect(upgrade).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('declared on a runtime that names no upstream cloud: the entry is still drawn, to the declared address', async () => {
+    asMock(cloudConsoleUrl).mockReturnValue('');
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setSnapshot(BLOCKED);
+    render(<StorageUsageBanner />);
+
+    expect(screen.getByTestId('storage-usage-upgrade')).toHaveAttribute('href', UPGRADE);
+  });
+
+  it('declared: the `warn` banner still carries no upgrade entry', async () => {
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setSnapshot(WARNING);
+    render(<StorageUsageBanner />);
+
+    expect(screen.getByTestId('storage-usage-banner')).toHaveAttribute('data-storage-usage-case', 'warning');
+    expect(screen.queryByTestId('storage-usage-upgrade')).toBeNull();
+  });
+
+  // CONTROL — absent, the banner is byte for byte today's.
+  it('absent: a served config without the key renders the same markup as no config — the Cloud origin link', async () => {
+    setSnapshot(BLOCKED);
+    const before = render(<StorageUsageBanner />);
+    const untouched = before.container.innerHTML;
+    before.unmount();
+
+    await serveRuntimeConfig({ cloudUrl: CLOUD });
+    const after = render(<StorageUsageBanner />);
+    expect(after.container.innerHTML).toBe(untouched);
+    expect(screen.getByTestId('storage-usage-upgrade')).toHaveAttribute('href', CLOUD);
+  });
+
+  it('absent on a runtime that names no upstream cloud: no upgrade entry, as before', async () => {
+    asMock(cloudConsoleUrl).mockReturnValue('');
+    await serveRuntimeConfig({ singleEnvironment: true });
+    setSnapshot(BLOCKED);
+    render(<StorageUsageBanner />);
+
+    expect(screen.getByTestId('storage-usage-banner')).toHaveAttribute('data-storage-usage-case', 'blocked');
+    expect(screen.queryByTestId('storage-usage-upgrade')).toBeNull();
   });
 });

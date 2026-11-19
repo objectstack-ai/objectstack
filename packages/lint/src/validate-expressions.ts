@@ -117,7 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -171,6 +171,7 @@ import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, re
 import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
+import { requiredVisibleWhenFormulaIssue } from './required-visible-when-formula-issue.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -1294,9 +1295,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
     '`resolveFieldRuleState` evaluates it with the host scope bound, the `current_user` binding ' +
     'ADR-0089 D1 gives every runtime record surface) — so the ' +
-    'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
-    '`visibleWhen` at all: the record still carries the value and every other reader still ' +
-    'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
+    'control is hidden in that one form while NO server-side gate hides anything by a field-level ' +
+    '`visibleWhen` (the write path reads one only to decide whether a `required` field must be ' +
+    'filled): the record still carries the value and every other reader still returns it, a SILENT ' +
+    'enforcement gap. Where no host publishes a scope (the console public ' +
     '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
     'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
     '`fallback: true`), leaving the field the test was meant to hide showing for everyone. ' +
@@ -1632,7 +1634,7 @@ function faultOutcomeOf(site: FaultSite): (ExprFaultOutcome & NullGuardOutcome) 
  * select option's own `visibleWhen`.
  */
 
-type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
+type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen' | 'visibleWhen';
 
 /** [#20078] A root a field-level predicate binds, with the record shape it binds. */
 interface FieldTraversalHolder {
@@ -1659,6 +1661,15 @@ const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
   'option visibleWhen':
     'The server REFUSES every write by an acting user that picks this option — an option gate it ' +
     'cannot evaluate refuses the write, naming the option, the field and the fault (ADR-0137 D2)',
+  // [ADR-0113 D1, as amended] Judged only on a `required` field: the server
+  // reads that field's own `visibleWhen` to decide whether the requirement
+  // applies, and a predicate it cannot evaluate counts as SHOWN. A warning,
+  // not a refusal: the field keeps exactly the unconditional `required` it had
+  // before the amendment, so nothing gets worse; only the waiver never happens.
+  visibleWhen:
+    'This field is `required`, and the server judges that requirement by this predicate on every ' +
+    'write; a predicate it cannot evaluate counts as SHOWN (ADR-0113 D1), so the field stays required ' +
+    'on every record, the ones the form hides it on included, and a user who cannot see it cannot save',
 };
 
 /**
@@ -3015,6 +3026,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     slot: FieldTraversalSlot,
     raw: unknown,
     holders: readonly FieldTraversalHolder[],
+    // [ADR-0113 D1, as amended] `warning` for the one slot whose fault the
+    // server answers with the pre-amendment `required` instead of a refusal.
+    severity: 'error' | 'warning' = 'error',
   ): void => {
     const source = celSourceOf(raw);
     if (!source) return;
@@ -3030,7 +3044,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           where,
           message: fieldTraversalMessage(slot, root, field, fieldType, [...related].sort(), owner),
           source,
-          severity: 'error',
+          severity,
         });
       }
     }
@@ -4329,6 +4343,46 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ] as const) {
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
+      // [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` is a
+      // server concept now: the write path judges the requirement by it
+      // (`rule-validator.ts`, `evaluateRequiredWhenShown`) with the field-rule
+      // slots' binding, and a fault there counts as SHOWN. Two shapes the author
+      // can see at build time keep the field required where the form hides it,
+      // so both are WARNINGS, never refusals — the field keeps the requirement
+      // it had before the amendment, nothing gets worse:
+      //
+      //  - a read THROUGH a reference field: never hydrated at the field level,
+      //    so it faults on every row (the roots the server cannot bind —
+      //    `features`, `app`, `page`, the acting user — are already refused for
+      //    every field `visibleWhen` above, `FIELD_RULE_BOUND_ROOTS`);
+      //  - `storage.notNull`: the column refuses the null the waiver admits, so
+      //    a record outside the condition still cannot be created. A parse
+      //    refusal like the `requiredWhen` rider's would break every pre-17
+      //    source the `field-required-notnull-explicit` conversion stamped.
+      // Literal member reads, like the gates above, for the #5017 scan.
+      if (f.required === true && f.visibleWhen != null) {
+        const visibleWhere = `object '${objectName}' · field '${fname}' visibleWhen`;
+        refuseFieldTraversal(visibleWhere, 'visibleWhen', f.visibleWhen, fieldRuleHolders, 'warning');
+        if ((f.storage as AnyRec | undefined)?.notNull === true) {
+          issues.push({
+            where: visibleWhere,
+            message:
+              `Field '${fname}' is \`required\` with a \`visibleWhen\`, so a write the predicate hides it on ` +
+              `does not need it (ADR-0113 D1) — but it also declares \`storage.notNull: true\`, and the column ` +
+              `refuses that null: a record outside the condition still cannot be created. Drop ` +
+              `\`storage.notNull\` (the write contract alone keeps shown rows filled), or drop \`visibleWhen\` ` +
+              `if the field applies to every record.`,
+            source: celSourceOf(f.visibleWhen) ?? '',
+            severity: 'warning',
+          });
+        }
+        // A `formula` the predicate reads: a reminder that the server judges it
+        // on the formula value it computes at write time, and one the write
+        // path cannot compute keeps the field required on every write, shown
+        // by the form (`required-visible-when-formula-issue.ts`).
+        const formulaRead = objectName ? requiredVisibleWhenFormulaIssue(objectName, fname, f, fieldDefs) : undefined;
+        if (formulaRead) issues.push(formulaRead);
+      }
       judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });
     }
     // [#33100] A formula that reads its own value, itself or through the
@@ -4714,6 +4768,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // pages' action rows off an object write. Errors since #25680, a holeless
   // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
+  // [#34273] An action refusal sentence over declared `params` — the hook
+  // refusal's compile half, on the same collections the copy pass reads.
+  issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
 
   return issues;
 }

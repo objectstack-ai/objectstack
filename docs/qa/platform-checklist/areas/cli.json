@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "cli",
-  "axis": "devpath",
+  "axis": "build",
   "title": "CLI — os dev/build/migrate/verify/test boot, load, execution & exit-code contracts, scaffold first-run, flag/command error UX",
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures (README \"Area-level `fixtures`\"; shape copied from qa-scratch-authz in areas/attachments-storage.json). An item opts in with fixtures.provisioning = { use: KEY, why: … }. This area's one recipe is not runtime-provisioned like the others: it RESTORES a committed database into two new files, so nothing in the repo or on a live boot is touched and the teardown line is the whole cleanup. Every call cites the file and symbol that grounds it; replay the calls literally, and if one answers differently re-read the citation before assuming the recipe rotted.",

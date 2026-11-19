@@ -21,7 +21,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { t, tFormat } from '../i18n';
+import { t } from '../i18n';
 
 type Row = Record<string, unknown>;
 
@@ -163,7 +163,8 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
       within(rail).getByLabelText(t('designer.field.visibleWhen', LOCALE)),
       // The header's pair and each option row's.
       ...within(rail).getAllByRole('button', { name: t('engine.inspector.reorder.up', LOCALE) }),
-      within(rail).getByRole('button', { name: tFormat('designer.field.remove', LOCALE, { label: 'Industry' }) }),
+      // objectstack#34794 — Remove is the header's ⋯ menu, its one entry.
+      within(rail).getByTestId('field-more-menu'),
       within(rail).getAllByTestId('option-value')[0]!,
     ];
     for (const control of named) {
@@ -177,6 +178,9 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
   it('Tab reaches a lock, and focus or hover shows the reason as a tooltip', async () => {
     const rail = mount('name');
     const sentence = within(rail).getByTestId('field-base-patch-only').textContent!.trim();
+    // objectstack#34794 — the API name sits in the collapsed Developer info
+    // section: open it, as an author must, before Tab can reach its lock.
+    await userEvent.click(within(rail).getByTestId('field-developer-toggle'));
     const apiNameLock = within(rail).getByTestId('field-apiname-input').closest<HTMLElement>('[data-disabled-reason]')!;
     let reached = false;
     for (let i = 0; i < 12 && !reached; i++) {

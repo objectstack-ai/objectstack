@@ -54,6 +54,7 @@ import type {
 } from 'ai';
 import type { z } from 'zod';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
+import type { EvalUser } from '../identity/eval-user.zod.js';
 
 /**
  * @deprecated Use `ModelMessage` from `ai` instead.
@@ -820,6 +821,81 @@ export interface IActionConfirmationService {
 }
 
 // ---------------------------------------------------------------------------
+// The AI-route caller — `req.user` on an AI route handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Which credential admitted the caller of an AI route, as
+ * {@link AIRouteUser.credential} carries it. One vocabulary: the runtime's
+ * environment-membership gate and its api-action forward read the same three
+ * values.
+ *
+ * - `session`: a person's signed-in session to the app, whichever carrier
+ *   brought its token: the session cookie, or an `Authorization: Bearer`
+ *   header (the same session, read by the same session read; a client on a
+ *   split-origin deployment, where the cookie does not flow, sends it that
+ *   way). Ruled on #34184 (record 6942875153), Q1 A.
+ * - `api_key`: an API key, in any spelling the key header accepts.
+ * - `oauth`: an OAuth access token (honoured on the MCP endpoint alone), or
+ *   the credential the server mints to forward an OAuth-connected agent's call
+ *   in process; both resolve to an agent principal carrying the token's
+ *   scopes.
+ */
+export type AIRouteCredentialKind = 'session' | 'api_key' | 'oauth';
+
+/**
+ * The caller an AI route handler receives as `req.user`: the route table the
+ * AI service registers (`buildAIRoutes`) is dispatched with
+ * `{ body, params, query, headers, user }`, and `user` is this shape, or
+ * absent for an anonymous caller (reachable only on a route that declares
+ * `auth: false`).
+ *
+ * The identity core is an `EvalUser` (ADR-0068 D1), extended with the keys
+ * every dispatch path that hands a user to customer code publishes: the
+ * id and display-name aliases and the two authority channels, which are never
+ * merged. Two facts are the AI route's own, so that a door reserved to the
+ * person (an approval only the person the call ran as may give) can tell who
+ * is acting and how they came in, without reading request headers:
+ * {@link AIRouteUser.impersonatedBy} and {@link AIRouteUser.credential}.
+ */
+export interface AIRouteUser extends EvalUser {
+    /** The acting user's id (`sys_user.id`). */
+    id: string;
+    /** Alias of {@link AIRouteUser.id}. */
+    userId: string;
+    /** The display name (`sys_user.name`); the id when none resolves. */
+    name: string;
+    /** Alias of {@link AIRouteUser.name}. */
+    displayName: string;
+    /** ADR-0090 position names held by the caller. */
+    positions: string[];
+    /** Permission-SET names (`admin_full_access`, `ai_seat`, …). */
+    permissions: string[];
+    /** CAPABILITIES (`manage_metadata`, `studio.access`, …): a separate channel. */
+    systemPermissions: string[];
+    /**
+     * The administrator (a `sys_user` id) who started the impersonation session
+     * this request runs in: `ExecutionContext.impersonatedBy`, carried as is.
+     * Absent on every other request; absence means the user in
+     * {@link AIRouteUser.id} is acting themselves. {@link AIRouteUser.id} stays
+     * the impersonated user.
+     *
+     * A fact a door may use to refuse an act reserved to the person (ruled on
+     * #34184, record 6942875153, Q2 A). It is never the authorization subject, and no platform
+     * middleware reads it; what it decides is the consuming door's.
+     */
+    impersonatedBy?: string;
+    /**
+     * Which credential admitted this caller; see {@link AIRouteCredentialKind}.
+     * Absent when the request recorded none (a host that hands the dispatcher
+     * an execution context without running its identity step). A door reserved
+     * to a person's signed-in session reads anything but `'session'`, absence
+     * included, as not that session.
+     */
+    credential?: AIRouteCredentialKind;
+}
+
+// ---------------------------------------------------------------------------
 // IAIService
 // ---------------------------------------------------------------------------
 
@@ -1265,6 +1341,17 @@ export interface AIObjectResult<T> {
 // ---------------------------------------------------------------------------
 
 /**
+ * One message of a persisted conversation: a Vercel `ModelMessage` plus the
+ * turn it belongs to, the `turnId` it was written under
+ * ({@link IAIConversationService.addMessage}). Absent or null on a message
+ * stored with no turn. The wire shape is `AiConversationMessageSchema` (`api/protocol.zod.ts`).
+ */
+export type AIConversationMessage = ModelMessage & {
+    /** The turn the message was written under; absent or null when it had none. */
+    turnId?: string | null;
+};
+
+/**
  * A persistent AI conversation with message history
  */
 export interface AIConversation {
@@ -1276,8 +1363,8 @@ export interface AIConversation {
     agentId?: string;
     /** User who owns the conversation */
     userId?: string;
-    /** Messages in the conversation */
-    messages: ModelMessage[];
+    /** Messages in the conversation, each with the turn it was written under */
+    messages: AIConversationMessage[];
     /** Creation timestamp (ISO 8601) */
     createdAt: string;
     /** Last update timestamp (ISO 8601) */

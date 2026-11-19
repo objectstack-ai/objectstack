@@ -240,6 +240,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "邮箱",
+            pendingAgain: "已在待激活中",
             notApplied: "此人仍待激活，以下内容未生效（请在其记录上设置）",
             managerError: "上级",
             "host.reason": "邀请未发出"
@@ -263,6 +264,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "已在待激活中，已再次通知",
             "summary.failed": "未添加",
             rows: "逐行结果"
+          },
+          columns: {
+            rows: {
+              row: "行",
+              email: "邮箱",
+              ok: "成功",
+              alreadyPending: "已在待激活中，已再次通知",
+              "host.notified": "已通知托管组织",
+              "host.reason": "未通知的原因",
+              "error.message": "未添加的原因",
+              notApplied: "未应用（请在记录上设置）",
+              managerError: "上级"
+            }
           }
         }
       },

@@ -26,6 +26,7 @@ import { Search } from 'lucide-react';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import type { PackageCustomizations } from './packageCustomizations-io.js';
+import type { ActionObjects } from './switchedOffActionTargets.js';
 import {
   customizationRowsOf,
   loadCustomizationLabels,
@@ -34,7 +35,12 @@ import {
 
 /** One app's read, as the landing holds it. */
 export type AppCustomizationRead =
-  | { kind: 'read'; read: Pick<PackageCustomizations, 'overrides' | 'extensions' | 'switchedOff'> }
+  | {
+      kind: 'read';
+      read: Pick<PackageCustomizations, 'overrides' | 'extensions' | 'switchedOff'>;
+      /** objectstack#34724 — the object holding each switched-off action (`readActionObjects`). */
+      actionObjects?: ActionObjects;
+    }
   | { kind: 'failed'; message: string };
 
 /** How many rows the panel shows before "Show all". */
@@ -79,7 +85,7 @@ export function LandingCustomizationsPanel({
     () =>
       apps.flatMap((app) => {
         const r = reads[app.id];
-        return r?.kind === 'read' ? customizationRowsOf(app, r.read) : [];
+        return r?.kind === 'read' ? customizationRowsOf(app, r.read, r.actionObjects) : [];
       }),
     [apps, reads],
   );

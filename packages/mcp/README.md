@@ -78,13 +78,18 @@ grant, then two parts:
 
 - **The selection rule**, only where this request registers both
   `list_datasets` and `query_dataset`: look for a governed metric first with
-  `list_datasets` and the question's business words; one measure match answers
-  through `query_dataset`; several matches are a question for the user; no
-  match falls back to the object tools and says the answer is not from a
-  governed metric. A grant without `data:read` gets no such sentence.
+  `list_datasets` and the question's business words; each word with exactly
+  one measure match answers through `query_dataset`, and two such words are two
+  metrics computed both; several matches are a question for the user; a word
+  with `candidates` in the answer is the same question, never a match; no match
+  and no candidates falls back to the object tools and says the answer is not
+  from a governed metric. A grant without `data:read` gets no such sentence.
 - **The skills install line**: `Published skills: @objectstack/skills <version>`
-  and its `pnpm add -D` command, at this package's own version (the two are
-  released together), never the `version` option.
+  and the command that installs it into the agent's skills directory with or
+  without a project, `os skills install --version <version>` (with its
+  `npx -p @objectstack/cli@<version>` form for a machine without the CLI), at
+  this package's own version (the packages are released together), never the
+  `version` option.
 
 The stdio server's instructions are fixed when it is constructed, before its
 tools are bridged, and carry neither part.

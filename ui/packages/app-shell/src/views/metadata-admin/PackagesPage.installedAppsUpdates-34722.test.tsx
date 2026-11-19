@@ -34,6 +34,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import axe from 'axe-core';
 import { I18nProvider } from '@object-ui/i18n';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -344,6 +345,35 @@ describe('Setup → Installed Apps: an app is one line, its modules folded under
 
     fireEvent.click(toggle);
     for (const id of MODULE_IDS) expect(screen.queryByTestId(`pkg-row-${id}`)).toBeNull();
+  });
+
+  it('the toggle names the module lines it shows in aria-controls, and names none while they are hidden', async () => {
+    await serve({ packages: [HOTCRM, ...MODULES, TODO] });
+    renderAt(SETUP_URL);
+    await settled();
+
+    const toggle = screen.getByTestId(`pkg-modules-toggle-${HOTCRM_ID}`);
+    expect(toggle).not.toHaveAttribute('aria-controls');
+
+    fireEvent.click(toggle);
+    const ids = (toggle.getAttribute('aria-controls') ?? '').split(' ');
+    // Every id resolves to a drawn module line of this app, one per module.
+    const named = ids.map((id) => document.getElementById(id));
+    expect(named.map((el) => el?.getAttribute('data-testid')).sort()).toEqual(
+      MODULE_IDS.map((id) => `pkg-row-${id}`).sort(),
+    );
+    for (const el of named) expect(el).toHaveAttribute('data-module-of', HOTCRM_ID);
+
+    // axe judges the IDREFs of an expanded control: none may dangle.
+    const res = await axe.run(screen.getByTestId('pkg-installed-apps-table'), {
+      runOnly: { type: 'rule', values: ['aria-valid-attr-value'] },
+    });
+    expect(res.violations.map((v) => v.nodes.map((n) => n.html.slice(0, 80)))).toEqual([]);
+    // Control: an empty list is a reading only if the rule judged the toggle.
+    expect(res.passes.flatMap((r) => r.nodes.map((n) => n.html)).some((h) => h.includes('aria-controls='))).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(toggle).not.toHaveAttribute('aria-controls');
   });
 
   it('a module that declares two apps, or none in view, stays a line of its own', async () => {

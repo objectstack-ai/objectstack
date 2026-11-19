@@ -57,6 +57,15 @@ import type {
   ToolRegistry,
 } from './types.js';
 
+/** [#34766] The paragraph the open server's default text adds where authoring tools register. */
+const AUTHORING_DRAFTS_PARAGRAPH_START = 'This connection also lists authoring tools';
+
+/** The text with that one paragraph taken out (the paragraphs are joined by a blank line). */
+function withoutDraftsParagraph(text: unknown): unknown {
+  if (typeof text !== 'string') return text;
+  return text.split('\n\n').filter((part) => !part.startsWith(AUTHORING_DRAFTS_PARAGRAPH_START)).join('\n\n');
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -686,10 +695,12 @@ describe('[#31022] per-request instructions on the authoring injection — answe
     ).toBe(defaultText);
   });
 
-  it('a metadata:write request whose injection carries no instructions gets the default', async () => {
+  it('a metadata:write request whose injection carries no instructions gets the default, plus the drafts line its tools earn', async () => {
     const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
     const subject = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
-    expect(subject).toBe(defaultText);
+    // [#34766] The one paragraph a request that registers authoring tools adds.
+    expect(subject).toContain(AUTHORING_DRAFTS_PARAGRAPH_START);
+    expect(withoutDraftsParagraph(subject)).toBe(defaultText);
   });
 
   it('a runtime configured with instructions keeps them for every request the injection does not reach', async () => {
@@ -810,7 +821,7 @@ describe('[#32766] data-only instructions on the authoring injection — the com
       await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], registry, dataOnlyInstructions: '  \n ' }),
     ).toBe(defaultText);
     expect(
-      await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry, instructions: '' }),
+      withoutDraftsParagraph(await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry, instructions: '' })),
     ).toBe(defaultText);
   });
 

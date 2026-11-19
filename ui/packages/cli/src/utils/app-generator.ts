@@ -428,6 +428,11 @@ const APP_THEME_TOKENS = `@theme {
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+  --color-chart-9: hsl(var(--chart-9));
+  --color-chart-10: hsl(var(--chart-10));
 }`;
 
 /**
@@ -437,7 +442,10 @@ const APP_THEME_TOKENS = `@theme {
  * `packages/components/src/index.css`: `@theme` already emits into `:root`, and
  * `.dark` only has to override the values. Every `var(--x)` named by
  * `APP_THEME_TOKENS` is declared here — pinned by a test, since a token that
- * resolves to nothing is a class that silently renders unstyled.
+ * resolves to nothing is a class that silently renders unstyled. The
+ * `--chart-1..10` values are the library's own, light and dark, value for value:
+ * the CLI ships without that stylesheet, so they are kept in step and a test
+ * compares the two.
  */
 const APP_THEME_VARIABLES = `:root {
   color-scheme: light;
@@ -467,6 +475,11 @@ const APP_THEME_VARIABLES = `:root {
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+  --chart-6: 130 55% 40%;
+  --chart-7: 315 65% 38%;
+  --chart-8: 195 85% 48%;
+  --chart-9: 0 70% 38%;
+  --chart-10: 215 14% 55%;
 
   /* Sidebar colors */
   --sidebar: 0 0% 98%;
@@ -506,6 +519,11 @@ const APP_THEME_VARIABLES = `:root {
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
+  --chart-6: 115 55% 48%;
+  --chart-7: 300 55% 72%;
+  --chart-8: 187 65% 48%;
+  --chart-9: 0 70% 46%;
+  --chart-10: 210 12% 60%;
 
   /* Sidebar colors for dark mode */
   --sidebar: 240 5.9% 10%;

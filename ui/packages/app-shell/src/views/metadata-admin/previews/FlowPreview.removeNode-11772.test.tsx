@@ -20,6 +20,8 @@
  * re-attached to the new node: the published flow then ran it once per edge.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act, within } from '@testing-library/react';
@@ -149,7 +151,8 @@ function insertOnTheOnlyEdge() {
 }
 
 function removeSelectedNode() {
-  fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole('menuitem', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
 }
 
 /** The "+" under a node card — select-then-append, as in the card's step 4. */

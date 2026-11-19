@@ -188,7 +188,7 @@ async function writeBlankExpression() {
   const key = within(map).getByPlaceholderText('Key');
   fireEvent.change(key, { target: { value: 'id' } });
   fireEvent.blur(key);
-  fireEvent.click(within(map).getByRole('button', { name: 'Write as a CEL expression' }));
+  fireEvent.click(within(map).getByRole('button', { name: 'Write as a formula' }));
   return { map, readsBefore };
 }
 
@@ -232,7 +232,7 @@ describe('Automations page — Problems and the node agree on a blank expression
     await screen.findByTestId('flow-problem-target', {}, { timeout: 6000 });
 
     const saves = mockClient.save.mock.calls.length;
-    const source = within(map).getByPlaceholderText('CEL expression, e.g. joinNonEmpty(…)');
+    const source = within(map).getByPlaceholderText('Formula, e.g. joinNonEmpty(…)');
     fireEvent.change(source, { target: { value: 'record.id' } });
     fireEvent.blur(source);
 

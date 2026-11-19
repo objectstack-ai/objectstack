@@ -197,7 +197,12 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       expect(result.isError).toBe(true);
       expect(result.content).toHaveLength(1);
       expect(JSON.parse(result.content[0].text)).toEqual({
-        error: { code: 'RECORD_NOT_FOUND', message: 'Record t9 not found in task', status: 404 },
+        error: {
+          code: 'RECORD_NOT_FOUND', message: 'Record t9 not found in task', status: 404,
+          // The end user's sentence the producer marks (#34699): no caller here, so
+          // English. The metadata door's answer carries no `userMessage` channel.
+          ...(site.metaDoor ? {} : { userMessage: 'This record does not exist, or you do not have access to it.' }),
+        },
       });
     });
 
@@ -983,6 +988,28 @@ describe('run_action / resume_run: a throw answers what the /actions door answer
       });
       const door = actionsDoorAnswerOf(thrown());
       expect([door.code, door.declaredCode, door.status]).toEqual([error.code, error.declaredCode, error.status]);
+    });
+
+    it(`${site.tool}: an action body that timed out answers the door's 500 INTERNAL_ERROR with the sentence naming the action and its limit`, async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // The shape `QuickJSScriptRunner` raises for an action that ran out of
+      // time (`@objectstack/runtime`'s `sandboxed-action-crash-is-a-fault.test.ts`
+      // measures it on a real run and on the HTTP door): the operator line in
+      // `.message`, the caller sentence in `innerMessage`, a declared 500, no code.
+      const sentence = "Action 'demo_leave_body' timed out: it exceeded its 50 ms time limit and was stopped.";
+      const thrown = () => Object.assign(
+        new Error("action 'demo_leave_body' exceeded CPU budget of 50ms (after 3 pump iterations)"),
+        { name: 'SandboxError', innerMessage: sentence, status: 500 },
+      );
+      const result = await callTool(site, thrown());
+      expect(result.isError).toBe(true);
+      const { error } = JSON.parse(String(result.content[0].text));
+      expect(error).toEqual({ code: 'INTERNAL_ERROR', message: sentence, status: 500 });
+      const door = actionsDoorAnswerOf(thrown());
+      expect(error).toEqual({ code: door.code, message: door.message, status: door.status });
+      // The operator line reaches the log, and never the tool result.
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(result.content[0].text)).not.toContain('pump iterations');
     });
 
     it(`${site.tool}: a fault carries no thrown details; a refusal still does`, async () => {

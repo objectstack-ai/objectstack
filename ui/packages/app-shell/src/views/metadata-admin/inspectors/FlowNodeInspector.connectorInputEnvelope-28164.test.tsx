@@ -14,6 +14,8 @@
  * declares none).
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
@@ -36,7 +38,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 
 const SLACK_POST_MESSAGE = {
   type: 'object',

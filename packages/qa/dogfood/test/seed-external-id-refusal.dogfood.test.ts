@@ -22,7 +22,8 @@
 // nothing is stored, so `publish-drafts` has nothing of it to publish.
 // Controls: the same seed keyed on `name` saves, publishes and converges on
 // replay (`inserted: 1`, then `inserted: 0, updated: 0`, one row served); an
-// `insert` seed is not judged. The publish door's refusal of a draft stored
+// `insert` seed, a mode #34613 retired, is refused for its mode and never
+// reaches the key judgment. The publish door's refusal of a draft stored
 // before this rule, and of a seed whose object is drafted in the same batch,
 // is pinned in-process
 // (`packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts`):
@@ -114,8 +115,11 @@ describe('dogfood: a seed whose externalId names no field of its object is refus
     expect(JSON.stringify(listed.json).match(/"G1"/g) ?? []).toHaveLength(1);
   });
 
-  it('control: an `insert` seed never matches by its key, so it is not judged', async () => {
+  it('control: an `insert` seed is refused for its retired mode, not judged on its key (#34613)', async () => {
     const saved = await call('PUT', `/meta/seed/r_insert?mode=draft&package=${PKG}`, seed('no_such_field', 'insert'));
-    expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+    expect(saved.status, JSON.stringify(saved.json)).toBe(422);
+    const wire = JSON.stringify(saved.json);
+    expect(wire).toContain("`seed.mode: 'insert'` was removed");
+    expect(wire).not.toContain('which is not a field of object');
   });
 });

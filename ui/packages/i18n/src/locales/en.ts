@@ -816,6 +816,7 @@ const en = {
         'This view is grouped, but its data source does not implement queryGroupHeaders, so the groups cannot be counted. Remove the grouping to show the records.',
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+      draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -1223,6 +1224,8 @@ const en = {
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
+    draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+    withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
@@ -1954,6 +1957,9 @@ const en = {
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',
+    drillTooMany: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+    drillUnavailable: 'The records behind this value can’t be listed from here.',
+    drillFailed: 'The records behind this value couldn’t be loaded. Try again later.',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -1977,7 +1983,6 @@ const en = {
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
-    exportCsv: 'Export CSV',
     openInList: 'Open in list',
     config: {
       breadcrumb: {
@@ -2883,7 +2888,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -2991,7 +2996,7 @@ const en = {
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
-        title: 'Assistant',
+        title: 'AI Assistant',
         description: 'AI assistant chat',
         resize: 'Resize chat',
         collapse: 'Collapse chat',
@@ -3114,7 +3119,7 @@ const en = {
         unauthorizedHint: 'Holds no permission set beyond the baseline every signed-in member has. Give them a permission set or a position.',
       },
       objectNotFound: 'Object Not Found',
-      objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
+      objectNotFoundDescription: 'The object "{{objectName}}" does not exist, or you do not have access to it.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
       filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
@@ -3195,8 +3200,16 @@ const en = {
       viewTypeChartDesc: 'Aggregated bar / line / pie visualisations.',
       viewTypeTree: 'Tree',
       viewTypeTreeDesc: 'Nest self-referencing records into a hierarchy by a parent field.',
+      viewTypeTimesheet: 'Timesheet',
+      viewTypeTimesheetDesc: 'Enter a number per row and weekday; each filled cell is one record.',
       parentField: 'Parent field',
       parentFieldHelp: 'The field pointing to the parent record (same object) that defines the hierarchy. Only self-referencing fields qualify.',
+      timesheetRowField: 'Row field',
+      timesheetRowFieldHelp: 'Each row of the grid is one value of this field, such as a project.',
+      timesheetDateField: 'Date field',
+      timesheetDateFieldHelp: 'Records are placed on the weekday matching this date.',
+      timesheetValueField: 'Value field',
+      timesheetValueFieldHelp: 'The number each cell shows and edits, such as hours.',
       newView: 'New View',
       viewName: 'Name',
       viewNameHelp: 'Machine key (snake_case). Auto-filled from the title — edit if you like.',
@@ -3565,6 +3578,10 @@ const en = {
       missingToken: 'Verification link is missing a token.',
       emailMissing: 'Email address is missing',
       resendButton: 'Resend verification email',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        'Your email address has not been verified yet. Send a verification link to {{email}}, then click the link to verify your account.',
+      sendButton: 'Send verification email',
       resending: 'Sending…',
       resent: 'Email sent! Check your inbox',
       resentSuccess: 'Verification email sent!',
@@ -4098,7 +4115,6 @@ const en = {
   },
   empty: {
     objectNotFound: 'Object Not Found',
-    objectNotFoundDescription: 'Object "{{name}}" definition missing. Check your configuration or navigate back to select a valid object.',
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
@@ -4198,7 +4214,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
@@ -4311,7 +4327,8 @@ const en = {
       securityBlockTitle: 'Publishing will be refused — {{count}} item(s) need a decision first',
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
-      securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      securityBlockWhere: 'Fix it on the object under Settings → Who can see which records, then publish again.',
+      flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
@@ -6114,6 +6131,33 @@ const en = {
     insecureBody: "This server's address is {{address}}. The mobile app signs in through it, so it must use HTTPS, and no code is shown. Serve this server over HTTPS, set {{setting}} to its https:// address, for example {{example}}, and restart it.",
     unpublishedTitle: "This server does not publish its public address",
     unpublishedBody: "No code is shown: this server does not offer its public address to the mobile app yet. Update the server to a version that does.",
+  },
+  notificationSettings: {
+    title: "Notification Settings",
+    subtitle: "Choose which notifications reach you, and on which channels",
+    loading: "Loading your notification settings…",
+    loadFailed: "Could not read your notification settings. Reload the page to try again.",
+    saveFailed: "The change was not saved: {{reason}}",
+    general: "General",
+    generalWarning: "Changing your digest or quiet hours saves your own general setting. It then applies to every topic and channel you have not set yourself, in place of your organization's defaults.",
+    digest: "Digest",
+    digestNone: "No digest",
+    digestDaily: "Daily",
+    digestWeekly: "Weekly",
+    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
+    quietHours: "Quiet hours",
+    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
+    save: "Save",
+    matrix: "Topics and channels",
+    topic: "Topic",
+    allTopics: "All topics",
+    alwaysDelivered: "Always delivered",
+    notConfigured: "Not set up",
+    toggleLabel: "{{topic}} by {{channel}}",
+    sourceOwn: "Your setting",
+    sourceDefault: "Organization default",
+    sourceBuiltin: "Default",
+    sourceMandatory: "Required",
   },
 } as const;
 

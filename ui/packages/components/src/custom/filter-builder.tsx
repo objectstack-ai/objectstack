@@ -17,7 +17,7 @@ import {
   type ViewFilterRule,
 } from "@objectstack/spec/ui"
 import { DATE_RANGE_PRESETS, expandEmptyOperator, type DateRangePreset } from "@objectstack/spec/data"
-import { SchemaRendererContext } from "@object-ui/react"
+import { SchemaRendererContext, useSettledSchema } from "@object-ui/react"
 import {
   FILTER_DATE_LIKE_TYPES,
   FILTER_LOOKUP_LIKE_TYPES,
@@ -36,6 +36,7 @@ import {
   ComponentRegistry,
   isRealCalendarDate,
   isRetiredFieldType,
+  referencedRecordTitle,
   reportRetiredFieldType,
   toDateTimeInputValue,
 } from "@object-ui/core"
@@ -2712,17 +2713,27 @@ function LookupValuePicker({ field, value, multiple, onChange }: LookupValuePick
   // list that disagrees with the gate about what is live.
   const referenceTo =
     field.referenceTo || (field.type === "user" ? "users" : undefined)
-  const displayField = field.displayField || "name"
+  // The lookup's own `displayField` when it declares one; otherwise the target
+  // object's declared `nameField` names each option (objectstack#35053), read
+  // from the target's definition: one schema read per picker, which the
+  // ObjectStack adapter serves from its metadata cache after the first.
+  const displayField = field.displayField || undefined
   const idField = field.idField || "id"
+  const { def: targetDef } = useSettledSchema(
+    referenceTo ?? "",
+    referenceTo && dataSource && typeof dataSource.find === "function" ? dataSource : undefined,
+  )
 
   const [open, setOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
-  const [options, setOptions] = React.useState<LookupOption[]>([])
+  // The records the search answered; their labels are derived at render, so
+  // a target definition that lands after them still names them.
+  const [optionRecords, setOptionRecords] = React.useState<any[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  // Resolved labels for currently selected ids (so we can render chips even
-  // when the selection isn't part of the latest fetched page).
-  const [resolved, setResolved] = React.useState<Record<string, string>>({})
+  // The records of the currently selected ids, by id (so we can render chips
+  // even when the selection isn't part of the latest fetched page).
+  const [resolvedRecords, setResolvedRecords] = React.useState<Record<string, any>>({})
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const selectedIds: string[] = React.useMemo(() => {
@@ -2736,14 +2747,21 @@ function LookupValuePicker({ field, value, multiple, onChange }: LookupValuePick
   const hasDataSource =
     dataSource != null && typeof dataSource.find === "function" && !!referenceTo
 
+  // Grouped and filtered by id: two records with one title stay two options.
   const recordToOption = React.useCallback(
     (r: any): LookupOption => {
       const id = r?.[idField] ?? r?.id ?? r?._id
-      const label = r?.[displayField] ?? r?.label ?? r?.name ?? String(id)
-      return { value: id, label: String(label) }
+      const label = referencedRecordTitle(targetDef, r, displayField) ?? String(id)
+      return { value: id, label }
     },
-    [displayField, idField],
+    [targetDef, displayField, idField],
   )
+  const options = React.useMemo(() => optionRecords.map(recordToOption), [optionRecords, recordToOption])
+  const resolved = React.useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const [id, r] of Object.entries(resolvedRecords)) labels[id] = recordToOption(r).label
+    return labels
+  }, [resolvedRecords, recordToOption])
 
   const fetchData = React.useCallback(
     async (search?: string) => {
@@ -2755,30 +2773,29 @@ function LookupValuePicker({ field, value, multiple, onChange }: LookupValuePick
         if (search && search.trim()) params.$search = search.trim()
         const result = await dataSource.find(referenceTo, params)
         const records: any[] = result?.data ?? result ?? []
-        const mapped = records.map(recordToOption)
-        setOptions(mapped)
-        // Cache resolved labels for any matching selected ids
-        if (mapped.length > 0) {
-          setResolved((prev) => {
+        setOptionRecords(records)
+        // Keep the records of any matching selected ids
+        if (records.length > 0) {
+          setResolvedRecords((prev) => {
             const next = { ...prev }
-            for (const opt of mapped) next[String(opt.value)] = opt.label
+            for (const r of records) next[String(r?.[idField] ?? r?.id ?? r?._id)] = r
             return next
           })
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
-        setOptions([])
+        setOptionRecords([])
       } finally {
         setLoading(false)
       }
     },
-    [dataSource, referenceTo, hasDataSource, recordToOption],
+    [dataSource, referenceTo, hasDataSource, idField],
   )
 
   // Resolve labels for already-selected ids that we haven't seen yet
   React.useEffect(() => {
     if (!hasDataSource || selectedIds.length === 0) return
-    const missing = selectedIds.filter((id) => !(id in resolved))
+    const missing = selectedIds.filter((id) => !(id in resolvedRecords))
     if (missing.length === 0) return
     let cancelled = false
     ;(async () => {
@@ -2789,12 +2806,9 @@ function LookupValuePicker({ field, value, multiple, onChange }: LookupValuePick
         })
         const records: any[] = result?.data ?? result ?? []
         if (cancelled) return
-        setResolved((prev) => {
+        setResolvedRecords((prev) => {
           const next = { ...prev }
-          for (const r of records) {
-            const opt = recordToOption(r)
-            next[String(opt.value)] = opt.label
-          }
+          for (const r of records) next[String(r?.[idField] ?? r?.id ?? r?._id)] = r
           return next
         })
       } catch {
@@ -2804,7 +2818,7 @@ function LookupValuePicker({ field, value, multiple, onChange }: LookupValuePick
     return () => {
       cancelled = true
     }
-  }, [selectedIds, hasDataSource, dataSource, referenceTo, idField, recordToOption, resolved])
+  }, [selectedIds, hasDataSource, dataSource, referenceTo, idField, resolvedRecords])
 
   // Fetch initial data when popover opens
   React.useEffect(() => {

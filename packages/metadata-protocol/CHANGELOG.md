@@ -1,5 +1,743 @@
 # @objectstack/metadata-protocol
 
+## 18.6.0
+
+### Minor Changes
+
+- d10f652: feat(spec, metadata-protocol): a seed dataset can declare `dependsOn`, the objects it loads after, for an order no lookup field gives
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #34277 — `skills/objectstack-data/references/seeds.md` (its relationship section and its best-practice table tell the author to order seeds parent before child in the exported array, which orders nothing; `dependsOn` is not taught)
+  
+  The seed loader orders a load's datasets by the `lookup`, `master_detail` and `user` fields between their objects; the order of the stack's `data` array only breaks ties. A dataset whose `beforeInsert` hook reads another seeded object had no way to say so, and its hook ran against whatever that object held at the moment, which an unrelated dataset could change. A rating scored from seeded bands, ordered by its one lookup to its rule, was written a wave before the bands and scored every row as if none existed.
+  
+  - **`Seed.dependsOn: string[]` names objects.** Each name adds an edge to the same dependency graph the lookup fields feed, so the dataset's object loads after the named object's rows: `defineSeed(CustomerRating, { dependsOn: ['crm_rating_band'], records })`. The edges of several datasets of one object are pooled onto that object, and the returned `dependencyGraph.nodes[].dependsOn` lists them beside the lookup edges.
+  - **A load that declares none keeps its order exactly.** Nothing changes for an app that does not write the key.
+  - **A declaration the load cannot honour refuses the whole load, before any row is written.** The load answers `success: false` with one `errors[]` entry per refused declaration (`field: 'dependsOn'`, `sourceObject` the declaring object, `targetObject` the named one), and every caller reports it the way it reports any failed load. Three cases: a name that is the dataset's own object; a name no other dataset of the same load seeds (a misspelling, or an object whose datasets `env` or `locale` scoped out of this load, which the message says); and a declared edge that closes a cycle with the other edges, lookups included, with the cycle spelled out object by object. A cycle made of lookup fields alone still loads in deferred passes, as before.
+  - **A refused boot seed reads as a failed seed.** The single-tenant boot seed (`AppPlugin`) counts each error of a load refused before any dataset ran as a rejected row in the outcome it records, so `os dev` / `os serve` print the source with a warning on the banner's `Seeds:` line and the `objectstack:seed-settled` message answers `ok: false`; before, a refused load wrote nothing and read clean on both.
+  - **`defineSeed` refuses a dataset that names its own object** when it runs. The other two cases need the whole load, so only the loader can judge them.
+  
+  A seed published on its own (a draft publish) is its own load, so a published seed whose `dependsOn` names an object seeded by another item is refused until the two are published together.
+- 071323e: feat(i18n): a dependent package's `fieldPatches` text is translated from that package's own translations
+  
+  Clause-②: yes (widening) — `TranslateDocumentOptions` gains an exported member, `patchBundles`; nothing accepted before is refused
+  Metadata-protocol: semantic — a dependent package's translations of its own `fieldPatches` text now take effect on `/meta` and on the public form; on a patched slot the pair `.custom` translation is laid over the package's locale by locale, so a pair that translates the slot only in a fallback locale (`en`) no longer wins over the package's translation in the requested one (`zh-CN`)
+  Skills-docs: follow-up #34785
+  
+  A code package that relabels a vendor's field with `fieldPatches` (ADR-0146 D10) can now translate the text it writes. Before this change, a patched label, help text, description or option label was served exactly as the patch wrote it in every locale: a patched slot read only the pair `.custom` package's catalog, and the deployment catalog merges every package's translations with the package ids dropped, so the patching package's own `zh-CN` rows for the slot never applied.
+  
+  A patched slot now reads, in order:
+  
+  1. the pair `.custom` package's translation of that key, as before, laid over the package's translations locale by locale along the fallback chain;
+  2. the translations of the code package whose patch wrote the served value: its shipped `translations` and its own active translation rows;
+  3. the served text.
+  
+  The slots read this way are the field `label`, the help text (`inlineHelpText`, or `description` when the field has none), an option `label` on a field not bound to a shared picklist, and, through the same rule, `inlineTitle` and `relatedListTitle`. The owner's translation of the text the patch replaced never applies to a patched slot, as before. A slot the patch did not write (a tenant's rename on top of it) keeps its own text. When two packages patch the same slot, the slot reads the package whose text it serves. Nothing is stamped on the served document: which package wrote a slot is found by comparing the served value with the packaged base plus that one package's patches (ADR-0029 D9.2a).
+  
+  New reads beside the option: `SchemaRegistry.getPackagedFieldPatchBases(name)` and `ObjectStackProtocolImplementation.getPackagedFieldPatchBases(name)` (one entry per patching code package, highest precedence first) and `ObjectStackProtocolImplementation.getPackageTranslationBundle(packageId)` (one package's own translations, locale-keyed). The `/meta` object item and list reads and `GET /forms/:slug` pass `patchBundles` to the translator. The public form reads no pair translation, before this change as after it, so there a patched slot reads the package's translation, then the text.
+  
+  The save door's inverse of the read (the translated-echo restore that keeps a Studio save in another locale from storing the read's translation) translates with the same patch translations. A zh-CN read of a patched label, saved back whole, stores the patch text and not the patching package's translation, both over a stored row that carries the patch text and with no stored row; an `en` read after it serves the patch text.
+- 50d655f: fix(metadata-protocol)!: a package-less action save on an object no package binds the name to writes the environment's own action
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  Skills-docs: none — no skill under `skills/**` teaches where a package-less save of a writable package's item is written; `skills/objectstack-platform` teaches only the managed base's `.custom` pair, whose refusals do not move.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answer is which stored row a package-less save of an action writes; a row an older build re-addressed into a package stays as it was stored, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** (ADR-0150 D4, maintainer ruling 6902014292): an action is keyed `(package, objectName, name)`. A package-less `PUT /api/v1/meta/action/NAME` (no `?package=`) whose body binds an object that no package holding the name binds it to now writes the environment's own action on that object. Every package's action of that name stays where it is.
+  
+  The moved answers, for a writable package `P` holding `approve` on `invoice`:
+  
+  - a package-less save of `approve` bound to `task` was written into `P` (receipt `package=P`) and moved `P`'s action from `invoice` to `task`; it now writes the environment's own row on `task` (a receipt with no package), and `P`'s action on `invoice` is untouched: `GET /meta/action/approve?package=P` still serves it and `/actions/invoice/approve` still runs it.
+  - the same save with an object-less body: it now writes the environment's own object-less row.
+  - with two packages holding `approve` on two other objects, the save was refused `409 RESOURCE_CONFLICT` naming both; it now writes the environment's own row.
+  - with `P` the sole holder and `P` disabled, the save was written into `P`'s row; it now writes the environment's own row on `task`.
+  - with the sole row on `invoice` bound to a package that is not installed, the save was refused `422`; it now writes the environment's own row on `task`.
+  - with `P` on `invoice` and `Q` on `product`, a draft save bound to `task` was refused `409` naming both; it now writes the environment's own draft, the per-item publish naming no package promotes it into the environment's own row, and the draft discard naming no package removes it (each was `409` naming both).
+  - with `P` (enabled) on `invoice` and a disabled package `Q` on `task`, the save on `task` was written into `P` and moved its action to `task`; it is now judged over the holders on `task` only, so it writes `Q`'s row (as a save over a name only a disabled package holds does), and `P`'s action on `invoice` is untouched.
+  - with `P` (enabled) on `invoice`, and on `task` an enabled `Q` and a disabled `R`, the save on `task` was refused `409` naming `P` and `Q`; it is now judged over the holders on `task` only, so it writes `Q`'s row, and `P`'s action on `invoice` is untouched. Without `R` the same save is still refused `409` naming `P` and `Q` (below).
+  - a draft save (`PUT …?mode=draft`) of `approve` bound to `task` was written as `P`'s draft (receipt `package=P`), and the per-item publish naming no package (`POST /meta/action/approve/publish`) promoted it over `P`'s action on `invoice`; the draft is now the environment's own draft (a receipt with no package), and its publish writes the environment's own row on `task`. Beside a sole binding to a package that is not installed, the draft save was refused `422`; it now writes the environment's own draft, and its publish the environment's own row.
+  - with the environment's draft on `task` stored, a package-less draft save on `invoice` adopted that draft into `P` and rewrote it on `invoice`, so the environment's pending draft was gone; it now writes `P`'s draft on `invoice` and the environment's draft on `task` stays.
+  - with a package-unbound row on `invoice` beside `P`'s (`P`'s customization, stored by the other save order or an older build), the save bound to `task` was written into `P` and moved its action; it is now refused `409 RESOURCE_CONFLICT` naming `P`, and nothing is written. The same for a package-unbound draft on `invoice` (`P`'s pending change) and a draft save bound to `task`, which adopted that draft into `P` and rewrote it on `task`. A draft save bound to `task` beside that package-unbound row on `invoice` is refused the same way, because the environment's draft would be published into that one row (it was written as `P`'s draft, whose publish moved `P`'s action onto `task`). With a package-unbound draft on `task` already stored beside that row, the per-item publish naming no package (`POST /meta/action/approve/publish`; in process, also one stating `packageId: null`) is refused `409 RESOURCE_CONFLICT` naming `P`, and the row and the draft stay (it was promoted into `P`'s row, moving `P`'s action onto `task`). The environment keeps one package-unbound row and one package-unbound draft per action name, and here that one is `P`'s: edit it on `invoice`, or give the environment's own action on `task` another name.
+  
+  Unchanged: the same save or draft save on `invoice` (the object `P` binds) is still `P`'s customization, and its publish is `P`'s row; a package on `invoice` and another on `task`, both enabled, still answer a save on `task` with `409` naming both; an enabled package on `task` beside a disabled package on `invoice` still answers a save on `task` by writing the enabled package's row; a managed (code) package's action name is still refused `403 NOT_OVERRIDABLE`; every type other than `action`.
+  
+  The two modes still differ for one enabled and one disabled holder with the body on the disabled holder's object: the publish-mode save writes the disabled holder's row, while the draft save is refused `409` naming both, as it was.
+  
+  One slot per name, as before: the environment's own action row (and its draft) is one package-unbound row per name, so a package-less save of the environment's action bound to another object that no package binds the name to (`product`, with the environment's row on `task`) rewrites that row onto `product`, as a save of a name no package holds always has; `/actions/_env/task/approve` then answers nothing. The same for the environment's draft and a draft save.
+  
+  Not moved yet (#33904, the read, list and delete half): the environment's row on `task` has no by-name read, since `GET /meta/action/approve` naming no package still serves `P`'s action; it is not in `GET /meta/action`; and a package-less `DELETE /meta/action/approve` removes `P`'s row on `invoice`, not the environment's. The version the read naming no package serves in process (`getMetaItem`) is `P`'s, so a save on `task` that carries it as its parent (`parentVersion`) is refused `409 METADATA_CONFLICT`, before and after the environment's row exists; send the save without a parent. Over REST the bare read of an action carries no `version` to send. The one address that reaches the environment's row today is the action route `/actions/_env/task/approve`; a read or delete naming `P` (`?package=P`) reaches `P`'s.
+  
+  With `P`'s own draft and the environment's draft both stored, the per-item publish naming no package promotes `P`'s draft (its receipt names `P`) and the draft discard naming no package removes `P`'s draft; the environment's draft stays, and those doors reach it once `P` has no draft. With two or more packages holding the name on other objects, they act on the environment's draft (above).
+  
+  Until #33904 lands, no meta address deletes only the environment's own action: do not send a package-less delete of the name to remove it, because that removes the package's action. A package's own action is moved to another object by a save naming the package (`?package=P`), as before. A package's action that an older build moved to another object stays where it was stored.
+- d4b2a75: feat(spec): a named import mapping's label is translatable at `mappings.NAME.label`
+  
+  Clause-②: yes (widening) — a new optional translation group `mappings` (one key per mapping, `label`) on `TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema` and `TranslationItemSchema`, a new `translateMapping` export from `@objectstack/spec/system` registered for the `mapping` type, and a new `ObjectStackProtocolImplementation.getPackagedMappingBase`; nothing that parsed before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #34962 (skills/objectstack-i18n/SKILL.md group list)
+  
+  An import mapping's `label` is the name the import wizard offers it by, and until now it showed the authored text in every locale: the bundle had no key for it. A bundle now translates it:
+  
+  ```ts
+  'zh-CN': { mappings: { crm_lead_feed: { label: '线索导入' } } }
+  ```
+  
+  - `GET /meta/mapping` (list and item) serves the label in the reader's locale. A shipped mapping overridden through its `.custom` pair follows the ADR-0146 D2 order every other translated label follows: a label the override changed keeps its own text unless the pair translates it, and a label it left alone takes the pair's translation, then the package's. The packaged base is now available for `mapping` (`getPackagedMappingBase`), so the override's label is judged against it.
+  - Only `label` has a key. A mapping declares no `description`, and its `fieldMapping` holds column and field names rather than copy — the refusal for either names where to translate instead (a target field's label is `objects.OBJECT.fields.FIELD.label`). The singular `mapping` and the label aliases `name` / `title` are refused with the declared spelling named.
+  - `os i18n extract` scaffolds the key, `os i18n check` reports a gap as `i18n/missing-mapping`, and `os validate` reports a key naming no mapping of the stack as `translation-target-unknown`, with the nearest name suggested.
+  - Studio's translation preview shows the group as **Import Mappings** (导入映射), and the Studio translation table walks it.
+
+### Patch Changes
+
+- 9404cb1: fix(metadata-protocol): a bare save of a name an enabled and a disabled package both hold writes the enabled holder's row, where the bare read serves it
+  
+  Clause-②: yes (widening) — a bare save of a name an enabled and a disabled package both hold, refused 409 naming both when each held a stored row, now writes the enabled holder's row; nothing the save door accepted is refused
+  Metadata-protocol: none
+  
+  A save that names no package (`PUT /meta/:type/:name` with no `?package=`, or `saveMetaItem` with no `packageId`) now resolves its address the way the read at the same address does (ADR-0150 D3/D5). A disabled package holds nothing an address reaches. Before this fix the save door still counted a disabled package as a holder of the name. So when an enabled package E and a disabled package D both held the name, the save could:
+  
+  - write a new package-unbound row, an environment-own item that shadows both packages once D is enabled again;
+  - update D's row silently, so the next read kept serving E's item and the edit never showed;
+  - refuse 409 naming D, while the read served E without ambiguity.
+  
+  The bare save of such a name is now E's write (ADR-0150 D4). It writes E's row, D's row stays byte-unchanged, and D is never named. When two or more enabled packages hold the name beside the disabled one, the save refuses 409 and names only the enabled ones. When a package-unbound row already stands in for the item, the save edits that row, which is the one the read serves. Once D is enabled again, the bare read and the bare save both answer 409 naming both packages. A name no disabled package holds saves exactly as before. So does a name only disabled packages hold.
+  
+  What moves, for a bare save of a name held by an enabled package E and a disabled package D:
+  
+  - FROM D's row silently updated TO E's row written, D's row unchanged.
+  - FROM a package-unbound row written TO a row bound to E.
+  - FROM 409 naming E and D TO E's row updated (a widening: the save now writes where it refused).
+  
+  Nothing to migrate. To edit D's own row while D is disabled, name it: `?package=` on the REST door, `packageId` in process.
+- d0737f6: fix(metadata-protocol): after a deployment removes its customization of a name two packages ship, the deleted body is no longer served from the registry until the next reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The case: a stored row bound to an installed package that ships no item of the name (an App's customization, ADR-0146), on a name two packages ship, where the pair relation names no single base. After that row was deleted, the registry heal's baseline read was refused (two holders), and the heal stopped with an `error` line. For a `flow` or a `permission`, whose bound row sits in the name's bare registry slot, the removed row's entry stayed there. Until the next reload, a read naming the customizing package served the deleted body, and a read naming either holder was refused with that package as its candidate, although its row no longer existed.
+  
+  The heal now retires that entry, as it already did for a package-less row (seat ruling 6812637203 Q2). Entry kept → retired, on the epic seat's ruling 6818436831. Retiring picks no holder and registers no baseline. Each holder's read answers its own item again, the read naming no package is the 409 naming both holders, and the list shows the two holders only. The retire verb still refuses a packaged artifact, so no holder's item can be removed.
+  
+  The other package-scoped types already retired the bound row's own package slot. For them only the `error` line changes: it now says that slot was retired, where it said the entry was left as it was. A peer replica converging on a cluster signal that names no package still keeps the logged stop, because it cannot tell whose entry the bare slot holds.
+- 661ede2: fix(metadata-protocol, rest)!: the layered read of a name two packages hold refuses as the plain read does, naming the holders as `details.candidates` (ADR-0150 D3/D5)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of a name two packages hold, which now refuse as the plain read of that name already did: no stored row, layer, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a reader of the layers, or of the REST published view, of a name two or more served packages register in code, naming no package. Such a name has no one holder (ADR-0150 D3/D5), and the plain read already refused it. Three answers move, measured in both registration orders:
+  
+  - FROM: on a host that wires no engine for the REST door chain, `GET /meta/:type/:name/layers` (and `?layers=true`) answered 200 with the layers of the holder that registered first. TO: it answers `409 RESOURCE_CONFLICT` naming both holders as `details.candidates`.
+  - FROM: in process, the protocol's `getMetaItemLayered({ type, name })` with no `packageId` resolved the holder that registered first. TO: it throws `PackageScopedNameRefusedError` (`RESOURCE_CONFLICT`, 409) naming both, as `getMetaItem` does.
+  - FROM: on a REST host with no `objectQLProvider`, `GET /meta/:type/:name/published` served the name's package-unbound active row (200) when one stands. With no such row, it went on past its overlay read to the published exit: what the host's metadata service `getPublished` answers, or `501 NOT_IMPLEMENTED` when the host resolves no metadata service. TO: it answers `409 RESOURCE_CONFLICT`, without `details.candidates`. The dispatcher's `/published`, where its engine registry is not reachable, swallows the same refusal. With no such row it serves its snapshot as before. With one, it served that row and now serves the code snapshot instead.
+  
+  **Not moved.** A name one package holds, and every read naming the package (`?package=`, `packageId`), answer as before. On a host whose door chain has an engine, `/layers` already refused 409; it now also names the holders. The save and delete doors do not move.
+  
+  The fix for a caller: name the package whose layers it means.
+  
+  `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`) of a name two or more packages hold, read naming no package, now answers like the plain read on every exit and on both transports: `409 RESOURCE_CONFLICT` with the holders as `details.candidates` (`[{ kind: 'package', packageId }, …]`), never one holder's layers.
+  
+  - A name two served packages register in code: the protocol's layered read (`getMetaItemLayered`) asks the registry's package-scoped resolver before it reads any layer, as `getMetaItem` does, so it throws the same `PackageScopedNameRefusedError` naming both, in process too, whatever the metadata service holds. It used to answer the holder that registered first, and so did the REST door on a host that wires no engine for its door chain. `?package=` still reads each holder's layers; a name one package holds is unchanged.
+  - The REST `/layers` route's catch carries the candidates of a package-scoped refusal, as the plain read's catch does. Before, it answered the refusal by its sentence alone (the dispatcher already carried them).
+  - A name whose active rows two packages hold keeps the package-less writes' refusal (its sentence, code, status and `?package=` remedy) and gains the same `details.candidates`. The save and delete doors' answer does not move.
+  - Stored-row holders beside a disabled package keep their in-process answer: the protocol's layered read still serves its in-process readers there, and the door refuses.
+- a00b422: fix(metadata-protocol): two namespaces' stored permission sets of one name are each kept and served at their own package
+  
+  Clause-②: yes (widening) — widened: a save, publish or restore of a permission set whose name a package of another namespace stores moves from `422 NAMESPACE_CONFLICT` to saved; and a restart over a stored set of one package beside a set of the name another namespace's package ships or declares moves from a boot refused with `422 NAMESPACE_CONFLICT` to a boot that serves each package's set at its package.
+  Metadata-protocol: none
+  
+  A permission set is `(package, name)` (ADR-0150 D2). The host kernel now keeps a stored permission set bound to a package in that package's own registry slot, at the save's write-through and at the boot hydration alike. It used to put every stored set of a name into the name's one bare registry entry, so a second package's set of the name took the first one's place. The save door therefore refused it, even when the two packages had two namespaces, and a restart over a stored set beside another namespace's shipped or declared set of the name was refused.
+  
+  What moves, for packages `crm` and `hr` of two namespaces:
+  
+  - FROM `422 NAMESPACE_CONFLICT` naming `crm` TO saved, for `hr`'s save, publish or restore of a set whose name `crm` stores. `crm`'s own save of a set of the name beside the one `hr` stores, and a third namespace's, are admitted too. A grant bound to each package confers that package's set, in every order the boot reads the stored rows.
+  - FROM a boot refused with `422 NAMESPACE_CONFLICT` TO a boot that serves each set at its package, for a restart over a set `hr` stores beside a set of the name `crm` ships or declares. `crm` keeps serving the set it ships, `hr` serves the set it stores, and the stored set is tenant-authored and bound to `hr`. The packaged-permission-set lock reads only the shipped set as packaged.
+  - A delete of one package's stored set retires that package's slot alone, and the other package's set stays served, before and after a restart.
+  - The refusal that stays (two packages of one namespace, a platform namespace, a package with no namespace, the environment, a name the platform requests by spelling) now names steps the writer can take: rename its own set, or delete a set the environment or another package stores. It no longer tells the writer to rename the set inside another package. Envelope unchanged: `422 NAMESPACE_CONFLICT`.
+  
+  Unchanged: a package's stored set counts as its holding of the name at every name check. A package of the same namespace declaring or registering the name beside it is refused with `422 NAMESPACE_CONFLICT`, and so is a cold boot where it is held against a package that declares or ships the name (ADR-0048 N.3), including a stored set bound to the declaring package itself. A grant naming no package of a name two packages hold confers nothing (ADR-0150 D3). A package-less stored permission row keeps the name's bare registry entry, as before.
+- 36c0e96: fix(metadata-protocol): the layered read naming no package serves an App pair's declared override of a bundle addition's own member as `effective`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An App's customization pair (`<app>.custom`) can store a row that declares `overrides: { package: Z }` for the bundle member a bundle addition Z ships, for example the `fr-FR` locale Z adds to an email template another package of the App ships in `en-US`. The plain read naming no package (`?member=fr-FR`) and `?package=Z&member=fr-FR&layers=true` already served that row. The layered read naming no package (`?member=fr-FR&layers=true`, `getMetaItemLayered` without a package) answered Z's shipped `fr-FR` as `effective`, with no `overlay`, and so disagreed with the read it describes.
+  
+  It now reads such a member at the one enabled package that ships it, as the plain read does: `code` is Z's shipped member, `overlay` the pair's row, `effective` the override, and the envelope names Z. The pending draft layer stays the one the strict draft read serves. Nothing else moves: a member two packages ship, a row declaring another package, an undeclared pair row, the environment's own item and a disabled shipper answer as before. No stored row changes shape.
+- 3cf26c1: fix(metadata-protocol): the read naming no package serves an App pair's declared override of a bundle addition's own member
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An App's customization pair (`<app>.custom`) can store a row that declares `overrides: { package: Z }` for the bundle member a bundle addition Z ships, for example the `fr-FR` locale Z adds to an email template another package of the App ships in `en-US`. `?package=Z&member=fr-FR`, Z's lists and the registry's slot at Z already served that row as Z's item. The read naming no package (`?member=fr-FR`, and the execution read a send makes without a package) served Z's shipped `fr-FR` instead and dropped the declared override.
+  
+  That read now takes such a member at the one enabled package that ships it when an active row of the member is that package's declared override, so it serves what Z's own address serves. Nothing else moves: a member two packages ship, a row declaring another package, an undeclared pair row, the environment's own item, a disabled shipper and the strict draft read answer as before. No stored row changes shape.
+- 7d06248: fix(metadata-protocol): the read naming no bundle member serves an App pair's declared override of the canonical member a bundle addition ships
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A read that names no bundle member addresses the canonical one (`en-US` for an email template), the same request as `?member=en-US`. When a bundle addition Z ships that canonical member beside another package's member of the same name (for example X ships `fr-FR`), and the App's customization pair (`<app>.custom`) stores a row declaring `overrides: { package: Z }` for it, `?member=en-US` already served the override. The plain read, the execution read and the layered read naming no member (`GET /meta/email_template/:name`, `?layers=true`) served Z's shipped `en-US` instead, and `/published`, which asks the layered read for its overlay exit, found no runtime-published row there.
+  
+  They now judge the canonical member as `?member=en-US` does and read it at Z: the override is served, the layered `effective` is the override with Z's shipped member as `code`, and `/published` serves the override. The strict draft read and the layered draft layer stay where they were. Nothing else moves: no override declared, an undeclared pair row, a row declaring another package (still refused naming both), another package's own member, the environment's own item, a disabled shipper, and a bundle that ships no canonical member answer as before. No stored row changes shape.
+- b1efa37: feat(metadata-protocol, spec, lint)!: a post-publish probe finding carries the sentence for the person who published, in their language
+  
+  Clause-②: yes (narrowing) — narrowed: `PublishPackageDraftsResponseSchema.probes` FROM `z.unknown()` (any value parses; input and output type `unknown`) → TO `BuildProbeReportSchema` (only the report parses; type `BuildProbeReport`). Widened: the optional `RuntimeBuildIssue.userMessage`, the new `RuntimeBuildIssueSchema` / `BuildProbeReportSchema` exports, and `userTextLocaleOf` / `renderUserText` / `UserTextEntry` from `@objectstack/lint`.
+  Metadata-protocol: added
+  Skills-docs: follow-up #34552
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key a metadata author writes is removed, renamed or re-shaped and no stored row changes shape: `probes` is a field of the publish-drafts RESPONSE, written by the platform's own probe pass, which emits only the report. Nothing exists for `objectstack migrate meta` to rewrite; the code that meets the narrowing is a hand-written producer or test double of that response, and the TypeScript compiler names it at its call site. -->
+  
+  **BREAKING** for code that builds a `PublishPackageDraftsResponse` by hand (another protocol host, a test double) with a `probes` value that is not the report, or that parses such a value through `PublishPackageDraftsResponseSchema`: it used to parse, and it is now refused at `probes`. The fix: write `probes` as `{ issues: RuntimeBuildIssue[], checked: { seeds, views, widgets, objects } }`, or leave it out. A reader of `probes` loses nothing: the type moves from `unknown` to the report, so a cast is no longer needed.
+  
+  `POST /packages/:id/publish-drafts` answers with `probes`, the report of the checks that run after a publish (ADR-0038 L3). Each finding in `probes.issues[]` now carries `userMessage`: one sentence for the person who asked for the app, composed by the probe in the request's language. The language is the request's locale, else the workspace default, else English, over the eleven platform locales. A sentence names a dashboard, widget, dataset, view or object by its label where the probe can read one, and by its API name otherwise. An object the publishing account was refused, or whose read access the server could not decide, is named by the API name the refusal carries, and the probe reads nothing of it.
+  
+  `message` and `fix` are unchanged: they stay the English text written for the agent that published, and `code` stays the stable id. A client shows `userMessage` to a person and no longer needs a per-code translation table; when the field is absent it shows its own generic sentence. All eight probe codes have sentences: `seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, `object_field_ref_rule_failed`, `widget_not_probed`, `empty_query`, `widget_query_failed` and `probes_unavailable`.
+  
+  `@objectstack/spec`: `probes` on `PublishPackageDraftsResponseSchema` is modeled. It was `z.unknown()`; it is now `BuildProbeReportSchema` (`issues[]` of `RuntimeBuildIssueSchema`, and `checked` with the `seeds`, `views`, `widgets` and `objects` counts), member for member what the probe pass returns. The inferred type of `probes` changes from `unknown` to the report, so code that reads it no longer needs a cast. A `probes` value that is not the report no longer parses through the schema; the platform's own producer emits nothing else.
+  
+  `@objectstack/metadata-protocol`: `RuntimeBuildIssue` and `BuildProbeReport` are now re-exports of the spec types, and `runBuildProbes` takes `userTextLocales`, which `publishPackageDrafts` fills from the request.
+  
+  `@objectstack/lint`: `userTextLocaleOf` and `renderUserText`, the locale ladder behind `findingUserMessage`, are exported (also from `@objectstack/lint/runtime`) with the `UserTextEntry` type, so a producer that keeps its own sentences uses the same ladder.
+- 69783b7: fix(metadata-protocol)!: the bare item read refuses a package-less row beside two packages' rows, and reads a row-held base at its dependent's added member (ADR-0150 D3, red line 2)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — `skills/objectstack-platform/SKILL.md` (the ADR-0146 paragraph) and `content/docs/concepts/metadata-lifecycle.mdx` teach that a locale a dependent adds under a base's name is served only under its own `?package=`, and that the read naming no package answers `404` for it. Both sentences were true only for a base that ships the name, and are now true for a row-held base too, at a dependent's named locale other than the canonical one, however many dependents each add one. Nothing in `skills/**` or `content/docs/**` teaches what the read naming no package answers for a package-less row beside two packages' rows. No taught sentence moves.
+  
+  <!-- adr-0087: registered row-held-base-addition-bare-read-at-base, two-row-holders-bare-read-refused -->
+  
+  **BREAKING**: two answers of the `/meta` item read that names no package move from served to refused. Name the package (`?package=`) to read the row, as before.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), every save order, both registration orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app stores either shape.
+  
+  - **A package-less row beside two packages' rows of a name no package ships** (packages E and F each store a row of `dash`, and a package-less row of `dash` is stored too). The plain read `GET /meta/dashboard/dash`, `GET /meta/dashboard/dash/published` and the execution read move FROM the row stored first (E's, F's or the package-less one) TO `409 RESOURCE_CONFLICT` naming E and F in `details.candidates`. `GET /meta/dashboard/dash/layers` already refused it, and still does with the package-less writes' sentence. The package-less row is never served in their place: it is a customization of a name it cannot say whose (red line 2). After a reboot, the registry's environment item of such a name is the bare slot's entry, the row hydrated last. With rows bound to two or more packages beside it, that entry no longer counts as the environment's own item.
+  - **A member that only a dependent's addition holds, over a base that holds the name only as stored rows** (base A stores `welcome` in `en-US`, dependent D, which declares A, stores `fr-FR`, and no package ships `welcome`). `GET /meta/email_template/welcome?member=fr-FR`, `GET /meta/email_template/welcome/layers?member=fr-FR` and the execution read at `fr-FR` move FROM D's row (200) TO `404 RESOURCE_NOT_FOUND`. That is the answer the same reads already gave when A ships `welcome`: a bundle addition holds no name, so the read takes the base's address, which holds no `fr-FR`. Each dependent is judged against its own declared dependencies, so with a second dependent D2 storing `de-DE` the reads at `fr-FR` and at `de-DE` both answer `404`, in either registration order. A dependent that also stores a member the base stores (D storing `en-US` as well as `fr-FR`) is still an addition, as the registry judges it (a member held only as stored rows is no clash), so its `fr-FR` answers `404` too.
+  
+  **Not moved.** One package's row beside a package-less row is that package's, served on every bare door in both save orders, before and after a reboot. Each exact address (`?package=E`, `?package=F`, `?package=D&member=fr-FR`) serves its own row. The base's own member (`?member=en-US`) is the base's; where the dependent stores it too over a row-held base, the read there refuses naming both, as before. The read naming no member (the canonical member, `GET /meta/email_template/welcome` and `/published`) is not moved, even where a dependent stores the canonical member over a row-held base that holds only another one. A name with a disabled holder keeps its own judgment (#32354), and a package-less row beside a disabled holder leaves the read as it was (that shape, with the plain read following save order while `/layers` refuses, is #34440). The canonical member of a shipped base that holds only another member answers differently before and after a restart (#34441); this change does not move it. The writes do not move: in the first shape the save naming no package was already refused `409 RESOURCE_CONFLICT` naming E and F, writing nothing, and still is, so it now agrees with the read. A save that edits a package-unbound row while the read refuses is another shape, two enabled packages that ship the name with no package's row stored (#34348, decision open); this change does not move it either.
+  
+  The ADR-0087 entry `row-held-base-addition-bare-read-at-base` registers the second move. The first is the narrowing `two-row-holders-bare-read-refused` already registers: two or more enabled packages hold the name only as stored rows. That entry's `reason` now says how the holders are judged: by the packages the rows are bound to at the member read, with the registry's holders only helping recognise a customization pair.
+- 5af956f: fix(objectql)!: a by-name read of a doc that names no package refuses a name two enabled packages hold, naming both
+  
+  Clause-②: no (narrowing) — narrowed: a by-name read of a doc that names no package (`GET /meta/doc/NAME` and the doors that read through it, `MetadataFacade.get`/`getEntry`), of a name two or more enabled packages hold, moves from one holder's body, picked by registration order, to `409 RESOURCE_CONFLICT` naming every holder. Unchanged: one holder, a read that names the package, the environment's own item.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is the answer a by-name doc read gives when two packages ship the name, so there is nothing for a migration to rewrite and no tombstone -->
+  
+  **BREAKING** for a caller that reads a doc by its name alone while two enabled packages ship that name: it now gets `409 RESOURCE_CONFLICT` naming the packages, where it got one of them. The fix: name the package (`?package=PACKAGE_ID` on the REST door, the package id in process). A doc name one package ships reads as before.
+  
+  A read of a `doc` by its name alone (`GET /api/v1/meta/doc/NAME`, the doors that read through it, and `MetadataFacade.get('doc', name)` / `getEntry`) answered one holder's doc when two packages ship the same name: the registry's first-registered copy, or on a composed server the metadata service's copy, which is the package registered last. It now answers `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`), naming every enabled package that holds the name, in either registration order. `MetadataFacade.exists` answers `true` for such a name.
+  
+  Unchanged: a doc name one package holds reads as before; a read that names the package (`?package=` on the REST door, a package caller in process) is not changed; the environment's own doc of the name, as the server holds it, still answers first. A disabled package holds no name: beside one enabled holder the read is not refused, and the facade serves the enabled holder's doc. `doc` keeps its global literal name and its addressing (ADR-0150 D1 bucket 1).
+  
+  What moves, for a doc name two enabled packages ship: the answer was `200` with one holder's doc, chosen by registration order; it is `409 RESOURCE_CONFLICT` naming each holder. No metadata, no stored row and no export changes, so there is nothing to rewrite: a caller that wants one of the docs names its package.
+- bb17350: fix(metadata-protocol)!: the diff door of a by-package name refuses the bare name two holders hold, and `?package=` compares one holder's versions (ADR-0150 D3/D4, #33308)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/diff` naming no package is refused `409 RESOURCE_CONFLICT` before any version is read wherever the history and rollback doors refuse the name (two or more row slots hold it, `details.candidates` naming every holder, or the bare plain read refuses it), where it answered one holder's version compared against another holder's as one item's change; an addressed diff (`?package=`) naming a version of another holder, or a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is, and nothing is compared. Widened: the door accepts `?package=` on a by-package type (the `/layers?package=` spelling), which compares that holder's versions only, its own active row as the default `to` side and its own nearest earlier differing version as the default `from` side; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds diffs bare exactly as on `main`.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the diff door, and the docs that do (`content/docs/api/client-sdk.mdx`, `content/docs/permissions/system-context.mdx`, `content/docs/ui/apps.mdx`) name the route without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `DiffMetaItemRequest` with its `packageId`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (`DiffMetaItemRequestSchema` is a new schema declaring a request the door already took, its two bounds read as the same whole numbers as before, plus the optional `packageId`), and no stored row changes shape. What moves is which versions the door compares, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare diff request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/diff?from=N&to=M` TO `GET /meta/TYPE/NAME/diff?package=PKG&from=N&to=M`, with both versions that holder's (its `?package=` history lists them), once per holder the `409` names. The SDK's `client.meta.diffItem` sends no `package`, so for an SDK caller the TO request is a raw request.
+  
+  `?package=` names a holder exactly as the history and rollback doors read it (`historySlotOf`): the row a read naming that package serves, else the package's own slot when it ships the name; a package that neither holds nor ships the name is refused `409` (`not-held-by-qualifier`) while another row slot holds the name; with no stored row of the name it answers an empty comparison. `all` and the empty string name no package.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (the new `DiffMetaItemRequestSchema`, declaring the diff door's request with its two whole-number bounds and `packageId`), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`diffMetaItem` takes `packageId`) and `@objectstack/rest` (the diff door accepts `?package=` and reads its bounds through the declaration).
+- 66f6638: fix(metadata-protocol,rest,runtime)!: a name only disabled packages hold answers 404 at `_env`, and an environment customization of such a name is hidden until a holder is enabled again (ADR-0150 D3, D4)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: updated here — content/docs/data-modeling/import-mappings.mdx (no `skills/**` file teaches an `_env` answer)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads under a reversible package state: no stored row is changed or deleted, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a read of an environment customization of a name whose every holding package is disabled. Such a customization is a row saved without a package, for a name an installed package holds. It belongs to that package (ADR-0150 D4), and a disabled package holds no name (ADR-0150 D3).
+  
+  - **The read that names no package (`GET /meta/:type/:name`, and the execution read).** When every package holding the name is disabled, this read now answers as if the customization were not saved: `404`, where it served the row. That includes a translation the package never shipped, such as an email template's `fr-FR` that only the environment wrote. A customization at a member the package ships was already hidden.
+  - **The list and the execution list (`GET /meta/:type`).** They now leave out the same customization, so they agree with the read of the name: while every package holding the name is disabled, neither list carries any item of it. Enable a holder again and both list it again.
+  - **A save or delete naming no package while every holder is disabled.** A save at a member the package never ships is accepted and kept, as before, but it is now hidden from the reads above until a holder is enabled again. A delete of it still removes the row. A save at a member the package ships is still refused `403 NOT_OVERRIDABLE`.
+  - **`GET /meta/:type/_env/:name`.** When every package holding the name is disabled, the environment address now answers `404`, as for a name no package holds, on both the REST server and the runtime dispatcher. It used to refuse `409 RESOURCE_CONFLICT` naming the disabled packages. It still refuses `409` in three cases: an enabled package holds the name; a package holds it through a saved metadata row that the read of the name serves; or the read carries `?state=draft`, `?preview=draft` or `?layers=`, which read other rows than the plain read. That `409` names only the disabled package the registry holds the name for, as before; it does not name an enabled package that holds the name through a saved row. On a composition whose metadata engine has no package-scoped resolver for the type (its registry lacks the by-name reads), `_env` of a name only disabled packages hold now answers `501 NOT_IMPLEMENTED`, the refusal of a read that engine cannot judge, where it answered `409`. Refusal to refusal; no production composition lacks those reads.
+  - **The import door's `mappingName: "_env/NAME"`.** The same move, as `GET /meta/mapping/_env/NAME` answers it: `404 MAPPING_NOT_FOUND`, naming no package, where it was refused `409` naming the disabled package.
+  
+  **Not moved.** With an enabled holder, every answer is unchanged. That includes an enabled package that holds the name only through a saved row the registry has not read yet: the customization is still served and listed, whether the list or the read of the name comes first. A customization of a name no installed package holds is the environment's own item and is still served.
+  
+  **No migration.** Nothing is deleted or rewritten. Enable the package again and the customization is served again, unchanged. The fix for a caller who needs the row while the package is disabled is to re-enable the package.
+- 68e726d: fix(metadata-protocol): the by-name read of an action grafts a package's artifact envelope only onto the item that package holds at its own `(object, name)`, so the environment's own action on another object is served as the environment's (#33456)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0150 D4 keys an action by `(package, object, name)`. The by-name read (`getMetaItem`, `getMetaItemForExecution`) looked the served item's artifact envelope up by name alone, so beside ONE package that binds an action name to one object, the environment's own package-less action of that name bound to another object (or object-less) was served carrying that package's `_packageId`, `_packageVersion` and `_provenance: 'package'`.
+  
+  What moves, with ALPHA and BETA two packages and `approve` the action name:
+  
+  - ALPHA binds `approve` to `account`, the environment's own row binds it to `contact` (or BETA binds it to `contact` alone and the row binds it to `account`): `GET /api/v1/meta/action/approve` on `RestServer` and the runtime dispatcher, `getMetaItemForExecution`, and the declaration `/actions/contact/approve` (`/actions/account/approve` in the second shape) judges, serve the environment's item with no package envelope, FROM the holder's `_packageId` and `_provenance: 'package'`. The route's `packageId` stays unset and the environment's handler runs, as before.
+  - The same with the row object-less beside ALPHA on `account`, or bound to `account` beside ALPHA object-less: no package envelope, FROM ALPHA's.
+  
+  Not changed: a package-less row on the object a package binds the name to (that package's customization, still under its envelope); a name two packages hold on one object (refused, naming both); a name one package holds with no package-less row; a read naming a package (`?package=`), which keeps that package's own item and envelope; every type other than `action`; stored rows (no migration).
+- 568f214: fix(metadata-protocol): `revertCommit` answers only what the running process acted on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `revertCommit` now reports an item whose row was written but whose next step did not land in `failed[]`, not `reverted[]`, and the answer's `success` is `false`. The steps are: the runtime registry refusing the restored object, its storage not following the restored body (the `object-storage-sync-refused` advisory stays on `advisories`), the mutation projector failing, and any step after the row write throwing. The entry names the row state ("its row was restored to the body of version N", or "its row was removed from sys_metadata") beside the step that failed, and quotes no driver text. The revert's own commit still records the row change. Before, each of these answered `success: true` with the item in `reverted[]`, against the method's own contract ("a revert that answers `success: true` is one the running process has already acted on"). `rollbackToPackageCommit` carries each such item into its own `failed[]` and answers `success: false`.
+  
+  The same holds for an item of any other metadata type: a restored item whose registry write-through throws, and a removed item whose registry heal stops, so that the registry may still serve the removed row.
+  
+  A revert is now itself revertible, as ADR-0067 D3 says. The revert's own commit records, for each row it changed, the version that row held before the revert, so reverting the revert brings that body back, and an item the revert removed is written again. An item recorded as existing before the commit but carrying no version to restore, which is how every revert commit recorded by an earlier release records the items it restored, is named in `failed[]` with nothing written. Before, it was skipped: it appeared in neither `reverted[]` nor `failed[]`. To undo such an older revert, restore each item from its own version history (`GET /api/v1/meta/:type/:name/history`, then `POST /api/v1/meta/:type/:name/rollback`).
+  
+  The `rollbackToPackageCommit` docblock now says what each step records: it attempts its own revert commit, best effort. When the commit store is unprovisioned or the write fails, nothing is recorded and the step's answer omits `revertCommitId`, so that step cannot itself be reverted as a commit.
+- ef1ebad: fix(metadata-protocol): a position saved active through the metadata save door carries the holders of its renamed names at once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A position saved straight to active through the metadata save door (`PUT /api/v1/meta/position/:name`, the default mode, no draft) now carries the holders of the names it lists in `renamedFrom` before the door answers, as a draft save followed by the per-item publish (`POST /api/v1/meta/position/:name/publish`) already did. Before this fix the active save announced nothing, so the holder carry ran only at the next restart: until then each holder (`sys_user_position.position`) kept the old name, which no position serves any more, and lost that position's access.
+  
+  The active save of a position now signals the host the way the per-item publish does (`onMetaItemPublished`), awaited, after the save's projector and mutation event. `ObjectQLPlugin` turns that into `metadata:reloaded` with `changed: ['position/NAME']`, which the carry reads. Only the node that took the save announces.
+  
+  What it does not change:
+  
+  - Position only. An active save of any other type announces nothing new.
+  - The per-item publish and `POST /packages/:id/publish-drafts` still announce once each; neither passes through the save door.
+  - `duplicatePackage` and the unmanaged package import, which save every copied item through the save door, announce nothing per position: what they carry stays as it was, at the next restart.
+  - The package-commit restore and revert doors do not save through the save door, so they announce nothing new either.
+- 568d416: fix(objectql): the duplicate-record refusal reaches the writer's locale on the action door and on bulk rows
+  
+  Clause-②: yes (widening). The /data 409 and the row errors gain a `userMessage` key, with the same text as the end-user sentence. `message` keeps its diagnostic text.
+  Metadata-protocol: none
+  
+  The engine's duplicate-record refusal already composed its end-user sentence in the writer's locale, and `/api/v1/data` answered it as the 409 body's `error`. Other doors read the user-facing sentence from `userMessage` and keep `message` as the diagnostic. The refusal did not declare that key, so an action button or a bulk edit showed the English diagnostic, for example `Duplicate record refused on '周成本': …`, where the form save showed `已存在「工厂」、「牌号」、「成本周次」均相同的记录`.
+  
+  - `DuplicateRecordError` now declares the same sentence as `userMessage`. The action door (declarative and sandboxed script actions), the Hono handler-throw seam, MCP tool errors and a flow's inner refusal forward it unchanged. `message` is still the diagnostic sentence.
+  - Row errors from `updateMany` and `batch` (`create`, `update`, `upsert`) carry a declared `userMessage`, with the same bound the `/data` door applies. A row whose producer marked nothing carries no `userMessage`, as before.
+  - The flat `/data` 409 (and the whole-request `createMany` 409) gains `userMessage` beside `error`, with the same text. `error`, `code`, `field` and `developerMessage` are unchanged.
+  
+  The sentence names fields by label and quotes no record value.
+- 85f2ac5: fix(metadata-protocol): a seed `owner_id` naming a person resolves on an object that relies on the injected owner column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The seed loader builds its reference graph from the object definition the metadata service serves, which is the one the author wrote. An object that does not declare `owner_id` gets the column from the platform at registration, so the graph had no reference for it. A seed value naming a person there (`owner_id: 'Zhang Wei'`) was stored as that text, with no error and no log line, while a declared person field on the same row (`Field.user()`, `Field.lookup('sys_user')`) resolved the same name to the user's id. This happened on every load: the single-organization boot, the per-organization replay, the organization-create replay and a package install into an organization.
+  
+  The graph now reads the injected `owner_id` as the `sys_user` lookup the platform registers. The value resolves like any person reference: across the database on a load with no organization, and through the organization's membership on an organization's own load. A person who is not a member of that organization is not resolved. The column is left NULL, and the load reports the same "not a member of organization" error a declared person field gets. The first-admin handoff can then claim the NULL owner. Before, a row with the name stored as text stayed owned by a user id that does not exist, and the handoff never claimed it because the value was not NULL.
+  
+  A declared `owner_id` is unchanged: the author's field is read as before, whatever its type. An object that gets no injected owner (`ownership: 'org'`, `'none'` or `'business_unit'`, `managedBy`, a `sys_*` name, `systemFields: false`) gets no owner reference added. This change itself rewrites no stored row: a row that already holds a name in `owner_id` keeps it until a later seed write or an edit sets its owner.
+- 5092581: Clause-②: no
+  Metadata-protocol: none
+  
+  The registry heal after a metadata delete no longer registers a picked holder's item in the bare slot. A `dashboard`, `report` or other type addressed by `(package, name)` that the metadata service stores by name alone keeps only the item registered last, and answers it to a read naming any package. When two or more packages held the name in the registry, the heal's baseline read took that answer and registered it in the bare slot, so every bare registry lookup answered the last-registered holder's item and the registry listed it twice (ADR-0150 D3: a bare read never picks between holders). The heal now reads no baseline there: the bare slot stays empty and a read naming no package answers the refusal naming every holder, as the boot leaves it. A name one package holds heals as before.
+- 0bbb211: fix(metadata-protocol): `revertCommit` reports an item of any type whose registry write-through or heal faults
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `revertCommit` now puts a restored `view`, `permission`, `object_extension` or other non-object item into `failed[]` when the runtime registry write-through for its restored body throws, and the answer's `success` is `false`. The entry names the row state ("its row was restored to the body of version N") beside the registry's reason, and carries the reason's `code` where it declares one, the same way a refused `object` has been reported since the previous change to this door. Before, the write-through's non-object branches (the overlay hydration, and the `object_extension` registration) only logged the fault at `warn`, so such a revert answered `success: true` with the item in `reverted[]`, while the process kept serving the body the revert replaced. `rollbackToPackageCommit` carries each such item into its own `failed[]` and answers `success: false`.
+  
+  A removed item is reported the same way. When the revert soft-removes an item the reverted commit created and the registry heal after the removal stops (a registry throw, or the registry refusing a row of the item still stored under another package), the item goes into `failed[]` naming "its row was removed from sys_metadata" and that the registry may still serve the removed row, with the reason and its `code`. Before, the heal's stop was only an `error` line in the server log, and the item answered `removed`. The `error` line is unchanged.
+  
+  This supersedes the sentence of the note on the previous change to this door that says a write-through fault of every type other than `object` "is still not seen by the revert": after this change, the revert sees it, and a stopped heal too.
+  
+  Save, publish and delete do not change. Save and publish do not ask the write-through for these faults: under the same fault, `saveMetaItem` and `publishMetaItem` of a non-object item still answer success with no advisory, and the fault is still the same `warn` line in the server log. `deleteMetaItem`, a publish's undo and a peer's convergence ignore the heal's answer, so a stopped heal still answers what it answered before there, with the same `error` line.
+- d3bea96: fix(metadata-protocol): on PostgreSQL the `sys_metadata` ACTIVE overlay key becomes the partial NULL-safe unique index, as on SQLite, instead of the declared NULL-distinct constraint
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On PostgreSQL the declared `idx_sys_metadata_overlay_active` is a UNIQUE constraint over `(type, name, package_id, bundle_member)`. `bundle_member` is NULL on nearly every row, so this constraint enforced nothing. Two ACTIVE overlays for one `(type, name, package)` could both be stored, and which one a metadata read returned was undefined. The runtime migration that replaces the constraint ran `DROP INDEX` on it. PostgreSQL refuses that (2BP01), so every process printed one `[sql-driver] DATABASE_ERROR … (2BP01)` line at its first `sys_metadata` read, kept the constraint and reported nothing else.
+  
+  The migration now gets the dialect and a seam that returns rows, so it takes the PostgreSQL path the `sys_setting` and `sys_notification_preference` identity migrations already take. That path frees the name with `ALTER TABLE … DROP CONSTRAINT`, builds `UNIQUE (type, name, COALESCE(package_id, ''), COALESCE(bundle_member, '')) WHERE state = 'active'`, and checks the result by reading the index definition back. The 2BP01 line no longer appears.
+  
+  If the database already holds two ACTIVE rows for one key, the old constraint stays and no row is deleted. One `[metadata-protocol] cannot rebuild 'idx_sys_metadata_overlay_active'` line is printed at `error`. It names the key that is not enforced, gives the query that lists the blocking rows and points to `os migrate duplicates`. Resolve the duplicates and restart, and the next boot builds the index. If the name cannot be freed at all, the line says the existing index is unchanged. The step never reports success it did not get.
+- 01598d9: fix(metadata-protocol): an exact by-name read (`?package=X`) of a `doc`, a `view` or another type the exact qualifier does not judge no longer answers another package's item from the metadata service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/meta/doc/NAME?package=X` (both transports, and every reader of the protocol's by-name read) answered the other package's doc when two packages ship the name and the other one registered last. The metadata service keeps such a type by name alone, so it holds the item of the package registered last, and the read asked it before the registry. Now that copy is not served at X's address when it is stamped with another installed package (one that is neither X nor X's customization pair). The registry's read naming X answers X's own item instead (ADR-0150 D3: an exact address answers that holder).
+  
+  The same holds for every type the exact qualifier of ADR-0150 D5 does not judge: `doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog` and `object_extension`. `position` and `capability` keep one package holder. `object` is not changed: one package owns an object name, and the registry reads it by name. The covered types were already right, because the exact qualifier replaces another package's copy after the layers.
+  
+  Unchanged: a package that is the only holder, a service copy bound to no package, a copy stamped X, and the read that names no package.
+- 6cc3f97: fix(metadata-protocol,rest,runtime): beside a disabled package, the read naming no package, `/layers` and `/published` serve the one enabled holder of a `doc`, `view` or any other type the registry does not read by package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A disabled package holds no name (ADR-0150 D3). Take a name that one enabled and one disabled package both ship. For a type the registry reads by package, the bare read (`GET /api/v1/meta/TYPE/NAME`), `/layers` and `/published` already served the enabled holder. For every other type they read the layer they find by name alone. That layer is the metadata service's copy, which belongs to the package registered last, or else the registry's first composite. Either one could be the disabled holder's.
+  
+  - The plain read answered `404` (the disabled body, withheld) although an enabled package ships the name. FROM `404`, TO the enabled holder's item.
+  - `/layers` served the disabled holder's body as `effective`. FROM that body, TO the enabled holder's item.
+  - `/published` answered `404` on both transports. FROM `404`, TO the enabled holder's item.
+  
+  This covers `doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog`, `object_extension`, `hook`, `job`, `sharing_rule`, `queue` and `assignment_rule`. `object`, `action` and `package` are not changed: an `action`'s own bare judge already serves the enabled holder.
+  
+  Unchanged: no answer that was served becomes refused. Two enabled holders of a doc are still refused `409` naming both. A name only disabled packages hold still answers `404`. A name no disabled package holds reads as before. The bare save door is unchanged.
+- 20bf222: fix(metadata-protocol)!: a bare save or delete answers the holders the bare read counts: a name two enabled packages hold is refused naming both, and a name only disabled packages hold is refused naming none (ADR-0150 D3/D5)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are write doors under a reversible package state: no stored row is rewritten, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a writer that saves or deletes a name without naming a package (`PUT` or `DELETE /meta/:type/:name` with no `?package=`, or `saveMetaItem` / `deleteMetaItem` with no `packageId`), in two states. The bare write used to take its address from the stored rows alone, while the bare read counts the name's holders. It now counts them as the read does (ADR-0150 D3/D5, red line 2: ambiguity is reported, never guessed). Every refusal is the existing `409 RESOURCE_CONFLICT` with the `?package=` remedy; there is no new code. Measured on a booted kernel through the runtime dispatcher and `RestServer`, in both registration orders.
+  
+  **Two or more enabled packages hold the name.** The bare read refuses 409 naming them.
+  
+  - A publish-mode bare save used to answer 200. Over no stored row it wrote a package-unbound row beside both packages; over one package's row it updated that row. It is now refused naming both packages, and nothing is written. Over a row of each it was refused already, and still is.
+  - A draft-mode bare save (`?mode=draft`) used to write a package-unbound draft, or the one package's draft. It is now refused the same way.
+  - A bare delete used to remove the one package's row. It is now refused the same way, and the row stays.
+  - A bare delete or bare draft discard (`?state=draft`) over no stored row used to answer the no-op receipt (`success: true, reset: false`). It is now refused the same way.
+  
+  **Every package that holds the name is disabled.** A disabled package holds no name (ruling A on #34144 and the registry's served-holder rule, #32183), so the bare read answers 404. The bare write is now refused naming no package (ruling A):
+  
+  - A publish-mode bare save of a name whose only holder D is disabled used to answer 200. Over D's row alone it updated D's row; over no stored row it wrote a package-unbound row that every read then withheld. It is now refused, and nothing is written.
+  - A bare save of a bundled name (an `email_template`) whose every holder is disabled, at a member the holder never ships, used to answer 200 and store a package-unbound row that the by-name read and both lists withheld until the package was enabled again. It is now refused, and nothing is stored. This replaces the "accepted and kept" save described in this release's note on reads of a disabled package's customization: FROM `success: true` with the row stored and hidden, TO `409 RESOURCE_CONFLICT` with the `?package=` remedy, naming no package, no row stored. The line of `.changeset/33385-disabled-holders-env-404.md` that says this save "is accepted and kept, as before" is superseded by this note: while every holder is disabled, the save is refused and nothing is stored. A delete of such a row while the package is disabled still removes it, a save at a member the package ships is still refused `403 NOT_OVERRIDABLE` where the package door refuses it, and once the package is enabled again the same save is kept.
+  - A draft-mode bare save (`?mode=draft`) of such a name used to write a package-unbound draft. It is now refused the same way.
+  - A bare delete of such a name used to remove D's row. It is now refused, and D's row stays.
+  - A bare delete or bare draft discard (`?state=draft`) of such a name over no stored row used to answer the no-op receipt (`success: true, reset: false`). It is now refused the same way.
+  
+  **Not moved.** A write naming the package (`?package=`, `packageId`) answers as before. So do a name one enabled package holds, a name an enabled and a disabled package both hold, a name no package holds (the environment's own item), and a package-unbound row stored at the address: the save edits that row and the delete removes it, as before. Once a disabled package is enabled again, its bare writes answer as before. A type the registry does not read by package (`action`, `doc`, whose bare reads refuse through their own judges) is not judged here and answers as before. A bare save in these two states that a later gate already refused (an invalid body, a read-only inherited package) is still refused, now with this `409` first: refused to refused.
+  
+  **No migration.** No schema key or stored row changes. To write one holder's item, name its package; to write a disabled package's item, name it or enable it again.
+- 1ccb445: perf(metadata-protocol): the served item read caches its caller-independent compiled answer (ADR-0156)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `getMetaItem` (the served face of `GET /api/v1/meta/:type/:name`, and the per-item read an app bundle makes for every app, object, view, page and dashboard it names) no longer recompiles an item whose sources have not changed. Every caller gets the same answer it got before, the response body and ETag included: only the server's work per request moves.
+  
+  - **What is cached.** The compiled envelope of a by-name read of `app`, `object`, `view`, `page` and `dashboard` items, per engine. A read for a package, a state, a member or a draft preview is never cached. The per-caller gate, field mask, translation and ETag stay computed on every request, and the live trailers (`registration`, `disabledActions`, `cascadeDeleteObjects`) are read on every hit.
+  - **What retires it.** Each source counts its own changes at its own mutation point: the `sys_metadata` overlay generation, the schema registry's `objectRevision` and a new `revision` that every public write of `SchemaRegistry` moves (the classification of its public methods is exhaustive by type), and a new `revision` on `MetadataManager`. Any move drops every entry. A source without its counter makes the cache decline.
+  - **What another process can change.** After a bound (`OS_METADATA_COMPILE_CACHE_TTL_MS`, default 30000 ms) the cache confirms before it recompiles, once per bound per engine however many readers cross it: a digest of every stored row's identity, binding, state, `version`, `checksum` and `updated_at` (so an `updated_at` stamped from a clock that is behind still moves it; the bodies are not read) and each loader's reading of its backing store (`FilesystemLoader` stats the type directories and files its reads touched). If nothing moved, the entries stand for another bound, never past 10 bounds from when each was compiled; that cap is the only bound on a writer that bypasses the engine and rewrites a body while leaving all three bookkeeping columns as they were (#34522 tracks a column that would close it). Every confirmation also retires the overlay row cache, so a recompile reads rows at least as new as the reading, and a read in flight across a confirmation is not stored. A local counter move takes no store reading. A loader that keeps no change mark makes every entry recompile at its bound, never renewed.
+  - **New public members (additive).** `SchemaRegistry#revision`, `MetadataManager#revision`, `MetadataManager#loaderChangeMark()`, the optional `MetadataLoader#changeMark()` and `FilesystemLoader#changeMark()`.
+  - `OS_METADATA_COMPILE_CACHE_TTL_MS=0` is the uncached read, the same reads in the same order.
+  
+  On a showcase Setup bundle, an immediate repeat made 213 database reads before and 9 after.
+- 80cdbd4: fix(metadata-protocol, plugin-security): a package's save of its own permission set is no longer refused because a package of another namespace ships a set of that name
+  
+  Clause-②: yes (widening) — a save, a draft save or a draft's publish that a package addresses to its own permission set N, refused 403 `NOT_OVERRIDABLE` ("provided by a managed package and is sealed") while a package of another namespace ships N, now lands; the exported `MetadataAuthoringGateContext` (`@objectstack/metadata-protocol`) and `PermissionSetLockGateContext` (`@objectstack/plugin-security`) each gain an optional `packageId`; nothing the save door accepted is refused
+  Metadata-protocol: none
+  
+  A permission set is `(package, name)`, and a name holds one set per namespace (ADR-0150 D2/D9). The metadata door's managed seal (ADR-0126 / ADR-0131 D6) and plugin-security's packaged-permission-set lock both judged a save of a permission set by its name alone. So when package `crm` shipped a set `N`, a package `hr` of another namespace could not save its own set `N`: the save was refused as if it edited `crm`'s shipped set.
+  
+  These judges, and the managed seal the store applies to the write a save or a draft's publish hands it, now judge the package the write is addressed to. A save of `N` overrides a set a package `Q` ships, and stays sealed and locked exactly as before, when it names no package, is addressed to `Q`, is addressed to `Q`'s customization pair (whatever namespace the pair declares), or is addressed to a package that shares `Q`'s set of the name (a co-owner of `Q`'s namespace, a platform namespace, a package with no namespace, or a name the platform requests by spelling). Every package that ships the name is judged, so the answer is the same in every registration order. Any other package's save of its own `N` lands, is served at that package, and that package's grants confer its own set.
+  
+  What moves, for a save of `N` while a package of another namespace ships `N`:
+  
+  - FROM 403 `NOT_OVERRIDABLE` (sealed) TO saved, for a save addressed to a package of another namespace than every package that ships `N`, which is not the customization pair of any of them. The same holds for a draft save of that set and for its publish.
+  
+  When a package publish is refused on a runtime that cannot roll back its transaction, the undo of each promotion it made judges the same package the promotion addressed, so a package's own set `N` is taken back out and its draft is put back instead of being reported still live. Rollback and revert of such a set still judge the name alone, and other sealed package-scoped types keep the name-wide seal.
+  
+  `MetadataAuthoringGateContext` (`@objectstack/metadata-protocol`) gains an optional `packageId`: the package the write is addressed to (a save's `packageId`, a restore's row binding), absent for a write that names none. An authoring gate that judges an item keyed `(package, name)` reads it. Gates that ignore it are unaffected. `PermissionSetLockGateContext` (`@objectstack/plugin-security`), the subset of it the lock gate consumes, gains the same optional `packageId`.
+  
+  Nothing to migrate.
+- 89d5a41: fix(metadata-protocol)!: an exact `?package=X` read of a doc, view or other type the exact qualifier does not judge answers X's own item, never another package's: where another package holds the name it is refused 409 `not-held-by-qualifier` naming the holders (ruling 6917064203 on #34398), and a name nothing holds stays 404; a bare doc read of a name two enabled packages ship, beside the environment's own package-less entry, serves that entry, never the package registered last (ADR-0150 D3/D5, red line 2, ruling 6893582352)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill teaches a moved answer: `skills/**` teaches `?package=` reads of a holder or of its pair (objectstack-platform SKILL.md, "Customizing an installed package"), which do not move, and never the read of a package that holds no item of the name or the bare doc read beside a package-less entry
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads and one save's code-layer read: no stored row, registry slot or package binding changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that reads `?package=X` of a name X ships no item of, for the types the exact qualifier does not judge (`doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog`, `object_extension`). Measured on the composed artifact rig (the `MetadataPlugin` artifact door plus `AppPlugin`), on the dispatcher and on `RestServer`, in both registration orders:
+  
+  - `GET /meta/TYPE/NAME?package=X`, where X ships no item of NAME and another package does: was 200 with that package's item (the registry's first composite, or the metadata service's copy). It is now `409 RESOURCE_CONFLICT`, reason `not-held-by-qualifier`, with `details.candidates` naming each package that holds NAME (ruling 6917064203 on #34398), the refusal the covered types already answer. X need not be an installed package: a qualifier that names none (the Console's app-name segment) gets the same answer. A name no package holds stays the read's own 404. The read gate answers before the `not-held-by-qualifier` refusal names any holder: for a `doc`, a caller the ADR-0046 §6.7 docs audience refuses is answered the gate's `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED`; for a `view`, a member the list view audience (`requiredPermissions`) refuses is answered the gate's `403 PERMISSION_DENIED`, as the holder's own address answers them. A caller the gate admits is answered the 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, same address: was 200 with another package's `code` and `effective`. It is now the same 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, where X and Y ship NAME and Y registered last: was 200 with Y's `code` and `effective` (the metadata service keeps such a type by name alone). It is now X's, as the plain read answers since #34040.
+  - `GET /meta/doc/NAME` and its `/layers` and `/published`, where two enabled packages ship NAME and the registry's bare slot holds a package-less entry: was 200 with the doc of the package the metadata service registered last. It is now 200 with the environment's own item, as the registry and `MetadataFacade.get` already served it. Without such an entry the read stays refused 409 naming both (#34036). Per entry:
+    - A stamp-less runtime registration: the plain read and `/published` serve its body; `/layers` reports it as `code` and `effective`.
+    - The same registration beside a different package-less stored row: all three doors serve the registration; `/layers` reports it as `code` and `effective` and the row as `overlay`.
+    - A stored package-less row the hydrator registered before any package shipped the name (its entry is tenant-authored, `_provenance: 'org'`, so it is no code layer): the plain read and `/published` serve the row; `/layers` reports `code: null` and the row as `overlay` and `effective`.
+    - Both `/published` doors (the dispatcher's and `RestServer`'s) serve that item in place of the metadata service's package copy.
+  - The same stored row hydrated after the packages' artifacts registered wears the first registered holder's envelope (the hydrator grafts it), so no package-less entry exists: the bare doors stay refused 409 naming both, as before.
+  - A save naming package X of a `datasource` with no stored row at X (the credential carry-forward reads the code layer, `readCodeLayerForCarryForward`): carried forward the credential of the package the metadata service kept, or of the first registered holder. It now carries X's own credential, or none when X ships no datasource of the name (the incoming body is kept as sent; the carry-forward is no read answer, so it does not refuse). Of this family only `datasource` carries a credential, so no other save moves. Path: a save door naming the package (`PUT /meta/datasource/NAME?package=X`), its draft save, and any carry-forward of a body whose credentials the read redacted.
+  
+  **Console.** The doc page under an app (`/apps/X/docs/...`) and the flat permalink every cross-reference is rewritten to (`/apps/X/docs/NAME`, whose single-item read tells a refused name from an absent one) read with X as ADR-0048 prefer-local context. When that read answers the `not-held-by-qualifier` 409 (X not among the candidates) or a 404, each now reads the name again by name. A cross-reference from X's docs to another package's doc, and the app-name segment of a package that ships several apps (which names no package), keep rendering the doc's one holder, or its holder's audience refusal on the flat permalink; a name two other packages ship lists them (the 409 candidate list), where it showed one of them by registration order.
+  
+  **Not moved.**
+  - A holder's own address, a customization pair's address of its base's item, and an item bound to no package (the environment's entry).
+  - Any read naming no package other than the bare doc case above.
+  - `object`, and the covered types (`action`, `hook`, `job`, `sharing_rule`, `queue`, `assignment_rule`), whose exact qualifier already refuses 409 `not-held-by-qualifier`.
+  - The security catalog types `position` and `capability`: the registry keeps one package holder of such a name, so `?package=` of another package keeps the code layers' answer (that holder's item).
+  - One enabled holder beside a stamp-less bare entry: the bare doors serve the holder's doc while the registry and `MetadataFacade.get` serve the entry (measured, unresolved here; the entry answers first beside two or more holders only). Follow-up card #34452 carries this cell; it needs a ruling first on whether the environment's entry answers first beside one holder, before any reader moves.
+  
+  **No migration.** No schema key, stored row or registry slot changes; nothing is rewritten.
+  
+  The fix for a caller: address a package the refusal names (or its pair), or read with no package. For the bare doc read beside the environment's own entry, address a holder with `?package=` to read that holder's doc.
+- 1e4656d: fix(metadata-protocol): a package's rollback, commit revert or package rollback of its own permission set is no longer refused because a package of another namespace ships a set of that name
+  
+  Clause-②: yes (widening) — a rollback, a commit revert or a package rollback of a package's own permission set N, refused 403 `NOT_OVERRIDABLE` ("provided by a managed package and is sealed") while a package of another namespace ships N, now restores; a delete of that set answers "Deleted permission 'N' (package=P) — it no longer exists." in place of "Customization overlay deleted (package=P) — permission/N reset to artifact default.", with `reset: true` as before; nothing the doors accepted is refused
+  Metadata-protocol: none
+  
+  A permission set is `(package, name)` (ADR-0150 D2/D9). The save door, the draft publish and the publish undo already judge a write of a package's own set `N` by the package it is addressed to. The per-item rollback (`POST /api/v1/meta/:type/:name/rollback`), the commit revert (`POST /packages/:id/commits/:commitId/revert`) and the package rollback (`POST /packages/:id/rollback`, which reverts commit by commit) still judged the name alone: when package `crm` shipped `N`, package `hr` of another namespace could not restore an earlier version of its own `N`. The rollback answered 403 `NOT_OVERRIDABLE`, and a revert listed `N` in `failed[]`.
+  
+  Those restores now read the same verdict as the save. A restore into `hr`'s own `N` is a runtime write to `hr`, so the earlier version is restored and `hr`'s grants confer it. Every package that ships the name is judged, so the answer is the same in every registration order. A restore into a row bound to no package, to the shipper, to the shipper's customization pair or to a package that shares the shipper's set of the name is refused exactly as before.
+  
+  A delete of `hr`'s own `N` already succeeded, but its receipt said an overlay was deleted and `N` was reset to its artifact default. `hr` ships no `N`, so the receipt now says the set was deleted and no longer exists. A delete naming `hr` when `hr` holds no `N` answers "nothing to delete" in place of "already at artifact default". The receipts for a customization of a shipped set are unchanged.
+  
+  Nothing to migrate.
+- ddab49d: fix(metadata-protocol)!: a dependent's row of a bundle member moves no read naming no package across a restart, and a row-held base's own member is served beside a dependent's copy of it (#28802 R2, ADR-0150 red line 2)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — `skills/objectstack-platform/SKILL.md` (the ADR-0146 paragraph) and `content/docs/concepts/metadata-lifecycle.mdx` teach that a locale a dependent adds under a base's name is served only under its own `?package=`. This change makes `/published` and `/layers` hold to that for the canonical member of a base that ships only another member, before and after a restart, and makes a row-held base's own member the base's. No taught sentence moves.
+  
+  <!-- adr-0087: registered shipped-base-dependent-canonical-row-not-published -->
+  
+  **BREAKING**: one answer of `GET /meta/TYPE/NAME/published` naming no package moves from served to 404. Name the package (`?package=DEPENDENT&member=CANONICAL`) to read the row, as before.
+  
+  **Every moved answer, before → after.** On the runtime dispatcher, in both registration orders, before and after a restart.
+  
+  - **A dependent's canonical member over a base that ships only another one** (base A ships `email_template` `welcome` in `fr-FR` only; dependent D, which declares A, stores `en-US`). `GET /meta/email_template/welcome/published` moves FROM D's row (200, before a restart only) TO `404 RESOURCE_NOT_FOUND`, its answer with no D row stored. `GET /meta/email_template/welcome/layers` (no member) moves FROM `404` after a restart TO A's `fr-FR` (200), its answer with no D row stored and before a restart; before a restart its `overlay` layer moves FROM D's row TO `null`, as with no D row stored. The layered read had reported D's row as an orphan of A's name although A ships no `en-US`, and after a restart the hydrated row took the registry's bare slot the code layer read A's `fr-FR` from.
+  - **A member a row-held base and its dependent both store** (A stores `en-US`, D stores `en-US` and `fr-FR`, no package ships the name). Each door below moves FROM `409 RESOURCE_CONFLICT` naming A and D (the execution read threw `PackageScopedNameRefusedError`) TO A's row (200), as when A ships `en-US`. D's row of it is a bundle addition, never a second holder. Bundled types only (a type with no members has no additions). Naming the member: `GET /meta/email_template/welcome?member=en-US`, `/layers?member=en-US` and the execution read at `en-US`. Naming no member, which addresses the canonical member `en-US`: the plain read (`packageId` A), `/layers` (effective and overlay A's row), `/published` (A's row) and the execution read. The writes naming no package do not move: the save, delete, publish, draft and history doors still refuse these rows naming A and D, so `/layers` loads A's stack where the save it then sends is refused; a follow-up card judges whether the writes follow the base.
+  
+  **Not moved.** The plain read, `?member=CANONICAL` and the execution read of the first shape (A's `fr-FR` naming no member, 404 at `en-US`). Each exact address (`?package=D&member=en-US` serves D's row). A package-less row beside two holders is still refused (#33210). A dependent's canonical row over a base that holds only another member as a row is still served (the `S1` pin of #33210). Two dependents storing the same member over a base that holds none of it are still refused naming both. A name of a type with no members (`dashboard`, `permission`, `tool`, …) that a base and its dependent both store as rows, no package shipping it, is still refused naming both on every door naming no package (#32607). The shipped CONTROL of the second shape (A ships `en-US`): the plain read and the execution read serve A's `en-US`, and `/layers` naming no member and `/published` report D's row as the overlay A's code shadows (#28409), as before.
+- d0348cf: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(runtime): on an un-walled first boot, a seed person reference naming the first admin resolves to that admin
+  
+  A single-tenant install loads its boot seed before the first admin's `sys_user` row exists. A `Field.user()` or `Field.lookup('sys_user')` value naming that admin therefore landed NULL, and the first-admin handoff wrote `owner_id` and no other column. Sample records assigned to the owner showed as unassigned, apart from the record owner. A later boot did not repair them either: a dataset in the default create-only mode leaves an existing row as it is.
+  
+  The seed loader now holds each person reference its second pass left NULL, together with the row it landed on (`SeedLoaderService#resolveHeldPersonReferences`, `heldPersonReferenceCount`). `AppPlugin` retries the boot seed's held references after every `sys_user` insert. It resolves each one by the loader's own rule and writes it to that row only while the column is still NULL. A row the seed did not write keeps its value (ADR-0138 D1). A seeded row that someone assigned in the meantime keeps that assignment. A reference that still names nobody stays held until the next user insert of the process. The walled boot is unchanged: it writes no inline seed, and its per-organization replay already waits for the owner's membership.
+- 4ec9cc2: fix(metadata-protocol): a list read that registers stored rows no longer sends the reads after it to the store
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a kernel whose list read (`getMetaItems`) registers the stored rows back into the schema registry, every list read moves `registry.revision`, even when it registers what is already there. Each move opened a new compile-cache bucket, and opening a bucket retired the `sys_metadata` row cache. So the list read and the item reads after it all went to the store. Measured with a list read of three stored objects followed by item reads, in alternation: 3 store reads per round with the compile cache on against 1 with it off (one item read), and 7 against 3 (three item reads).
+  
+  A bucket opened by a counter move now keeps the row cache when its rows were read within the last bound, and its first bound ends one bound after they were read, so no answer carries a row more than one bound old. When the rows are older than that, opening the bucket retires them, as before. The same alternation now costs what it costs with the compile cache off.
+- d9fabb2: fix(metadata-protocol): the publish probes skip a widget whose dataset does not exist instead of checking the read's envelope
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The by-name read `getMetaItem` answers an item that does not exist with its envelope, `item` empty, not with `undefined`. The publish probes' reader (`publishedItemReader`) fell back to that envelope when it carried no `item`, so a dashboard widget naming a dataset nothing holds was handed the envelope as its dataset. The widget was counted in `checked.widgets`, and its query ran over a body that binds no object, which could report a false `widget_query_failed` on the publish receipt and in `verify_build`. The reader now answers no body when the envelope carries no `item`, so such a widget takes the dangling-dataset path again: an L1 graph finding, not probed and not counted. A dataset that exists is read exactly as before.
+- 99bd220: feat(spec, service-automation): a packaged flow can ship switched off for an administrator to turn on (`defaultActive: false`)
+  
+  Clause-②: yes (widening) — `FlowSchema` gains the optional `defaultActive` boolean. A flow that declares it was refused before as an unknown key; a packaged flow that declares it now registers. A flow authored in the environment that declares it is still refused, now with a sentence naming its `status` as its switch. Nothing that registered before is refused.
+  Metadata-protocol: added
+  Skills-docs: updated here — skills/objectstack-automation/SKILL.md (one paragraph under "A flow an installed package ships"), evals/flows-triggers-approvals.json (eval id 24)
+  
+  A package can now ship a flow switched off: declare `defaultActive: false` on the flow, beside `status: 'active'`. On an installation where no administrator has switched the flow, it is not armed and does not run, and `GET /api/v1/automation/_status` reports it `enabled: false`. An administrator turns it on with the packaged-flow switch (`POST /api/v1/automation/:name/toggle`, or the Enabled switch on a read-only package's flow in Studio), which writes an activation-ledger row (`sys_metadata_activation`). That row wins over the declared default in either state: a flow switched on stays on across a restart, an upgrade and a reinstall, and one switched off stays off. With no row the flow follows the package's own declaration for the version installed today, so an upgrade that changes it moves only installations nobody switched; a declared `.custom` override armed in the package's place does not change the default, whatever it declares. Absent or `true`, the flow ships on, as every packaged flow did before. A package that declares the key needs a platform at or above this release: an older one refuses the flow as an unknown key.
+  
+  `status` stays the author's switch: `obsolete` and `invalid` disarm the flow everywhere, and the packaged-flow switch does not override them.
+  
+  Only a flow a package ships has the packaged-flow switch, so:
+  
+  - registering a flow authored in the environment that declares `defaultActive` is refused, with a sentence saying its switch is its `status` (`'obsolete'` to keep it off, `'active'` to arm it). The automation write doors (`POST /api/v1/automation`, `PUT /api/v1/automation/:name`) answer `VALIDATION_FAILED`, 400, and store nothing; a dry run refuses the draft; the metadata door (`PUT /api/v1/meta/flow/:name`), which parses without registering, stores the row, the engine refuses to arm it, and `os migrate meta --stored` lists it at the key;
+  - `POST /api/v1/automation/:name/clone` drops `defaultActive` from the copy, which is written switched off by its own `status` as before;
+  - an unmanaged install copies `defaultActive: false` as `status: 'obsolete'` (unless the status already disarms the flow) and drops the key, so the copy arrives switched off.
+  
+  A name two packages ship is a package's flow too: each holder's body registers with the key, on every re-sync and upgrade, and the refusal above is only for a name no package ships.
+  
+  For hosts that compose the engine themselves, `AutomationEngine.setPackagedFlowDefaultSource(source)` and its `PackagedFlowDefaultSource` type are new public API. The automation plugin attaches the reader (it asks the metadata protocol for the package's own body); it is how the engine reads the package's default while a declared `.custom` override is armed in the package's place, and it is asked once per registration, not on every enablement read. `AutomationEngine.refreshPackagedFlowDefaults()` is new public API too: it asks the reader again for every armed body that is not the package's own, and re-arms or disarms each flow whose answer moved; the automation plugin calls it at every `metadata:reloaded` re-sync, so a hot upgrade that changes the declared default reaches a flow whose override body was not re-registered. A host composing the engine itself calls it after the set of installed packages changes. An engine composed without a reader reads the default only off an armed package body, so while an override is armed a flow its package ships off runs (fail-open): such an engine cannot see the package's body, and treating an unknown default as on keeps the behaviour every packaged flow had before this release instead of switching off a flow no package was seen to declare off.
+  
+  ADR-0126 §4 carries an amendment note: "absence of a row means the packaged default" now reads the default a packaged flow declares; the ledger's shape is unchanged.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- 842b468: fix(metadata-protocol): a seed dataset whose `externalId` includes a reference the first load must leave empty now holds one row across loads, and the reference lands on that row once it resolves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset keyed on a composite `externalId` such as `['name', 'assignee']`, whose reference names a person who has not signed up yet, lands its row with that column empty. Every later load (each boot, each per-organization replay) inserted another copy: while the person stayed missing the record keyed empty, and once the person existed the record carried an id the stored row did not. Three loads left three rows.
+  
+  Such a row now lands with an id derived from the key as the author wrote it (the person's natural key, never the id it resolves to), in its object and organization. A load whose natural key finds no row looks the row up by that id, and takes it only when its other key columns still match and its reference column is empty or already holds the resolved value. A row a person created never carries such an id, so it is never taken, and two records whose keys differ only in that reference stay two rows. Once the reference resolves it is written onto the row first landed: by the update under `mode: 'upsert'`, and under the default `mode: 'ignore'` by the pass-2 back-fill of that one column. Keys that resolve on the first load, and keys over plain fields, match exactly as before, with engine-minted ids.
+  
+  An install that already holds such copies keeps them (remove the extras by hand); the next load lands at most one more row, the one the following loads find.
+- aa0fde3: feat(flow designer): the publish checks show in the Problems tab and the publish drawer before the publish, worded for the builder
+  
+  Clause-②: yes (widening: optional userTextLocales on GetMetaItemRequestSchema)
+  Metadata-protocol: added
+  
+  Before, a flow's publish checks were seen only after the publish, as a toast that listed rule ids, machine names and English prose, and then disappeared.
+  
+  - **The draft read carries what the publish would still report.** A flow draft read (`state: 'draft'`) now adds the publish gate's advisory findings to `_diagnostics.warnings`, next to the refusals it already carried. Each warning has the finding's user sentence in the reader's language. The REST door and the runtime dispatcher pass the request's locales, through a new optional `userTextLocales` on `GetMetaItemRequestSchema`. With no locales the sentence is English. `valid` does not change, and the drafts of other types read as before.
+  - **The sentences name what the builder sees.** `flow-decision-unconditional-branch` has user text in all 11 platform locales. It names the flow, the branch step and the paths by their labels, and says what the shape does to a run and how to fix it. The `approval-approvers-*` sentences now name the flow and the approval step by their labels instead of the flow's machine name and the node id. A step or flow with no label falls back to its id or name. The findings' `message`, `where`, rules and severities do not change.
+  - **The console shows them before the publish.** The designer's Problems tab already lists a draft's warnings, so the checks now appear there after each save, and clicking one selects its step. The pending-changes drawer lists each flow draft's checks under the flow's label, above Publish. A publish from the drawer or the designer, made after the checks were listed, ends with the toast's title line only. A publish the author did not review, such as one an AI surface performs, keeps the full toast.
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- a6c2b83: fix(cloud-connection): a sample row a tenant deleted stays deleted when install-local reinstalls, upgrades, heals or replays the package
+  
+  Clause-②: no (the door starts honouring the loader's existing `landedKeys` guard, #31021; no accepted shape or public export widens; the dev confirms)
+  Metadata-protocol: none
+  
+  install-local's seed loads now keep, and honour, the per-organization record of which seed rows landed (`sys_seed_landed_key`, registered by `@objectstack/platform-objects`). Before, the door built its seed loader without the `landedKeys` option, so it neither read nor wrote that record: a seed row a person deleted (a demo account, a demo order) was inserted again by the next reinstall, upgrade, restart heal or per-organization replay.
+  
+  - The install and the upgrade (in the installing person's organization under an organization wall, otherwise in the install's sole organization), the restart heal of an empty database, the per-organization replay of a new organization and an unmanaged copy's first load honour the record: a seed row whose key landed in that organization before and whose row is now gone is not inserted again. A key that never landed still lands, so a row an upgrade adds to the seed is inserted, and a new database, which holds no record, is healed whole. A row the record keeps out is counted in `skipped`.
+  - The sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`, for a ledgered package and for an unmanaged copy alike) is the deliberate re-seed: it inserts every missing row whatever the record says, and records it again. Its answer is unchanged.
+  - The `seed-replayer` service this door registers when no app has registered one now takes `{ reseed: true }`, as the AppPlugin replayer does: that call inserts every missing row; any other call honours the record.
+  
+  Every row a load lands is recorded, whether it inserted, updated or matched the row. An existing install keeps no record until its next install, upgrade, reseed, replay or restart heal, so a row a person deletes before that load, after this release too, comes back once on it, and stays deleted from then on.
+  
+  A restart heal that withholds every row (a seed a person emptied, or a purge then a reinstall) reports a settled seed: the withheld rows are counted in `skipped` and logged at `info`, not recorded as an empty install, so the boot banner, `objectstack:seed-settled`, `GET /ready` and `os verify` read it as settled. The split reads the loader's `skipped`, which also counts an `update` seed row with no match, so a heal whose only skips are those also reports settled. A heal that lands nothing and skips nothing, or errors, is still the empty install.
+  
+  `@objectstack/spec`: the `mode` description of a seed dataset no longer says a package install keeps no record: a seed publish is the load that keeps none, and the sample-data reseed is named beside `seed-replayer(organizationId, { reseed: true })` as the deliberate re-seed.
+  
+  `@objectstack/platform-objects`: the `sys_seed_landed_key` object's description names install-local's loads among the record's writers and readers, and its sample-data reseed beside `seed-replayer` as the deliberate re-seed.
+  
+  `@objectstack/metadata-protocol`: the seed loader's `info` line for withheld rows names an installed package's sample-data reseed beside `seed-replayer` with `{ reseed: true }` as the way back.
+- a2bb7d5: feat(objectql): a bulk update recomputes its parents' roll-up summaries once, at the end of the batch
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: follow-up owed — `skills/objectstack-data/rules/relationships.md` (Roll-up Summaries: "the engine recomputes it server-side whenever a child is inserted/updated/deleted") does not say that a bulk update recomputes once at the end of the batch, that a summary a rule reads still recomputes after each row, or that a hook reads the pre-batch value meanwhile (ruling 6928862195); it moves as a governed skills-only change. `content/docs/data-modeling/fields.mdx` is updated here.
+  
+  **Added:** an optional member on the engine slot contract, `IObjectQLEngine.deferSummaryRecompute(callback)` in `@objectstack/spec` (and the same optional member on `MetadataHostEngine` in `@objectstack/metadata-protocol`). It is a callback, entered and left by the engine as `transaction` is; a nested call joins the open scope. Inside it, the roll-up `summary` recompute every write would run after itself is recorded, and runs once when the callback settles: per child object and caller, one grouped aggregate per summary field and one write per parent for the whole batch. `ObjectQL` implements it. A caller probes for it; an engine without it keeps the per-row recompute, with the same values. Every way out of the callback recomputes: resolved, the callback's result (or `ERR_SUMMARY_RECOMPUTE` with `written` set to that result when a parent cannot be recomputed); rejected, the recompute still runs for the writes that landed and the callback's error is rethrown. Opened inside a transaction, the scope's recompute runs before the commit. Only writes under the transaction the scope was opened in (or under none) are deferred: a write under another transaction opened within the scope, such as a hook's own `ctx.api.transaction` or an atomic batch reached from inside a non-atomic one, recomputes at once inside that transaction, as before, because that transaction may commit before the scope ends.
+  
+  **Changed:** the bulk update doors run their per-row loop inside that scope: `updateManyData` (`PATCH /api/v1/data/:object/updateMany`, both arms) and the `update` operation of `batchData`. A 50-row bulk update over 10 parents with two summary fields went from 400 to 182 statements (one summary field: 350 to 181; no summary field: 150, unchanged), measured on SQLite and PostgreSQL 16. The stored values are unchanged for every summary kind.
+  
+  Two things a caller can see, which is why this declares `Metadata-protocol: semantic` (when an authored hook runs and what it reads move, as in `33760-async-hook-on-commit`):
+  
+  - A hook or a flow step that reads a parent's summary during a bulk update reads the value from before the batch until the batch ends, as it does during a bulk create; before this change each row's hook saw the recompute of the rows before it. Rules do not change against today: a summary field a rule reads is not deferred (ruling 6928862195). A validation rule of any object that reads it one hop through a reference, a detail object's `requiredWhen` / `readonlyWhen` that reads it on `parent`, or a rule of the summary's own object that reads it on its own row, whether the rule names the summary or a formula or stored computed field calculated from it (and any summary a chain of summaries rolls up into one of those), a declared bound (`min`, `max`, `precision`, `unique`, …) or a declared unique index on the summary, and any stored computed field of its object calculated from it (the recompute's write judges that value whatever it declares: a bound, an option list, a number that is not finite), makes every roll-up of that child object recompute after each row inside the batch, so a bulk update answers such a rule as one-by-one updates do, for every summary function (two contacts set primary in one grid edit: the first is admitted, the second refused with the rule's text; an atomic edit that moves a line onto a capped invoice and back rolls back at the first move). A `parent.` predicate that reads a field that is not a summary (`parent.status == 'paid'`) does not turn the deferral off. A stored computed field of any object that reads the summary one hop (`record.invoice.line_count`) does turn it off, since it stores what it read at its own write; a `formula` does not, since it is computed when read.
+  - The parent's own write path (hooks, validation, audit entry, realtime event) runs once per recompute: once per parent for the whole batch, instead of once per child row, for a roll-up that is deferred. A roll-up a rule of the parent reads is not deferred, so those rules still judge every recompute.
+  
+  The scope is ambient, not tied to the object being updated: a write a hook issues while the batch runs under the batch's own transaction (or under none, for a non-atomic batch), on any object (a hook's own insert, update or delete, for instance a child-row hook that inserts a row into a second child object of the same parent), has its roll-up recompute deferred to the end of the batch as well, so a summary over that second object also reads its pre-batch value until the batch ends.
+  
+  Each row's own hooks, validation, audit and realtime run where they ran. An atomic bulk update whose end-of-batch recompute fails rolls back and answers the same rolled-back envelope a failed row answers (the last row that landed carries `ERR_SUMMARY_RECOMPUTE`, the rows before it `ROLLED_BACK`). A non-atomic one keeps its rows written, logs the stale summary once at `error`, and answers the rows as written, as a per-row recompute failure did.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [18194fb]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f8d016c]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [3dc3599]
+- Updated dependencies [f6f5b50]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [d576509]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/lint@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/metadata@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/sdui-parser@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

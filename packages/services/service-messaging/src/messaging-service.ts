@@ -10,7 +10,7 @@ import type {
     Notification,
 } from './channel.js';
 import { RecipientResolver, isRoleAudience } from './recipient-resolver.js';
-import { PreferenceResolver, type PreferenceTarget } from './preference-resolver.js';
+import { PreferenceResolver, type EffectivePreferences, type PreferenceTarget } from './preference-resolver.js';
 import type { INotificationOutbox } from './outbox.js';
 import type {
     EnqueueHttpInput,
@@ -727,6 +727,22 @@ export class MessagingService {
             known.push({ id, configured: this.getChannel(id) !== undefined });
         }
         return known;
+    }
+
+    /**
+     * [rulings 6968686390 and 6969143776] One person's effective notification
+     * preferences, decided by the SAME resolver `emit` filters with (its
+     * `mandatoryTopics` included). Read by the caller-scoped door
+     * `GET /api/v1/messaging/me/preferences` (`my-preferences-routes.ts`); see
+     * `PreferenceResolver.effectiveFor` for what is read and what leaves.
+     */
+    effectivePreferencesFor(
+        userId: string,
+        organizationId: string | undefined,
+        topics: readonly string[],
+        channels: readonly string[],
+    ): Promise<EffectivePreferences> {
+        return this.preferences.effectiveFor(userId, organizationId, topics, channels);
     }
 
     /* ------------------------------------------------------------------ */

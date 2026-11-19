@@ -17,7 +17,7 @@ import type { IDataEngine, WriteObservabilityOptions } from '@objectstack/spec/c
 // data path", and the engine's read path OMITS it. The ledger is a second exit
 // for the same value, so it honours the same declaration the same way — the
 // producer's declaration consumed, not a masking rule of this package's own.
-import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
+import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields, platformSystemApi } from '@objectstack/objectql/core';
 // [#24625] The mask of a mail-log row's body columns in a copy of it.
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 // The key-material columns no copy of a row carries (`key-material-copy.ts`).
@@ -94,6 +94,12 @@ import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
 import { IMPERSONATED_BY_KEY, IMPERSONATED_BY_NAME_KEY, impersonatorOf } from './impersonation-attribution.js';
 import { SCIM_CONNECTION_ID_KEY, scimConnectionOf } from './scim-connection-attribution.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
+import {
+  MENTION_EMAIL_CHANNEL,
+  MENTION_TOPIC,
+  mentionEmailDedupKey,
+  type MentionBuiltinTemplate,
+} from './mention-email.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
 import {
@@ -131,7 +137,19 @@ export interface MessagingEmitSurface {
     source?: { object: string; id: string };
     actorId?: string;
     organizationId?: string;
+    /**
+     * The channels to fan out to; absent, messaging's `['inbox']` default.
+     * The mention e-mail names `['email']` (`mention-email.ts`).
+     */
+    channels?: string[];
   }): Promise<unknown>;
+  /**
+   * `MessagingService.registerBuiltinTemplates` — the code-declared template
+   * tier the mention e-mail's text is registered in (`mention-email.ts`).
+   * Optional: a messaging service without it renders the e-mail from the
+   * notification's title and body alone.
+   */
+  registerBuiltinTemplates?(templates: readonly MentionBuiltinTemplate[]): void;
 }
 
 /**
@@ -214,6 +232,14 @@ export interface AuditWriterOptions {
    * tell on its own who may see the comment a notification would preview.
    */
   admitMentionRecipients?(input: MentionGateInput): Promise<string[]>;
+  /**
+   * The absolute URL of a Console page — the auth service's `getConsoleUrl`
+   * (`${origin}${uiBasePath}${path}`), the one composer of Console page links
+   * in mail. The mention e-mail links the comment's record through it
+   * (`mention-email.ts`). Absent, or answering nothing, the link stays the
+   * app-relative `/{object}/{id}` the inbox notice carries.
+   */
+  getConsoleUrl?(path: string): string | undefined;
 }
 
 /**
@@ -238,8 +264,10 @@ export interface AuditWriterOptions {
  *    separately and only over the objects a deployment opts in: record-detail
  *    views, batched off the request path. This writer stays write-only.
  *
- * All writes go through `ctx.api.sudo()` so they bypass record-level
- * permissions and always succeed regardless of the calling user's RBAC.
+ * All writes go through the platform's own system api over `ctx.api`
+ * (`platformSystemApi`, objectql) so they bypass record-level permissions and
+ * always succeed regardless of the calling user's RBAC — and so they are the
+ * platform's rows, never an insert of the automation whose write they record.
  */
 
 /**
@@ -1478,6 +1506,16 @@ export function installAuditWriters(
    * writer advances it before the activity row, so after a throw it still names
    * the table whose insert threw. ⛔ Not caught here — the failure must keep
    * reaching the caller's `catch`, which is the site the gate holds at `error`.
+   *
+   * [#35052] Both rows are written through the platform's own system api
+   * (`platformSystemApi`, objectql), never `api.sudo()`. `sudo()` keeps the
+   * write's provenance — the app-automation elevation mark of an action body
+   * or a system hook, a flow run's `flowRunId` — so under such a write the
+   * platform's own ledger rows were judged as the automation's insert into an
+   * append-only object (plugin-security's deprecation today, its refusal once
+   * that arm ships, which would lose the audit trail of every such write). An
+   * api the engine did not build has no context to derive from and keeps its
+   * own `sudo()`.
    */
   const persistAuditTrailRow = async (
     api: any,
@@ -1485,7 +1523,7 @@ export function installAuditWriters(
     activityRow: Record<string, any> | undefined,
     progress: AuditTrailWriteProgress,
   ): Promise<void> => {
-    const sys = api.sudo();
+    const sys = platformSystemApi(api) ?? api.sudo();
     await sys.object('sys_audit_log').create(auditRow);
     if (activityRow) {
       progress.writing = 'sys_activity';
@@ -2899,6 +2937,19 @@ export function installAuditWriters(
       actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
     }
     const bodyPreview = String(row.body ?? '').slice(0, 240);
+    // The mention e-mail's link (`mention-email.ts`): the record the comment
+    // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
+    // under the deployment's address. No record, no e-mail: a mail with no
+    // way back to the thread is not worth the daily mail budget.
+    const recordPath = source_object && source_id ? `/${source_object}/${source_id}` : null;
+    let mentionUrl: string | null = null;
+    if (recordPath) {
+      try {
+        mentionUrl = opts.getConsoleUrl?.(recordPath) || recordPath;
+      } catch {
+        mentionUrl = recordPath;
+      }
+    }
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
 
@@ -2970,6 +3021,33 @@ export function installAuditWriters(
             actorName,
           },
         });
+        // The e-mail (`mention-email.ts`): a second emit through the same
+        // ingress, `email` only, deduplicated per person and 10-minute
+        // window — the first mention of a person in a window sends it, every
+        // later one there is inbox-only. The person's own preference rows
+        // filter it like any channel.
+        if (mentionUrl) {
+          try {
+            await messaging.emit({
+              topic: MENTION_TOPIC,
+              audience: [uid],
+              severity: 'info',
+              source: { object: source_object, id: source_id },
+              actorId: actorId ?? undefined,
+              organizationId: tenantId ?? undefined,
+              channels: [MENTION_EMAIL_CHANNEL],
+              dedupKey: mentionEmailDedupKey(tenantId, uid, Date.now()),
+              payload: {
+                title,
+                body: bodyPreview,
+                actorName,
+                mentionUrl,
+              },
+            });
+          } catch (err) {
+            try { (engine as any).logger?.warn?.('Mention e-mail emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+          }
+        }
       } catch (err) {
         try { (engine as any).logger?.warn?.('Mention notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
       }

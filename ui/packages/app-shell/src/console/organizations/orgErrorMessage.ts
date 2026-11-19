@@ -178,21 +178,56 @@ function errorCode(err: unknown): string | undefined {
 }
 
 /**
- * better-auth's code for an accept refused because the session's address is
- * not verified. objectstack answers it while the deployment delivers mail
- * (objectstack#34272, plugin-auth `invitation-accept-verified-email.ts`), and
- * the vendor's own accept route answers it when its option is on.
+ * better-auth's code for an accept or a decline refused because the session's
+ * address is not verified. objectstack answers it on every deployment
+ * (plugin-auth `invitation-accept-verified-email.ts`).
  */
 export const ACCEPT_NEEDS_VERIFIED_EMAIL_CODE =
   'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION';
 
 /**
- * Was this rejection the accept refused for an unverified address? Read by
- * code only. The accept page answers it with the verification screen rather
- * than a toast: the person's next step is to verify, not to retry.
+ * Was this rejection an accept or a decline refused for an unverified address?
+ * Read by code only. The accept page answers it with the verification screen
+ * rather than a toast: the person's next step is to verify, not to retry.
  */
 export function isAcceptNeedsVerifiedEmail(err: unknown): boolean {
   return errorCode(err) === ACCEPT_NEEDS_VERIFIED_EMAIL_CODE;
+}
+
+/**
+ * The verification screen that answers {@link isAcceptNeedsVerifiedEmail}, as a
+ * router path: `/verify-email-prompt` with the account's address (`email`) and
+ * the router path the verification mail's link returns to (`redirect`). Each
+ * is left out when absent.
+ *
+ * The route is the host's: the console declares it, and a host that mounts
+ * the accept page or the console's action runtime without it sends the person
+ * nowhere (the package README, "Hosting the invitation pages").
+ */
+export function verifyEmailPromptPath(
+  email: string | null | undefined,
+  redirect: string | null | undefined,
+): string {
+  const sp = new URLSearchParams();
+  if (email) sp.set('email', email);
+  if (redirect) sp.set('redirect', redirect);
+  return `/verify-email-prompt?${sp.toString()}`;
+}
+
+/**
+ * {@link verifyEmailPromptPath} for a refusal that did not come from the accept
+ * page — the invitation inbox's `accept_invitation` action: the mail's link
+ * returns to the accept page for that invitation, where the person accepts
+ * once verified. No invitation id, no `redirect`.
+ */
+export function invitationVerifyEmailPromptPath(
+  email: string | null | undefined,
+  invitationId: unknown,
+): string {
+  const redirect = typeof invitationId === 'string' && invitationId
+    ? `/accept-invitation/${encodeURIComponent(invitationId)}`
+    : undefined;
+  return verifyEmailPromptPath(email, redirect);
 }
 
 /**

@@ -88,6 +88,10 @@ vi.mock('./useMetadata', async (importOriginal) => {
   };
 });
 
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay
+// its load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerMetadataPreview, getMetadataPreview } from './preview-registry';
 
@@ -98,9 +102,14 @@ function StubPageCanvas() {
 const realPagePreview = getMetadataPreview('page');
 
 const saveItem = vi.fn(async () => ({}));
-const adapter = { getClient: () => ({ meta: { saveItem } }) } as unknown as React.ComponentProps<
-  typeof AdapterCtx.Provider
->['value'];
+/** The apps as stored, the body a navigation write starts from: the listed apps of the open render. */
+let storedApps: { name: string }[] = [];
+const adapter = {
+  getClient: () => ({ meta: { saveItem } }),
+  // objectstack#35054 — a navigation write starts from the stored app (the
+  // layers read), not the served list; here the two are the same app.
+  getAuthoredItem: async (_type: string, name: string) => storedApps.find((a) => a.name === name) ?? null,
+} as unknown as React.ComponentProps<typeof AdapterCtx.Provider>['value'];
 
 function metaValue(apps: unknown[]): MetadataContextValue {
   return {
@@ -148,6 +157,7 @@ async function settle() {
 async function openEditor(search = '', apps: unknown[] = [crm]) {
   const path = `/metadata/page/${NAME}${search}`;
   window.history.replaceState(null, '', path);
+  storedApps = apps as { name: string }[];
   render(
     <AdapterCtx.Provider value={adapter}>
       <MetadataCtx.Provider value={metaValue(apps)}>
