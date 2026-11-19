@@ -22,16 +22,28 @@
  * Writability is the server's verdict read by packages-io (`PkgEntry.writable`,
  * ADR-0070 D2), and the server's write gate stays the authority. The page's
  * copy says what the author can do; it names no package mechanism.
+ *
+ * objectstack#35196 — this page is the served Studio's door to package
+ * management (ruling 甲 of objectstack#25098 puts the unfiltered package list
+ * in Studio only, and the `@objectstack/studio` app whose Overview → Packages
+ * entry names it is not default-loaded): every card carries Manage, which
+ * opens the same detail sheet as the top-bar switcher's "Package info &
+ * settings" (Disable / Enable, export, and the writable actions), and the
+ * title row links to the unfiltered Packages page.
  */
 
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Boxes, Building2, Clock, Hammer, Library, Plus, Loader2, Copy, Store } from 'lucide-react';
+import { Boxes, Building2, Clock, Hammer, Library, List, Plus, Loader2, Copy, Settings, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
+import { PackageDetailSheet, type InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
+import { packagesHref } from '../metadata-admin/packageSource.js';
+import { formatMetadataError } from '@object-ui/data-objectstack';
+import { fetchInstalledPackageRow } from './PackageSwitcher.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, fetchListedPackageIds, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
 import {
@@ -64,6 +76,15 @@ import { useMetadataClient } from '../metadata-admin/useMetadata.js';
  * metadata page (objectstack ADR-0146 D1, Setup carries none).
  */
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
+
+/**
+ * objectstack#35196 — the unfiltered Packages page (`developer:packages` with no
+ * `source`), the full list with every package's lifecycle actions. Ruling 甲
+ * (objectstack#25098) gives it no Setup menu entry; this landing's link is its
+ * menu door in the served Studio. The route is hosted under the Setup app's
+ * address, the one console app every boot loads.
+ */
+export const STUDIO_ALL_PACKAGES_PATH = packagesHref('/apps/setup');
 
 /** objectui#11863 — how many recent packages the landing lists: one row of cards. */
 const RECENT_PACKAGES_SHOWN = 3;
@@ -145,6 +166,70 @@ export function BuilderLanding(): React.ReactElement {
   }, []);
 
   const open = (id: string) => navigate(`/studio/${encodeURIComponent(id)}/data`);
+
+  // objectstack#35196 — Manage on a card: the switcher's detail sheet, opened
+  // on the package's full installed row (`fetchInstalledPackageRow`), so
+  // Disable and Enable are one click from the landing. The sheet offers
+  // Disable where the server's `disableable` says the door accepts it, and
+  // Enable on any disabled package.
+  const [manage, setManage] = React.useState<InstalledPackageRow | null>(null);
+  const [manageOpen, setManageOpen] = React.useState(false);
+  const [manageBusy, setManageBusy] = React.useState<string | null>(null);
+  const openManage = async (id: string) => {
+    setManageBusy(id);
+    try {
+      const full = await fetchInstalledPackageRow(id);
+      if (!full) {
+        // The list answered without it: removed since this page loaded.
+        toast.error(tFormat('engine.studio.pkg.manageMissing', locale, { id }));
+        return;
+      }
+      setManage(full);
+      setManageOpen(true);
+    } catch (e) {
+      toast.error(formatMetadataError(e));
+    } finally {
+      setManageBusy(null);
+    }
+  };
+  // A lifecycle action ran in the sheet: re-read the cards and the sheet's
+  // record, so a disable shows at once. A package the list no longer names
+  // (deleted) closes the sheet; its card goes with the refreshed list.
+  const onManageChanged = async () => {
+    const id = manage?.manifest.id;
+    fetchListedPackageIds().then(setListedPackageIds, () => {});
+    fetchPackages().then(
+      (list) => setPkgs(list),
+      (e: unknown) => toast.error(formatMetadataError(e)),
+    );
+    if (!id) return;
+    try {
+      const fresh = await fetchInstalledPackageRow(id);
+      if (fresh) setManage(fresh);
+      else setManageOpen(false);
+    } catch (e) {
+      // Never left open on the pre-action record: its button would offer the
+      // verb the author just used (the switcher's posture).
+      toast.error(
+        tFormat('engine.studio.pkg.manageRefreshFailed', locale, { id, error: formatMetadataError(e) }),
+      );
+      setManageOpen(false);
+    }
+  };
+  const manageButton = (p: PkgEntry) => (
+    <button
+      type="button"
+      data-testid="studio-landing-manage"
+      onClick={() => void openManage(p.id)}
+      disabled={manageBusy !== null}
+      aria-label={tFormat('engine.studio.landing.manageTitle', locale, { name: p.name })}
+      title={tFormat('engine.studio.landing.manageTitle', locale, { name: p.name })}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 max-md:min-h-11 max-md:px-3"
+    >
+      {manageBusy === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Settings className="h-3 w-3" />}
+      {t('engine.studio.landing.manage', locale)}
+    </button>
+  );
 
   // objectui#11863 — the packages the author was last in, newest first, as the
   // console's route owner records them (`StudioRoute`). An entry stores the
@@ -456,6 +541,15 @@ export function BuilderLanding(): React.ReactElement {
           <Hammer className="h-4.5 w-4.5" />
         </span>
         <h1 className="text-lg font-semibold">{t('engine.studio.landing.title', locale)}</h1>
+        {/* objectstack#35196 — the unfiltered Packages page's menu door. */}
+        <Link
+          to={STUDIO_ALL_PACKAGES_PATH}
+          data-testid="studio-landing-all-packages"
+          title={t('engine.studio.landing.allPackagesTitle', locale)}
+          className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-primary hover:underline"
+        >
+          <List className="h-3 w-3" /> {t('engine.studio.landing.allPackages', locale)}
+        </Link>
       </div>
       <p className="mb-5 max-w-2xl text-xs leading-5 text-muted-foreground">
         {t('engine.studio.landing.lead', locale)}
@@ -532,6 +626,7 @@ export function BuilderLanding(): React.ReactElement {
                 >
                   {t('engine.studio.customize.action', locale)}
                 </button>
+                {manageButton(p)}
               </div>
             ))}
           </div>
@@ -580,6 +675,7 @@ export function BuilderLanding(): React.ReactElement {
               >
                 <Copy className="h-3 w-3" /> {t('engine.studio.landing.dup', locale)}
               </button>
+              {manageButton(p)}
             </div>
             {dupFor === p.id && (
               <div className="flex flex-col gap-1.5 border-t px-3 py-2.5">
@@ -646,6 +742,12 @@ export function BuilderLanding(): React.ReactElement {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onSaved={(r) => open(r.id)}
+      />
+      <PackageDetailSheet
+        pkg={manage}
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        onChanged={() => void onManageChanged()}
       />
 
       {/* objectui#11863 — the packages last opened here. objectstack#34715
