@@ -868,6 +868,89 @@ describe('[query_dataset totalGroups] a SQL dialect the strategy does not know i
   });
 });
 
+// [query_dataset totalGroups] The count is the served answer's, or absent. The
+// primary grid is counted by its own statement; the `totals` reads run after
+// it. When one of them meets a missing source, the service serves the empty
+// answer, and a count already written would pair `rowCount: 0` with the groups
+// of a grid that was never served. Over a real SQLite engine: the second
+// statement of the call fails as a table that vanished between the two would.
+describe('[query_dataset totalGroups] a totals read that meets a missing source serves no count', () => {
+  const OBJECT = 'os_tg_vanish';
+  const DATASET = {
+    name: 'tg_vanish',
+    label: 'Vanishing pipeline',
+    object: OBJECT,
+    dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' }],
+  };
+  let engine: ObjectQL;
+  let service: AnalyticsService;
+  const statements: string[] = [];
+  let failFrom = Number.POSITIVE_INFINITY;
+
+  beforeAll(async () => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    engine = new ObjectQL({ logger: tgQuiet } as never);
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: OBJECT,
+      label: 'Deal',
+      fields: { stage: { name: 'stage', type: 'text' }, amount: { name: 'amount', type: 'number' } },
+    } as never, '@objectstack/service-analytics');
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine as never);
+    for (const [i, stage] of ['lead', 'qualified', 'won'].entries()) {
+      await engine.insert(OBJECT, { id: `v${i}`, stage, amount: 10 * (i + 1) } as never);
+    }
+    const realExecute = (engine as any).execute.bind(engine);
+    (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
+      if (opts?.object === OBJECT) {
+        statements.push(String((sql as { sql?: string })?.sql ?? sql));
+        if (statements.length >= failFrom) return Promise.reject(new Error(`SQLITE_ERROR: no such table: ${OBJECT}`));
+      }
+      return realExecute(sql, opts);
+    };
+    const registered: Record<string, unknown> = {};
+    await new AnalyticsServicePlugin({} as never).init({
+      getService: (name: string) => (name === 'data' ? engine : name === 'security' ? tgSecurity : registered[name]),
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      hook: () => {},
+      logger: tgQuiet,
+    } as never);
+    service = registered.analytics as AnalyticsService;
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  const ask = () => service.datasetTools({ loadDatasets: async () => [{ ...DATASET }] }).queryDataset(
+    { datasetName: DATASET.name, selection: { measures: ['revenue'], dimensions: ['stage'], totals: { groupings: [[]] } } },
+    TG_CALLER,
+  );
+
+  it('CONTROL: with the totals read served, the primary statement counts the groups', async () => {
+    failFrom = Number.POSITIVE_INFINITY;
+    statements.length = 0;
+    const out = await ask();
+    expect(out).toMatchObject({ rowCount: 3, truncated: false, totalGroups: 3 });
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain(TG_WINDOW);
+  });
+
+  it('with the totals read failing as a missing source: the empty answer, and no totalGroups', async () => {
+    statements.length = 0;
+    failFrom = 2;
+    const out = await ask();
+    expect(statements, 'the primary statement ran and counted before the totals read failed').toHaveLength(2);
+    expect(statements[0]).toContain(TG_WINDOW);
+    expect(out).toMatchObject({ rowCount: 0 });
+    expect(out).not.toHaveProperty('totalGroups');
+  });
+});
+
 // [ADR-0149] The dataset is the one declared definition: `query_dataset`
 // answers only the members it declares. A raw field (`amount`), the
 // service's ad-hoc `count`, a suffix spelling (`amount_sum`) or an

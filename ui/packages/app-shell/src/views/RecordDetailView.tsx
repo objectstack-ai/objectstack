@@ -2780,6 +2780,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   });
   const editDisabledByPredicate = editPredicates?.disabledWhen != null && editDisabledPred;
   const deleteDisabledByPredicate = deletePredicates?.disabledWhen != null && deleteDisabledPred;
+  // The sentence a `disabledWhen`-greyed Edit / Delete gives (objectstack#35135):
+  // `userActions` declares no reason key, so it is the generic one an
+  // authored action without a `disabledReason` gives too.
+  const predicateDisabledReason = String(
+    t('actions.notAvailableForRecord', { defaultValue: 'Not available for this record' }),
+  );
   // objectstack#32756 — the record's state leaves the edit form nothing to
   // edit: every field it shows resolves read-only, at least one by its
   // `readonlyWhen`. Judged by the form's own field-rule evaluator over the
@@ -4729,6 +4735,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     if (affordances.edit) {
       const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
+      // objectstack#35135 — the reason a predicate-disabled Edit gives. The
+      // approval band and the state-lock badge explain their own locks, so
+      // the generic sentence is spoken only when `edit.disabledWhen` is what
+      // turned Edit off and neither of those draws: one reason at a time.
+      const editReason = editDisabledByPredicate && !approvalLocked && !editLockedByState
+        ? predicateDisabledReason
+        : undefined;
       // Single primary Edit CTA → opens the full record form. Inline editing
       // is no longer a standalone header button; it is entered by
       // double-clicking a field (or its hover pencil) in the record body,
@@ -4775,6 +4788,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
         disabled: editOff,
+        // `page:header` draws a host action's own `disabledReason` as the
+        // button's tooltip and accessible description, and as the second
+        // line of its `⋯` entry (the phone bar's, where an off Edit goes).
+        ...(editReason ? { disabledReason: editReason } : null),
         // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
         // first slot is its primary place, and an action that cannot be
         // pressed never holds it: whichever of the three reasons above turns
@@ -4886,8 +4903,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // declared no `disabled` key before, and `page:header` reads a declared
         // `disabled` by `!= null`, so emitting a bare `false` would say
         // something the object never declared. With no predicate the emitted
-        // ActionDef is byte-identical to the pre-#4213 one.
-        ...(deleteDisabledByPredicate ? { disabled: true } : null),
+        // ActionDef is byte-identical to the pre-#4213 one. The predicate is
+        // the only thing that greys Delete, so it carries the same generic
+        // reason as Edit (objectstack#35135).
+        ...(deleteDisabledByPredicate ? { disabled: true, disabledReason: predicateDisabledReason } : null),
         onClick: async () => {
           // objectui#11695 — the list's delete copy, from the one shared core
           // (`recordDelete.confirmCopy`): the title names this record by the
