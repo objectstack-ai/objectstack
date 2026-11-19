@@ -432,7 +432,8 @@ export const LocationValueSchema = lazySchema(() => strictObject(
     // The retired spec-only spelling (see the module header). The two entries
     // play DIFFERENT roles and neither is optional. The fallback is
     // `suggestRename` (`shared/rename-guess.ts`, the package's one rename
-    // rule), whose budget is `max(2, floor(len / 3))` past five characters.
+    // rule): budget `max(2, floor(len / 3))`, and at five characters or fewer
+    // one edit counting an adjacent swap as one.
     //
     //  - `longitude` → `lng` is the unreachable case: 6 edits against a budget
     //    of 3, and no other declared member is closer, so without this entry
