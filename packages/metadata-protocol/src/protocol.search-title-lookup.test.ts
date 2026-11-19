@@ -37,6 +37,10 @@
 // denial for an object the fake security layer refuses.
 
 import { describe, it, expect, vi } from 'vitest';
+// `protocol.ts` reaches `@objectstack/lint` through a dynamic import; loaded
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 type Row = Record<string, unknown>;
