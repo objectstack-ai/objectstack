@@ -14,7 +14,8 @@ Skills-docs: none — `skills/objectstack-data/rules/field-types.md` already say
 
 - **The verdict.** The follow door (`SchemaRegistry.objectRegistrationRefusal` with `againstRegistry`, and the end of an install, upgrade or reload on a running server) now judges a one-segment pointer against the object AS SERVED: its base, every enabled extension, and the incoming body. A pointer naming no other field, or a field that is not a `text` field declaring `valueDomain: 'iso_4217_currency'`, is refused `422 INVALID_METADATA` (`RecordCurrencyFollowRefusedError`), naming the amount, the pointer and the object's code-field candidates; nothing is stored.
 - **Admitted as before.** A pointer naming a code field the owner declares, the same extension adds, or another enabled extension adds.
-- **The owner's end.** An owner re-registering without the code field an extension's amount names is refused, naming the package that adds the amount. A re-save that leaves such a pointer as it found it is not refused over it.
+- **The owner's end.** An owner re-registering without the code field an extension's amount names is refused, naming the package that adds the amount.
+- **Runs and single saves.** An install, upgrade or reload that leaves such a pointer as it found it is not refused over it. A published single save and the batch writers judge with the slot left empty: re-publishing an unchanged extension whose pointer a cold boot admitted is refused, and so is a published save of the owner while an extension's amount names no code field. Correct that extension's pointer (or uninstall it), then save the owner again unchanged.
 - **Not asked.** The cold boot: packages installed before this release keep loading.
 
 One-line fix: point the amount's `currencyField` at the extended object's ISO 4217 code field (the refusal lists the candidates), or add one in the same extension and name it.

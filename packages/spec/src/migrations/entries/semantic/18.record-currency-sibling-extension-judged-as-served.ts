@@ -20,7 +20,10 @@ export const entry: SemanticMigration = {
     'Name in `currencyField` a field of the extended object that declares `valueDomain: \'iso_4217_currency\'` (the '
     + 'refusal lists the candidates), or add such a field in the same extension and name it. When the owner of the '
     + 'extended object is refused because it drops or de-codes the field an extension\'s amount names, the refusal '
-    + 'names that package: keep the field, or have that package move its amount first',
+    + 'names that package: keep the field, or have that package move its amount first. When the owner is refused '
+    + 'over an extension\'s amount it did not change (a published single save of the owner while that amount already '
+    + 'names no code field), the correction is the extension\'s package: it is saved or upgraded with the pointer '
+    + 'corrected, or uninstalled, and the owner is then saved again unchanged',
   reason:
     'An object body whose record-mode amount names a sibling field it does not declare, or one that holds no ISO '
     + '4217 code, is refused 422 INVALID_METADATA at parse. An extension cannot be judged there, because its pointer '
@@ -29,7 +32,10 @@ export const entry: SemanticMigration = {
     + 'prescribing a write into a field that does not exist. The door now judges the sibling pointer against the '
     + 'object as served, so the save is refused 422 INVALID_METADATA naming the field and the object\'s code-field '
     + 'candidates, and a pointer naming a code field the owner or another enabled extension declares is saved as '
-    + 'before. A run that leaves such a pointer as it found it is not refused over it. Packages installed before this '
+    + 'before. An install, upgrade or reload that leaves such a pointer as it found it is not refused over it. A '
+    + 'single save and the batch writers judge against the slot left empty, so re-publishing an unchanged extension '
+    + 'whose pointer a cold boot admitted is refused there, and so is a published single save of the owner while an '
+    + 'extension\'s amount names no code field, as for the two-segment path. Packages installed before this '
     + 'release keep loading at every boot, which is not asked. There is no mechanical rewrite: only the author knows '
     + 'which field holds the code',
   acceptanceCriteria:

@@ -801,7 +801,27 @@ describe('an object_extension\'s record-mode amount naming a sibling code field 
         const refusal = h.engine.registry.objectRegistrationRefusal({ ...invoice('sib'), fields: withoutCode } as never, P, 'own', { againstRegistry: true });
         expect(refusal).toMatchObject({ name: 'RecordCurrencyFollowRefusedError', status: 422, code: 'INVALID_METADATA', objectName: 'sib_invoice', fieldName: 'fee' });
         expect(refusal?.message).toContain(`package '${X}'`);
-        // A no-change re-save of the owner is not refused over a pair it leaves as it found it.
-        expect(h.engine.registry.objectRegistrationRefusal(invoice('sib') as never, P, 'own', { againstRegistry: true })).toBeNull();
+    });
+
+    // A single save asks with its slot left empty (`before: null`), so it does
+    // not get the run's R7 comparison: a pointer already dangling when the save
+    // arrives (registered unasked, as a cold boot registers it) refuses both an
+    // unchanged re-publish of that extension and an unchanged owner save.
+    it('a published single save is refused over a sibling pointer that already dangles: the extension\'s unchanged re-publish, and the owner\'s unchanged save', async () => {
+        const h = await bootWithInvoice();
+        h.engine.registry.registerObject({ name: 'sib_invoice', fields: { fee: fee('zz_missing') } } as never, P, undefined, 'extend');
+        expect(registered(h, 'sib_invoice')?.fields?.fee?.currencyConfig?.currencyField).toBe('zz_missing');
+
+        const republish = await caught(() => saveExtension(h, { fee: fee('zz_missing') }));
+        expect(republish).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(activeRow(h, 'object_extension', 'sib_invoice', P)).toBeUndefined();
+
+        const other = await bootWithInvoice();
+        other.engine.registry.registerObject({ name: 'sib_invoice', fields: { fee: fee('zz_missing') } } as never, X, undefined, 'extend');
+        // Asked as the single save asks it (a protocol re-save of the owner first meets the destructive-change
+        // door, which reads the extension's column as one the body would drop).
+        const ownerSave = other.engine.registry.objectRegistrationRefusal(invoice('sib') as never, P, 'own', { againstRegistry: true });
+        expect(ownerSave).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(String(ownerSave?.message)).toContain(`package '${X}'`);
     });
 });
