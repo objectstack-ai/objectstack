@@ -72,9 +72,12 @@ At boot, the automation service resolves each provider-bound entry:
 1. **Look up the provider factory** registered under `entry.provider`. The
    three generic executors — `@objectstack/connector-rest`,
    `@objectstack/connector-openapi`, `@objectstack/connector-mcp` — each
-   contribute one; scaffolded projects (`npm create objectstack`) ship all
-   three in `plugins:` by default, paired with the `automation` capability
-   that performs the materialization.
+   contribute one. A scaffolded project (`npm create objectstack`) lists
+   none: install the provider's package and add its executor to `plugins:`
+   when the app first declares a connector, beside the `automation`
+   capability that performs the materialization. A plugin is code, so an app
+   that lists one installs only as a managed package, never as an editable
+   (`unmanaged`) copy.
 2. **The factory validates `providerConfig`** and the automation service
    resolves `auth.credentialRef` to its secret (see
    [What `credentialRef` resolves through](#what-credentialref-resolves-through)).

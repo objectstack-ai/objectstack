@@ -58,6 +58,15 @@ export interface NamespaceRenameInput {
     items: ReadonlyArray<NamespaceRenameItem>;
     /** The door's verb, for the remedy every refusal ends with ("then duplicate again"). */
     retryVerb: 'duplicate' | 'install';
+    /**
+     * [#35157] The source package stays installed beside the copy, in the same
+     * deployment — true for `duplicatePackage`, whose source is a stored base.
+     * A capability the copy cannot give a name of its own is then one gate
+     * shared by the copy and its source, so every item naming one is refused
+     * (see {@link planNamespaceRename}). Absent for the unmanaged import, whose
+     * source is a package body it is handed.
+     */
+    sourceStaysInstalled?: boolean;
 }
 
 /** One body, re-namespaced — or the reason it cannot be. */
@@ -123,6 +132,34 @@ export const METADATA_ITEM_NAME_STORAGE_LIMIT: number =
 function isViewType(type: string): boolean {
     return (PLURAL_TO_SINGULAR[String(type)] ?? String(type)) === 'view';
 }
+
+/** A `capability` row, in either spelling of the type. */
+function isCapabilityType(type: string): boolean {
+    return (PLURAL_TO_SINGULAR[String(type)] ?? String(type)) === 'capability';
+}
+
+/**
+ * [#35157] The keys a body names capabilities under: a permission set GRANTS
+ * them (`systemPermissions`) and a resource REQUIRES them
+ * (`requiredPermissions` — on an object, a field, an app and its navigation, an
+ * action, a flow, a list view, a dashboard, a record block; a `string[]`, or on
+ * an object a `{ read, create, update, delete }` map of them). Their values are
+ * capability names and nothing else, so each entry goes to the capability
+ * rename, never to the generic walk: a name the package declares takes the
+ * capability rename alone, and any other name takes the object-name pass, so
+ * an undeclared token spelled with a renamed object's name follows the object.
+ */
+const CAPABILITY_REFERENCE_KEYS: ReadonlySet<string> = new Set(['systemPermissions', 'requiredPermissions']);
+
+/**
+ * [#35157] The third place a body names a capability: a predicate that hides a
+ * component unless the viewer holds one, `current_user.hasCapability('<name>')`
+ * (`PageComponentSchema.visibleWhen`, `packages/spec/src/ui/page.zod.ts`, which
+ * teaches writing it "with the name the gated action's `requiredPermissions`
+ * declares"). A quoted literal argument only; any other argument is an
+ * expression this engine does not evaluate, and it is left as written.
+ */
+const HAS_CAPABILITY_CALL = /(\bhasCapability\(\s*)(['"])([^'"\\]*)\2/g;
 
 /** A `view` row whose name is qualified `<object>.<viewKey>` (`ViewItemNameSchema`). */
 function isQualifiedViewName(type: string, name: unknown): name is string {
@@ -312,6 +349,107 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
     // one-to-one, so a meeting is always a renamed name and a name this copy
     // does not rename; an element the source itself repeats is copied as
     // stored.
+    // [#35157] ⭐ A COPIED CAPABILITY TAKES THE TARGET NAMESPACE, AND EVERY
+    // GRANT AND REQUIREMENT OF IT IN THE COPY FOLLOWS. A capability's name is
+    // ONE per deployment — the runtime matches a grant to a requirement by
+    // string, whichever package declared it (`missingCapabilities`,
+    // `@objectstack/core`) — so two copies of one app that kept the source's
+    // capability names would share one gate: a holder of either copy's set
+    // would pass both copies' actions. The name a package gives its own
+    // capability carries its namespace, `<ns>.<name>` or `<ns>_<name>`; the
+    // copy swaps that prefix for the target's, as an object name's prefix is
+    // swapped, and rewrites the name wherever the copy's bodies grant or
+    // require it ({@link CAPABILITY_REFERENCE_KEYS}). A capability the
+    // package declares without its prefix keeps its name — no rule says what
+    // its prefix is. A name the package does NOT declare (a platform
+    // capability, another package's) never takes the capability rename: it
+    // takes the object-name pass, as every string did before #35157, so it
+    // keeps its name unless it is spelled with a renamed object's name, and
+    // then it follows the object.
+    //
+    // The name is rewritten in the three places a body names a capability —
+    // the two keys above, and a `hasCapability('<name>')` predicate
+    // ({@link HAS_CAPABILITY_CALL}) — and there the object-name pass below
+    // never touches a name the package declares, so a capability named after
+    // a renamed object (`crm.crm_invoice.void`) is ONE name in the copy, the
+    // declaration's, never a second one the object pass would invent. A name
+    // the package does not declare still takes the object-name pass there.
+    //
+    // ⛔ A SHARED GATE IS REFUSED (`sourceStaysInstalled`). When the source
+    // stays installed beside the copy (`duplicatePackage`), a declared
+    // capability the copy does not rename — it carries no source prefix, or
+    // its copy name is refused below — is held by the source already: the save
+    // door refuses the copy's declaration, and an item of the copy that grants
+    // or requires it would pass on the SOURCE's gate. So every such item is
+    // refused at its own name, with the rename that clears it. The unmanaged
+    // import keeps such a name: its source is not installed, and when a
+    // package does hold the name the save door refuses the declaration and
+    // the import, all or nothing, refuses with it.
+    //
+    // ⛔ REFUSED, NEVER RE-INVENTED: a copy name another capability of the
+    // package already holds would merge two gates into one, so that
+    // capability is refused at its own name.
+    const capabilityNames = new Set<string>(
+        items.filter((item) => isCapabilityType(item?.type) && typeof item.name === 'string').map((item) => item.name),
+    );
+    const capabilityRenames = new Map<string, string>();
+    const refusedCapabilities = new Map<string, string>();
+    if (sourceNs && targetNs !== sourceNs) {
+        for (const name of capabilityNames) {
+            const sep = name.startsWith(`${sourceNs}.`) ? '.' : name.startsWith(`${sourceNs}_`) ? '_' : undefined;
+            if (sep === undefined) continue;
+            const nn = `${targetNs}${sep}${name.slice(sourceNs.length + 1)}`;
+            if (capabilityNames.has(nn)) {
+                refusedCapabilities.set(
+                    name,
+                    `Capability '${name}' is not copied: its copy name in namespace '${targetNs}' is '${nn}', a `
+                        + `capability package '${sourcePackageId}' already declares, so the copy would merge two `
+                        + `gates into one. Rename '${name}' or '${nn}' on the source, ${again}.`,
+                );
+                continue;
+            }
+            capabilityRenames.set(name, nn);
+        }
+    }
+    // Why a declared capability keeps the source's name, for each one that does.
+    const sharedCapabilities = new Map<string, string>();
+    if (input.sourceStaysInstalled) {
+        for (const name of capabilityNames) {
+            if (capabilityRenames.has(name)) continue;
+            sharedCapabilities.set(name, refusedCapabilities.has(name)
+                ? `its copy name in namespace '${targetNs}' is a capability the package already declares`
+                : !sourceNs
+                    ? 'the package declares no namespace, so no prefix marks the name as the package\'s'
+                    : targetNs !== sourceNs
+                        ? `it carries no '${sourceNs}.' or '${sourceNs}_' prefix to swap for '${targetNs}'`
+                        : 'the copy keeps the source\'s namespace');
+        }
+    }
+    // The capability names one `rewrite` call met, for the shared-gate refusal.
+    let capabilitiesNamed: Set<string> | undefined;
+    // A name the package DECLARES takes the capability rename alone, never the
+    // object-name pass, so its declaration and every reference agree. Any
+    // other name is the object-name pass's, as it was before #35157: an
+    // undeclared token spelled with a renamed object's name
+    // (`crm_invoice.void`) follows the object in the grant, the requirement
+    // and the predicate alike, so each copy keeps a gate of its own.
+    const renameCapability = (name: string): string => {
+        capabilitiesNamed?.add(name);
+        if (capabilityNames.has(name)) return capabilityRenames.get(name) ?? name;
+        return re ? name.replace(re, (m) => renameMap.get(m) ?? m) : name;
+    };
+    const renameCapabilityList = (list: unknown): unknown =>
+        Array.isArray(list)
+            ? list.map((entry) => (typeof entry === 'string' ? renameCapability(entry) : entry))
+            : list;
+    const rewriteCapabilityValue = (val: unknown): unknown =>
+        Array.isArray(val)
+            ? renameCapabilityList(val)
+            : val && typeof val === 'object'
+                ? Object.fromEntries(Object.entries(val as Record<string, unknown>)
+                    .map(([op, list]) => [op, renameCapabilityList(list)]))
+                : val;
+
     const objectReferenceProperties = new Set(
         (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
     );
@@ -322,7 +460,18 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
             if (whole !== undefined) return whole;
             const viewItem = viewItemRenames.get(v);
             if (viewItem !== undefined) return viewItem;
-            return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
+            const objectPass = (text: string): string => (re ? text.replace(re, (m) => renameMap.get(m) ?? m) : text);
+            // A `hasCapability('<name>')` argument is a capability name and
+            // goes to `renameCapability`: a name the package declares takes the
+            // capability rename alone, never the object pass; any other name
+            // takes the object pass there.
+            let out = '';
+            let last = 0;
+            for (const m of v.matchAll(HAS_CAPABILITY_CALL)) {
+                out += objectPass(v.slice(last, m.index)) + m[1] + m[2] + renameCapability(m[3]!) + m[2];
+                last = m.index! + m[0].length;
+            }
+            return last === 0 ? objectPass(v) : out + objectPass(v.slice(last));
         }
         if (Array.isArray(v)) {
             const out = v.map((element, i) => deepRewrite(element, collisions, atReference, `${at}[${i}]`));
@@ -350,6 +499,10 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
                     collisions.push({ at, shape: 'key', moved: key === k ? other : k, met: key });
                 }
                 from.set(key, k);
+                if (CAPABILITY_REFERENCE_KEYS.has(k)) {
+                    o[key] = rewriteCapabilityValue(val);
+                    continue;
+                }
                 const entry = deepRewrite(
                     val, collisions,
                     objectReferenceProperties.has(k) || (atReference && k === 'name'),
@@ -450,6 +603,8 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
     const copyName = (type: string, name: string): string =>
         type === 'object'
             ? (renameMap.get(name) ?? name)
+            : isCapabilityType(type)
+                ? (capabilityRenames.get(name) ?? name)
             : isQualifiedViewName(type, name)
                 ? qualifiedViewCopyName(name)
                 : isViewType(type) && renameMap.has(name)
@@ -493,8 +648,31 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
         },
         rewrite(type, name, item) {
             const singular = PLURAL_TO_SINGULAR[String(type)] ?? String(type);
+            const capabilityRefusal = singular === 'capability' ? refusedCapabilities.get(name) : undefined;
+            if (capabilityRefusal !== undefined) return { refusal: capabilityRefusal };
+            const shared = singular === 'capability' ? sharedCapabilities.get(name) : undefined;
+            if (shared !== undefined) {
+                return {
+                    refusal: `Capability '${name}' is not copied: ${shared}, so the copy would declare the name `
+                        + `package '${sourcePackageId}' still declares, and the two would share one gate. `
+                        + `Rename '${name}' on the source to a '${sourceNs || '<namespace>'}.' name, ${again}.`,
+                };
+            }
             const collisions: ReferenceCollision[] = [];
+            // Every call starts its own count, so a throw from an earlier one leaves nothing behind.
+            const named = new Set<string>();
+            capabilitiesNamed = named;
             const rewritten = deepRewrite(item, collisions);
+            capabilitiesNamed = undefined;
+            const sharedNamed = [...named].find((cap) => sharedCapabilities.has(cap));
+            if (sharedNamed !== undefined) {
+                return {
+                    refusal: `${nounOf(type)} '${name}' is not copied: it names capability '${sharedNamed}', which `
+                        + `package '${sourcePackageId}' declares and this copy cannot rename (${sharedCapabilities.get(sharedNamed)}), `
+                        + 'so the copy would pass on the source\'s gate. '
+                        + `Rename '${sharedNamed}' on the source to a '${sourceNs || '<namespace>'}.' name, ${again}.`,
+                };
+            }
             if (collisions.length > 0) {
                 const more = collisions.length - 1;
                 return {
