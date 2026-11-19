@@ -2707,12 +2707,15 @@ describe('ListView.recordDrawerCount-27545', () => {
       await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
     });
 
-    it('a record open in the drawer: the column summaries are drawn beside the count', async () => {
+    // objectstack#35548 — the column summaries left this bar: the grid draws
+    // them as its table's own last row, each under its column, so the list
+    // hands it no `onColumnSummaryChange` and the bar holds the count alone.
+    it('a record open in the drawer: the bar holds the count alone; the summaries are the grid\'s own row', async () => {
       renderList('a1');
       (await screen.findByTestId('grid-probe')).click();
       const bar = await screen.findByTestId('record-count-bar');
-      await waitFor(() => expect(within(bar).getByTestId('record-count-summaries')).toHaveTextContent('Number of Employees: Avg: 10'));
-      expect(within(bar).getByText('4 records')).toBeInTheDocument();
+      await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
+      expect(within(bar).queryByTestId('record-count-summaries')).toBeNull();
     });
   });
 });

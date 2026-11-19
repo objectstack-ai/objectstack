@@ -1286,7 +1286,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 741 since #33657: the hook form's refusal entry offers `reasons` (with
       // its `message`) and `params` — three row labels, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(741);
+      // 744 since #34575: the hook form offers the `texts` record and its
+      // `message` / `params` entry fields — three row labels, authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(744);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

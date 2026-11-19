@@ -989,6 +989,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Parámetros",
         helpText: "Nombres que las frases pueden rellenar (p. ej. state): el cuerpo lanza { code, params: { state } } y un marcador {{ state }} muestra su valor. Si se omite: las frases son texto plano"
       },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que el gancho escribe en los registros, indexadas por la clave snake_case que su código pide con ctx.text (p. ej. follow_up_subject). El gancho recibe el mensaje declarado en el idioma de la organización, traducido, con el mensaje declarado como respaldo. Para un cuerpo JavaScript (L2) o un manejador; se rechaza en un cuerpo de expresión"
+      },
+      "texts.message": {
+        label: "Mensaje",
+        helpText: "La frase que escribe el gancho cuando su código pide esta clave. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "texts.params": {
+        label: "Parámetros",
+        helpText: "Nombres que la frase puede rellenar (p. ej. lead): el código pide ctx.text(key, { lead }) y un marcador {{ lead }} muestra su valor. Si se omite: la frase es texto plano"
+      },
       handler: {
         label: "Manejador",
         helpText: "Nombre de función manejadora (obsoleto — preferir `body`)"

@@ -9,7 +9,9 @@
 /**
  * objectui#12695 — the list toolbar draws Filter, Sort and Display as icon
  * buttons at every width, with the count badge as the only text in the
- * cluster. One shape for every list: the triggers live in `ListView`, which
+ * cluster. ⚠️ objectstack#35548 redrew them from `sm` up as named text
+ * buttons, 「筛选」「排序」「选项」 (Display is now Options), each with its count
+ * after the name; below `sm` they stay icons, the label `hidden sm:inline`. One shape for every list: the triggers live in `ListView`, which
  * app object lists, Setup lists and related lists all mount.
  *
  * ## How "wide" and "narrow" are reproduced here
@@ -103,71 +105,72 @@ afterEach(() => {
   if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
 });
 
-describe('Filter, Sort and Display are icon buttons on every list (objectui#12695)', () => {
-  it('wide: no visible label, the names and titles resolve', async () => {
+describe('Filter, Sort and Options: text buttons from `sm` up, icons below it (objectui#12695, objectstack#35548)', () => {
+  const TRIGGERS = [
+    ['toolbar-filter-trigger', 'Filter'],
+    ['toolbar-sort-trigger', 'Sort'],
+    ['toolbar-display-trigger', 'Options'],
+  ] as const;
+
+  it('wide: each trigger reads its name, and the names and titles resolve', async () => {
     mount();
     await screen.findByTestId('grid-stub');
-    for (const [testId, name] of [
-      ['toolbar-filter-trigger', 'Filter'],
-      ['toolbar-sort-trigger', 'Sort'],
-      ['toolbar-display-trigger', 'Display'],
-    ] as const) {
+    for (const [testId, name] of TRIGGERS) {
       const btn = screen.getByTestId(testId);
-      expect(btn.textContent).toBe('');
+      expect(btn.textContent).toBe(name);
       expect(screen.getByRole('button', { name })).toBe(btn);
       expect(btn).toHaveAttribute('title', name);
     }
   });
 
-  it('narrow: Filter and Display draw no label and keep their names', async () => {
+  it('narrow: the label is `hidden sm:inline` beside an `sm:hidden` icon, and the names hold', async () => {
     belowSm();
     mount();
     await screen.findByTestId('grid-stub');
-    for (const [testId, name] of [
-      ['toolbar-filter-trigger', 'Filter'],
-      ['toolbar-display-trigger', 'Display'],
-    ] as const) {
+    for (const [testId, name] of [TRIGGERS[0], TRIGGERS[2]]) {
       const btn = screen.getByTestId(testId);
-      expect(btn.textContent).toBe('');
+      const label = Array.from(btn.querySelectorAll('span')).find((el) => el.textContent === name)!;
+      expect(label.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'sm:inline']));
+      expect(btn.querySelector('svg')?.getAttribute('class') ?? '').toContain('sm:hidden');
       expect(screen.getByRole('button', { name })).toBe(btn);
     }
   });
 
-  it('the count badge is the only text: Filter 2 · Sort 1 · Display 2', async () => {
+  it('the count badge follows the name: Filter 2 · Sort 1 · Options 2', async () => {
     mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>, { initialFilters: TWO_FILTERS });
     await screen.findByTestId('grid-stub');
     await changeTwoDisplaySettings();
 
     const filter = screen.getByTestId('toolbar-filter-trigger');
-    expect(filter.textContent).toBe('2');
+    expect(filter.textContent).toBe('Filter2');
     expect(filter).toHaveAccessibleName('Filter, 2 active');
     expect(filter).toHaveAttribute('title', 'Filter');
 
     const sort = screen.getByTestId('toolbar-sort-trigger');
-    expect(sort.textContent).toBe('1');
+    expect(sort.textContent).toBe('Sort1');
     expect(screen.getByRole('button', { name: 'Sort' })).toBe(sort);
 
     const display = screen.getByTestId('toolbar-display-trigger');
-    expect(display.textContent).toBe('2');
-    expect(screen.getByRole('button', { name: 'Display' })).toBe(display);
+    expect(display.textContent).toBe('Options2');
+    expect(screen.getByRole('button', { name: 'Options' })).toBe(display);
 
-    // Everything the cluster says in text is the three counts.
+    // Everything the cluster says in text is the three names and their counts.
     const cluster = document.querySelector('[data-print-hide]');
-    expect(cluster?.textContent).toBe('212');
+    expect(cluster?.textContent).toBe('Filter2Sort1Options2');
   });
 
-  it('`compactToolbar: false` draws Filter and Sort in the same icon shape', async () => {
+  it('`compactToolbar: false` draws Filter and Sort in the same shape', async () => {
     mount({ compactToolbar: false, sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>);
     await screen.findByTestId('grid-stub');
     const filter = screen.getByRole('button', { name: 'Filter' });
-    expect(filter.textContent).toBe('');
+    expect(filter.textContent).toBe('Filter');
     expect(filter).toHaveAttribute('title', 'Filter');
     const sort = screen.getByRole('button', { name: 'Sort' });
-    expect(sort.textContent).toBe('1');
+    expect(sort.textContent).toBe('Sort1');
     expect(sort).toHaveAttribute('title', 'Sort');
   });
 
-  it('CONTROL: each popover still opens from its icon button', async () => {
+  it('CONTROL: each popover still opens from its trigger', async () => {
     mount();
     await screen.findByTestId('grid-stub');
 
@@ -181,7 +184,7 @@ describe('Filter, Sort and Display are icon buttons on every list (objectui#1269
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Sort Records')).toBeNull());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Options' }));
     expect(await screen.findByTestId('view-settings-content')).toBeInTheDocument();
   });
 });

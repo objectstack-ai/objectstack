@@ -20,6 +20,7 @@ import {
     type SecurityHeadersOptions,
 } from './security/index.js';
 import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
+import { sessionAdmittedPrincipal } from './security/admitting-credential.js';
 import { buildActorUser } from './security/actor-user.js';
 import { resolveKernelCache } from './security/kernel-cache.js';
 import {
@@ -179,8 +180,12 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
  *  - No gate feature is active, or the probe is absent or throws: the answer
  *    is `undefined` and no session is read. The gate costs nothing while it
  *    is off, and a host whose probe faults never declared a gate.
- *  - The gate is active: a dedicated session read. The answer is its user, or
- *    `undefined` when there is no session. The API-key caller and the
+ *  - The gate is active and the request's own session admitted the principal
+ *    (`admitted`, read off the identity step's record): the posture decided
+ *    off that same read. ⛔ No second read: the request's session is read
+ *    once, and every seam of the request shares that read.
+ *  - The gate is active otherwise: a dedicated session read. The answer is its
+ *    user, or `undefined` when there is no session. The API-key caller and the
  *    anonymous caller have none, and no policy holds them.
  *  - The gate is active and the read FAILS: the branded authorization-store
  *    outage, answered `503 SERVICE_UNAVAILABLE` by the fallback's error exit.
@@ -194,6 +199,7 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
 async function readGatedSessionUser(
     authService: IAuthService | undefined,
     headers: Record<string, unknown>,
+    admitted?: { authGate: unknown },
 ): Promise<unknown> {
     let active = false;
     try {
@@ -202,6 +208,7 @@ async function readGatedSessionUser(
         active = false;
     }
     if (!authService || !active) return undefined;
+    if (admitted) return { authGate: admitted.authGate };
     try {
         const api = authService.api ?? (await authService.getApi?.());
         // A provider that mounts no session API has no session to hold.
@@ -2524,11 +2531,20 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 // and the dispatcher's route mounts make (#4910).
                                 // Two answers to "who is calling" eventually
                                 // disagree about what counts as authenticated.
-                                resolvePrincipalId: (headers) =>
-                                    resolveSessionPrincipalId(
-                                        safeGetService<IAuthService>(ctx, 'auth'),
-                                        headers as Record<string, unknown>,
-                                    ),
+                                //
+                                // A principal this request's own session read
+                                // already admitted (the identity step above,
+                                // `resolveRequestScope`) is answered from that
+                                // read: the session is read once per request.
+                                resolvePrincipalId: (headers) => {
+                                    const admitted = sessionAdmittedPrincipal(protocolContext);
+                                    return admitted
+                                        ? Promise.resolve(admitted.userId)
+                                        : resolveSessionPrincipalId(
+                                            safeGetService<IAuthService>(ctx, 'auth'),
+                                            headers as Record<string, unknown>,
+                                        );
+                                },
                                 // ADR-0069: the session the authentication-policy
                                 // gate is asked about, read only while a gate feature
                                 // is active. Same `auth` occupant as the lookup above.
@@ -2545,6 +2561,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                         : readGatedSessionUser(
                                             safeGetService<IAuthService>(ctx, 'auth'),
                                             headers as Record<string, unknown>,
+                                            // The posture off the identity step's
+                                            // read, for a principal the request's
+                                            // own session admitted: no second read.
+                                            sessionAdmittedPrincipal(protocolContext),
                                         ),
                                 limiters: endpointLimiters,
                                 // The authored `server.trustProxy`, read from the

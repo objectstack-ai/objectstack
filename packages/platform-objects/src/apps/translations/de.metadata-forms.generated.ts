@@ -989,6 +989,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Parameter",
         helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
       },
+      texts: {
+        label: "Texte",
+        helpText: "Sätze, die der Hook in Datensätze schreibt, nach dem snake_case-Schlüssel, den sein Code mit ctx.text anfragt (z. B. follow_up_subject). Der Hook erhält die deklarierte Meldung in der Sprache der Organisation, übersetzt, mit der deklarierten Meldung als Rückfall. Für einen JavaScript-Rumpf (L2) oder einen Handler; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "texts.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Hook schreibt, wenn sein Code diesen Schlüssel anfragt. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "texts.params": {
+        label: "Parameter",
+        helpText: "Namen, die der Satz füllen darf (z. B. lead): Der Code fragt ctx.text(key, { lead }) an, und ein Platzhalter {{ lead }} zeigt den Wert. Fehlt er: Der Satz ist einfacher Text"
+      },
       handler: {
         label: "Handler",
         helpText: "Name der Handler-Funktion (veraltet – besser `body`)"

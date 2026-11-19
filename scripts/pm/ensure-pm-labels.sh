@@ -584,10 +584,10 @@ gh label create domain:rest     -R objectstack-ai/objectstack -c bfd4f2 -d "Reti
 gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); no objectstack lane claims it" 2>/dev/null || true
 gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); objectui lanes never claim it" 2>/dev/null || true
 # status:parked is the other half of parking: the backlog sweep's disjunct ③
-# (有 domain:* 无 pm-state) and check-half-states.mjs's H13 read it as the
-# exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a card that
-# carries domain:cloud WITHOUT it is listed and "cured" with a pm state every
-# fire, against the ruling above. The object exists in objectstack (auto-created)
+# (有 area:* 无 pm-state) and check-half-states.mjs's H13 read it as the
+# exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a parked
+# card (domain:cloud beside its area:cloud) WITHOUT it is listed and "cured"
+# with a pm state every fire, against the ruling above. The object exists in objectstack (auto-created)
 # and was absent in objectui; the roster makes both. Colour matches `tracking`,
 # the other sweep-exempt label. Descriptions differ per repo on purpose: the
 # check:pm-label-desc-cap dry run wants one distinct description per parsed line.
