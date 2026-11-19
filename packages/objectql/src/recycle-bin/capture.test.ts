@@ -495,7 +495,7 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     },
   );
 
-  it('logs at error, and keeps the answer, when the entry cannot be withdrawn', async () => {
+  it('logs at error, and still refuses with RECORD_NOT_FOUND, when the entry cannot be withdrawn', async () => {
     const { engine, driver, rec } = await makeEngine({
       transactional: false,
       removesNothingOf: { object: 'loner', answer: false },
