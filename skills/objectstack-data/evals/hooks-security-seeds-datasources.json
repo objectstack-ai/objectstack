@@ -212,6 +212,26 @@
       }
     },
     {
+      "id": 28,
+      "prompt": "A blocking `afterUpdate` hook body on `invoice` (default `onError: 'abort'`) runs `ctx.api.transaction`: it inserts a `payment`, then throws when the balance would go negative. The body catches that throw so the save still succeeds. Is the `payment` row rolled back? Is it committed when the callback returns? We also want it to insert a `bank_transfer`, a business object on our `finance` datasource, in the same callback.",
+      "expected_output": "Inside the save's unit (a blocking `afterUpdate` that can abort runs in it) `ctx.api.transaction` joins that unit: its throw is no rollback and its return is no commit. The caught throw keeps the `payment` row, and the outer unit commits it with the save, or rolls back all of it. To undo the payment, check the balance before inserting, or let the throw out of the body so the save is refused and everything rolls back. A body transaction is on the default datasource only: the `bank_transfer` insert is refused before it runs, `400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`, and a plain `ctx.api` write to it inside the save's unit is refused the same way. Keep the objects it writes on the default datasource, or make that write outside the unit (an `async: true` hook).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["join", "ERR_CROSS_DATASOURCE_TRANSACTION_WRITE"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 29,
+      "prompt": "Our organization works in German (Setup → Localization); reps save leads in English or French. Write an `afterInsert` hook on `crm_lead` that opens a `crm_task` whose subject reads `Follow up with lead: NAME`.",
+      "expected_output": "The hook declares the sentence in `texts` (`follow_up_subject: { message: 'Follow up with lead: {{ lead }}', params: ['lead'] }`) and its `js` body (capabilities `['api.write']`; `ctx.text` needs none) writes `subject: await ctx.text('follow_up_subject', { lead: ctx.input.name })` into the `crm_task` insert, linked by `ctx.result.id` (`ctx.input.id` is undefined on insert). The subject is written in the organization's language (German), never the saving rep's: translated first, then filled from `params`. A missing German translation writes the declared `message` and does not fail the hook; the translation key is objectstack-i18n's. No sentence is hard-coded in the body.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["texts", "ctx.text", "params"],
+        "must_not_contain": ["related_to_lead: ctx.input.id"]
+      }
+    },
+    {
       "id": 20,
       "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects, but must never be able to read tasks.",
       "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no Modify All on `project` (it overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",

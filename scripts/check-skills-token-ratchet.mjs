@@ -1032,7 +1032,21 @@ export const CEILINGS = new Map([
   // (its two halves live in the listing comment and the two-axes note, which
   // now names the two `tenantId` symbols), the `ctx.user` paragraph under the
   // `??` line that shows it, and the `session.roles` history clause.
-  ['skills/objectstack-data/references/data-hooks.md', 10011],
+  // 10011 -> 10122 (the data-hooks follow-ups of PRs #34503, #35102 and
+  // #34545): the `api.transaction` row teaches that a body transaction is on
+  // the default datasource only (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`
+  // for a write to any other) and that inside an open unit it joins that unit
+  // (its return no commit, its throw no rollback); a `Declared texts` block
+  // beside `refusals`, naming its translation key, and a `ctx.text` pointer row
+  // teach hook `texts` + `ctx.text`. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST — ten restatements cut, each keeping its other home (listed in the
+  // PR body). Arithmetic against `main`'s 40004 bytes (headroom 10): the text
+  // adds 1805, the cuts remove 1323, so the LANDED file is 40486 bytes ->
+  // ceil(40486 / 4) = 10122; the ceiling moves +111, the measured remainder
+  // only. Pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-data/references/data-hooks.md) / 4) == ceil(40486 / 4)
+  ['skills/objectstack-data/references/data-hooks.md', 10122],
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
   // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
