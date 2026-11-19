@@ -1177,8 +1177,9 @@ async function bootClaimed(
       ? dsDefs.length > 0
       : !!dsDefs && typeof dsDefs === 'object' && Object.keys(dsDefs).length > 0;
     if (declaresDatasources) {
-      const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory, resolveDatasourceSchemaMode } =
-        await import('@objectstack/service-datasource');
+      const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
+        '@objectstack/service-datasource'
+      );
       // Verify's own factory over the one `objectstack dev` uses: a declared
       // MANAGED datasource is built as an ephemeral store of the default
       // store's engine instead of its real connection, the same swap ruling A
@@ -1186,7 +1187,6 @@ async function bootClaimed(
       await kernel.use(new DatasourceAdminServicePlugin({
         driverFactory: createVerifyDatasourceDriverFactory({
           real: createDefaultDatasourceDriverFactory(),
-          resolveSchemaMode: resolveDatasourceSchemaMode,
           defaultStore: databaseDriver,
         }),
       }));

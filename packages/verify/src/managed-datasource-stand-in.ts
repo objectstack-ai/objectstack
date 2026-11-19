@@ -23,11 +23,21 @@
 // withholds its objects the way it withholds external ones, naming why. Verify
 // never writes through to it.
 //
-// Type-only imports of `@objectstack/service-datasource`: the harness loads that
-// package lazily, and hands this module the real factory and the schema-mode
-// resolver from its own dynamic import.
+// ## One reading of "is this datasource managed"
+//
+// {@link isManagedDatasource} is the ONE reader, and both deciders call it: this
+// factory (stand-in or real driver) and `deriveCrudCases` (withhold as external
+// or exercise). It is `resolveDatasourceSchemaMode` — the read the real factory
+// hands the driver, `spec.schemaMode`, then `external.schemaMode`, then
+// `config.schemaMode` — with no mode read as managed. Two readers drifting is
+// the hazard: a datasource that spells `schemaMode` only inside `config` would
+// get its real connection here (the factory's reading) while derive (the
+// declared key alone, as the engine's write gate reads it) kept its objects in
+// every write family, so verify's rows would land in the real database. With
+// one reader, any datasource this factory keeps real is withheld by derive.
 
 import { resolveDriverId } from '@objectstack/spec/data';
+import { resolveDatasourceSchemaMode } from '@objectstack/service-datasource';
 import type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
@@ -60,6 +70,23 @@ export function managedStandInEngine(
   return undefined;
 }
 
+/**
+ * Whether verify reads a declared datasource (an authored definition, or the
+ * connection spec built from one) as MANAGED — the one reader both this
+ * factory and `deriveCrudCases` decide on (see this file's header).
+ */
+export function isManagedDatasource(ds: {
+  schemaMode?: unknown;
+  external?: unknown;
+  config?: unknown;
+}): boolean {
+  const spec = {
+    ...ds,
+    config: ds.config && typeof ds.config === 'object' ? (ds.config as Record<string, unknown>) : {},
+  } as DatasourceConnectionSpec;
+  return (resolveDatasourceSchemaMode(spec) ?? 'managed') === 'managed';
+}
+
 /** True when a managed datasource on `driver` is run on a verify stand-in rather than withheld. */
 export function hasManagedStandIn(driver: unknown): boolean {
   return managedStandInEngine(driver, 'sqlite-wasm') !== undefined;
@@ -68,8 +95,6 @@ export function hasManagedStandIn(driver: unknown): boolean {
 export interface VerifyDatasourceDriverFactoryOptions {
   /** The factory `objectstack dev` builds declared datasources with. */
   real: IDatasourceDriverFactory;
-  /** `resolveDatasourceSchemaMode`, the read the real factory makes. */
-  resolveSchemaMode: (spec: DatasourceConnectionSpec) => string | undefined;
   /** The engine of verify's own default store. */
   defaultStore: VerifyStoreEngine;
 }
@@ -91,9 +116,8 @@ export function createVerifyDatasourceDriverFactory(
       return opts.real.supports(driverId);
     },
     create(spec: DatasourceConnectionSpec): Promise<DatasourceDriverHandle> | DatasourceDriverHandle {
-      // No declared mode is managed, as the real factory and the pool's
-      // connect read it.
-      if ((opts.resolveSchemaMode(spec) ?? 'managed') !== 'managed') return opts.real.create(spec);
+      // The one reader derive decides on too: what this keeps real, derive withholds.
+      if (!isManagedDatasource(spec)) return opts.real.create(spec);
       const engine = managedStandInEngine(spec.driver, opts.defaultStore);
       if (engine === undefined) return opts.real.create(spec);
       return opts.real.create({

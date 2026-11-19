@@ -21,7 +21,7 @@
 
 import { isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
-import { hasManagedStandIn } from './managed-datasource-stand-in.js';
+import { hasManagedStandIn, isManagedDatasource } from './managed-datasource-stand-in.js';
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
 const RELATIONAL = new Set(['lookup', 'master_detail', 'master-detail', 'masterdetail', 'tree']);
@@ -249,14 +249,18 @@ export function deriveCrudCases(config: any): CrudCase[] {
     // Every write family (CRUD, RLS, reference shapes, delete behaviours,
     // unique scopes, parent write reach, dashboard windows) builds its records
     // from this case, so one blocked case keeps all of them off the object.
-    // Two triggers count the object as external. A declared `schemaMode` other
-    // than `managed` is the half the engine's write gate reads too. An object
-    // carrying an `external` block is verify's own trigger: the engine does
-    // not gate on it, verify withholds the object anyway. The reason names the
-    // gate's state, so the report says when a write was possible and was
-    // withheld.
+    // Two triggers count the object as external. A datasource that is not
+    // managed is the half the engine's write gate reads too — read here by
+    // `isManagedDatasource`, the same reader verify's driver factory decides
+    // stand-in-or-real on, so a datasource the boot connects for real is never
+    // one whose objects verify writes (`./managed-datasource-stand-in.ts`).
+    // That reader also takes a `schemaMode` spelled inside `external` or
+    // `config`, which the engine's gate does not read. An object carrying an
+    // `external` block is verify's own trigger: the engine does not gate on
+    // it, verify withholds the object anyway. The reason names the gate's
+    // state, so the report says when a write was possible and was withheld.
     const ds = obj.datasource ? dsByName.get(obj.datasource) : undefined;
-    if (obj.external || (typeof ds?.schemaMode === 'string' && ds.schemaMode !== 'managed')) {
+    if (obj.external || (ds && !isManagedDatasource(ds))) {
       const writable = ds?.external?.allowWrites === true && obj.external?.writable === true;
       d.blocked =
         `external datasource "${obj.datasource ?? 'default'}" (${writable ? 'writes allowed' : 'read-only'}): ` +

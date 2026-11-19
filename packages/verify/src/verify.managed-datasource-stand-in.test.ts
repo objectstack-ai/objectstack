@@ -35,7 +35,6 @@ import { join } from 'node:path';
 import { defineStack } from '@objectstack/spec';
 import {
   createDefaultDatasourceDriverFactory,
-  resolveDatasourceSchemaMode,
   type DatasourceConnectionSpec,
   type IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
@@ -46,6 +45,7 @@ import { runReferenceShapeProofs, formatReferenceShapeReport } from './reference
 import { runDeleteBehaviorProofs, formatDeleteBehaviorReport } from './delete-behavior.js';
 import { runUniqueScopeProofs, formatUniqueScopeReport } from './unique-scope.js';
 import { createVerifyDatasourceDriverFactory } from './managed-datasource-stand-in.js';
+import { deriveCrudCases } from './derive.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Paid at collection: the harness's boot loads these lazily (check:test-source-alias).
@@ -198,11 +198,7 @@ describe('createVerifyDatasourceDriverFactory — which declarations get a stand
       return { driver: {} } as never;
     },
   };
-  const factory = createVerifyDatasourceDriverFactory({
-    real,
-    resolveSchemaMode: resolveDatasourceSchemaMode,
-    defaultStore: 'sqlite-wasm',
-  });
+  const factory = createVerifyDatasourceDriverFactory({ real, defaultStore: 'sqlite-wasm' });
   const buildOne = async (spec: DatasourceConnectionSpec) => {
     built.length = 0;
     await factory.create(spec);
@@ -233,6 +229,19 @@ describe('createVerifyDatasourceDriverFactory — which declarations get a stand
       name: 'wh', driver: 'postgres', schemaMode: 'external', config: { host: 'wh.internal' }, external: {},
     };
     expect(await buildOne(declared)).toBe(declared);
+  });
+
+  it('a datasource that spells schemaMode only inside config keeps its real driver, and derive withholds its objects', async () => {
+    const declared: DatasourceConnectionSpec = {
+      name: 'wh', driver: 'postgres', config: { host: 'wh.internal', schemaMode: 'external' },
+    };
+    expect(await buildOne(declared)).toBe(declared);
+    // The same reader decides derive's side: what the factory keeps real is withheld.
+    const c = deriveCrudCases({
+      datasources: [declared],
+      objects: [{ name: 'wh_order', datasource: 'wh', fields: { amount: { type: 'number' } } }],
+    }).find((x) => x.object === 'wh_order');
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
   });
 
   it('a managed datasource with no faithful stand-in (mongodb) keeps its real driver; derive withholds its objects', async () => {

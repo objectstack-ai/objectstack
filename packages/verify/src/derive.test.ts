@@ -49,6 +49,21 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
   });
 
+  // One reader with verify's driver factory (`isManagedDatasource`): a mode
+  // spelled only inside `config` or `external` gets the real driver at boot, so
+  // derive must withhold its objects too, or verify's rows reach that database.
+  it.each([
+    ['config', { driver: 'postgres', config: { host: 'wh.internal', schemaMode: 'external' } }],
+    ['external', { driver: 'postgres', config: { host: 'wh.internal' }, external: { schemaMode: 'validate-only' } }],
+  ])('withholds an object whose datasource spells schemaMode only inside `%s`', (_where, ds) => {
+    const c = deriveCrudCases({
+      datasources: [{ name: 'wh', ...ds }],
+      objects: [{ name: 'wh_order', datasource: 'wh', fields: { amount: { type: 'number' } } }],
+    }).find((x) => x.object === 'wh_order');
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+    expect(c?.body).toBeUndefined();
+  });
+
   it('a required relation to an external object is blocked too, so nothing is written for it', () => {
     const config = external({ allowWrites: true }, { remoteName: 'orders', writable: true });
     config.objects.push({
