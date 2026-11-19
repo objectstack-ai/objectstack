@@ -30,7 +30,8 @@ import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNa
 import { objectPresence, readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { readObjectPresence } from '../appObjectScope.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
-import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-chatbot/core';
