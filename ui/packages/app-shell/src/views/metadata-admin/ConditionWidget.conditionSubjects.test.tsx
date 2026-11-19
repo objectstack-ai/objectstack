@@ -296,6 +296,7 @@ describe('conditionSubjectsForMetadataType — the per-type derivation (objectui
 describe('the generic condition mount names a field subject by its label (objectstack#34122)', () => {
   /** The bound object's field catalog as the host loads it: one labelled field, one not. */
   const context: WidgetContext = {
+    conditionScope: 'record',
     objectFields: {
       status: 'loaded',
       data: [
