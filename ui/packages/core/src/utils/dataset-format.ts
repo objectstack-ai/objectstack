@@ -1008,7 +1008,9 @@ export async function resolveDatasetDrillFilter(
     }
     // Only a single-valued relationship is a join hop of the analytics compiler,
     // so only it is drilled; "multi-valued" is the SPEC predicate
-    // `isMultiValueField`, the one `driver-sql`'s storage rule also asks.
+    // `isMultiValueField`, the one `driver-sql`'s storage rule also asks; if
+    // the two sides ever split again, this refusal follows the spec
+    // (objectstack#17469).
     if (!target || isMultiValueField(def as Parameters<typeof isMultiValueField>[0])) {
       throw new DrillResolutionStop({ status: 'unavailable', reason: 'unknown-relationship', field: fieldPath });
     }
