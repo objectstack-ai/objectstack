@@ -528,6 +528,14 @@ const ko = {
     bulkAllMatchingSelectedCapped: "일치하는 레코드 {{total}}건 중 처음 {{cap}}건만 처리됩니다.",
     bulkSelectedAllMatchesCapped: "{{cap}}건 선택됨(일치 항목 {{total}}건 중)",
     bulkActions: "일괄 작업",
+    // objectstack#35554 — the list page bar while rows are selected.
+    selectedCount: "{{count}}건 선택됨",
+    selectedCount_one: "{{count}}건 선택됨",
+    selectedCount_other: "{{count}}건 선택됨",
+    selectedAllLoaded: "이 페이지의 {{count}}건이 모두 선택되었습니다.",
+    selectedAllLoaded_one: "이 페이지의 {{count}}건이 모두 선택되었습니다.",
+    selectedAllLoaded_other: "이 페이지의 {{count}}건이 모두 선택되었습니다.",
+    selectAllTotal: "일치하는 {{total}}건 모두 선택",
     bulk: {
       confirmDefault: "레코드 {{count}}건에 적용됩니다.",
       confirmDefault_one: "레코드 {{count}}건에 적용됩니다.",
@@ -4848,6 +4856,12 @@ const ko = {
       shown: '이 보기에 표시',
       hidden: '숨긴 필드',
       empty: '일치하는 필드 없음',
+      addable: '아직 보기에 없음',
+      add: '{{label}} 추가',
+      show: '{{label}} 표시',
+      hide: '{{label}} 숨기기',
+      move: '{{label}} 이동',
+      moveHint: '드래그하거나 위아래 화살표 키로 순서 변경',
     },
     filter: {
       advanced: '고급 필터',

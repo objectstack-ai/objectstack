@@ -3029,9 +3029,16 @@ os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   
    object): every stage reports it as not exercised, and the CRUD stage lists
    it `skipped` as `external datasource "NAME" (writes allowed)` or
    `(read-only)`, which does not fail the run. An object that requires a
-   reference to it is skipped too. A write the app itself makes there, its seed
-   or a hook or flow that a stage's write fires, goes where the app sends it,
-   as under `os dev`. With `--rls`, a second fresh boot proves the
+   reference to it is skipped too, and its reason says the target was withheld
+   on purpose. A write the app itself makes there, its seed or a hook or flow
+   that a stage's write fires, goes where the app sends it, as under `os dev`.
+   A declared managed datasource (`schemaMode: 'managed'`, or none declared) is
+   not connected to the database it names: verify runs it on a fresh in-memory
+   store, as it runs its own default one, so every write to its objects stays
+   in memory and they are still exercised. One whose engine has no in-memory
+   stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
+   and its objects are `skipped` as `managed datasource "NAME" (driver
+   "DRIVER"): not exercised`. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every

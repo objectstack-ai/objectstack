@@ -274,7 +274,9 @@ describe('CONTROL — every other view asks exactly what it asked before (object
 
   it('the paged grid: one page, its `$top`, no window, and the next page by `$skip`', async () => {
     const ds = makeDataSource(contractsIn(9, 122, 'oct'));
-    renderList({ viewType: 'grid' }, ds);
+    // A grid that declares `pagination` pages; one that declares none loads
+    // as it scrolls (objectstack#35554), which is not the window under test.
+    renderList({ viewType: 'grid', pagination: {} }, ds);
     await waitFor(() => expect(lastGridProps?.manualPagination).toBe(true));
     expect(ds.calls).toEqual([
       { $orderby: undefined, $top: SPEC_DISPLAY_DEFAULT, $select: ['id', 'name', 'status'] },
