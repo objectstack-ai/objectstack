@@ -9,7 +9,7 @@
  * Every value is passed in as a prop.
  */
 
-import { createElement } from 'react';
+import { createElement, useCallback, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@object-ui/components';
 import { Upload, MoreHorizontal } from 'lucide-react';
+import { useDisplayLocale } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -31,6 +32,7 @@ import type { useObjectViewToolbarAffordances } from './objectViewToolbarAfforda
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import { useListPageBarHost } from '@object-ui/plugin-grid';
 
 /**
  * objectstack#35446 — the list header's width under which it takes
@@ -128,6 +130,27 @@ export function ObjectViewPageHeader({
     foldedHeaderActions: ReturnType<typeof useObjectViewHeaderChrome>['foldedHeaderActions'];
 }) {
     const pluralLabel = objectPluralLabel(objectDef);
+    // objectstack#35554 — the page bar's selection slot (`useListPageBarHost`,
+    // `@object-ui/plugin-grid`). The list in this page column fills it while
+    // rows are selected — 「已选 N 条」, Cancel and the actions for what is
+    // selected — and this bar shows it in place of its title and actions.
+    // The list also reports its match total, drawn beside the view name.
+    const [selectionSlot, setSelectionSlot] = useState<HTMLDivElement | null>(null);
+    const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
+    const headerRootRef = useCallback((el: HTMLDivElement | null) => {
+        setPageColumn(el?.parentElement ?? null);
+    }, []);
+    const pageBar = useListPageBarHost(selectionSlot, pageColumn);
+    const displayLocale = useDisplayLocale();
+    const totalCount = typeof pageBar.total === 'number' ? (
+        <span
+            className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground"
+            title={t('list.recordCount', { count: pageBar.total, defaultValue: '{{count}} records' })}
+            data-testid="list-total-count"
+        >
+            {pageBar.total.toLocaleString(displayLocale)}
+        </span>
+    ) : null;
     // A view with no label is already called by the plural (objectui#12774):
     // the switcher names the object, and a crumb would say it twice.
     const title = titleSwitcher == null
@@ -136,8 +159,27 @@ export function ObjectViewPageHeader({
             ? titleSwitcher
             : <ObjectListTitle objectLabel={pluralLabel} objectListHref={objectListHref} titleSwitcher={titleSwitcher} />;
     return (
-             <div className="hidden sm:block">
+             <div className="hidden sm:block" ref={headerRootRef}>
+             {/* objectstack#35554 — the selection face: the object's name, then
+                 what the list draws into the slot. Always mounted, so the slot
+                 is there the moment a row is ticked; shown only while one is. */}
+             <div
+                 className={pageBar.selecting
+                     ? 'relative shrink-0 border-b bg-background z-10'
+                     : 'hidden'}
+                 data-testid="list-selection-page-bar"
+                 aria-hidden={pageBar.selecting ? undefined : true}
+             >
+                 <div className="flex items-center gap-2.5 min-h-9 py-2.5 sm:py-2 px-4 sm:px-6">
+                     <span className="shrink-0 text-base sm:text-lg font-semibold tracking-tight text-muted-foreground">
+                         {pluralLabel}
+                     </span>
+                     <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
+                     <div ref={setSelectionSlot} className="flex min-w-0 flex-1 items-center" />
+                 </div>
+             </div>
              <PageHeader
+                 className={pageBar.selecting ? 'hidden' : undefined}
                  // The title is the object's plural ahead of the view switcher,
                  // 「OBJECT / VIEW ▾」 (objectstack#27594,
                  // objectstack#27950). A view with no label is called by the
@@ -150,7 +192,7 @@ export function ObjectViewPageHeader({
                  // (objectui#12606).
                  // objectstack#28950 — and, before it, the 「Personalized」
                  // marker while the reader's list differs from the view.
-                 badge={<>{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
+                 badge={<>{totalCount}{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
                  subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
                  // `createElement`, not a JSX tag: the looked-up icon is a value,
                  // which react-hooks/static-components refuses in tag position

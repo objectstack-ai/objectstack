@@ -297,13 +297,11 @@ async function inviteAda(): Promise<void> {
 async function openRowMenu(email: string): Promise<string[]> {
   const cell = await screen.findByText(email, undefined, { timeout: 5000 });
   const row = cell.closest('tr')!;
-  const trigger = await waitFor(() => {
-    const t = within(row).getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu');
-    expect(t).toBeDefined();
-    return t!;
-  }, { timeout: 5000 });
-  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
-  const items = await screen.findAllByRole('menuitem', undefined, { timeout: 5000 });
+  // objectstack#35554 — the list page draws no "⋮" on the row: its menu is
+  // the row's context menu (right-click), the same items.
+  fireEvent.contextMenu(row.querySelector('td:last-child') ?? row, { button: 2, clientX: 40, clientY: 60 });
+  const menu = await screen.findByTestId('row-context-menu', undefined, { timeout: 5000 });
+  const items = await within(menu).findAllByRole('menuitem', undefined, { timeout: 5000 });
   return items.map((item) => (item.textContent ?? '').trim());
 }
 

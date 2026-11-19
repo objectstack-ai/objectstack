@@ -20,7 +20,8 @@
  * `?runAction=` deep-link arming, which arms only what the header draws.
  *
  * The real chain throughout: the real `ObjectView`, the real `ObjectGrid` and
- * its `BulkActionBar` (fed by `resolveBulkActions` from the view's own keys),
+ * its selection actions (fed by `resolveBulkActions` from the view's own keys;
+ * on the list page they are drawn into the page bar, objectstack#35554),
  * the real `action:bar`. Every case is a differential on the view's wiring or
  * the action's placement, with the same object and the same rows.
  */
@@ -191,6 +192,24 @@ async function rowBoxes(): Promise<HTMLElement[]> {
   }, { timeout: 5000 });
 }
 
+/**
+ * objectstack#35554 — the selection's actions on the list page: the page bar's
+ * selection face, its exposed buttons and the ones behind its "⋮". Returns the
+ * bar and the action names it carries.
+ */
+async function selectionBar(): Promise<{ bar: HTMLElement; names: string[] }> {
+  const bar = await screen.findByTestId('list-selection-bar', undefined, { timeout: 5000 });
+  const names = within(bar).queryAllByTestId(/^bulk-action-/).map((el) => el.getAttribute('data-testid')!.slice('bulk-action-'.length));
+  const more = within(bar).queryByTestId('selection-actions-more');
+  if (more) {
+    await act(async () => { fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    const menu = await screen.findByRole('menu');
+    names.push(...within(menu).queryAllByTestId(/^row-context-bulk-/).map((el) => el.getAttribute('data-testid')!.slice('row-context-bulk-'.length)));
+    await act(async () => { fireEvent.keyDown(menu, { key: 'Escape' }); });
+  }
+  return { bar, names };
+}
+
 async function tickRows(n: number): Promise<void> {
   const boxes = await rowBoxes();
   for (const box of boxes.slice(0, n)) {
@@ -208,18 +227,18 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
 
     // Zero rows: the header has the plain action and not the duplicate; no bar.
     expect(addToCampaignIn(header)).toBeNull();
-    expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
+    expect(screen.queryByTestId('list-selection-bar')).toBeNull();
 
-    // Two rows: the bar floats carrying the action; the header still lacks it.
+    // Two rows: the selection carries the action; the header still lacks it.
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-create_campaign')).toHaveTextContent('Add to Campaign');
+    const { bar, names } = await selectionBar();
+    expect(names).toContain('create_campaign');
     expect(addToCampaignIn(header)).toBeNull();
     expect(within(header).getByRole('button', { name: /Refresh Scores/ })).toBeInTheDocument();
 
-    // Clearing the selection hides the bar.
-    await act(async () => { fireEvent.click(within(bar).getByRole('button', { name: /Clear/ })); });
-    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull(), { timeout: 5000 });
+    // Cancelling the selection brings the page bar back.
+    await act(async () => { fireEvent.click(within(bar).getByTestId('list-selection-cancel')); });
+    await waitFor(() => expect(screen.queryByTestId('list-selection-bar')).toBeNull(), { timeout: 5000 });
   });
 
   it('the view wires it in a `bulkActionDefs` entry: the header lacks it, the bar carries it', async () => {
@@ -228,8 +247,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-create_campaign')).toBeInTheDocument();
+    expect((await selectionBar()).names).toContain('create_campaign');
   });
 
   it('CONTROL — a view that does not wire it keeps the header button, and its bar does not carry it', async () => {
@@ -238,8 +256,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).not.toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).queryByTestId('bulk-action-create_campaign')).toBeNull();
+    expect((await selectionBar()).names).not.toContain('create_campaign');
     expect(addToCampaignIn(header)).not.toBeNull();
   });
 
@@ -250,8 +267,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).not.toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-refresh_scores')).toBeInTheDocument();
+    expect((await selectionBar()).names).toContain('refresh_scores');
     expect(within(header).getByRole('button', { name: /Refresh Scores/ })).toBeInTheDocument();
   });
 });

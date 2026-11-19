@@ -2316,15 +2316,43 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
   };
 
-  const handleSelectRow = (rowId: any, checked: boolean) => {
+  // objectstack#35554 — Shift extends a selection over a range: the row the
+  // last plain toggle landed on is the anchor, and a Shift toggle sets every
+  // row between it and the clicked one (inclusive) to the clicked row's new
+  // state. Rows are counted in the order this table draws them
+  // (`paginatedData`). The leading cell records the Shift key on the way in
+  // (`shiftSelectRef`), because the checkbox's own change event carries no
+  // modifier.
+  const selectionAnchorRef = React.useRef<number | null>(null);
+  const shiftSelectRef = React.useRef(false);
+  const handleSelectRow = (rowId: any, checked: boolean, rowIndex?: number) => {
+    const extend = shiftSelectRef.current;
+    shiftSelectRef.current = false;
     // Single mode replaces the previous selection instead of accumulating —
     // the spec's 'single' must never hold two rows (#2941).
     const newSelected = new Set(selectionMode === 'single' ? [] : selectedRowIds);
-    if (checked) {
+    const anchor = selectionAnchorRef.current;
+    if (
+      extend
+      && selectionMode === 'multiple'
+      && rowIndex !== undefined
+      && anchor !== null
+      && anchor !== rowIndex
+      && anchor < paginatedData.length
+    ) {
+      const from = Math.min(anchor, rowIndex);
+      const to = Math.max(anchor, rowIndex);
+      for (let i = from; i <= to; i += 1) {
+        const id = getRowId(paginatedData[i], (effectivePage - 1) * pageSize + i);
+        if (checked) newSelected.add(id);
+        else newSelected.delete(id);
+      }
+    } else if (checked) {
       newSelected.add(rowId);
     } else {
       newSelected.delete(rowId);
     }
+    if (rowIndex !== undefined) selectionAnchorRef.current = rowIndex;
     setSelectedRowIds(newSelected);
     
     // Call callback if provided
@@ -3940,9 +3968,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                           // alone: on a tall row the box is a small target
                           // and a near miss used to open the record. The
                           // checkbox itself handles its own clicks.
+                          onClickCapture={(e) => { shiftSelectRef.current = e.shiftKey; }}
                           onClick={(e) => {
                             if ((e.target as HTMLElement).closest('[role="checkbox"]')) return;
-                            handleSelectRow(rowId, !isSelected);
+                            // Shift+click on a cell would also extend the
+                            // browser's text selection across the rows.
+                            if (e.shiftKey) window.getSelection?.()?.removeAllRanges();
+                            handleSelectRow(rowId, !isSelected, rowIndex);
                           }}
                           className={cn(cellClassName, "w-10 relative cursor-pointer", showRowNumbers ? "px-0 text-center" : "px-3", frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}
                         >
@@ -3981,7 +4013,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 (objectui#11690). */}
                             <Checkbox
                               checked={isSelected}
-                              onCheckedChange={(checked) => handleSelectRow(rowId, checked as boolean)}
+                              onCheckedChange={(checked) => handleSelectRow(rowId, checked as boolean, rowIndex)}
                               aria-label={t('table.selectRow')}
                             />
                           </span>
