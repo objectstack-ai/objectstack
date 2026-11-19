@@ -35,6 +35,12 @@
  * the header is too narrow for `actions` and its text, it draws that instead,
  * so the actions fold before the title or the description is cut:
  *   [icon] Title [kind] | the whole description   [refresh] [primary] [⋯]
+ *
+ * The compact form — a page may opt in with `compactBelow` (objectstack#35446):
+ * while the one-row header is narrower than that, it drops the description and
+ * draws `foldedActions` whatever the text needs, so a main area narrowed by a
+ * docked panel, a small window or the record drawer gets a short header row:
+ *   [icon] Title [kind]                            [refresh] [primary] [⋯]
  */
 
 import * as React from 'react';
@@ -141,6 +147,17 @@ export interface ConsolePageHeaderProps {
    */
   foldedActions?: React.ReactNode;
   /**
+   * Opt-in compact form for a narrow header (objectstack#35446): while the
+   * one-row header is narrower than this many pixels, the description (and
+   * the hairline before it) is not drawn and `foldedActions`, when given, is
+   * drawn in place of `actions`. At this width and above the header behaves
+   * exactly as without it. Read from the header's own width, never the
+   * viewport's, so any narrowing of the main area counts. Setup's posture,
+   * whose description sits on its own line, ignores it. A page that passes
+   * nothing keeps today's header at every width.
+   */
+  compactBelow?: number;
+  /**
    * CSS color used to tint the top hairline, icon chip background, and
    * icon stroke. Defaults to the Shadcn `--primary` token so the header
    * automatically follows the active app's branding.
@@ -184,6 +201,7 @@ export function PageHeader({
   refresh,
   actions,
   foldedActions,
+  compactBelow,
   accentColor,
   sticky = false,
   className,
@@ -198,8 +216,12 @@ export function PageHeader({
 
   // objectui#12705 — the actions fold before the text is cut.
   const canFold = foldedActions != null && foldedActions !== false;
-  const { rootRef, textRef, descriptionRef, clusterRef, folded } = useActionsFold(canFold, setup);
-  const drawnActions = canFold && folded ? foldedActions : actions;
+  const { rootRef, textRef, descriptionRef, clusterRef, folded, compact } = useActionsFold(
+    canFold,
+    setup,
+    setup ? undefined : compactBelow,
+  );
+  const drawnActions = canFold && (folded || compact) ? foldedActions : actions;
 
   const refreshButton = refresh ? (
     <Button
@@ -222,7 +244,7 @@ export function PageHeader({
       ref={clusterRef}
       className="flex items-center gap-1.5 sm:gap-2 shrink-0"
       data-testid="page-header-actions"
-      data-folded={canFold ? String(folded) : undefined}
+      data-folded={canFold ? String(folded || compact) : undefined}
     >
       {refreshButton}
       {drawnActions}
@@ -241,6 +263,7 @@ export function PageHeader({
       )}
       data-testid={testId ?? 'page-header'}
       data-posture={setup ? 'setup' : 'row'}
+      data-compact={compact ? 'true' : undefined}
     >
       {/* Accent hairline — a 2px gradient strip that fades to transparent at
           both edges. Picks up the app's accent color, or the default primary
@@ -294,7 +317,7 @@ export function PageHeader({
               {title}
             </h1>
             {badge}
-            {(subtitle || breadcrumb) && (
+            {(subtitle || breadcrumb) && !compact && (
               <>
                 <span aria-hidden="true" className="hidden sm:block h-4 w-px shrink-0 bg-border" />
                 <p ref={descriptionRef} className="hidden sm:block min-w-0 flex-1 truncate text-sm text-muted-foreground">
@@ -327,8 +350,12 @@ export function PageHeader({
  * Without layout (no `ResizeObserver`, every width 0) nothing ever overflows
  * and the header stays unfolded.
  */
-function useActionsFold(canFold: boolean, setup: boolean) {
+function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number | undefined) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  // objectstack#35446 — the opt-in compact form, read from the header's own
+  // width. Without layout (width 0) the header is never compact.
+  const [compact, setCompact] = React.useState(false);
+  const compactRef = React.useRef(false);
   const textRef = React.useRef<HTMLDivElement>(null);
   const descriptionRef = React.useRef<HTMLParagraphElement>(null);
   const clusterRef = React.useRef<HTMLDivElement>(null);
@@ -340,6 +367,18 @@ function useActionsFold(canFold: boolean, setup: boolean) {
   // observer below never keys on a callback's identity (AGENTS.md #10).
   const measureRef = React.useRef<() => void>(() => {});
   const measure = () => {
+    const rootWidth = rootRef.current?.getBoundingClientRect().width ?? 0;
+    const nextCompact = compactBelow !== undefined && rootWidth > 0 && rootWidth < compactBelow;
+    // The compact face is decided by width alone. The content fold below reads
+    // the full face, so it is measured only once that face is drawn: never
+    // while the compact one is, nor in the pass that switches between them
+    // (the render that follows measures again).
+    if (nextCompact !== compactRef.current) {
+      compactRef.current = nextCompact;
+      setCompact(nextCompact);
+      return;
+    }
+    if (nextCompact) return;
     if (!canFold) {
       // A page that stops offering the fold starts unfolded when it offers it
       // again.
@@ -372,16 +411,17 @@ function useActionsFold(canFold: boolean, setup: boolean) {
     measure();
   });
 
+  const observes = canFold || compactBelow !== undefined;
   React.useEffect(() => {
     const root = rootRef.current;
-    if (!canFold || !root || typeof ResizeObserver === 'undefined') return;
+    if (!observes || !root || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => measureRef.current());
     observer.observe(root);
     if (clusterRef.current) observer.observe(clusterRef.current);
     return () => observer.disconnect();
-  }, [canFold]);
+  }, [observes]);
 
-  return { rootRef, textRef, descriptionRef, clusterRef, folded: canFold && folded };
+  return { rootRef, textRef, descriptionRef, clusterRef, folded: canFold && folded, compact };
 }
 
 /**
