@@ -19,7 +19,10 @@
  * engine body, the parked writer holds the store's only connection in its
  * `BEGIN`, and the second writer waits behind it and loses at its pre-image
  * read instead. That cell's answer was already `RECORD_NOT_FOUND`; it is here
- * so both bindings are pinned to the same answer.
+ * so both bindings are pinned to the same answer. On a store with more than one
+ * connection (PostgreSQL) the hooked writers do not queue, and the loser
+ * reaches the driver's `false` exactly as in the first cell; this file runs on
+ * SQLite only.
  *
  * The control: a delete nobody races removes the row and fires each
  * after-effect exactly once.
