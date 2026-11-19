@@ -124,9 +124,8 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * The per-row outcome an `execution: 'aggregate'` handler MAY resolve with
  * (#34216, seat ruling 6905490575, option A).
  *
- * Read by the console grid's bulk executor (`@object-ui/plugin-grid`,
- * `readAggregateResult`) on every `execution: 'aggregate'` dispatch, by the
- * rules below.
+ * Read by the grid's aggregate reader in `@object-ui/plugin-grid` on every
+ * `execution: 'aggregate'` dispatch, by the rules below.
  *
  * An aggregate dispatch is ONE call carrying the whole selection in
  * `params._selectedIds`, so the call's own success or failure is one outcome
