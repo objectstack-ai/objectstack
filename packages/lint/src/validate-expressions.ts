@@ -4376,10 +4376,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             severity: 'warning',
           });
         }
-        // A `formula` the predicate reads: a reminder that the server judges it
-        // on the formula value it computes at write time, and one the write
-        // path cannot compute keeps the field required on every write, shown
-        // by the form (`required-visible-when-formula-issue.ts`).
+        // A `formula` the predicate reads that the form cannot compute: the
+        // form shows the field and keeps it required, and the server either
+        // cannot compute it either (required on every write) or computes it
+        // and can waive the field (`required-visible-when-formula-issue.ts`).
+        // A formula the form computes draws nothing: both sides agree.
         const formulaRead = objectName ? requiredVisibleWhenFormulaIssue(objectName, fname, f, fieldDefs) : undefined;
         if (formulaRead) issues.push(formulaRead);
       }
