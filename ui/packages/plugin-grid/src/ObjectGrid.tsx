@@ -1974,16 +1974,19 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
     cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
   });
+  // The same cell padding as at the right edge; the frozen zone's own sticky
+  // classes, offset and edge rule come from `data-table`.
+  const inFrozenZone = (col: any) => ({
+    ...applyColumnChrome(col),
+    pinned: undefined,
+    className: ['px-3', col.className].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName].filter(Boolean).join(' '),
+  });
 
   const orderedColumns = actionsInFrozenZone
     ? [
         ...scrollingColumns.slice(0, actionsFrozenAt),
-        {
-          ...applyColumnChrome(actionsColumn),
-          pinned: undefined,
-          className: ['px-3', actionsColumn.className].filter(Boolean).join(' '),
-          cellClassName: [rowHeightCellClass, actionsColumn.cellClassName].filter(Boolean).join(' '),
-        },
+        inFrozenZone(actionsColumn),
         ...scrollingColumns.slice(actionsFrozenAt),
         ...pinnedRightCols.filter((col: any) => col !== actionsColumn).map(rightPinned),
       ]
