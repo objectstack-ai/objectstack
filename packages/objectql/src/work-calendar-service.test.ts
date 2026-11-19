@@ -361,7 +361,7 @@ describe('the calendar hooks take the organization from the session', () => {
   const member = { userId: 'usr_1', organizationId: 'org_a', isSystem: false };
 
   for (const posture of ['single', 'isolated'] as const) {
-    it(`${posture}: a member's create reads in the session's organization, not one its row names`, async () => {
+    it(`${posture}: a member's create reads in the session's organization`, async () => {
       const h = bound(posture);
       const row = created('org_b');
       await h.insert(member, row);
