@@ -39,6 +39,7 @@ import {
     decorateMetadataItem,
     withPublishAdvisories,
     withPublishVerdict,
+    viewLintObjectLookup,
     withViewLintWarnings,
 } from './metadata-diagnostics.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
@@ -837,10 +838,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // ({@link withListViewFieldWarnings}), against the same objects.
     // Applied at every served exit of this read, the draft ones included; a
     // warning, so `valid` is left as the schema answered it. The execution
-    // face serves no `_diagnostics`.
+    // face serves no `_diagnostics`. [#34901] Each object is folded with
+    // every disabled package's `extend` contribution, as the save door folds
+    // it ({@link viewLintObjectLookup}): a name such a package adds is a
+    // stored field, not an unknown one.
     const serveViewLint = <T>(served: T): Promise<T> => (execution
         ? Promise.resolve(served)
-        : withViewLintWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
+        : withViewLintWarnings(request.type, served, viewLintObjectLookup(host.engine?.registry)));
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`
@@ -1359,9 +1363,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // member's stored row; when there is none, the member is the code
     // layer's — the artifact that ships it — and then the registry's, asked
     // for that member. The registry's bare-name read answers the canonical
-    // member wherever it sits (its own [#22877] note), and still answers a
-    // bundle that ships no canonical member at all; a named member that no
+    // member wherever it sits (its own [#22877] note); a member that no
     // layer holds answers nothing, so the door answers it as absent.
+    // [#34682] …the canonical member included: naming no member is the
+    // request that names it (the selector's contract), so a bundle that
+    // ships or stores no canonical member answers this read as absent, as
+    // `?member=<canonical>` and `/published` answer it.
     // [ADR-0150 D3/D5] Whether the answer below is the code layers' (the
     // artifact lookup and the registry), judged at the end of step 3.
     const reachedCodeLayers = item === undefined;
@@ -1400,7 +1407,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         // [#22877] A registry that does not narrow by member (a host
         // double, an older registry) can answer another member of the
         // bundle for a named one; that answer is not this member.
-        if (member !== undefined && item !== undefined && !isWantedMember(item)) item = undefined;
+        // [#34682] …nor is the member the registry's bare-name read answers
+        // for a bundle with no canonical member, when none was named: this
+        // read addresses the canonical member ({@link resolveBundleMemberSelector}).
+        if (wantedMember !== undefined && item !== undefined && !isWantedMember(item)) item = undefined;
         // [#20946] The registry half — see `storedRowDeclined` above.
         // `getItem` answers the bare slot first, and for a shipped flow name
         // that slot holds the hydrated stored row, which is not one of the

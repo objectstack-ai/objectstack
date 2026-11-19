@@ -95,7 +95,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
-import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
+import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
@@ -114,6 +114,10 @@ import {
     servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    AGGREGATE_ORDER_CUT,
+    type AggregateOrderCutRequest,
+    LATEST_PER,
+    type LatestPerRequest,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
@@ -863,8 +867,35 @@ export async function callData(deps: ActionExecutionDeps,
             const { object, ...rest } = params;
             return rest;
         })();
+        // [latest per group] The engine's one-row-per-group request, when an
+        // in-process door (the MCP tools) set it on `params` under the
+        // engine's own symbol key — never a wire key. Handed to `findData` on
+        // its request under the same key, and read back: a read that comes back
+        // without the engine's outcome on it was not served as one row per
+        // group, and its rows are no answer.
+        const latestPer = (params as Record<symbol, unknown> | undefined)?.[LATEST_PER] as LatestPerRequest | undefined;
         if (protocol && typeof protocol.findData === 'function') {
-            return await protocol.findData({ object: params.object, query, context: executionContext });
+            if (latestPer === undefined) {
+                return await protocol.findData({ object: params.object, query, context: executionContext });
+            }
+            const answer = await protocol.findData({ object: params.object, query, context: executionContext, [LATEST_PER]: latestPer });
+            if (latestPer.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The one-row-per-group read of '${params.object}' came back without being served as one row `
+                        + 'per group, so its rows are not the answer and none is returned.',
+                };
+            }
+            return answer;
+        }
+        if (latestPer !== undefined) {
+            // The fallback below serves canonical QueryAST keys only; one row
+            // per group is the engine's window, reached through `findData`.
+            throw {
+                statusCode: 501,
+                message: `Data query fallback cannot serve one row per group of '${params.object}': the protocol service `
+                    + '(metadata-protocol plugin) is not registered, and only its findData carries that read to the engine.',
+            };
         }
         if (ql) {
             // [#4386] This fallback used to pass only `{ context }` — the
@@ -961,6 +992,13 @@ export async function callData(deps: ActionExecutionDeps,
                 groupBy: params.groupBy,
                 aggregations: params.aggregations,
             });
+            // [aggregate order and cut] The engine's order-cut-count request,
+            // when an in-process door (the MCP tools) set it on `params` under
+            // the engine's own symbol key — never a wire key. Handed to the
+            // engine as its read option and read back: a read that comes back
+            // without the engine's outcome on it was not ordered and cut in
+            // the driver's statement, and its rows are no answer.
+            const orderCut = (params as Record<symbol, unknown> | undefined)?.[AGGREGATE_ORDER_CUT] as AggregateOrderCutRequest | undefined;
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -970,8 +1008,19 @@ export async function callData(deps: ActionExecutionDeps,
                     ...(params.timezone ? { timezone: params.timezone } : {}),
                     ...(executionContext ? { context: executionContext } : {}),
                 },
+                ...(orderCut !== undefined
+                    ? [{ [AGGREGATE_ORDER_CUT]: orderCut } as Parameters<typeof engine.aggregate>[2]] as const
+                    : [] as const),
             );
-            return { object: params.object, rows: rows ?? [] };
+            if (orderCut === undefined) return { object: params.object, rows: rows ?? [] };
+            if (orderCut.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${params.object}' came back without being served by the `
+                        + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+                };
+            }
+            return { object: params.object, rows: rows ?? [], totalGroups: orderCut.outcome.totalGroups };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -3877,11 +3926,18 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * handler (`landed-write-answer.ts`), on this context and every one it
  * derives. That layer sits beneath the reader seam, so the answer is served
  * like any write's return.
+ *
+ * It is built over {@link keepActionDoorProvenance}, beneath both layers, so
+ * it and every api derived from it carry the action door's origin flag: on
+ * it, `platformSystemApi(ctx.api)` answers what `ctx.api.sudo()` answers.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
     const served = (scoped: unknown) =>
-        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
+        serveStoredMetadataReadsThrough(
+            answerLandedWritesDespiteStaleSummary(keepActionDoorProvenance(scoped), ACTION_API_SURFACE),
+            ql,
+        );
     try {
         return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
@@ -3894,6 +3950,37 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
             return undefined;
         }
     }
+}
+
+/** The action door's origin flag: `true` on the api {@link buildActionApi} builds, and on every api derived from it. */
+const ACTION_DOOR_ORIGIN = Symbol.for('objectstack.runtime.actionDoorOrigin');
+
+/** On the action door's api, the platform's own system api is answered by `sudo()`. */
+const ACTION_DOOR_ANSWERS: ReadonlyMap<PropertyKey, PropertyKey> = new Map([[PLATFORM_SYSTEM_API, 'sudo']]);
+
+/**
+ * The action door's provenance layer: `api`, and every api derived from it
+ * (the shared walk, `deriveThroughSeam`: `sudo()`, `withRunAs(...)`, a
+ * transaction's context, and the api a symbol-keyed member derives, the
+ * user-grants seed's included), carry {@link ACTION_DOOR_ORIGIN},
+ * and on each the platform's own system api (`platformSystemApi`, objectql)
+ * is the api's `sudo()`: the `'action'` mark {@link buildActionExecutionContext}
+ * sets, and any `flowRunId`, stay. So a handler handing its own `ctx.api` to
+ * `platformSystemApi` gains nothing, and its writes to the identity-assignment
+ * objects are refused as an action handler's are
+ * (`content/docs/permissions/system-context.mdx`). `platformSystemApi` takes
+ * the mark off only the api the audit writer holds, a hook api the engine
+ * builds, which this layer never wraps.
+ *
+ * A flag of the action door's own, and ⛔ not the engine's app-authored one:
+ * that one also refuses a permanent delete (ADR-0148 D3), and a host code
+ * handler keeps the engine's permanent delete. Repositories pass through
+ * unchanged. Not a security boundary: the handler's package registered
+ * through the engine it holds, whose `createContext({ isSystem: true })`
+ * already builds a system api with neither the mark nor the run.
+ */
+function keepActionDoorProvenance<T>(api: T): T {
+    return deriveThroughSeam(api, ACTION_DOOR_ORIGIN, (_name, repo) => repo, ACTION_DOOR_ANSWERS);
 }
 
 /** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */

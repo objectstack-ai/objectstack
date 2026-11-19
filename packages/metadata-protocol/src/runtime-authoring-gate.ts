@@ -1435,6 +1435,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * carried there with no priority.
      */
     storedObjectExtensions?: readonly StoredObjectExtension[];
+    /**
+     * The node types the host's automation engine runs, stated only once the
+     * engine's vocabulary is SEALED (`getSealedNodeTypeVocabulary()`). A fact
+     * only the host holds, of the #6285 kind: handed to the shared rules, where
+     * `validateFlowNodeExecutors` refuses a flow node no executor runs. Absent
+     * (no automation service, or an engine not yet sealed), node types are not
+     * judged.
+     */
+    flowNodeTypeVocabulary?: readonly string[];
 }): RuntimeAuthoringVerdict {
     const toIssue = issueOf(args.userTextLocales ?? []);
     // [#26188] The one finding a draft hears: a hierarchy scope this runtime
@@ -1510,6 +1519,9 @@ export function evaluateRuntimeAuthoringGate(args: {
             : {}),
         ...(args.storedObjectExtensions !== undefined
             ? { storedObjectExtensions: args.storedObjectExtensions }
+            : {}),
+        ...(args.flowNodeTypeVocabulary !== undefined
+            ? { flowNodeTypeVocabulary: args.flowNodeTypeVocabulary }
             : {}),
     });
 

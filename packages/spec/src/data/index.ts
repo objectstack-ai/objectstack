@@ -100,6 +100,11 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// Which filter operator fits which declared field type: one row per
+// declared-type door that judges an operator class (today the text-operator
+// door above, by reference), read through `filterOperatorFieldTypeFit` by every
+// door that reports a filter a type change leaves unfit.
+export * from './filter-operator-field-type-fit';
 // [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
 // off a field DEFINITION (text-like, multi-value, null only) plus the
 // value-level predicate for the faces with no declaration. The operator is

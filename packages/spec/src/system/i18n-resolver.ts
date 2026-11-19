@@ -2043,6 +2043,10 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // its sidebar from `GET /meta/book`, and the tree route translates the book
   // it resolves through this same table (`createMetaBookTreeAnswer`).
   book: translateBook,
+  // A named import mapping's label: the console's import wizard offers each
+  // mapping by label from `GET /meta/mapping`, so registering here is the
+  // whole wiring.
+  mapping: translateMapping,
 };
 
 /**
@@ -2975,6 +2979,70 @@ export function translateBook<T extends BookLike>(
     ...(description !== undefined ? { description } : {}),
     ...(groupsMoved ? { groups } : {}),
   };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Import mapping resolver (label)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal import-mapping shape consumed by {@link translateMapping}. */
+export interface MappingLike {
+  name: string;
+  label?: string;
+  [key: string]: any;
+}
+
+function lookupMappingLabel(
+  bundle: TranslationBundle | undefined,
+  mappingName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.mappings?.[mappingName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to an import-mapping metadata document — its
+ * `label` against `mappings.<name>.label`. The input document is not mutated;
+ * it comes back as the same reference when the bundle carries no label for
+ * it, and then the authored label stands.
+ *
+ * Registered in {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary
+ * localizes every served mapping (`GET /meta/mapping`, list and item) — the
+ * list the console's import wizard offers by name in its saved-mapping
+ * selector. A mapping's `fieldMapping` is not copy (column names and field
+ * names) and is left alone.
+ *
+ * ## An override's own label — ADR-0146 D2
+ *
+ * A mapping is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's label. So the label follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}: a label the override changed reads only
+ * the pair's translations and otherwise keeps its own text; a label it left
+ * alone takes the pair's translation, then the base's. No base supplied: the
+ * catalog applies.
+ */
+export function translateMapping<T extends MappingLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const mappingName = doc.name;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (typeof mappingName !== 'string' || mappingName.length === 0 || !catalogs.unchanged) return doc;
+  const base = asRecord(opts?.packagedBase);
+  const label = lookupMappingLabel(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), mappingName, opts,
+  );
+  if (label === undefined) return doc;
+  return { ...doc, label };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -4582,6 +4650,62 @@ export function hookRefusalMessageKey(hookName: string, code: string, reason?: s
  */
 export function hookTextMessageKey(hookName: string, key: string): string {
   return `hooks.${hookName}.texts.${key}.message`;
+}
+
+/**
+ * Dot-notation i18n key for an action's declared refusal message (#34273,
+ * `ActionSchema.refusals`) — the action twin of {@link hookRefusalMessageKey},
+ * at the address every action translation is read at
+ * ({@link actionTranslationNode}):
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.refusals.<CODE>.message`;
+ *  - an object-less action: `globalActions.<action>.refusals.<CODE>.message`;
+ *
+ * and, given a declared reason under the code,
+ * `….refusals.<CODE>.reasons.<REASON>.message`.
+ *
+ * Used by the action body runner, which answers a throw of a declared code
+ * with this translation in the caller's locale (`ExecutionContext.locale`),
+ * the declared sentence on a miss. `objectName` is the action's OWN object —
+ * `objectName` on its declaration, or the object that declares it inline —
+ * never the object a caller routed it under, so a bound action never reads
+ * `globalActions` and an object-less one never reads an object's group.
+ */
+export function actionRefusalMessageKey(
+  objectName: string | undefined,
+  actionName: string,
+  code: string,
+  reason?: string,
+): string {
+  const node = actionTranslationNodeKey(objectName, actionName);
+  return reason === undefined
+    ? `${node}.refusals.${code}.message`
+    : `${node}.refusals.${code}.reasons.${reason}.message`;
+}
+
+/**
+ * Dot-notation i18n key for an action's declared text (#34374 PR2, ruling
+ * 6913660232 parameter 7, `ActionSchema.texts`) — the action twin of
+ * {@link hookTextMessageKey}, at the address every action translation is read
+ * at, beside the action's refusals:
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.texts.<key>.message`;
+ *  - an object-less action: `globalActions.<action>.texts.<key>.message`.
+ *
+ * Used by the action body runner, which answers `ctx.text(key, params)` with
+ * this translation in the ORGANIZATION's language (never the caller's), the
+ * declared sentence on a miss, and fills its holes after. `objectName` is the
+ * action's OWN object, as for {@link actionRefusalMessageKey}.
+ */
+export function actionTextMessageKey(objectName: string | undefined, actionName: string, key: string): string {
+  return `${actionTranslationNodeKey(objectName, actionName)}.texts.${key}.message`;
+}
+
+/** The translation node of an action: `objects.<object>._actions.<action>`, or `globalActions.<action>` with no object. */
+function actionTranslationNodeKey(objectName: string | undefined, actionName: string): string {
+  return typeof objectName === 'string' && objectName.length > 0
+    ? `objects.${objectName}._actions.${actionName}`
+    : `globalActions.${actionName}`;
 }
 
 /**

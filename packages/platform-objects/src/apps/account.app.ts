@@ -108,16 +108,36 @@ export const ACCOUNT_APP: App = {
           requiresObject: 'sys_inbox_message',
         },
         {
+          // [rulings 6968686390 and 6969143776] The person's own notification
+          // settings: per topic × channel on/off, digest and quiet hours. A
+          // console page registered as `account:notification_settings`; it
+          // reads `GET /api/v1/messaging/me/preferences` (their EFFECTIVE
+          // preferences, computed by the resolver `emit` uses) and writes
+          // their own `sys_notification_preference` rows through the data
+          // door, where `member_default`'s own-row policy decides which rows.
+          // Gated like Approvals: the capability is the messaging SERVICE,
+          // which mounts the route the page reads.
+          id: 'nav_account_notification_settings',
+          type: 'component',
+          label: 'Notification Settings',
+          componentRef: 'account:notification_settings',
+          icon: 'bell-ring',
+          requiresService: 'messaging',
+        },
+        {
           // #7234 — the DESTINATION is the Approvals Inbox component, not the
           // raw `sys_approval_request` grid. The engine-owned table has no
-          // decision actions for an end user: all eight are gated on
-          // `record.viewer.can_act || record.viewer.can_override`, and the
-          // `viewer` block is attached ONLY on the approvals REST path
-          // (`approval-service.ts`, `attachViewers()`), never on the generic
-          // data API. So the object route could only ever render a read-only
-          // list of rows an approver cannot act on. The inbox component calls
-          // the approvals REST path and therefore carries the decision
-          // actions, business vocabulary, node progress and drawer.
+          // decision actions for an end user: every one is gated on a leaf
+          // of the served `record.viewer` block (`can_act`, `is_submitter`,
+          // `can_override`, `can_override_approve`; the override arm reads
+          // `can_override_approve` on Approve and `can_override` on Reject,
+          // Reassign and Recall), and the `viewer` block is attached ONLY on
+          // the approvals REST path (`approval-service.ts`,
+          // `attachViewers()`), never on the generic data API. So the object
+          // route could only ever render a read-only list of rows an approver
+          // cannot act on. The inbox component calls the approvals REST path
+          // and therefore carries the decision actions, business vocabulary,
+          // node progress and drawer.
           //
           // The ref is the component-registry KEY, never a console path — that
           // indirection is the whole contract (objectui#2763; the key is

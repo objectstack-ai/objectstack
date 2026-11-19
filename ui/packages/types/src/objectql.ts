@@ -158,6 +158,8 @@ import type {
   // `ObjectTreeSchema.tree` below takes the protocol's own type. Aliased for
   // the reason `SpecGanttConfig` above is.
   TreeConfig as SpecTreeConfig,
+  // objectstack#34382 — the `object-timesheet` node's `timesheet` block.
+  TimesheetConfig as SpecTimesheetConfig,
   // objectui#9239 — `ComponentPropsMap['object-calendar']`'s author state, so
   // `ObjectCalendarSchema.data` below DERIVES the protocol's `data` row rather
   // than re-spelling it. Aliased because the bare name is the protocol's, and a
@@ -746,9 +748,12 @@ export interface BulkActionDef {
    *   injects `params._selectedIds: string[]` (every selected record id) and
    *   publishes the full records as `context.selectedRecords`, so the server
    *   can produce a single aggregate artifact (zip of QR codes, merged PDF,
-   *   batch print job…). Result semantics are all-or-nothing: the one call
-   *   covers the whole selection, so per-row retry is unavailable — a total
-   *   failure keeps the selection for a whole-run re-run.
+   *   batch print job…). A rejection is one outcome for the whole
+   *   selection; a run that moved some rows and refused others resolves
+   *   with a `BulkActionResult` (`{ succeeded, failed }`,
+   *   `@objectstack/spec/ui`), a non-empty `failed` being a legal success
+   *   answer. Per-row retry is unavailable — a total failure keeps the
+   *   selection for a whole-run re-run.
    *
    * Ignored for `operation: 'update' | 'delete'` (their bulk fast-path already
    * aggregates per batch) and for a `custom` def without `actionDef` (nothing
@@ -3293,6 +3298,9 @@ export interface NamedListView {
    */
   tree?: ListViewSchema['tree'];
 
+  /** Timesheet configuration. Consumed by `ObjectTimesheet` (`@object-ui/plugin-timesheet`, objectstack#34382). */
+  timesheet?: ListViewSchema['timesheet'];
+
   /**
    * The audience gate — `@objectstack/spec` 18's one list-view capability key
    * (objectstack#22611, ruling A): a list of capabilities, ALL required, with
@@ -3819,6 +3827,23 @@ export interface ObjectTreeSchema extends BaseSchema {
    * @deprecated Not a channel `object-tree` reads — nothing renders it.
    */
   children?: never;
+}
+
+/**
+ * Object Timesheet Component Schema (objectstack#34382)
+ *
+ * The editable row × weekday grid `ListView` composes for a `type: 'timesheet'`
+ * view: one record per filled cell, keyed by `timesheet.rowFields`, placed by
+ * `timesheet.dateField` and valued by `timesheet.valueField`.
+ */
+export interface ObjectTimesheetSchema extends BaseSchema {
+  type: 'object-timesheet';
+  /** The object whose records the grid pivots. */
+  objectName: string;
+  /** The binding — the spec's `TimesheetConfig`, by reference. */
+  timesheet?: SpecTimesheetConfig;
+  /** Base query filter, joined with the displayed week on `dateField`. */
+  filter?: QueryParams['$filter'];
 }
 
 /**
@@ -6182,6 +6207,7 @@ export type ObjectQLComponentSchema =
   | ObjectViewSchema
   | ObjectMapSchema
   | ObjectTreeSchema
+  | ObjectTimesheetSchema
   | ObjectGanttSchema
   | ObjectCalendarSchema
   | ObjectKanbanSchema

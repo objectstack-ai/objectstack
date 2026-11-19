@@ -28,12 +28,14 @@ import {
   type FieldRulePredicate,
   recordDisplayValueAt,
   evalFieldPredicate,
+  resolveFieldRuleState,
   resolveNameField,
   toPredicateRecord,
   withoutDeniedFields,
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
 import { hasCellValue } from '../emptiness';
+import { EmptySectionsLineContext } from '../defaultRecordPage';
 import { RecordPageProvenanceContext } from '../recordPageProvenance';
 import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
@@ -258,6 +260,38 @@ function sectionPredicateVisible(
   return evalFieldPredicate(visibleWhen, record, false, record, scope, {
     context: `visibleWhen of ${where} — fail-closed, the group is hidden`,
   });
+}
+
+/**
+ * Does a FIELD's own `visibleWhen` (`@objectstack/spec` `Field.visibleWhen`:
+ * "field is shown only when TRUE (else hidden)") admit its row on this record?
+ *
+ * Asked of every field this body draws, whatever section carries it — a
+ * `{ group }` reference, an enumerated section (the default page's ungrouped
+ * bucket and its no-`fieldGroups` split are enumerated sections, the same
+ * shape an authored page writes) or the flat `fields` list. The predicate is
+ * the OBJECT's declaration of the field, read by name, never a key on the
+ * section entry.
+ *
+ * ⭐ The form's judge, called the form's way: `resolveFieldRuleState` from
+ * `@object-ui/core`, the call the form renderer makes for a field's
+ * `visibleWhen`, so the fault direction is the field rule's
+ * (`VISIBLE_WHEN_FAULTED`, ADR-0137 D3): a predicate that cannot be evaluated
+ * SHOWS the field and warns once. That is the opposite of a group's gate
+ * ({@link sectionPredicateVisible}, fail-closed), deliberately — each slot
+ * keeps the direction the form gives it. The inputs are the ones the group
+ * gate passes: {@link sectionPredicateRecord} as `record` and as `previous`,
+ * and the host predicate scope.
+ *
+ * Display only, as on the form: the record API serves the field either way.
+ */
+function fieldPredicateVisible(
+  visibleWhen: FieldRulePredicate,
+  record: Record<string, unknown>,
+  scope: Record<string, unknown>,
+  where: string,
+): boolean {
+  return resolveFieldRuleState({ visibleWhen }, record, {}, record, scope, where).visible;
 }
 
 /**
@@ -875,6 +909,33 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
     });
   };
 
+  // The record a group's or a field's `visibleWhen` is evaluated against —
+  // assembled only when a predicate is actually declared, so a body without
+  // one does no extra work and renders exactly as before.
+  let sectionRecord: Record<string, unknown> | undefined;
+  const predicateRecord = (): Record<string, unknown> =>
+    (sectionRecord ??= sectionPredicateRecord(ctx.data, objSchemaFields));
+
+  /**
+   * Drop every row whose field's own `visibleWhen` is FALSE for this record —
+   * see {@link fieldPredicateVisible}. Applied to every list this body draws,
+   * after the other folds, so it reads only the rows that would be drawn.
+   */
+  const dropPredicateHidden = (list: any[] | undefined): any[] | undefined => {
+    if (!list) return list;
+    return list.filter((e) => {
+      const n = fieldName(e);
+      const visibleWhen = n ? objSchemaFields?.[n]?.visibleWhen : undefined;
+      if (visibleWhen == null) return true;
+      return fieldPredicateVisible(
+        visibleWhen as FieldRulePredicate,
+        predicateRecord(),
+        predicateScope,
+        `field '${n}' of record:details on object '${objectName}'`,
+      );
+    });
+  };
+
   // ── The declared fallback body (objectui#12433) ─────────────────────────
   //
   // `@objectstack/spec` declares what a node with no authored body draws, on
@@ -903,7 +964,7 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   const bodyFields: string[] | undefined = bodyFieldsOmitted
     ? (Array.isArray(objSchema?.highlightFields) ? objSchema.highlightFields : undefined)
     : schema.fields;
-  const filteredFields = dropHidden(normaliseList(filterList(bodyFields)));
+  const filteredFields = dropPredicateHidden(dropHidden(normaliseList(filterList(bodyFields))));
 
   // ── `sections[].group` — the ADR-0085 §5 REFERENCE form ──────────────────
   //
@@ -940,11 +1001,6 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
     }
   }
 
-  // The record a group's `visibleWhen` is evaluated against — assembled only
-  // when a referenced group actually declares one, so a page without a gated
-  // group does no extra work and renders exactly as before.
-  let sectionRecord: Record<string, unknown> | undefined;
-
   /**
    * Resolve one authored entry to the section the body renders, or `null` when
    * a `group` reference names no declared group — or names a group whose
@@ -975,10 +1031,9 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
       return null;
     }
     if (entry.visibleWhen != null) {
-      sectionRecord ??= sectionPredicateRecord(ctx.data, objSchemaFields);
       const shown = sectionPredicateVisible(
         entry.visibleWhen as FieldRulePredicate,
-        sectionRecord,
+        predicateRecord(),
         predicateScope,
         `group '${s.group}' of record:details on object '${objectName}'`,
       );
@@ -1037,8 +1092,10 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         // entry with no schema default, and states the fallback as the
         // renderer's: hiding is on, so a section whose fields are ALL empty
         // renders nothing at all — no heading, no skeleton — and `false` keeps
-        // the section a brand-new record needs (read-only, its heading plus one
-        // fold row since objectui#13386; edit mode, every row).
+        // the section a brand-new record needs (read-only, named in the body's
+        // closing empty-sections line and drawn as its heading plus one fold
+        // row when that line expands, objectui#13386 and objectstack#35019;
+        // edit mode, every row).
         //
         // ⭐ The default is resolved HERE, on an AUTHORED section, and that
         // placement is the whole design. `DetailSection` tests `=== true`, so
@@ -1102,7 +1159,7 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         // partly-filled section — is untouched. Pinned four ways in
         // `__tests__/record-details.hideEmptyRetired-7129.test.tsx`.
         hideEmpty: s.hideEmpty ?? true,
-        fields: dropHidden(normaliseList(filterList(s.fields))),
+        fields: dropPredicateHidden(dropHidden(normaliseList(filterList(s.fields)))),
       });
       })
     : schema.sections;
@@ -1198,13 +1255,17 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         >
           {/* objectui#12701 — the record is the context host's (the record
               page's read, or the binding's row above); this body never reads it
-              again, it waits for `ctx.data`. */}
-          <DetailView
-            schema={synthesized}
-            dataSource={ctx.dataSource}
-            inlineEdit={inlineEditDefault}
-            recordFromHost
-          />
+              again, it waits for `ctx.data`. objectstack#35019 — a details
+              body folds its entirely empty sections into one closing line,
+              on an authored page as on the default one. */}
+          <EmptySectionsLineContext.Provider value>
+            <DetailView
+              schema={synthesized}
+              dataSource={ctx.dataSource}
+              inlineEdit={inlineEditDefault}
+              recordFromHost
+            />
+          </EmptySectionsLineContext.Provider>
         </RecordFieldAccessForRecord>
       </RecordPageProvenanceContext.Provider>
     </div>

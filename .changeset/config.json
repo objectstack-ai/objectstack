@@ -113,6 +113,7 @@
       "@object-ui/plugin-markdown",
       "@object-ui/plugin-report",
       "@object-ui/plugin-timeline",
+      "@object-ui/plugin-timesheet",
       "@object-ui/plugin-tree",
       "@object-ui/plugin-view",
       "@object-ui/react",

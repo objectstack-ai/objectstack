@@ -36,6 +36,7 @@ import {
   isIndexDriftOp,
   parseIndexDdl,
   planDeclaredRenames,
+  latestPerDirectiveOf,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -2504,6 +2505,20 @@ export class TursoDriver extends SqlDriver {
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'find');
     if (this.isRemote) {
+      // [latest per group] The remote transport compiles its own reads and no
+      // window: a read handed the directive is refused before anything is
+      // read, never answered as an ordinary read. The engine refuses it first;
+      // this is the driver's own word for a caller that reaches it directly.
+      if (latestPerDirectiveOf(query) !== undefined) {
+        const err = new Error(
+          `find('${object}'): one row per group cannot run on the remote face of this driver, whose transport `
+          + 'compiles no window. The query was NOT run and nothing was read. A local or replica database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'find');
       const remoteQuery = this.toRemoteReadQuery(object, query, undefined, options);
       // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
@@ -3258,6 +3273,23 @@ export class TursoDriver extends SqlDriver {
   ): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
     if (this.isRemote) {
+      // [aggregate order and cut] The remote transport compiles its own
+      // aggregates and no ordered cut: a statement handed the engine's
+      // directive (`Symbol.for` key, as `driver-sql` reads it) is refused
+      // before anything is read, never answered uncut. The engine refuses it
+      // first; this is the driver's own word for a caller that reaches it
+      // directly.
+      if ((query as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.driver.aggregate.orderCut')] !== undefined) {
+        const err = new Error(
+          `aggregate('${object}'): ordered and cut groups cannot run on the remote face of this driver, whose `
+          + 'transport compiles no ordered cut. The query was NOT run and nothing was read. A local or replica '
+          + 'database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'aggregate');
       // [#20424] The caller's own query is what the fault is attributed
       // against, as `SqlDriver.aggregate` does locally: its groupBy and

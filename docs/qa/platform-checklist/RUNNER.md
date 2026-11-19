@@ -552,22 +552,21 @@ contradicts it, and correct it here when it does.
      bearer seam. So a session driven with the localStorage token alone gets **401
      `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
      `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
-     upload is broken". The Setup app's **Packaged Actions** page (component ref
-     `automation:packaged-actions`) is built the same way: its `GET /api/v1/meta/object`
-     and `GET /api/v1/data/sys_metadata_activation` loads and its
+     upload is broken". Studio's packaged-action switch (`action-ledger-switch`, on a
+     read-only app's vendor action) is built the same way: its
+     `GET /api/v1/data/sys_metadata_activation` load and its
      `POST /api/v1/actions/_activation/<object>/<action>` toggle are bare `fetch`es with
      `credentials: 'include'` and no `Authorization` header
-     (`ui/packages/app-shell/src/views/setup/PackagedActionsSection.tsx`), so a token-only
-     session should expect a load failure ending `HTTP 401` (`object metadata HTTP 401` or
-     `activation ledger HTTP 401`) in the page's `role="alert"` box instead of the action
-     list. That is read from source; QA run #27409 measured the shape on the Packaged
-     Automation page (`automation:packaged`), which retired with ADR-0146 D11: a bookmark of
-     `/apps/<app>/component/automation/packaged` now opens Studio's Automations pillar
-     (`packagedAutomationStudioPath`,
-     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where a
-     packaged flow's switch and its New similar are. ⛔ Do not drive any storage/upload
-     surface or the Packaged Actions page from an injected token: **sign in through the
-     form** so both halves exist.
+     (`ui/packages/app-shell/src/views/setup/packagedActionLedger.ts`), so a token-only
+     session should expect no switch and a `role="alert"` line ending
+     `activation ledger HTTP 401` instead. That is read from source; QA run #27409 measured
+     the shape on the Packaged Automation page (`automation:packaged`), which retired with
+     ADR-0146 D11, and Setup's Packaged Actions page (`automation:packaged-actions`) retired
+     with objectstack#34724: a bookmark of either now opens Studio
+     (`packagedAutomationStudioPath` / `packagedActionsStudioPath`,
+     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where each
+     packaged item's switch is. ⛔ Do not drive any storage/upload surface or the action
+     switch from an injected token: **sign in through the form** so both halves exist.
 
 - **A stock showcase boot refuses self-registration — no item can mint a member by
   "fresh sign-up".** The showcase declares no `auth.audience`, so its posture is the

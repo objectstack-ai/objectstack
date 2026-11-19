@@ -15,7 +15,7 @@
  *    `POST /api/v1/actions/_activation/:object/:action`) and no clone — the
  *    action-clone half is not chartered; [#30065] its save names the declared
  *    override from the base's paired `.custom` first (ADR-0146 D9 `action`);
- *  - a PERMISSION SET has its clone (§8 item 3, the "Clone" action, which posts
+ *  - a PERMISSION SET has its clone (§8 item 3, the "New similar" action, which posts
  *    to `POST /api/v1/data/sys_permission_set`) and no switch named here.
  *
  * The protocol-side pins are
@@ -119,7 +119,7 @@ const expectRegimeC = (message: unknown, type: string, name: string, operation: 
 const ACTION_SWITCH = 'it off (POST /api/v1/actions/_activation/:object_or_global/:action, body {enabled: false}';
 // The route's spelling moved with C3 stage 8 (the retired object's data route
 // → the catalog's clone door), so the sentence is pinned up to it.
-const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "New similar" action on the permission set, '
     + 'or POST /api/v1/';
 
 describe('PUT / DELETE /api/v1/meta/action/:name on a packaged action — the refusal names the activation switch', () => {

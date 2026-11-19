@@ -11,7 +11,8 @@
  *   bridge that defines no description for one of the pair get no rule — each
  *   pinned beside its `tools/list` control.
  * - The install line names `@objectstack/skills` at this package's own
- *   version (one `fixed` changeset group), for every grant.
+ *   version (one `fixed` changeset group), for every grant, and the CLI
+ *   command that installs it with or without a project (#34773).
  * - Host-injected text and the runtime's configured text are whole answers
  *   their author owns: nothing is appended to either.
  */
@@ -25,6 +26,7 @@ import {
   MCP_OAUTH_SCOPE_METADATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
 } from '@objectstack/spec/ai';
+import { DATASET_NEXT_STEP_PRECEDENCE, getDatasetToolDefinitions } from '@objectstack/service-analytics';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import type { McpAuthoringInjection } from './types.js';
@@ -159,9 +161,18 @@ describe('[#34686] initialize instructions — the skills install line', () => {
     for (const o of [{}, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] }, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] }] as Opts[]) {
       const text = await instructionsOf(runtime, makeBridge(), o);
       expect(text).toContain(`Published skills: @objectstack/skills ${OWN_VERSION}`);
-      expect(text).toContain(`@objectstack/skills@${OWN_VERSION}`);
       expect(text).not.toContain('0.0.1-operator');
     }
+  });
+
+  // [#34773] The install is the CLI's own command, at that version, which needs
+  // no project: a client that only connected over MCP can follow it in an empty
+  // directory. The npx form is for a machine without the CLI installed.
+  it('names `os skills install --version` at that version, and no project-only install', async () => {
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain(`os skills install --version ${OWN_VERSION}`);
+    expect(text).toContain(`npx -p @objectstack/cli@${OWN_VERSION} os skills install --version ${OWN_VERSION}`);
+    expect(text).not.toContain('pnpm add');
   });
 });
 
@@ -190,5 +201,73 @@ describe('[#34686] initialize instructions — host and configured texts are lef
     const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0', instructions: CONFIGURED });
     expect(await datasetToolsListed(runtime, makeBridge())).toHaveLength(2);
     expect(await instructionsOf(runtime, makeBridge())).toBe(CONFIGURED);
+  });
+});
+
+describe('[#34766] initialize instructions — the drafts line follows the authoring tools', () => {
+  const DRAFTS = 'They save drafts only';
+  const ONE_TOOL = { getAll: () => [{ name: 'save_metadata_draft', description: 'Save a draft.' }], execute: async () => ({}) as never };
+
+  it('a metadata:write request whose host registry lists a tool is told authoring lands as drafts a person publishes', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge(), {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoring: { registry: ONE_TOOL as never },
+    });
+    expect(text).toContain(DRAFTS);
+    // The rest of the open text is still there.
+    expect(carriesRule(text)).toBe(true);
+    expect(text).toContain('@objectstack/skills');
+  });
+
+  it('no drafts line where no authoring tool registers: an empty registry, a grant without metadata:write, no injection', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const cases: Opts[] = [
+      { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoring: {} },
+      { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], authoring: { registry: ONE_TOOL as never } },
+      {},
+    ];
+    for (const o of cases) expect(await instructionsOf(runtime, makeBridge(), o), JSON.stringify(o)).not.toContain(DRAFTS);
+  });
+});
+
+/**
+ * [#34919] The rule tells the client to follow `list_datasets`' `nextStep`
+ * and cite `query_dataset`'s `sourceLine`, and names the precedence among
+ * mixed cases in the order the service-analytics executor applies it (its
+ * exported constant, so a reorder there reds here).
+ */
+describe('[#34919] initialize instructions — follow nextStep, cite sourceLine', () => {
+  it('names both members and the executor\'s precedence, in its order', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain('nextStep');
+    expect(text).toContain('sourceLine');
+    expect(text).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
+  });
+});
+
+/**
+ * [#35005] The ask-back is owed only for a word with a measure among its
+ * candidates; a word whose candidates are all dimensions is at most a possible
+ * grouping. The rule states it in the same words as `list_datasets`' own
+ * description (the real one, read from the executor's package), so the two
+ * doors cannot drift apart.
+ */
+describe('[#35005] initialize instructions — the ask-back is scoped in the same words as list_datasets', () => {
+  const SCOPED =
+    'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+    + 'stops a matched measure.';
+
+  it('both doors carry the scoped sentence, and the question names a measure among the candidates', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    const list = getDatasetToolDefinitions().find((d) => d.name === LIST_DATASETS_TOOL_NAME)!;
+    expect(text).toContain(SCOPED);
+    expect(list.description).toContain(SCOPED);
+    expect(text).toContain('A word with no match and a measure among its candidates in the answer: ask the same way');
+    // The unscoped form is gone from both doors.
+    expect(text).not.toContain('A word with no match but with candidates in the answer');
+    expect(list.description).not.toContain('possible readings: ask the same way');
   });
 });

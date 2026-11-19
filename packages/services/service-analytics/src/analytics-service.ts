@@ -119,6 +119,7 @@ import {
   type DateGranularityValue,
 } from './dataset-executor.js';
 import { measureDrillScopes, type MeasureSource } from './drill-scope.js';
+import type { GroupCountRequest } from './dataset-group-count.js';
 import {
   resolveDimensionLabels,
   createOrderLabelResolver,
@@ -3064,12 +3065,19 @@ export class AnalyticsService implements IAnalyticsService {
    * degraded "backing object unavailable" return and the main return — so an
    * exit added later inherits it instead of needing its own copy. `query()`
    * never passes through here, so a cube answer carries none.
+   *
+   * [query_dataset totalGroups] `options.groupCount` asks for the number of
+   * groups the selection formed before its window cut them, written to the
+   * request's slot by the statement that grouped and cut them, or as the
+   * length of a whole grid the executor or the ObjectQL face windowed in
+   * memory (`dataset-group-count.ts`). The draft-preview read and the degraded
+   * "backing object unavailable" answer count nothing.
    */
   async queryDataset(
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
-    options?: { previewDrafts?: boolean },
+    options?: { previewDrafts?: boolean; groupCount?: GroupCountRequest },
   ): Promise<AnalyticsResult> {
     // The deployment's read limits judge the selection's own window — the
     // one a report or dashboard asked for — before anything runs (see
@@ -3097,7 +3105,7 @@ export class AnalyticsService implements IAnalyticsService {
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
-    options?: { previewDrafts?: boolean },
+    options?: { previewDrafts?: boolean; groupCount?: GroupCountRequest },
   ): Promise<AnalyticsResult> {
     // [#21177] The dataset's own dimension/measure `field` text — inline or saved,
     // whichever branch supplied it — is judged here: a `field` that is not a
@@ -3384,7 +3392,10 @@ export class AnalyticsService implements IAnalyticsService {
       // branch above matches `row[key]`, which already reads the field.
       const bound = bindDatasetFiltersToObjectFields(resolved.compiled, resolved.selection, this.getObjectFieldNames?.(dataset.object));
       const scoped = this.scopedService(this.requestScope(bound.compiled));
-      result = await new DatasetExecutor(scoped, orderLabels).execute(bound.compiled, bound.selection, context);
+      const executor = new DatasetExecutor(scoped, orderLabels);
+      result = options?.groupCount
+        ? await executor.execute(bound.compiled, bound.selection, context, { groupCount: options.groupCount })
+        : await executor.execute(bound.compiled, bound.selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
       // envelope reader serves it (4xx as itself; a declared 5xx relayed with
@@ -3757,14 +3768,21 @@ export class AnalyticsService implements IAnalyticsService {
         // [#28049] A derived measure has no field to lend a code. Its column
         // takes the one `fixed` code its operands resolve to (a `sum` /
         // `difference` over amounts in one `fixed` code), read off the compile
-        // guard's own resolution, so the column says what compile judged. Any
-        // other derived measure (a `ratio`, a `product`, operands in the
-        // tenant's or a record's currency) is monetary only by its own
+        // guard's own resolution, so the column says what compile judged.
+        //
+        // A `sum` / `difference` whose operands are ALL amounts in the
+        // tenant's currency (or such derived measures) is an amount in it too,
+        // so it is monetary and takes the chain's tenant step, as a plain sum
+        // of one of them does (seat ruling record 7000265215, item 2;
+        // `inTenantCurrency`). Any other derived measure (a `ratio`, a
+        // `product`, operands mixing the tenant's currency with a code, a
+        // record's currency or a `count`) is monetary only by its own
         // `currency`, as before.
         const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
         const derivedCode = m.derived ? currencies.fixedCodeOf(m) : undefined;
+        const derivedTenant = currencies.inTenantCurrency(m);
         if (meta?.currencyField !== undefined) {
           const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
             ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
@@ -3772,7 +3790,7 @@ export class AnalyticsService implements IAnalyticsService {
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
           const amount = meta?.type === 'currency' && AMOUNT_AGGREGATES.has(m.aggregate ?? '');
-          const monetary = !!mc.currency || amount || derivedCode !== undefined;
+          const monetary = !!mc.currency || amount || derivedCode !== undefined || derivedTenant;
           if (monetary) {
             const resolved = mc.currency ?? meta?.defaultCurrency ?? derivedCode ?? context?.currency;
             if (resolved) fc.currency = resolved;

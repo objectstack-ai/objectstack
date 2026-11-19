@@ -12,6 +12,12 @@ import { test, expect, type Page } from '@playwright/test';
  * browser's own, the close is an outside tap, and the reload is a real one,
  * which keeps `history.state`.
  *
+ * On a phone inside an app the drawer opens from the bottom menu bar's 「More」
+ * cell (objectstack#34594): the app bar's left slot holds the Back-to-home
+ * link there, not the sidebar trigger, which only the desktop control below
+ * still taps. Both open the same drawer through `setOpenMobile(true)`, so the
+ * history hook sees the same `openMobile` whichever control opened it.
+ *
  * In `test:e2e:live:nightly`, not the required `:ci` allowlist.
  */
 
@@ -19,18 +25,19 @@ const APP = 'com.example.showcase';
 const LIST = `/apps/${APP}/showcase_task`;
 const DRAWER = '[data-sidebar="sidebar"][data-mobile="true"]';
 const TRIGGER = 'button[data-sidebar="trigger"]';
+const MORE = '[data-testid="phone-app-nav-more"]';
 const FLAG = '__navDrawerOpen';
 
-async function openList(page: Page) {
+async function openList(page: Page, opener: string) {
   // A page behind the list, so Back has somewhere to go.
   await page.goto('/home');
   await expect(page.locator('#root')).not.toBeEmpty();
   await page.goto(LIST);
-  await expect(page.locator(TRIGGER).first()).toBeVisible();
+  await expect(page.locator(opener).first()).toBeVisible();
 }
 
 async function openDrawer(page: Page) {
-  await page.locator(TRIGGER).first().tap();
+  await page.locator(MORE).first().tap();
   await expect(page.locator(DRAWER)).toBeVisible();
   await expect.poll(() => drawerFlag(page)).toBe(true);
 }
@@ -51,7 +58,7 @@ for (const width of [375, 390]) {
     test.use({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
 
     test('Back with the drawer open closes it and stays on the list', async ({ page }) => {
-      await openList(page);
+      await openList(page, MORE);
       const url = page.url();
       await openDrawer(page);
 
@@ -63,7 +70,7 @@ for (const width of [375, 390]) {
     });
 
     test('an outside tap closes the drawer and pops its entry: Back goes to the previous page', async ({ page }) => {
-      await openList(page);
+      await openList(page, MORE);
       const before = await historyLength(page);
       await openDrawer(page);
 
@@ -80,7 +87,7 @@ for (const width of [375, 390]) {
     });
 
     test('choosing a nav entry replaces the drawer entry: Back returns to the list', async ({ page }) => {
-      await openList(page);
+      await openList(page, MORE);
       const listUrl = page.url();
       await openDrawer(page);
 
@@ -105,12 +112,12 @@ for (const width of [375, 390]) {
     });
 
     test('a reload with the drawer open leaves it closed, with no flagged entry left', async ({ page }) => {
-      await openList(page);
+      await openList(page, MORE);
       await openDrawer(page);
       const length = await historyLength(page);
 
       await page.reload();
-      await expect(page.locator(TRIGGER).first()).toBeVisible();
+      await expect(page.locator(MORE).first()).toBeVisible();
 
       await expect.poll(() => drawerFlag(page)).toBe(false);
       await expect(page.locator(DRAWER)).toBeHidden();
@@ -124,7 +131,7 @@ test.describe('desktop sidebar', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test('CONTROL — opening and closing the sidebar writes no history entry', async ({ page }) => {
-    await openList(page);
+    await openList(page, TRIGGER);
     const url = page.url();
     const length = await historyLength(page);
 

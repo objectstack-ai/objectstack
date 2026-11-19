@@ -22,6 +22,7 @@ import { render, waitFor, fireEvent, screen, act } from '@testing-library/react'
 import React from 'react';
 
 import { ObjectForm } from './ObjectForm';
+import { ModalForm } from './ModalForm';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererContext } from '@object-ui/react';
 
@@ -197,5 +198,121 @@ describe('ObjectForm — a lookup pick fills its declared lookupAutofill targets
     expect(saved.note ?? '').toBe('');
     expect(saved.unit_price ?? null).toBe(null);
     expect((container.querySelector('input[name="note"]') as HTMLInputElement).value).toBe('');
+  });
+});
+
+/**
+ * A create form that OPENS with the lookup already holding a record — a
+ * related list's New pre-linking its parent, a URL prefill, a form view
+ * default — fills that lookup's declared targets from it, as a pick does
+ * (objectstack#35050). The record is the one the lookup reads for its label,
+ * so the fill costs no second read. Only an empty target fills: a value the
+ * form opened with is an explicit one, and `overwrite: true` does not replace
+ * it. Controls: an edit form fills nothing from the stored record; a lookup
+ * without the key fills nothing.
+ */
+describe('ObjectForm — a create form opened with a lookup value fills its declared targets (objectstack#35050)', () => {
+  function renderSeeded(initialValues: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    const ds = makeDS();
+    const view = render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ObjectForm
+          schema={{ type: 'object-form', objectName: 'quote_line', mode: 'create', initialValues, ...extra } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    return { ds, container: view.container };
+  }
+
+  const valueOf = (c: HTMLElement, name: string) => (c.querySelector(`input[name="${name}"]`) as HTMLInputElement).value;
+
+  it('fills the empty targets from the record the lookup opened with, and saves them', async () => {
+    const { ds, container } = renderSeeded({ product: 'p1' });
+    await input(container, 'unit_price');
+
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    expect(valueOf(container, 'description')).toBe('A widget');
+
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(ds.create).toHaveBeenCalled());
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ product: 'p1', unit_price: 100, description: 'A widget' });
+  });
+
+  it('keeps every value the form opened with, `overwrite: true` included, and fills the rest', async () => {
+    const { container } = renderSeeded({ product: 'p1', description: 'my words' });
+    await input(container, 'unit_price');
+
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    expect(valueOf(container, 'description')).toBe('my words');
+  });
+
+  it('a pick after the opening fill still follows the pick rule', async () => {
+    const { container } = renderSeeded({ product: 'p1' });
+    await input(container, 'unit_price');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+
+    await pick('product', 'Gadget');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('250'));
+    expect(valueOf(container, 'description')).toBe('A gadget');
+  });
+
+  it('the opening fill is not an edit: an untouched form closes without the discard prompt, a touched one still asks', async () => {
+    const ds = makeDS();
+    const onOpenChange = vi.fn();
+    render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ModalForm
+          schema={{ objectName: 'quote_line', mode: 'create', open: true, onOpenChange, initialValues: { product: 'p1' } } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    const price = await input(document.body, 'unit_price');
+    await waitFor(() => expect(price.value).toBe('100'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+
+    // The guard is live in this form: the user's own edit is one.
+    onOpenChange.mockClear();
+    fireEvent.change(await input(document.body, 'note'), { target: { value: 'typed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByText('Discard changes?')).toBeTruthy();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('control: an edit form fills nothing from the record it loaded', async () => {
+    const ds = makeDS();
+    ds.findOne.mockImplementation(async (name: string, id: string) => {
+      if (name === 'quote_line' && id === 'l9') return { id: 'l9', product: 'p1', unit_price: null, description: null };
+      const row = (ROWS[name] ?? []).find((r) => r.id === id);
+      return row ? { ...row } : null;
+    });
+    const { container } = render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ObjectForm schema={{ type: 'object-form', objectName: 'quote_line', mode: 'edit', recordId: 'l9' } as any} dataSource={ds as any} />
+      </SchemaRendererContext.Provider>,
+    );
+    await input(container, 'unit_price');
+    // The lookup read its record for the label: the fill had what it needed.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith('product', 'p1'));
+    await waitFor(() => expect(screen.getByTestId('lookup-trigger-product').textContent).toContain('Widget'));
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+    expect(valueOf(container, 'unit_price')).toBe('');
+    expect(valueOf(container, 'description')).toBe('');
+  });
+
+  it('control: a lookup without the key fills nothing from its opening value', async () => {
+    const { ds, container } = renderSeeded({ account: 'a1', product: 'p1' });
+    await input(container, 'note');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith('account', 'a1'));
+    expect(valueOf(container, 'note')).toBe('');
   });
 });

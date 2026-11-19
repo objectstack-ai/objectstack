@@ -78,7 +78,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
   side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
-  `pending_confirmation`; a fact the observation does not carry fails. The operation the
+  `pending_confirmation`; a fact the observation does not carry fails. An `applied` state
+  entry may be an aggregate over every row its `where` matches: `sum` (`state:LABEL.sum(amount)`,
+  the rows' total; a row reading no number fails it) and `each` (`state:LABEL.each(field)`, every
+  row holds the value); no row matched fails `->rows`, never a vacuous pass. A `where` key may
+  be a relation path through `expect.lookups` (`claim.trip`): the runner reads the objects it
+  hops to after the turn (`relationObjects` in `runner/observe.ts`). The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
   was refused with the declared code, or it wrote nothing and its reply declines the write or
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
@@ -138,13 +143,15 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
 - `scenario-dataset-grade.ts` — a card's dataset question (`run.datasetQuestions`) graded on the route the answer took,
   never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
-  arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering, a count of the options it offers — `2 metrics`,
-  「2 个指标」 — and a year a time word or 年 marks are no figure, unless a counted noun follows it: `for 2031
-  orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  arguments the model sent decide nothing), `asked-back` (the reply asks — a question mark, or a request phrase such as `please confirm` or
+  请确认 opening a sentence or a clause, after `，` `,` `；` `:` and the like — names every candidate by a word other than
+  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
+  or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
   says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
   say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
-  `list_datasets` answer offered.
+  `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 3.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -230,6 +237,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
+pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
+pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -255,14 +264,127 @@ files only: no model, no network, and no score of its own — every figure is th
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
-  driver (a replay is its own driver), and the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`). When they do not, that table is refused with a line naming each difference and
+  driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
+  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
+- **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
+  of the card file's bytes as the runner loaded them: the bytes the loader parsed, `LoadedScenario.fileSha256`, never
+  a later read, so a card edited, moved or deleted during the run neither changes the stamp nor costs the record;
+  taken before the run moved the dates or prefixed the names), and the
+  scorecard prints it under the packages line: `card: travel_expense (sha256 3f2a9c01b7de)`. A change to a card's
+  questions, outcomes or seed moves the hash, so a round graded before it is told from one graded after it; a
+  replay grades on the card as it is now, and stamps that card. Two hashes in one table refuse it as above, the line
+  naming each hash and the records holding it.
 - **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
   `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
   differ only in it share a row.
 - `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
   on stderr; a file named directly that is not a run record fails the command.
+
+### Door mode — `--modes door`
+
+Door mode builds the card the way a person's own MCP client builds an app on a running environment: through the
+app's **MCP draft door** (`save_metadata_draft` and its reads), with **no project and no files**. Then a
+person-equivalent step publishes what it staged, and the result is graded exactly as a scratch build is: the Build
+half on what the environment serves after the publish, then the Run half on that app. It builds once (no iterate).
+
+Per card (`doorMode` in `src/runner/orchestrate.ts`):
+
+1. A host project of its own namespace (`host<code>`) boots with the OAuth authorization server on
+   (`OS_OIDC_PROVIDER_ENABLED=true`), and the runner signs in as the dev admin.
+2. **The person's steps, through the same doors Studio uses**: create a writable package `com.scenario.<namespace>`
+   in the card's namespace (`POST /api/v1/packages`), and connect an MCP client: an OAuth 2.1 + PKCE token scoped
+   `openid metadata:write`, the scope that serves the authoring tools.
+3. **The client's turn**: a fresh, empty directory outside the host project, removed after the turn. The token goes
+   in a 0600 MCP config file outside that directory (never on argv, never in the record). The turn may call
+   `mcp__app` (and `Skill` when it is given skills); `Bash`, `Edit`, `Write` and `NotebookEdit` are denied. The prompt
+   names the package and the namespace and is the same text in every arm.
+4. **The publish**: the runner lists the package's drafts and publishes them
+   (`POST /api/v1/packages/<id>/publish-drafts`), recording the outcome and each refused draft. A publish that does
+   not answer `published` (a refusal answers on a 200) is a finding; the build is graded on what is served anyway.
+
+A refused package, a refused token or a harness without these doors is a finding or a skip naming the step, never a
+score. The scorecard prints the steps on one line (`- door: package … created · client connected (…) · N drafts
+pending · publish: published, N published`).
+
+**Arms.** One round measures what a piece of instruction text is worth by running the same cards with and without
+it. The arm is part of the driver's record (`env.driver.door`), and `summary` never sums two arms into one table.
+
+- `--door-skills DIR`: the Claude Code skills the client is given, under its directory's `.claude/skills/` (the same
+  reader and closed front-matter key set as `--ask-skills`). `--door-skill-omit NAME[,NAME]` leaves named skills of
+  `DIR` out: with and without one skill is the same directory with and without that omission. The record names each
+  skill given, with its version and sha256, and each omitted.
+- `--door-rules builtin` (or `OS_SCENARIOS_DOOR_RULES=builtin`): the **built-in corpus**, given to the client as its
+  directory's `CLAUDE.md`. It is the authoring rules the hosted product's MCP build door hands its client, ported as
+  data (`src/runner/door-rules-corpus.ts`, which names the source files and the revision they were rendered from):
+  54 rules and the two corpora's preambles, 56 entries. Its named sets, for `--door-rules-omit`:
+
+  | Set | Holds |
+  |:---|:---|
+  | `metadata-authoring`, `solution-design` | each corpus, its preamble included |
+  | `inline` | what the hosted door hands its client up front: both preambles and every always-on rule |
+  | `ondemand` | what the hosted door serves only when the client asks for a rule by id |
+  | `names-build-door-tools` | the rules whose own text names a tool the hosted build door registers (`apply_blueprint`, `verify_build`, …), most of which the open draft door does not serve |
+
+  The arm gives every active rule up front, so `--door-rules-omit ondemand` is the closest it comes to the hosted
+  delivery. The whole corpus is about 115,000 characters of `CLAUDE.md`; the `inline` set alone, about 21,000.
+- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, in place
+  of the built-in corpus. The file lives outside this repository; one inside the checkout is refused. A file named
+  `builtin` is given with a path (`./builtin`).
+
+`--door-rules-omit A[,B]` leaves out rule ids or named sets of either. The record names the rules (a file by its name,
+not its path; the built-in corpus as `builtin`), their sha256 (the built-in corpus's: of its JSON), and the ids active
+and omitted, never a text.
+
+The rules file is one JSON object, the built-in corpus's shape too (`src/runner/door.ts` holds the whole contract):
+
+```json
+{
+  "rules": [
+    { "id": "rule-a", "text": "The full text of the first rule." },
+    { "id": "rule-b", "text": "The full text of the second rule." }
+  ],
+  "sets": { "set-x": ["rule-a"] }
+}
+```
+
+`rules` is a non-empty list of `{ id, text }` with unique ids; `sets` (optional) names lists of those ids. Refused
+before any card runs, naming what is wrong: a missing file, no JSON, an unknown key, an empty text, a duplicate id, a
+set naming no rule of the file or named like a rule, a selector naming nothing in the file, a selector that omits
+every rule (that arm is the run without `--door-rules`), and a file inside this checkout.
+
+A rules-arm run's record and recording (`--record`) hold the client's transcripts, and a transcript can quote rule
+text the client was given: read them before filing either anywhere public.
+
+Door mode runs on the live `claude` driver, or a replay of one (`--driver recorded:FILE` re-sends the recorded draft
+saves through the replay's own door and token, and refuses the run as not faithful when the app answers one
+otherwise). Codex and an external driver are refused.
+
+**One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
+
+```bash
+RULES=builtin   # the built-in corpus; or /abs/path/outside/the/repo/rules.json, a file of the maintainer's
+for arm in bare skills rules both; do
+  case $arm in
+    bare)   flags=() ;;
+    skills) flags=(--door-skills "$PWD/skills") ;;
+    rules)  flags=(--door-rules "$RULES") ;;
+    both)   flags=(--door-skills "$PWD/skills" --door-rules "$RULES") ;;
+  esac
+  for rep in 1 2 3 4 5; do
+    pnpm --filter @objectstack/scenarios run-scenarios --modes door "${flags[@]}" \
+      --record "$PWD/runs/door-$arm/rep$rep.rec.json" --out "$PWD/runs/door-$arm/rep$rep"
+  done
+done
+for arm in bare skills rules both; do
+  pnpm --filter @objectstack/scenarios run-scenarios summary --mode door "$PWD/runs/door-$arm"
+done
+```
+
+Add `--door-skill-omit NAME` to an arm to measure one skill, or `--door-rules-omit SET` to measure one named set of
+rules; add `--model` / `--effort` as any round does. Summarize each arm apart: `summary` refuses a table whose runs
+differ in arm, naming both, and prints the arm on each table's dimensions line.
 
 ### Running from npm
 
@@ -402,8 +524,11 @@ npx @objectstack/scenarios help                                      # the comma
 - **Dataset questions** (`orchestrate.ts`, `scorecard.ts`): a card's `run.datasetQuestions` are asked after its
   questions and before its operations, as the admin, each a fresh session honouring `--ask-repeats`, and graded by
   `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
-  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
-  fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
+  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back rev 2 1/2 ·
+  fallback-labelled 1/1)`) only on a card that declares them. A grader graded past its first rule revision is named
+  with it (`rev 2`; the tally's `byGrader` entry carries `revision`), so a round graded before a rule change, which
+  shows none, is not read like for like with one after; a replay (`--driver recorded:F`) grades with the rules as
+  they are now. A run on a build whose app serves no datasets answers
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
@@ -426,17 +551,20 @@ npx @objectstack/scenarios help                                      # the comma
   (`rowDrift`: every column but `created_at`, `updated_at`, `updated_by` and the fields the build computes — formula,
   summary, autonumber). When an earlier turn moved them (the agent's write, a probe's, a confirmed one, or a question
   turn that wrote), the operation starts from the seeded rows all the same, in one of two ways:
-  - **Scratch and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots the same
-    app again (scratch: the same project; ask: the same blank host with the same build installed the same way), signs
-    the personas in, loads the seed and reads the seeded state there, and that operation and every later turn of the
-    half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no validation rule,
-    hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved never goes back
-    to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
-    `object/id`). A copy that does not boot, or whose seed does not load as the run's did (other rows loaded or
+  - **Scratch, template and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots
+    the same app again (scratch: the same project; ask: the same blank host with the same build installed the same way;
+    template: the same blank host with what the iterated app serves installed unmanaged, `iteratedManifest`: the run's
+    install manifest with each served collection replaced by the items served after the iterate, their read
+    decorations such as `_diagnostics` stripped, so the copy holds the agent's iterate made live through the app's
+    doors), signs the personas in, loads the seed and reads the seeded state there, and that operation and every later
+    turn of the half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no
+    validation rule, hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved
+    never goes back to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
+    `object/id`). A copy that does not boot or install, or whose seed does not load as the run's did (other rows loaded or
     refused, a permission set not assigned alike), makes the operation NOT MEASURED (`restore: no fresh copy of the
     app could be seeded for it (…)`, naming what had moved). Each copy costs one boot, the sign-ins and a seed load.
-  - **Template mode writes the rows back** (`restoreSeededRows`), because its app holds the agent's iterate, made live,
-    which a host booted again would not: a row a turn added is deleted, a seeded row a turn removed is inserted again
+  - **Door mode writes the rows back** (`restoreSeededRows`), as does any Run half given no fresh copy: a row a turn
+    added is deleted, a seeded row a turn removed is inserted again
     with the body the seed sent, and a changed column is set back to the value the seed left, in up to three rounds so
     a cascade settles, all through the app's own doors, which its rules judge. The result carries `restored`
     (`deleted`, `reinserted`, `setBack`). Rows that still differ after the rounds make the operation NOT MEASURED
@@ -482,10 +610,25 @@ npx @objectstack/scenarios help                                      # the comma
   measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
   scorecard's author rows show every authoring turn's `resultSubtype`, the turns it took of its cap
   (`error_max_turns · 300/300 turns`) and its elapsed time.
-- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+- **Seed** (`seed.ts`, `loadSeedRows` in `orchestrate.ts`): rows go in as the admin through the platform's own seed
+  path, never the data API: the runner installs one data-only package whose `data[]` holds the card's rows (keyed on
+  the card's own `id`, so a lookup value names the row seeded under it), through the managed install door. The
+  platform's seed loader writes them as established facts: a build's `state_machine` rule (its `initialStates` entry
+  check) does not judge them, so a claim the card states as already `paid` loads as the card states it. Every other
+  validation rule and every hook still judges each row, and a refused row is recorded with its object, id and the
+  loader's message (`seed.refused`; the seed door names no error code). **Seed rows fire no record-triggered flow**,
+  where the data API's insert used to fire a build's "on create" automation on each one. No card relies on that: every
+  truth is computed from the seed's own values (`truth.ts` refuses one the seed does not determine), and the four cards
+  that ask for record-triggered flows (`asset_lifecycle`, `requisition_to_receipt`, `service_desk`, `travel_expense`)
+  seed the values such a flow produces (a ticket's group, SLA policy and breach flag, a line's over-standard flag, the
+  statuses) explicitly. An operation's own write still goes through the agent's door and fires the build's automation.
+  A restore puts a removed seeded row back the same way. A lookup's target loads before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
-  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). That second pass sets only these
+  deferred cycle lookups: `data[]` carries a persona's user id (`owner_id`, a `user` field) as sent, and patching it
+  again would put a user-door update, with its update triggers and hooks, back on every seed row.
+  The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
   the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its
@@ -577,7 +720,14 @@ that version, it prints one `skip: …` line and exits 0, having run nothing. It
 1. runs every card the gallery may show (origin `generic`, tier `starter` or `delivery`; `--debut`: the first of them
    by id) with `run-scenarios --modes scratch --packages published --create-version <version>`, so the apps are built
    on exactly that release, the turns recorded;
-2. exports with screenshots into the checkout (`export-gallery`'s rules: only a run that passed every half);
+2. exports with screenshots into the checkout (`export-gallery`'s rules: only a run that passed every half). Each
+   app's `source/` is written as a package a customer installs to try, after scoring so the build is never graded on
+   it (`src/export/trial-package.ts`): `objectstack.manifest.json` carries the card's English title and one-sentence
+   requirement as `displayName` and `description`, the Chinese pair under `translations.zh`, and the card's
+   `businessFunctions`; `src/sample-data.json` carries the card's seed rows as stack `data:` datasets (namespaced
+   objects, `externalId: 'id'`, a user-handle field left out), which `objectstack.config.ts` imports into its `data:`.
+   `installModes` and `solutionType` are not written: `installModes: ['unmanaged']` makes `defineStack` refuse an app
+   that carries code `plugins` or `capability` items, which an app on the standard scaffold does;
 3. creates the branch `export/<version>`, commits `apps/` and `index.json` under the checkout's own git identity, and
    prints the branch, the commit and a ready PR body.
 
@@ -643,7 +793,9 @@ The check a PR on objectstack-ai/gallery must pass before it is merged (`src/exp
 layout), so the two cannot drift. It prints one `CODE PATH: MESSAGE` line per finding and exits 1 on any, 0 on a clean
 tree: `index.json` that does not validate (absent is an empty gallery); an entry without a complete `apps/<id>/`
 (README, run record, scorecard and transcript in JSON and Markdown, `source/objectstack.config.ts`, at least one
-screenshot, every listed screenshot on disk and none unlisted); a directory under `apps/` no entry lists; a
+screenshot, every listed screenshot on disk and none unlisted); an app whose package arrives with no sample data (no
+`source/src/sample-data.json`, one that is not a non-empty list of stack `data:` datasets the spec's `SeedSchema`
+accepts, each with a record, or a `source/objectstack.config.ts` that does not import it); a directory under `apps/` no entry lists; a
 `framework.version` that is not a stable release published for `@objectstack/cli` (read with `npm view … versions`,
 only when the index lists an app); and anywhere in the tree a `.env*` name, a `node_modules` directory, a symbolic link
 or a text file naming a local absolute path.
@@ -736,8 +888,8 @@ wrapper, with no change to the runner.
 
 Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
 `assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
-once with the bundle installed and once without, and grades each answer by the case's own tokens. It runs from this
-checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
+once with the bundle installed and once without, and grades each answer by the case's own tokens. A trigger case
+asks instead whether the skill was loaded, and runs with the bundle installed only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
 the skill authors' and the runner never edits them.
 
 ```bash
@@ -770,6 +922,18 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
   (`not-shown`). A turn with no answer is `error`: the process failed or timed out, or the result line is not
   `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+- **Trigger cases**: an entry with `"should_trigger": true | false` in place of `assertions` (the reader refuses one
+  carrying both) asks whether the skill was loaded when it should be and left alone when it should not. It runs on
+  the with-skill arm only and is graded on the turn, never on its answer: the turn loaded the bundle when it launched
+  it with the `Skill` tool or read a file under its `.claude/skills/BUNDLE/` (the record's `trigger.loadedBy` says
+  which), and the case passes when that matches `should_trigger`. A turn that loaded the bundle is judged however it
+  ended; one that did not is judged only when it ended `success`, and is `error` otherwise. A bundle whose trigger
+  cases are all positive, or all negative, is refused. The summary reports trigger cases in their own section beside
+  the behaviour cases, never inside their pass rates: per bundle, loaded when it should, left alone when it should
+  not, the missed loads and the false loads.
+- **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
+  so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below
+  `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
   verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
   token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
@@ -777,7 +941,7 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
   `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
-  and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
+  and launched, the skill files read, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
   scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
   pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then
   every case. `summary.github.md` is the same text with angle brackets spelled `(lt)` / `(gt)` for a GitHub body.

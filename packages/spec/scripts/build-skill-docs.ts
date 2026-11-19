@@ -120,6 +120,7 @@ const DISPLAY: Array<{ name: string; label: string }> = [
   { name: 'objectstack-formula', label: 'Formula' },
   { name: 'objectstack-upgrade', label: 'Upgrade' },
   { name: 'objectstack-ask', label: 'Ask' },
+  { name: 'objectstack-project', label: 'Project' },
   { name: 'objectui', label: 'ObjectUI' },
 ];
 

@@ -110,7 +110,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.5.0
+  ghcr.io/objectstack-ai/objectstack:18.6.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -128,7 +128,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.5.0
+  ghcr.io/objectstack-ai/objectstack:18.6.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -185,7 +185,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:18.5.0
+FROM ghcr.io/objectstack-ai/objectstack:18.6.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -208,7 +208,7 @@ FROM node:22-slim
 RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
  && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
  && test "$(npm --version)" = "11.21.0" \
- && npm install -g @objectstack/cli@18.5.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm install -g @objectstack/cli@18.6.0 "pg@^8.0.0" "mysql2@^3.0.0" \
  && npm cache clean --force \
  && rm -rf /tmp/os-installer-npm
 
@@ -617,6 +617,20 @@ on empty development databases. That seed is hard-gated to
 `NODE_ENV=development`: it is a development convenience, never a production
 recovery path.
 
+Nor does a server outside development mode **accept** a development seed
+credential. A sign-in with the development seed password is refused on every
+account, and an account `os dev` seeded (its admin and the stack's `demoStaff`)
+opens no session while it still has the password it was seeded with. If you
+serve a database `os dev` wrote, set each seeded account's password on the
+server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
+first; the refusal names that command.
+
+What this release refuses is the seed password and every new session for a
+seeded account still on it. Sessions and API keys a seeded account was issued
+before the server left development mode are ended by `os user set-password`, so
+run it on each seeded account before serving the database; ending them at boot
+is follow-up #35184.
+
 ### A seeded directory opens no bootstrap window
 
 Both paths above assume the deployment's **first login** is still ahead of it.
@@ -759,6 +773,15 @@ same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The first
 account of a new deployment needs no invitation. Admission is all the
 invitation's `id` grants: the account it admits joins no organization until it
 accepts the invitation, and accepting needs a verified address.
+
+**Under `email_domain`, an invitation admits an address off the allowlist, and
+grants nothing more.** A pending invitation addressed to an address outside
+the list admits that address's sign-up. Verification is forced on under this
+posture, and while the account's address is unverified it joins no
+organization: it joins by accepting the invitation once the address is
+verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
+An address on the list is admitted by its domain, invitation or not, and the
+membership policy binds it at creation as before.
 
 **Accepting, declining and listing an invitation need a verified email
 address, on every deployment.** The invitation's `id`, which its link carries,

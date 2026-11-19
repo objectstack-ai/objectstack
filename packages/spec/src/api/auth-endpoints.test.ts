@@ -233,6 +233,7 @@ describe('AuthFeaturesConfig declares every classified served key', () => {
     ssoEnforced: false,
     directSignIn: true,
     localSignIn: 'hidden',
+    afterSignOut: 'identity-provider',
     deviceAuthorization: true,
     admin: true,
     phoneNumber: false,

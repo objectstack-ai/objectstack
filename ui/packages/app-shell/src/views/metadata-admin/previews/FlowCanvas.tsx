@@ -38,6 +38,7 @@ import { AlertCircle, AlertTriangle, Maximize2, Plus, ZoomIn, ZoomOut } from 'lu
 import { cn } from '@object-ui/components';
 import { uniqueId, appendArray, spliceArray } from '../inspectors/_shared.js';
 import { t as tr, tFormat } from '../i18n.js';
+import { useFlowLabelTranslationsContext } from './flow-label-translations.js';
 import {
   computeLayoutWithGeometry,
   NODE_W,
@@ -218,6 +219,8 @@ export function FlowCanvas({
   // has an index signature). Same reference when nothing needed migrating, so
   // the memos keyed on `nodes` are unaffected.
   const nodes = React.useMemo(() => withCanonicalGeometry(storedNodes), [storedNodes]);
+  // An approval step's label in the viewer's language, where the package translates it.
+  const labelTranslations = useFlowLabelTranslationsContext();
 
   const viewportRef = React.useRef<HTMLDivElement>(null);
   // objectui#11795 — the viewport width the diagram was last framed at (the
@@ -1294,7 +1297,7 @@ export function FlowCanvas({
                   id={node.id}
                   locale={locale}
                   type={node.type}
-                  label={node.label || node.id}
+                  label={labelTranslations?.stepLabel(node) ?? (node.label || node.id)}
                   summary={nodeSummary(node, locale, objectLabels)}
                   position={pos}
                   selected={selectedId === node.id}

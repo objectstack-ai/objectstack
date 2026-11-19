@@ -17,6 +17,11 @@
  * ill typed, not only if its spelling moves.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/core';
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
@@ -294,7 +299,7 @@ describe('a new row starts on a typed operator, not `truthy`', () => {
     fireEvent.click(screen.getByText('Add condition'));
     expect(lastOpTrigger(container).textContent).toBe('equals');
     await userEvent.click(comboboxes(container)[0]);
-    await userEvent.click(await screen.findByRole('option', { name: 'record.due_date' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Due date record.due_date' }));
     const cel = committed();
     expect(cel).toBe("record.due_date == ''");
     expect(evaluate(cel, { due_date: null })).toEqual({ ok: true, value: false });

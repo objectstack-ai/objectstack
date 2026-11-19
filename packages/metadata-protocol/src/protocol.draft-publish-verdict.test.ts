@@ -1383,3 +1383,115 @@ describe('[#34818] a flow draft read carries the advisories its publish would re
         expect(warnings.filter((w) => w.path === 'nodes.1')).toEqual([]);
     });
 });
+
+/**
+ * [#34766] The draft verdict is PUBLIC: a door that cannot publish (the open
+ * MCP draft door) answers its draft save and its draft list with it, so its
+ * caller learns what a publish would refuse before a person presses Publish.
+ *
+ * Such a door holds no stored row, so the method reads the stored draft itself
+ * when no `body` is handed. Pinned: that read judges the bytes as stored, at
+ * the package named, and answers the per-item publish's own 422 issues WHOLE,
+ * the `hint` (the next step) included, which the draft read's `_diagnostics`
+ * drops; an address with no draft is refused as the strict draft read refuses
+ * it. One judgement: the answer equals the body-handed call's.
+ */
+describe('[#34766] the public draft publish verdict judges the stored draft', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    /** A record-triggered flow whose start node names no trigger: saved as a draft, refused at publish. */
+    const unroutable = {
+        name: 'deal_followup',
+        label: 'Deal Follow-up',
+        type: 'record_change',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal' } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    };
+
+    it('with no body, answers the publish 422 issues of the stored draft whole, hint included', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        expect(await stageDraft(protocol, 'flow', unroutable)).toMatchObject({ success: true, state: 'draft' });
+
+        const judgement = await protocol.draftPublishJudgement({ type: 'flow', name: 'deal_followup', packageId: PKG });
+
+        const finding = judgement.refusals.find((issue) => issue.rule === 'flow-trigger-unroutable');
+        expect(finding, JSON.stringify(judgement.refusals)).toBeDefined();
+        expect(finding!.path).toBe('flows[0].nodes[0].config.triggerType');
+        expect(finding!.severity).toBe('error');
+        expect(typeof finding!.hint === 'string' && finding!.hint.length > 0).toBe(true);
+
+        // The publish refuses on exactly these issues, every member included.
+        const refusal: any = await protocol
+            .publishMetaItem({ type: 'flow', name: 'deal_followup', packageId: PKG } as any)
+            .then(() => null, (e: unknown) => e);
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(judgement.refusals).toEqual(refusal.issues);
+    });
+
+    it('judges the stored bytes as the body-handed call judges them: one judgement', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'flow', unroutable);
+        const stored = JSON.parse([...rows.values()].find((r) => r.name === 'deal_followup' && r.state === 'draft')!.metadata);
+
+        expect(await protocol.draftPublishJudgement({ type: 'flow', name: 'deal_followup', packageId: PKG }))
+            .toEqual(await protocol.draftPublishJudgement({ type: 'flow', name: 'deal_followup', body: stored, packageId: PKG }));
+    });
+
+    it('an address that holds no draft is refused 404 NO_DRAFT, as the strict draft read refuses it', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'flow', unroutable);
+
+        const refusalOf = (draft: { name: string; packageId: string | null }) => protocol
+            .draftPublishJudgement({ type: 'flow', ...draft })
+            .then(() => null, (e: any) => ({ code: e?.code, status: e?.status }));
+        // Another name, and the package-unbound address of a draft staged into a package.
+        expect(await refusalOf({ name: 'no_such_flow', packageId: PKG })).toEqual({ code: 'NO_DRAFT', status: 404 });
+        expect(await refusalOf({ name: 'deal_followup', packageId: null })).toEqual({ code: 'NO_DRAFT', status: 404 });
+        const read: any = await protocol.getMetaItem({ type: 'flow', name: 'no_such_flow', state: 'draft', packageId: PKG } as any)
+            .then(() => null, (e: any) => ({ code: e?.code, status: e?.status }));
+        expect(read).toEqual({ code: 'NO_DRAFT', status: 404 });
+    });
+
+    it('one closure map for a pass collects each package\'s closure once and changes no answer; without it, each call collects', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const names = ['deal_followup', 'deal_followup_b', 'deal_followup_c'];
+        for (const name of names) await stageDraft(protocol, 'flow', { ...unroutable, name });
+        const collect = vi.spyOn(protocol as any, 'collectBatchPendingDeclarations');
+
+        const alone = [];
+        for (const name of names) alone.push(await protocol.draftPublishJudgement({ type: 'flow', name, packageId: PKG }));
+        expect(collect).toHaveBeenCalledTimes(3);
+
+        collect.mockClear();
+        const packageClosures = new Map();
+        const pass = [];
+        for (const name of names) pass.push(await protocol.draftPublishJudgement({ type: 'flow', name, packageId: PKG, packageClosures }));
+        expect(collect).toHaveBeenCalledTimes(1);
+        expect(pass).toEqual(alone);
+        expect(alone.every((j) => j.refusals.some((issue) => issue.rule === 'flow-trigger-unroutable'))).toBe(true);
+    });
+
+    it('a draft the publish passes answers no refusal', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const routed = structuredClone(unroutable);
+        (routed.nodes[0]!.config as Record<string, unknown>).triggerType = 'record-after-create';
+        await stageDraft(protocol, 'flow', routed);
+
+        expect((await protocol.draftPublishJudgement({ type: 'flow', name: 'deal_followup', packageId: PKG })).refusals).toEqual([]);
+    });
+});

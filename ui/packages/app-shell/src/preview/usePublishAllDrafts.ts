@@ -97,24 +97,20 @@ export function usePublishAllDrafts(t: TranslateFn) {
       const packageIds = [...new Set(pending.map((d) => d.packageId).filter((p): p is string => p !== null))];
       const orphans = pending.filter((d) => d.packageId === null);
 
-      const seedProblems: string[] = [];
-      const probeProblems: string[] = [];
+      // objectstack#35141 — whether any seed failed, on either door below. The
+      // toast says that in the pack's sentence, as the chat's publish-health
+      // line does (objectstack#32984): `seedFailed` is the failure, and the
+      // loader's own text (`seedError`, `seedApplied.error`) is engine text
+      // for whoever repairs the seed, never the customer's sentence.
+      let seedFailed = false;
+      const probeProblems: NonNullable<PublishHealth['issues']> = [];
       let seededRows = 0;
       const recordHealth = (health: PublishHealth | undefined) => {
         if (!health) return;
-        // objectstack#32984 — `seedFailed` is the failure; `seedError` is only
-        // the producer's own text and is absent when it sent none. The rule
-        // the chat's publish-health line reads. With no producer text the
-        // toast says the line's own sentence, from the pack.
-        if (health.seedFailed === true || health.seedError) {
-          seedProblems.push(
-            health.seedError ||
-              t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }),
-          );
-        }
+        if (health.seedFailed === true || health.seedError) seedFailed = true;
         if (typeof health.seededRows === 'number') seededRows += health.seededRows;
         for (const issue of health.issues ?? []) {
-          if (issue.severity === 'error') probeProblems.push(issue.message);
+          if (issue.severity === 'error') probeProblems.push(issue);
         }
       };
 
@@ -165,20 +161,31 @@ export function usePublishAllDrafts(t: TranslateFn) {
         const res = await client.publishDraft(d.type, d.name, d.member ? { member: d.member } : {});
         if (firstPublish) created.push({ type: d.type, name: d.name });
         const seedApplied = (res as any)?.seedApplied;
-        if (seedApplied && seedApplied.success === false) {
-          seedProblems.push(seedApplied.error ?? `${d.name}: sample data failed to load`);
-        }
+        if (seedApplied && seedApplied.success === false) seedFailed = true;
       }
 
       if (probeProblems.length > 0) {
+        // objectstack#32984 ruling B, as the chat's publish-health line reads
+        // it: a finding speaks only through its producer's customer sentence
+        // (`userMessage`, already in the request's language). `message` and
+        // `fix` are the agent's text and never reach the toast. With no
+        // sentence on any error, the line's generic sentence for an error set.
+        const voiced = probeProblems.find((issue) => issue.userMessage)?.userMessage;
         toast.warning(
           t('home.pendingDrafts.probeWarn', { defaultValue: 'Published, but verification found problems.' }),
-          { description: probeProblems[0] },
+          {
+            description:
+              voiced ??
+              t('chatbot.build.issuesSummary', {
+                defaultValue:
+                  'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+              }),
+          },
         );
-      } else if (seedProblems.length > 0) {
+      } else if (seedFailed) {
         toast.warning(
           t('home.pendingDrafts.seedWarn', { defaultValue: 'Published, but some sample data failed to load.' }),
-          { description: seedProblems[0] },
+          { description: t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }) },
         );
       } else {
         toast.success(

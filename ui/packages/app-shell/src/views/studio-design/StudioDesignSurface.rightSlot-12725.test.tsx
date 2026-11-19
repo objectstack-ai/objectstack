@@ -88,7 +88,7 @@ vi.mock('./StudioAiCopilot', () => ({
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_WIDE_WORD } from './studio-tokens';
+import { STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_WIDE_WORD, STUDIO_PILLARS_HOST } from './studio-tokens';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -191,23 +191,22 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
     expect(slotProps().contains(screen.getByTestId('if-inspector'))).toBe(true);
   });
 
-  it("selecting an element switches the slot to that element's properties, the copilot a strip at its foot", async () => {
+  it("selecting an element switches the slot to that element's properties, the copilot behind the header switch", async () => {
     await openDashboard();
     await selectBlock();
 
     const inspector = within(slotProps()).getByTestId('stub-inspector');
     expect(inspector).toBeVisible();
     expect(screen.getByTestId('copilot-body')).not.toBeVisible();
-    const strip = screen.getByTestId('studio-slot-copilot-strip');
-    expect(strip).toHaveTextContent(t('engine.studio.aiCopilot', 'en'));
-    expect(strip).toHaveTextContent(t('engine.studio.slot.backToChat', 'en'));
-    expect(slot().lastElementChild).toBe(strip);
+    // objectstack#35018 — no strip at the slot's foot; the header's switch leads back.
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
+    const copilotTab = within(slot()).getByTestId('studio-slot-tab-copilot');
     expect(screen.getByTestId('if-canvas-hint')).toHaveTextContent(
       tFormat('engine.studio.if.canvasHint.selected', 'en', { label: 'Revenue' }),
     );
 
-    // The strip leads back to the conversation; the selection stays.
-    fireEvent.click(strip);
+    // The switch leads back to the conversation; the selection stays.
+    fireEvent.click(copilotTab);
     expect(slot()).toHaveAttribute('data-mode', 'copilot');
     expect(screen.getByTestId('copilot-body')).toBeVisible();
     expect(within(slotProps()).getByTestId('stub-inspector')).toBeInTheDocument();
@@ -306,26 +305,24 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
   });
 
   // objectstack#25943 — 「AI 助手 · N 项待确认」: the count of items the
-  // copilot proposed, on the tab's badge and in the folded strip.
-  it('the copilot tab and strip count the items that await approval', async () => {
+  // copilot proposed, on the tab's badge (objectstack#35018: the strip is gone).
+  it('the copilot tab counts the items that await approval, while the properties show too', async () => {
     copilot.planPendingCount = 2;
     await openDashboard();
     await waitFor(() => expect(screen.getByTestId('studio-slot-plan-pending')).toHaveTextContent('2'));
     const pending = tFormat('engine.studio.slot.pendingCount', 'en', { count: 2 });
     expect(within(slot()).getAllByRole('tab')[1]).toHaveAccessibleDescription(pending);
     await selectBlock();
-    expect(screen.getByTestId('studio-slot-strip-plan-pending')).toHaveTextContent(pending);
-    expect(screen.getByTestId('studio-slot-copilot-strip')).toHaveTextContent(
-      `${t('engine.studio.aiCopilot', 'en')} · ${pending}`,
-    );
+    expect(within(slot()).getAllByRole('tab')[1]).toHaveAccessibleDescription(pending);
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
   });
 
-  it('with nothing awaiting approval, neither the tab nor the strip carries a count', async () => {
+  it('with nothing awaiting approval, the tab carries no count', async () => {
     await openDashboard();
     expect(screen.queryByTestId('studio-slot-plan-pending')).toBeNull();
     expect(within(slot()).getAllByRole('tab')[1]).not.toHaveAttribute('aria-describedby');
     await selectBlock();
-    expect(screen.getByTestId('studio-slot-copilot-strip')).toBeVisible();
+    expect(within(slot()).getAllByRole('tab')[1]).not.toHaveAttribute('aria-describedby');
     expect(screen.queryByTestId('studio-slot-strip-plan-pending')).toBeNull();
   });
 
@@ -427,5 +424,33 @@ describe('Studio right slot — controls (objectui#12725)', () => {
     expect(screen.getByTestId('if-inspector')).toBeVisible();
     expect(screen.getByTestId('if-properties-toggle')).toBeInTheDocument();
     expect(screen.getByTestId('if-canvas-main')).toHaveClass('px-6');
+  });
+});
+
+// objectstack#35061 item 1 — the pillars' host is what every rail's narrow form
+// measures, and it says whether the slot squeezes it.
+describe('Studio right slot — the rails read whether it squeezes the pillars (objectstack#35061)', () => {
+  it('marks the pillars host open while the slot shows beside it, closed once it is hidden', async () => {
+    await openDashboard();
+    const host = screen.getByTestId('studio-pillars-host');
+    expect(host).toHaveClass(...STUDIO_PILLARS_HOST.split(' '));
+    expect(host).toContainElement(screen.getByTestId('studio-rail-interfaces'));
+    expect(host).not.toContainElement(slot());
+    await waitFor(() => expect(host).toHaveAttribute('data-studio-slot', 'open'));
+
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    expect(slot()).not.toBeVisible();
+    expect(host).toHaveAttribute('data-studio-slot', 'closed');
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    expect(host).toHaveAttribute('data-studio-slot', 'open');
+  });
+
+  it('a pillar with no slot to show (Access, no copilot) keeps its host closed', async () => {
+    copilot.available = false;
+    renderAt('access');
+    await screen.findByTestId('studio-shell-header');
+    await act(async () => {});
+    expect(slot()).not.toBeVisible();
+    expect(screen.getByTestId('studio-pillars-host')).toHaveAttribute('data-studio-slot', 'closed');
   });
 });

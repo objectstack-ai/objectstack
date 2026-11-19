@@ -4312,7 +4312,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight' | 'noRefusals' | 'noTexts';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -4331,6 +4331,12 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       noPreRunDialog: { bound: 'plain_env', global: 'mint_token' },
       // [#31885] An action whose `preflight` declares `fields`.
       preflight: { bound: 'upgrade_env', global: 'upgrade_pkg' },
+      // [#34273] An action that declares no `refusals`, so a refusal key under
+      // it is read by nothing (`coverageStack` gives the outcome hosts one).
+      noRefusals: { bound: 'plain_env', global: 'mint_token' },
+      // [#34374 PR2] An action that declares no `texts`, so a text key under
+      // it is read by nothing (`coverageStack` gives the outcome hosts some).
+      noTexts: { bound: 'plain_env', global: 'mint_token' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -4437,6 +4443,20 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.preflight.columns.ghost_path',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
+      refusals: {
+        kind: 'reference-checked',
+        host: 'noRefusals',
+        ghost: { refusals: { GHOST_CODE: { message: 'x' } } },
+        suffix: '.refusals.GHOST_CODE',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      texts: {
+        kind: 'reference-checked',
+        host: 'noTexts',
+        ghost: { texts: { ghost_key: { message: 'x' } } },
+        suffix: '.texts.ghost_key',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
     };
 
     // The global action needs a param with inline options for the options ghost.
@@ -4444,6 +4464,16 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       const stack = actionStack(bundle);
       const check = stack.actions.find((a) => a.name === 'check_updates') as Record<string, unknown>;
       check.params = [{ name: 'mode', label: 'Mode', type: 'select', options: [{ value: 'soft', label: 'Soft' }] }];
+      // [#34273] The outcome hosts declare a refusal catalogue, for the real instance below.
+      for (const name of [HOST.outcome.bound, HOST.outcome.global]) {
+        (stack.actions.find((a) => a.name === name) as Record<string, unknown>).refusals = {
+          NOT_READY: { message: 'Not ready.', reasons: { stale: { message: 'Stale.' } } },
+        };
+        // [#34374 PR2] …and declared texts.
+        (stack.actions.find((a) => a.name === name) as Record<string, unknown>).texts = {
+          audit_line: { message: 'Done.' },
+        };
+      }
       return stack;
     };
     const bundleAt = (address: Address, actionName: string, node: Record<string, unknown>) =>
@@ -4487,6 +4517,8 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             cancelText: 'x',
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
+            refusals: { NOT_READY: { message: 'x', reasons: { stale: { message: 'x' } } } },
+            texts: { audit_line: { message: 'x' } },
           },
           [dialog]: {
             resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' }, columns: { rows: { id: 'x' } } },
@@ -4952,6 +4984,42 @@ describe('validateTranslationReferences — reports', () => {
   });
 });
 
+describe('validateTranslationReferences — import mappings', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    mappings: [{ name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared name is clean', () => {
+    expect(validateTranslationReferences(stack({ mappings: { lead_feed: { label: 'Lead feed' } } }))).toEqual([]);
+  });
+
+  it('a name no package declares is translation-target-unknown, at the named-item groups\' error', () => {
+    const findings = validateTranslationReferences(stack({ mappings: { lead_fede: { label: 'x' } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.mappings.lead_fede', 'locale "en" · import mapping "lead_fede"'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "lead_feed"?');
+  });
+
+  it('judges the group against its own collection — a report name under `mappings` is an orphan', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { opps_by_stage: { label: 'x' } } },
+      { reports: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }] },
+    ));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0].en.mappings.opps_by_stage']);
+  });
+
+  it('resolves a name a sibling package of the artifact declares', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { contact_feed: { label: 'Contact feed' } } },
+      { packages: [{ manifest: { mappings: [{ name: 'contact_feed', targetObject: 'contact', fieldMapping: [] }] } }] },
+    ));
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — hook refusals (#26170)', () => {
   const creditStack = {
     hooks: [
@@ -5205,5 +5273,136 @@ describe('validateTranslationReferences — text a flow writes into a record (ru
     const otherType = validateTranslationReferences(keyed({ message: 'x' }, 'tell'));
     expect(otherType.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].flows.case_escalation.records.tell']);
     expect(otherType[0].message).toContain('`save_notice` node');
+  });
+});
+
+describe('validateTranslationReferences — action refusals (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'Closed.' } } },
+  };
+  const refusalStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_invoice', label: 'Invoice', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      {
+        name: 'submit_signoff',
+        label: 'Submit',
+        objectName: 'crm_invoice',
+        type: 'script',
+        body: { language: 'js', source: "throw { code: 'NOT_DRAFT' };" },
+        refusals,
+      },
+      {
+        name: 'export_all',
+        label: 'Export',
+        type: 'script',
+        body: { language: 'js', source: "throw { code: 'NOT_DRAFT' };" },
+        refusals,
+      },
+      { name: 'plain_invoice', label: 'Plain', objectName: 'crm_invoice', type: 'script', target: 'plainInvoice' },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const ON = 'translations[0]["zh-CN"].objects.crm_invoice._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  it('CONTROL: reports nothing for declared codes and reasons, bound and object-less', () => {
+    expect(validateTranslationReferences(refusalStack({
+      objects: {
+        crm_invoice: {
+          _actions: {
+            submit_signoff: {
+              refusals: {
+                NOT_DRAFT: { message: '只有草稿发票可以签核。' },
+                STAGE_LOCKED: { message: '已锁定。', reasons: { closed: { message: '已关闭。' } } },
+              },
+            },
+          },
+        },
+      },
+      globalActions: { export_all: { refusals: { NOT_DRAFT: { message: '只有草稿可以导出。' } } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a code the action does not declare, with the nearest declared code offered', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      objects: { crm_invoice: { _actions: { submit_signoff: { refusals: { NOT_DRAFTT: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${ON}.submit_signoff.refusals.NOT_DRAFTT`],
+    ]);
+    expect(findings[0].message).toContain('a code action "submit_signoff" does not declare under `refusals`');
+    expect(findings[0].message).toContain('Did you mean "NOT_DRAFT"?');
+  });
+
+  it('refuses a refusal key on an action that declares no `refusals`', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      objects: { crm_invoice: { _actions: { plain_invoice: { refusals: { ANY: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([`${ON}.plain_invoice.refusals.ANY`]);
+    expect(findings[0].message).toContain('action "plain_invoice" declares no `refusals`');
+  });
+
+  it('refuses a reason the code does not declare, and a reason under a code that declares none', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      globalActions: {
+        export_all: {
+          refusals: {
+            STAGE_LOCKED: { reasons: { clsoed: { message: 'x' } } },
+            NOT_DRAFT: { reasons: { any: { message: 'x' } } },
+          },
+        },
+      },
+    }));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `${GLOBAL}.export_all.refusals.STAGE_LOCKED.reasons.clsoed`],
+      [TRANSLATION_TARGET_UNKNOWN, `${GLOBAL}.export_all.refusals.NOT_DRAFT.reasons.any`],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "closed"?');
+    expect(findings[1].message).toContain('declares no `reasons` under that code');
+  });
+});
+
+describe('validateTranslationReferences — action texts (#34374 PR2)', () => {
+  const texts = { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } };
+  const body = { language: 'js', source: "await ctx.text('email_subject', { subject: input.subject });" };
+  const textStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_contact', label: 'Contact', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      { name: 'send_email', label: 'Send email', objectName: 'crm_contact', type: 'script', body, texts },
+      { name: 'send_digest', label: 'Send digest', type: 'script', body, texts },
+      { name: 'plain_contact', label: 'Plain', objectName: 'crm_contact', type: 'script', target: 'plainContact' },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const ON = 'translations[0]["zh-CN"].objects.crm_contact._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  it('CONTROL: reports nothing for declared text keys, bound and object-less', () => {
+    expect(validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } } } },
+      globalActions: { send_digest: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a key the action does not declare, with the nearest declared key offered, at both addresses', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subjct: { message: 'x' } } } } } },
+      globalActions: { send_digest: { texts: { email_subjct: { message: 'x' } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${ON}.send_email.texts.email_subjct`],
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.send_digest.texts.email_subjct`],
+    ]);
+    expect(findings[0].message).toContain('a key action "send_email" does not declare under `texts`');
+    expect(findings[0].message).toContain('Did you mean "email_subject"?');
+  });
+
+  it('refuses a text key on an action that declares no `texts`', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { plain_contact: { texts: { any: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([`${ON}.plain_contact.texts.any`]);
+    expect(findings[0].message).toContain('action "plain_contact" declares no `texts`');
   });
 });

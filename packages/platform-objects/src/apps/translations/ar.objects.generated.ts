@@ -72,6 +72,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "يجب تغيير كلمة المرور",
         help: "عند التفعيل، يجب على المستخدم تغيير كلمة المرور قبل أن يتمكن من المتابعة. يُفعَّل عندما ينشئ المسؤول الحساب أو يستورده أو يعيد تعيين كلمة مروره؛ يديره النظام."
       },
+      dev_seed_credential: {
+        label: "بيانات اعتماد البذرة التطويرية",
+        help: "يُعيَّن على حساب أنشأته البذرة التطويرية. ما دامت كلمة مروره هي كلمة مرور البذرة، يرفض خادم الإنتاج تسجيل دخوله وأي جلسة جديدة؛ يعيّن os user set-password كلمة مرور جديدة ويمسحه. يُديره النظام؛ ولا يُعاد عند القراءة أبدًا."
+      },
       mfa_required_at: {
         label: "تاريخ فرض المصادقة متعددة العوامل",
         help: "وقت تطبيق المصادقة متعددة العوامل الإلزامية على هذا المستخدم لأول مرة (بداية مهلة السماح). يستند إليه mfa_required؛ يديره النظام."
@@ -155,7 +159,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -240,6 +244,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             email: "البريد الإلكتروني",
+            pendingAgain: "معلّق بالفعل",
             notApplied: "معلّق بالفعل، لذا لم يُطبَّق (عيّنه في السجل)",
             managerError: "المدير",
             "host.reason": "لم تُرسَل الدعوة"
@@ -260,7 +265,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             "summary.added": "تمت الإضافة",
-            "summary.alreadyPending": "معلّق بالفعل، أُبلغ مجددًا",
+            "summary.alreadyPending": "معلّق بالفعل",
             "summary.failed": "لم تتم الإضافة",
             rows: "النتيجة لكل صف"
           },
@@ -269,7 +274,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
               row: "الصف",
               email: "البريد الإلكتروني",
               ok: "نجح",
-              alreadyPending: "معلّق بالفعل، أُبلغ مجددًا",
+              alreadyPending: "معلّق بالفعل",
               "host.notified": "أُبلغت المؤسسة المستضيفة",
               "host.reason": "سبب عدم الإبلاغ",
               "error.message": "لم تتم الإضافة بسبب",
@@ -704,7 +709,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -810,7 +815,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -962,7 +967,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -989,7 +994,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "تمت إعادة إرسال الدعوة",
         outcomeMessages: {
           sent: "أُعيد إرسال الدعوة إلى {{ result.email }}",
-          link_only: "جُدِّدت الدعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "جُدِّدت الدعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         }
       },
       copy_invitation_link: {

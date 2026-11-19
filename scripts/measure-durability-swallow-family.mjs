@@ -549,19 +549,19 @@ const RESOLUTION_CONTROLS = [
       + 'two apart — which is the whole reason this family reads the resolver instead of the output.',
   },
   {
-    file: 'packages/objectql/src/engine-delete-and-aggregate.ts',
-    callee: 'delete',
-    fromClass: 'DeleteAndAggregateFacet',
-    resolvesIn: 'DeleteAndAggregateFacet',
+    file: 'packages/objectql/src/engine-insert.ts',
+    callee: 'insert',
+    fromClass: 'InsertFacet',
+    resolvesIn: 'InsertFacet',
     why:
-      'The sharpest name in the vocabulary: `delete` is the callee the AWAITED discriminator exists to '
-      + 'police. Its one `this.delete(...)` re-entry (the after-abort unit re-running the delete) moved '
-      + 'out of `ObjectQL` in `engine.ts` with the body that holds it, into the facet module, where '
-      + '`this` is the facet host and its `delete` is the class\'s stub, which calls the facet\'s own '
-      + '`delete`. So the hop must land in `DeleteAndAggregateFacet`, the body the stub reaches, and in '
-      + 'no other. The cross-class collision in `engine.ts` (`ObjectRepository` and `ScopedContext` '
-      + 'declaring a method of an `ObjectQL` name) stays pinned by the `update` and `transaction` '
-      + 'controls beside this one.',
+      'A facet module calling the method its own body implements: `insertMany` is `this.insert(...)`, '
+      + 'where `this` is the facet host and its `insert` is the class\'s stub, which calls the facet\'s own '
+      + '`insert`. So the hop must land in `InsertFacet`, the body the stub reaches, and in no other. '
+      + 'This control first pinned the same shape on `delete`, through the re-entry that reran a delete '
+      + 'inside its after-abort unit; that re-entry is gone (the unit opens around the engine body, '
+      + '#35167), and with it the file\'s only `this.delete(...)`. The cross-class collision in '
+      + '`engine.ts` (`ObjectRepository` and `ScopedContext` declaring a method of an `ObjectQL` name) '
+      + 'stays pinned by the `update` and `transaction` controls beside this one.',
   },
   {
     file: 'packages/objectql/src/engine.ts',
@@ -571,7 +571,7 @@ const RESOLUTION_CONTROLS = [
     why:
       'Third class in the same file: `ScopedContext` (line ~13469) also declares `transaction()`, and '
       + 'it is the LAST one, so the flat index handed `ObjectQL`\'s own `this.transaction(...)` to a '
-      + 'class it has no relationship with. Pinned separately from `update`/`delete` because it proves '
+      + 'class it has no relationship with. Pinned separately from `update`/`insert` because it proves '
       + 'the key is the OWNING CLASS and not "the second declaration".',
   },
   {

@@ -144,6 +144,13 @@ import {
   writesQueue,
 } from './ownership-queue-gate.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
+import {
+  hasEmptyOwner,
+  isActionBodyElevation,
+  stampActionBodyInsertOwners,
+  stampEmptyOwner,
+  writesOwner,
+} from './owner-anchor-stamp.js';
 import { externalGrantPatch } from './external-owd-grant-stamp.js';
 import { computedFieldsReadingThroughReferences } from './field-masker.js';
 
@@ -668,6 +675,21 @@ export function registerAuthzMiddleware(
       (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
       (line) => ctx.logger.warn(line),
     );
+
+    // [#34885] An action body's insert is owner-stamped as a direct create
+    // is: the body's `ctx.api` / `ctx.engine` run the invoker's envelope
+    // elevated with the `'action'` mark, and the bypass below skips step 3.5,
+    // so without this the row landed with `owner_id` null and its invoker,
+    // on a private object, could neither read nor update it. An EMPTY owner
+    // only, the envelope's own principal only (nothing for the guest), keyed
+    // on the `'action'` mark only — flows, hooks and every other system write
+    // are unchanged. See `owner-anchor-stamp.ts`.
+    if (opCtx.operation === 'insert' && opCtx.data && typeof opCtx.data === 'object' && isActionBodyElevation(opCtx.context)) {
+      const fields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
+      if (fields?.has('owner_id')) {
+        stampActionBodyInsertOwners(opCtx.data, opCtx.context, isGuestEnvelope(opCtx.context), fields.has(QUEUE_FIELD));
+      }
+    }
 
     // System operations bypass security
     if (opCtx.context?.isSystem) {
@@ -1808,12 +1830,11 @@ export function registerAuthzMiddleware(
     ) {
       const isInsert = opCtx.operation === 'insert';
       const rows = (Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) as Record<string, unknown>[];
-      // Own-property test only — never read `owner_id` through the prototype
-      // chain (a polluted `Object.prototype.owner_id` must not make ordinary
-      // field-only updates look like ownership writes).
-      const writesOwner = (r: unknown): r is Record<string, unknown> =>
-        !!r && typeof r === 'object' && !Array.isArray(r) &&
-        Object.prototype.hasOwnProperty.call(r, 'owner_id');
+      // `writesOwner` is an own-property test only — never read `owner_id`
+      // through the prototype chain (a polluted `Object.prototype.owner_id`
+      // must not make ordinary field-only updates look like ownership
+      // writes). It and the insert stamp below are `owner-anchor-stamp.ts`,
+      // shared with the action-body stamp ahead of the `isSystem` bypass.
       // A valid owner id is a NON-EMPTY SCALAR. Anything else (array / object /
       // boolean / '' ) is neither a stampable self-owner nor a tolerable echo —
       // String()-coercing it would let `owner_id: [selfId]` pass as "self" and
@@ -1937,16 +1958,11 @@ export function registerAuthzMiddleware(
                   denyQueueWrite(INSERT_QUEUE_REFUSAL, 'record_queue_assign_denied');
                 }
               }
-              if (!writesOwner(row) || row.owner_id == null || row.owner_id === '') {
-                if (park) row.owner_id = null;
-                // Auto-stamp the acting user (batch rows included — the
-                // single-record-only stamp left bulk-inserted rows NULL-owned
-                // and invisible to their creator).
-                else if (userId) row.owner_id = userId;
-                // [ADR-0138 D1 item 5] A guest is stamped with nothing, and
-                // its empty owner is left UNSET: an empty string would land
-                // in the anchor as a value that is neither an owner nor none.
-                else if (guest && row.owner_id === '') row.owner_id = null;
+              if (hasEmptyOwner(row)) {
+                // Auto-stamp the acting user, batch rows included; the park
+                // leaves it unset, and [ADR-0138 D1 item 5] a guest is
+                // stamped with nothing.
+                stampEmptyOwner(row, { userId, guest, park });
               } else if (guest) {
                 denyGuestOwnerWrite();
               } else if (

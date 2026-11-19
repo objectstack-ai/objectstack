@@ -23,6 +23,8 @@ import {
   cn,
 } from '@object-ui/components';
 import { SchemaRenderer, useDrillNavigation } from '@object-ui/react';
+import { useSafeTranslate } from '@object-ui/i18n';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { ObjectDataTable } from './ObjectDataTable';
 import { OpenInListButton } from './OpenInListButton';
 
@@ -67,7 +69,40 @@ export interface DrillDownDrawerProps {
    * (objectui#11506).
    */
   report?: Record<string, unknown>;
+  /**
+   * Shown in place of the record list when there is no list to read yet, or
+   * none can be read (a dataset drill across a relationship,
+   * `resolveDatasetDrillFilter` in `@object-ui/core`):
+   *
+   * - `'resolving'` — the related ids are still being read;
+   * - `'too-many'` — more related records match than the drill may list;
+   * - `'unavailable'` — the relationship cannot be resolved from here;
+   * - `'failed'` — a read on the way failed.
+   *
+   * Each is a localized sentence for the viewer, never a server diagnostic.
+   * A list read the server refuses shows the `'failed'` sentence too.
+   */
+  notice?: DrillDownNotice;
 }
+
+/** What {@link DrillDownDrawer} shows in place of its record list — see `notice`. */
+export type DrillDownNotice = 'resolving' | 'too-many' | 'unavailable' | 'failed';
+
+/** The viewer's sentence for each notice, under `dashboard.drill*`. */
+const DRILL_NOTICE_COPY: Record<Exclude<DrillDownNotice, 'resolving'>, { key: string; fallback: string }> = {
+  'too-many': {
+    key: 'dashboard.drillTooMany',
+    fallback: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+  },
+  unavailable: {
+    key: 'dashboard.drillUnavailable',
+    fallback: 'The records behind this value can’t be listed from here.',
+  },
+  failed: {
+    key: 'dashboard.drillFailed',
+    fallback: 'The records behind this value couldn’t be loaded. Try again later.',
+  },
+};
 
 /**
  * Is this drill `report` a dataset-bound report (ADR-0021) — the shape
@@ -110,8 +145,10 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   maxRows,
   className,
   report,
+  notice,
 }) => {
   const { openRecordList, canOpenRecordList } = useDrillNavigation();
+  const tt = useSafeTranslate();
   const isReportDrill = isDatasetBoundReport(report);
 
   // `target: 'navigate'` skips the in-place view and opens the object's full
@@ -122,6 +159,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   // gracefully to the drawer below.
   const navigateOnly =
     target === 'navigate' &&
+    !notice &&
     !!openRecordList &&
     !isReportDrill &&
     !!objectName &&
@@ -137,13 +175,27 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
 
   // Escape hatch — escalate the peek to the full list page (shown in the header
   // when the host wired navigation and this is a raw-record drill).
-  const escapeHatch = !isReportDrill ? (
+  const escapeHatch = !isReportDrill && !notice ? (
     <OpenInListButton objectName={objectName} filter={filter} onNavigate={onClose} />
   ) : null;
 
   const body = (
     <div className={cn('overflow-auto', className)} data-testid="drill-down-body">
-      {isReportDrill
+      {notice === 'resolving'
+        ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground" role="status" data-testid="drill-down-resolving">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {tt('dashboard.loading', 'Loading…')}
+          </div>
+        )
+        : notice
+        ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-muted-foreground" role="alert" data-testid="drill-down-notice" data-notice={notice}>
+            <AlertTriangle className="h-6 w-6 opacity-60" aria-hidden="true" />
+            <p>{tt(DRILL_NOTICE_COPY[notice].key, DRILL_NOTICE_COPY[notice].fallback)}</p>
+          </div>
+        )
+        : isReportDrill
         ? (() => {
             // objectui#11506 — the drill's filter goes into `runtimeFilter`, the
             // key `ReportSchema` declares and the dataset renderer applies. It
@@ -186,6 +238,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
               drillDown: { enabled: true, mode: 'record', target: 'dialog' },
             }}
             dataSource={dataSource}
+            failureMessage={tt(DRILL_NOTICE_COPY.failed.key, DRILL_NOTICE_COPY.failed.fallback)}
           />
         )}
     </div>

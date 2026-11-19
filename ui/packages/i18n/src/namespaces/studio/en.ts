@@ -58,6 +58,10 @@ const STUDIO_EN: Record<string, string> = {
   'perm.bulk.all': 'All',
   'perm.bulk.none': 'None',
   'perm.bulk.allTip': 'Grant every column except Export, which is granted only by its own checkbox',
+  // objectstack#35061 — the folded matrix (content column under 1000 px): the
+  // six non-CRUD permissions sit behind each row's "More permissions".
+  'perm.more.col': 'More permissions',
+  'perm.more.count': '{count} on',
   // objectstack#26187 — the record-scope pickers (ADR-0057 D1 access depth).
   'perm.scope.unset': 'Not set',
   'perm.scope.value.own': 'Own',
@@ -580,6 +584,12 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.requiredWhen': 'Required when',
   'designer.field.conditionalRulesHint':
     'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
+  'designer.field.requiredVisibleWhenReference':
+    'This field is required, and the server decides that from this condition on every save. The condition reads through {fields}, a reference the server cannot follow here, so it counts the field as shown: it stays required on every record, including the ones this condition hides it on. Read a field of this object instead.',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    'This field is required, and the server decides that from this condition on every save. {fields} reads through a reference, or calls label() or current_user.can(), itself or through another formula, which the server cannot compute on a save (current_user.can() only on a save that picks no permission-gated option): it counts this field as shown, so it stays required on every record. A form that computes this object\'s formulas cannot compute it either, so it shows this field and keeps it required; a form check that computes no formulas judges the value it last read instead and can hide this field or not ask for it.',
+  'designer.field.requiredVisibleWhenFormulaFormOnly':
+    'This field is required, and the server decides that from this condition on every save. {fields} reads os, itself or through another formula: the server computes it (it binds os from the signed-in user and the tenant) and can waive this field, but the form cannot, so a form that computes this object\'s formulas shows this field and keeps it required; a form check that computes no formulas judges the value it last read instead and can hide this field or not ask for it.',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '{n} selected',
   'designer.canvas.bulkMoveTo': 'Move to section',
@@ -680,6 +690,7 @@ const STUDIO_EN: Record<string, string> = {
   // Flow node inspector
   'engine.inspector.flowNode.kind': 'Node',
   'engine.inspector.flowNode.close': 'Close node',
+  'engine.inspector.flowNode.sourceLabel': 'Authored label: “{label}”',
   'engine.inspector.flowNode.id': 'ID',
   // objectui#11827 — the ID field's inline refusal of a rename that cannot land;
   // the field shows the stored id again, so each says nothing was renamed.
@@ -729,15 +740,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': 'No entries yet.',
   // objectui#7588 — the per-value text / expression toggle on a `value`-role
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
-  'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
-  'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
-  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  'engine.inspector.flowNode.kv.asExpression': 'Write as a formula',
+  'engine.inspector.flowNode.kv.expressionPlaceholder': 'Formula, e.g. joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs a formula. Write one, or switch the value back to text.',
   // objectstack#33838 — a connector Input key the action does not declare: the run refuses it.
   'engine.inspector.flowNode.kv.undeclaredKey': 'The action does not declare this input, so the run refuses it. Remove it, or pick an action that declares it.',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
-  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
-  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the “{object}” record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the “{object}” record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -749,6 +760,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.help.learnMore': 'Learn more',
   'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
+  // objectstack#34796 — the node panel's header menu and its collapsed section for the node id.
+  'engine.inspector.flowNode.moreActions': 'More actions',
+  'engine.inspector.flowNode.developerInfo': 'Developer info',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
   'engine.inspector.appNav.close': 'Close nav item',
@@ -1505,6 +1519,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
   'engine.inspector.view.type.tree': 'Tree',
+  'engine.inspector.view.type.timesheet': 'Timesheet',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -1590,7 +1605,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",
   'engine.inspector.reference.queueHint': "The queue's machine name. Its members when the step opens are the approvers; an empty queue adds nobody.",
-  'engine.inspector.reference.fieldsOf': 'Fields of {object}.',
+  'engine.inspector.reference.fieldsOf': 'Fields of “{object}”.',
   'engine.inspector.reference.setTriggerObject': 'Set the flow’s trigger object (on the Start node) to list fields.',
   'engine.inspector.reference.actionsOf': 'Actions of {connector}.',
   'engine.inspector.reference.chooseConnector': 'Choose a Connector above to list its actions.',
@@ -1607,7 +1622,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.recipients.placeholder.user': 'Pick a user',
   'engine.inspector.recipients.placeholder.team': 'Pick a team',
   'engine.inspector.recipients.placeholder.email': 'name@example.com',
-  'engine.inspector.recipients.placeholder.expression': 'CEL, e.g. ownerId',
+  'engine.inspector.recipients.placeholder.expression': 'Formula, e.g. ownerId',
   'engine.inspector.recipients.placeholder.custom': 'Saved as typed, e.g. role:admin',
   'engine.inspector.recipients.add': 'Add recipient',
   'engine.inspector.recipients.remove': 'Remove recipient',
@@ -1939,6 +1954,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.submit': 'Create package',
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
+  'engine.packages.create.created': 'Created package “{name}”.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2200,7 +2216,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
-  'engine.studio.auto.nameLabel': 'Flow name',
+  'engine.studio.auto.nameLabel': 'Automation name',
   'engine.studio.auto.idLabel': 'Identifier',
   'engine.studio.access.nameLabel': 'Name',
   'engine.studio.access.idLabel': 'Identifier',
@@ -2504,6 +2520,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.definitionTitle': '{label} · Definition',
   // The shared rail (objectstack#26733): the action under a search that matched nothing.
   'engine.studio.rail.clearSearch': 'Clear search',
+  // objectstack#35061: the narrow rail's top button, which floats the whole list over the content and back.
+  'engine.studio.rail.expand': 'Show the full list',
+  'engine.studio.rail.collapse': 'Back to the narrow list',
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
@@ -2693,15 +2712,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'This matrix lists only the objects this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar), exactly like Data and Interfaces.',
-  'engine.studio.access.banner': 'This package’s objects · saved as draft',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on publish',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This package’s and {package}’s objects · saved as draft',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
+  'engine.studio.access.origin.app': 'Included with the app',
+  // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
+  'engine.studio.copilot.subject.access': 'Access',
+  'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is in the customization package for {package}, so the matrix lists {package}’s objects as well as the ones this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
-    'This matrix lists only the objects this package declares. The package is read-only: its permission sets can be viewed here, but not changed.',
+    'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
   // ADR-0090 D5/D9 — pending suggested audience bindings (isDefault sets
   // awaiting the admin's confirm; the server never auto-binds).
   'engine.studio.access.suggestPromptEveryone': 'Suggested: every member gets “{set}” by default, and new members get it automatically.',
@@ -2776,6 +2800,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.operation': 'Operation',
   'engine.studio.access.explain.run': 'Explain',
   'engine.studio.access.explain.running': 'Explaining…',
+  'engine.studio.access.explain.needObject': 'Choose an object first',
   'engine.studio.access.explain.allowedLine': '{operation} on “{object}” is ALLOWED for this principal.',
   'engine.studio.access.explain.deniedLine': '{operation} on “{object}” is DENIED for this principal.',
   'engine.studio.access.explain.principal': 'Principal',
@@ -3240,6 +3265,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.createDraft': 'Save as draft',
   'engine.studio.saveDraft': 'Save draft',
   'engine.studio.autoSaving': 'Saving…',
+  // objectstack#34818 — the flow header's landed-autosave mark, its spoken form, and the one toast left (a failed save).
+  'engine.studio.autoSaved': 'Saved',
+  'engine.studio.flowSavedNamed': 'Flow "{item}" saved',
+  'engine.studio.flowSaveFailed': 'The draft of "{item}" was not saved',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': 'App name',
   'engine.studio.app.idLabel': 'Identifier',
@@ -3461,6 +3490,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
   'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
   'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
+  'engine.studio.landing.customizations.switchedOffActionsLead': 'Actions: ',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '+{count} more',
+  'engine.studio.landing.customizations.switchedOffActionsTitle': 'Open the switched-off actions: each one is switched on again on the action',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': 'Not in a package',
   'engine.studio.org.name': 'Organization flows',
@@ -3733,6 +3765,12 @@ const STUDIO_EN: Record<string, string> = {
   // Actions view
   'engine.studio.actions.none': 'No actions on this object.',
   'engine.studio.actions.newButton': 'New action',
+  // objectstack#34724 — a read-only app's vendor action: its ledger switch.
+  'engine.studio.actions.ledger.hint':
+    'This action comes from a read-only package. This switch only turns it on or off in this deployment and leaves the package unchanged.',
+  'engine.studio.actions.ledger.walled': 'On this deployment, only the platform operator can switch a packaged action on or off.',
+  'engine.studio.actions.ledger.offMark': 'Off',
+  'engine.studio.actions.ledger.loadFailed': 'Could not read whether this action is switched on here: {message}',
   'engine.studio.actions.editorMissing':
     'No action editor is registered in this session, so this action’s properties cannot be edited here.',
   'engine.studio.actions.newLabel': 'New action',
@@ -4071,7 +4109,34 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowPreview.showVars': 'Show variables panel',
   'engine.flowPreview.hideVars': 'Hide variables panel',
   'engine.flowPreview.variables': 'Variables',
-  'engine.flowPreview.noVars': 'No variables declared.',
+  'engine.flowPreview.noVars': 'No variables yet. A variable holds a value the steps read as {{ name }}. Mark it Input to take it from whoever starts the flow, or Output to hand it back when the flow ends.',
+  'engine.flowPreview.addVariable': 'Add variable',
+  'engine.flowPreview.vars.name': 'Variable name',
+  'engine.flowPreview.vars.type': 'Type',
+  'engine.flowPreview.vars.default': 'Default value',
+  'engine.flowPreview.vars.defaultPlaceholder': 'Default value (optional)',
+  'engine.flowPreview.vars.input': 'Input',
+  'engine.flowPreview.vars.output': 'Output',
+  'engine.flowPreview.vars.remove': 'Remove variable {name}',
+  'engine.flowPreview.vars.type.text': 'Text',
+  'engine.flowPreview.vars.type.number': 'Number',
+  'engine.flowPreview.vars.type.boolean': 'True / false',
+  'engine.flowPreview.vars.type.object': 'Object',
+  'engine.flowPreview.vars.type.list': 'List',
+  'engine.flowPreview.vars.nameBlank': 'A variable needs a name.',
+  'engine.flowPreview.vars.nameDollar': 'A name may not start with $: those names belong to the flow engine.',
+  'engine.flowPreview.vars.nameTaken': 'Another variable is already named {name}.',
+  'engine.flowPreview.vars.renameRead': '{name} is still read by: {steps}. Change those steps first, then rename it.',
+  'engine.flowPreview.vars.removeRead': '{name} is still read by: {steps}. Change those steps first, then remove it.',
+  'engine.flowPreview.vars.listSep': ', ',
+  'engine.flowPreview.vars.readerConnection': 'a connection condition',
+  'engine.flowPreview.vars.readerMessages': 'the flow’s finish messages',
+  'engine.flowPreview.vars.defaultNumber': 'The default of a number variable must be a number.',
+  'engine.flowPreview.vars.defaultBoolean': 'The default of a true / false variable must be true or false.',
+  'engine.flowPreview.vars.defaultObject': 'The default of an object variable must be a JSON object, such as {"key": "value"}.',
+  'engine.flowPreview.vars.defaultList': 'The default of a list variable must be a JSON list, such as ["a", "b"].',
+  'engine.flowPreview.vars.typeHeld': 'The default value does not fit {type}. Clear or rewrite it first, then change the type.',
+  'engine.flowPreview.vars.inputRecord': 'This input is a record of {object}, so it stays an input.',
   'engine.flowPreview.runsTitle': 'Run history from the automation engine',
   'engine.flowPreview.runs': 'Runs',
   'engine.flowPreview.problemsTitle': 'Validation problems',
@@ -4086,6 +4151,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowRuns.unavailable':
     'Run history unavailable — the automation engine is offline or this flow hasn’t been published.',
   'engine.flowRuns.empty': 'No runs yet.',
+  // objectstack#34818 — the two causes the line above names, each said alone when the host knows which.
+  'engine.flowRuns.unpublished': 'Publish and turn on this flow, and each of its runs is listed here.',
+  'engine.flowRuns.engineOffline': 'Run history unavailable — the automation engine is not answering. Try again later.',
   'engine.flowRuns.noSteps': 'No step log recorded.',
   'engine.flowRuns.iteration': 'Iteration',
   'engine.flowRuns.iterationN': 'Iteration {n}',
@@ -4480,8 +4548,7 @@ const STUDIO_EN: Record<string, string> = {
   // qualified name (`{view}` below is the panel's title, the same string).
   // objectstack#30046 — the header's title names the object before it.
   'engine.studio.inspector.listView.defaultView': 'Default view',
-  'engine.studio.inspector.listView.notCreated':
-    'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
+  'engine.studio.inspector.listView.notCreated': 'Changes save as a draft first.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
   'engine.studio.inspector.listView.notList': '“{view}” is not a list view, so it is not edited here.',
   'engine.studio.inspector.listView.filter': 'Filter',
@@ -4581,6 +4648,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.category.positions': 'Positions',
   'engine.translationPreview.category.permissions': 'Permission Sets',
   'engine.translationPreview.category.books': 'Doc Books',
+  'engine.translationPreview.category.mappings': 'Import Mappings',
   'engine.translationPreview.category.metadataForms': 'Metadata Forms',
   'engine.translationPreview.category.settingsCommon': 'Settings UI',
   'engine.translationPreview.coverage': 'Category coverage:',

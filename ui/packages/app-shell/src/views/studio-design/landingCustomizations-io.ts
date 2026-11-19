@@ -32,6 +32,7 @@
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import type { PackageCustomizations } from './packageCustomizations-io.js';
 import { studioMetadataAreaPath } from './metadataArea.js';
+import { switchedOffActionPath, type ActionObjects } from './switchedOffActionTargets.js';
 
 /** How a row changed the app. */
 export type CustomizationMode = 'changed' | 'added' | 'switchedOff';
@@ -62,10 +63,17 @@ export interface CustomizationRow {
 const itemHref = (appId: string, type: string, name: string) =>
   `${studioMetadataAreaPath(appId)}/${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
 
-/** The rows one app's served answer makes, in the served order: changed, added, switched off. */
+/**
+ * The rows one app's served answer makes, in the served order: changed, added,
+ * switched off. `actionObjects` (objectstack#34724) names the object holding
+ * each switched-off action: such an action opens on its object's Actions view,
+ * since one declared inside its object has no item page; any other action
+ * opens its own page, as every other type does.
+ */
 export function customizationRowsOf(
   app: { id: string; name: string },
   read: Pick<PackageCustomizations, 'overrides' | 'extensions' | 'switchedOff'>,
+  actionObjects?: ActionObjects,
 ): CustomizationRow[] {
   const rows: CustomizationRow[] = [];
   for (const o of read.overrides) {
@@ -105,7 +113,7 @@ export function customizationRowsOf(
       type: s.type,
       name: s.name,
       labelKey: `${s.type}:${s.name}`,
-      href: itemHref(app.id, s.type, s.name),
+      href: s.type === 'action' ? switchedOffActionPath(app.id, s.name, actionObjects?.[s.name]) : itemHref(app.id, s.type, s.name),
     });
   }
   return rows;

@@ -238,7 +238,7 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
     expect(screen.queryByTestId('data-field-inspector')).toBeNull();
   });
 
-  it("selecting a field switches the slot to 属性 with that field's inspector, the copilot a strip at its foot", async () => {
+  it("selecting a field switches the slot to 属性 with that field's inspector, the copilot behind the header switch", async () => {
     await selectDataField();
 
     expect(slot()).toHaveAttribute('data-mode', 'props');
@@ -248,8 +248,9 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
     expect(slotProps().contains(screen.getByTestId('data-field-inspector'))).toBe(true);
     expect(within(slotProps()).getByTestId('stub-field-inspector')).toBeVisible();
     expect(screen.getByTestId('copilot-body')).not.toBeVisible();
-    const strip = screen.getByTestId('studio-slot-copilot-strip');
-    expect(slot().lastElementChild).toBe(strip);
+    // objectstack#35018 — no strip at the slot's foot: the header's 属性 | AI 助手 switch leads back.
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
+    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
   });
 
   it('Esc drops the selection and hands the slot back; an Escape another layer took does not', async () => {
@@ -281,13 +282,14 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
 
   it('a second field selected while the copilot shows asks for the properties again', async () => {
     await selectDataField();
-    fireEvent.click(screen.getByTestId('studio-slot-copilot-strip'));
+    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
     expect(slot()).toHaveAttribute('data-mode', 'copilot');
     // The selection stands: the copilot stays chosen.
     expect(within(slotProps()).getByTestId('stub-field-inspector')).toBeInTheDocument();
 
     // The same field again is no new selection: the copilot stays chosen.
-    fireEvent.click(screen.getByText('Title').closest('[role="button"]') as HTMLElement);
+    // objectstack#35018 — the rail's header names the field too: the canvas card is the one pressed.
+    fireEvent.click(within(screen.getByTestId('data-canvas-main')).getByText('Title').closest('[role="button"]') as HTMLElement);
     expect(slot()).toHaveAttribute('data-mode', 'copilot');
 
     fireEvent.click(screen.getByText('Due').closest('[role="button"]') as HTMLElement);
@@ -322,7 +324,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     expect(slotProps()).toHaveTextContent(t('engine.studio.auto.emptyLine1', 'en'));
   });
 
-  it("selecting a node switches the slot to 属性 with that node's configuration, the copilot a strip at its foot", async () => {
+  it("selecting a node switches the slot to 属性 with that node's configuration, the copilot behind the header switch", async () => {
     await openFlow();
     fireEvent.click(screen.getByTestId('pick-node'));
 
@@ -331,7 +333,8 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     expect(screen.getAllByTestId('auto-config-aside')).toHaveLength(1);
     expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
     expect(screen.getByTestId('copilot-body')).not.toBeVisible();
-    expect(slot().lastElementChild).toBe(screen.getByTestId('studio-slot-copilot-strip'));
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
+    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
   });
 
   it("Esc returns to the flow's own Configuration; an Escape typed in the inspector is the field's", async () => {
@@ -362,7 +365,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     await openFlow();
     fireEvent.click(screen.getByTestId('pick-node'));
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
-    fireEvent.click(screen.getByTestId('studio-slot-copilot-strip'));
+    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
     expect(slot()).toHaveAttribute('data-mode', 'copilot');
 
     fireEvent.click(screen.getByTestId('pick-other-node'));

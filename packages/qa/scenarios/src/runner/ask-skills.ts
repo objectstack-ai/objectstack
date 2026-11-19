@@ -150,26 +150,59 @@ export function skillVersionOf(skillMd: string): string | undefined {
 }
 
 /**
+ * The skill file `dir` holds, read off its listing by exact spelling:
+ * `SKILL.md` when it holds that file; else the name of a file spelled
+ * otherwise (`skill.md`, `Skill.md`); else `undefined`. Never `existsSync`: a
+ * case-insensitive filesystem answers it true for `skill.md`, while the listing
+ * names each file as it is spelled on every filesystem.
+ */
+function skillFileOf(dir: string): string | undefined {
+  const names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
+  if (names.includes(SKILL_FILE)) return SKILL_FILE;
+  return names.find((n) => n.toLowerCase() === SKILL_FILE.toLowerCase());
+}
+
+/**
  * Read a skills directory: either one skill (a directory holding `SKILL.md`,
  * named after the directory) or a directory of skills (each subdirectory that
  * holds `SKILL.md`, the layout of a `.claude/skills/` directory). Refused, with
  * the reason, when the path is no directory or holds no skill: an option that
- * gave the client nothing must not run as if it had. Refused too when any
- * SKILL.md of a skill carries a front-matter key outside the ask turn's closed
- * set ({@link frontMatterRefusal}): a skill must not widen the turn beyond the
- * app's tools and `Skill`.
+ * gave the client nothing must not run as if it had. Refused when a skill file
+ * is spelled otherwise than `SKILL.md` ({@link skillFileOf}), naming it: a
+ * session reads such a file on one filesystem and misses it on another, so the
+ * turn would be given a skill on one machine and none on the next. Refused too
+ * when any SKILL.md of a skill carries a front-matter key outside the ask
+ * turn's closed set ({@link frontMatterRefusal}): a skill must not widen the
+ * turn beyond the app's tools and `Skill`. `flag` names the option the
+ * refusals cite (`--ask-skills`, or door mode's `--door-skills`).
  */
-export function readAskSkills(dirArg: string): AskSkillsBundle {
+export function readAskSkills(dirArg: string, flag = '--ask-skills'): AskSkillsBundle {
   const dir = resolve(dirArg);
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`--ask-skills names \`${dirArg}\`, which is no directory`);
-  const skillDirs: Array<[string, string]> = existsSync(join(dir, SKILL_FILE))
-    ? [[basename(dir), dir]]
-    : readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isDirectory() && existsSync(join(dir, e.name, SKILL_FILE)))
-        .map((e) => [e.name, join(dir, e.name)] as [string, string])
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`${flag} names \`${dirArg}\`, which is no directory`);
+  const misspelt = (shown: string) =>
+    new Error(
+      `${flag} names \`${dirArg}\`, which holds \`${shown}\`: a skill file is spelled \`${SKILL_FILE}\` exactly, ` +
+        `or a session reads it on one filesystem and misses it on another; rename it to \`${SKILL_FILE}\``,
+    );
+  const skillDirs: Array<[string, string]> = [];
+  const top = skillFileOf(dir);
+  if (top !== undefined) {
+    if (top !== SKILL_FILE) throw misspelt(top);
+    skillDirs.push([basename(dir), dir]);
+  } else {
+    const subdirs = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const name of subdirs) {
+      const found = skillFileOf(join(dir, name));
+      if (found === undefined) continue;
+      if (found !== SKILL_FILE) throw misspelt(`${name}/${found}`);
+      skillDirs.push([name, join(dir, name)]);
+    }
+  }
   if (skillDirs.length === 0) {
-    throw new Error(`--ask-skills names \`${dirArg}\`, which holds no skill: give a directory holding ${SKILL_FILE}, or a directory of skill directories that each hold one`);
+    throw new Error(`${flag} names \`${dirArg}\`, which holds no skill: give a directory holding ${SKILL_FILE}, or a directory of skill directories that each hold one`);
   }
   const files = new Map<string, Map<string, Buffer>>();
   const skills: AskSkill[] = [];
@@ -181,7 +214,7 @@ export function readAskSkills(dirArg: string): AskSkillsBundle {
       const why = frontMatterRefusal(bytes.toString('utf8'));
       if (why !== undefined) {
         throw new Error(
-          `--ask-skills: skill \`${name}\` is refused: ${why} (${join(at, rel)}). An ask turn may use the app's tools and \`${SKILL_TOOL}\` alone, ` +
+          `${flag}: skill \`${name}\` is refused: ${why} (${join(at, rel)}). An ask turn may use the app's tools and \`${SKILL_TOOL}\` alone, ` +
             `and a skill's front matter can grant tools, another model or effort, hooks or a subagent beyond them; ` +
             `a skill given to an ask turn carries only ${[...ASK_SKILL_KEYS].map((k) => `\`${k}\``).join(', ')}`,
         );

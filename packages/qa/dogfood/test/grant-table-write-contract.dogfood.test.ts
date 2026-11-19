@@ -280,7 +280,7 @@ describe('an agent ceiling set reaches no person through a position or a seed', 
 
   it('a published seed granting an agent ceiling set stores no grant, and a person-set seed does', async () => {
     const seed = (name: string, set: string) => stack.apiAs(admin, 'PUT', `/meta/seed/${name}?mode=draft&package=${PKG}`, {
-      object: 'sys_user_permission_set', mode: 'insert', records: [{ user_id: personId, permission_set: set }],
+      object: 'sys_user_permission_set', externalId: ['user_id', 'permission_set'], records: [{ user_id: personId, permission_set: set }],
     });
     expect((await seed('agent_ceiling_grant_seed', CEILING)).status).toBe(200);
     expect((await seed('person_set_grant_seed', SET)).status).toBe(200);

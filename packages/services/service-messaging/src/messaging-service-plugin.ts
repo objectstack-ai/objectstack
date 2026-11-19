@@ -7,6 +7,7 @@ import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@object
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
 import { IN_APP_MESSAGE_ROUTE, registerInAppMessageRoutes } from './in-app-message-routes.js';
+import { MY_PREFERENCES_ROUTE, registerMyPreferencesRoutes } from './my-preferences-routes.js';
 import { resolveMessagingCaller, type MessagingCallerSources } from './messaging-request-caller.js';
 import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
@@ -698,9 +699,10 @@ export class MessagingServicePlugin implements Plugin {
         const http = optional<IHttpServer>('http-server');
         if (!http) {
             ctx.logger.warn(
-                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
-                    `nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) is mounted: the console draws notification topic ` +
-                    'and channel as plain text boxes, and the Setup action "Send in-app message" has nothing to call.',
+                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}), ` +
+                    `the caller's own preferences (GET ${MY_PREFERENCES_ROUTE}) nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) ` +
+                    'is mounted: the console draws notification topic and channel as plain text boxes, the Account page Notification ' +
+                    'Settings has nothing to read, and the Setup action "Send in-app message" has nothing to call.',
             );
             return;
         }
@@ -714,8 +716,7 @@ export class MessagingServicePlugin implements Plugin {
                 ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
                 : undefined,
         };
-        registerPreferenceOptionsRoutes(http, {
-            ...callerSources,
+        const optionSources = {
             knownChannels: () => service.getKnownChannels(),
             getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
             readFlows: async () => {
@@ -724,8 +725,18 @@ export class MessagingServicePlugin implements Plugin {
                 const raw = await protocol.getMetaItems({ type: 'flow' });
                 return Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | null)?.items ?? []);
             },
-        });
+        };
+        registerPreferenceOptionsRoutes(http, { ...callerSources, ...optionSources });
         ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
+        // [rulings 6968686390 and 6969143776] The caller's own effective
+        // preferences, decided by the same resolver `emit` filters with.
+        registerMyPreferencesRoutes(http, {
+            ...callerSources,
+            ...optionSources,
+            effectivePreferences: (userId, organizationId, topics, channels) =>
+                service.effectivePreferencesFor(userId, organizationId, topics, channels),
+        });
+        ctx.logger.info(`[messaging] caller's own preferences mounted at GET ${MY_PREFERENCES_ROUTE}`);
         registerInAppMessageRoutes(http, {
             resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
             getMessaging: () => service,

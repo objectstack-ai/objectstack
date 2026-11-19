@@ -72,6 +72,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "須修改密碼",
         help: "開啟後，使用者必須先修改密碼才能繼續使用。管理員建立帳號、匯入使用者或重設密碼時會自動開啟；系統維護。"
       },
+      dev_seed_credential: {
+        label: "開發種子憑證",
+        help: "開發種子建立的帳號會帶上此標記。只要其密碼仍是種子密碼，正式環境伺服器就拒絕其登入及任何新工作階段；使用 os user set-password 設定新密碼後會清除。系統維護；讀取時從不傳回。"
+      },
       mfa_required_at: {
         label: "MFA 強制生效時間",
         help: "強制 MFA 首次對該使用者生效的時間（寬限期計時起點）。支撐 mfa_required；系統維護。"
@@ -155,7 +159,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -240,6 +244,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "電子郵件",
+            pendingAgain: "已在待啟用中",
             notApplied: "此人仍待啟用，以下內容未套用（請在其記錄上設定）",
             managerError: "主管",
             "host.reason": "邀請未送出"
@@ -260,7 +265,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             "summary.added": "已新增",
-            "summary.alreadyPending": "已在待啟用中，已再次通知",
+            "summary.alreadyPending": "已在待啟用中",
             "summary.failed": "未新增",
             rows: "逐列結果"
           },
@@ -269,7 +274,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
               row: "列",
               email: "電子郵件",
               ok: "成功",
-              alreadyPending: "已在待啟用中，已再次通知",
+              alreadyPending: "已在待啟用中",
               "host.notified": "已通知託管組織",
               "host.reason": "未通知的原因",
               "error.message": "未新增的原因",
@@ -704,7 +709,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -810,7 +815,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -962,7 +967,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -989,7 +994,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "邀請已重新發送",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 重新發送邀請",
-          link_only: "已為 {{ result.email }} 續期邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 續期邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         }
       },
       copy_invitation_link: {
