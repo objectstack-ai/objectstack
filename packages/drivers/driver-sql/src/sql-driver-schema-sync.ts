@@ -2051,12 +2051,15 @@ export async function backfillCanonicalTimes(this: Pick<SchemaSyncHost, 'canonic
  * all read this one predicate, so the plan cannot count rows the step will not
  * convert.
  *
- * Only the two spellings `'true'` / `'false'` can be there: SQLite's NUMERIC
+ * Four spellings can be there. `'true'` / `'false'`: SQLite's NUMERIC
  * affinity, which a `boolean` column takes, folds the text `'1'` / `'0'` into
- * integers on write and keeps `'true'` / `'false'` as TEXT. `IN` compares with
- * the BINARY collation, so `'TRUE'` or `'yes'` is not selected.
+ * integers on write and keeps `'true'` / `'false'` as TEXT. [#35341]
+ * `'1.0'` / `'0.0'`: on a column with TEXT affinity (a `text` field retyped to
+ * `boolean`), the driver's own writes stored the REAL its JS number bound as,
+ * as that text, until it bound `sqliteBooleanBinding`'s `'1'` / `'0'`. `IN`
+ * compares with the BINARY collation, so `'TRUE'` or `'yes'` is not selected.
  */
-const SQLITE_LEGACY_BOOLEAN_TEXT = `typeof(??) = 'text' and ?? in ('true', 'false')`;
+const SQLITE_LEGACY_BOOLEAN_TEXT = `typeof(??) = 'text' and ?? in ('true', 'false', '1.0', '0.0')`;
 
 /**
  * [#34973] How many ids of the converted rows the backfill's `info` line
@@ -2074,7 +2077,9 @@ const BOOLEAN_BACKFILL_SAMPLE_IDS = 5;
  * ({@link SqlDriver.booleanFields}) on the integer form every write takes
  * since the engine stores the boolean a reading spells (#34916). Rows written
  * before that by a door that sent the text `'true'` / `'false'` (the console's
- * inline grid) still hold that TEXT. The row read presents them as booleans,
+ * inline grid) still hold that TEXT. [#35341] So do the `'1.0'` / `'0.0'` the
+ * driver's own writes left on a TEXT-affinity column, which the row read
+ * presented as `true` both. The row read presents the others as booleans,
  * but every comparison runs in SQL against the raw cell, so `= false` misses a
  * text `'false'`, `$in`, `!=` and `$nin` answer wrongly, ORDER BY sorts the
  * text after every integer, and an aggregate group key presents a text
@@ -2088,7 +2093,7 @@ const BOOLEAN_BACKFILL_SAMPLE_IDS = 5;
  * it, so no other dialect can hold such a row.
  *
  * ONE `UPDATE` per column, atomic on SQLite, whose `WHERE` is
- * {@link SQLITE_LEGACY_BOOLEAN_TEXT}: it selects only the two text spellings,
+ * {@link SQLITE_LEGACY_BOOLEAN_TEXT}: it selects only the four text spellings,
  * so a converged column is a no-op and a second boot converts 0 rows. One
  * counting scan over the column's text cells comes first, and the id sample and
  * the `UPDATE` run only when it found legacy text, so a converged column costs
@@ -2134,7 +2139,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
           [table, field, field, BOOLEAN_BACKFILL_SAMPLE_IDS],
         );
         const res = await this.knex.raw(
-          `update ?? set ?? = case ?? when 'true' then 1 when 'false' then 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
+          `update ?? set ?? = case when ?? in ('true', '1.0') then 1 else 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
           [table, field, field, field, field],
         );
         // better-sqlite3 reports `changes`; a client whose raw path returns
@@ -2145,7 +2150,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
         if (converted) {
           this.logger.info?.(
             `[sql-driver] canonicalised boolean storage for ${table}.${field}: rows that held the ` +
-              `text 'true' / 'false' now hold 1 / 0, so boolean filters, sorts and groups answer them ` +
+              `text 'true' / 'false' (or '1.0' / '0.0') now hold 1 / 0, so boolean filters, sorts and groups answer them ` +
               `as the boolean they read as`,
             { table, field, rowsConverted: converted, sampleIds: sample.map((r) => String(r.id)) },
           );
@@ -2154,7 +2159,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
       if (withheld > 0) {
         this.logger.warn(
           `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: their stored ` +
-            `value is text other than 'true' or 'false', which names no boolean the driver can ` +
+            `value is text other than 'true', 'false', '1.0' or '0.0', which names no boolean the driver can ` +
             `read without guessing. Boolean filters do not match them until the values are ` +
             `corrected or cleared at the source`,
           { table, field, rowsWithheld: withheld },
@@ -2163,7 +2168,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
     } catch (err) {
       this.logger.warn(
         `[sql-driver] could not canonicalise boolean storage for ${table}.${field}; rows holding ` +
-          `the text 'true' / 'false' stay missed by boolean filters until a later boot converts them`,
+          `the text 'true' / 'false' (or '1.0' / '0.0') stay missed by boolean filters until a later boot converts them`,
         { error: err instanceof Error ? err.message : String(err) },
       );
     }

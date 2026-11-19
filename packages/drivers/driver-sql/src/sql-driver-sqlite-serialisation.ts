@@ -63,6 +63,27 @@ export function presentStoredBoolean(value: unknown): boolean {
   return Boolean(value);
 }
 
+/**
+ * [#35341] The value a declared scalar `Field.boolean` / `Field.toggle` is bound
+ * as on SQLite, for a write (`formatInput`) and for a filter comparand
+ * (`coerceFilterValue`): the text `'1'` / `'0'`.
+ *
+ * Bound as a JS number (knex turns a boolean into `Number(b)`), better-sqlite3
+ * binds a REAL, and a column with TEXT affinity (a `text` field retyped to
+ * `boolean` boots onto the same column) stores it as the text `'1.0'` /
+ * `'0.0'`, which no reader takes for a boolean. The text `'1'` / `'0'` lands
+ * as the INTEGER `1` / `0` on the NUMERIC affinity of a column the driver
+ * created, and as the text `'1'` / `'0'` on a TEXT-affinity column: the same
+ * spellings `backfillCanonicalBooleans` writes there, and the ones
+ * {@link presentStoredBoolean} reads. A comparand bound the same way takes the
+ * column's affinity, so `= false` selects exactly the rows the row read
+ * presents as `false`. A BigInt would bind an INTEGER too, but knex's query
+ * text formatter throws on one.
+ */
+export function sqliteBooleanBinding(value: boolean): '1' | '0' {
+  return value ? '1' : '0';
+}
+
 export interface SqliteSerialisationHost {
   readonly booleanFields: SqlDriver['booleanFields'];
   readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
@@ -90,7 +111,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'datetimeFields' | 'fileColumnsMoved' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'datetimeFields' | 'fileColumnsMoved' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -306,6 +327,18 @@ export class SqliteSerialisationFacet {
     }
 
     if (!this.isSqlite) return copy;
+
+    // [#35341] A declared scalar boolean is bound as the text `'1'` / `'0'`.
+    // See {@link sqliteBooleanBinding}.
+    const booleanFields = this.booleanFields[object];
+    if (booleanFields && booleanFields.length > 0 && copy && typeof copy === 'object') {
+      for (const field of booleanFields) {
+        const v = copy[field];
+        if (typeof v !== 'boolean') continue;
+        if (!copied) { copy = { ...copy }; copied = true; }
+        copy[field] = sqliteBooleanBinding(v);
+      }
+    }
 
     // Safety net: better-sqlite3 can only bind numbers/strings/bigints/buffers/
     // null. Any value still an array or plain object here (a field type not
