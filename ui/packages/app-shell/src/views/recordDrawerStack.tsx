@@ -63,6 +63,8 @@ import {
   cn,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
+  RecordHeaderBarContext,
+  type RecordHeaderBar,
 } from '@object-ui/components';
 import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
@@ -526,6 +528,17 @@ export function RecordStackDrawer({
   // that was not opened with a title is still named by the one it reported.
   const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
   const [titles, setTitles] = useState<Readonly<Record<string, string>>>({});
+  // objectstack#35593 — the bar is the record's one header row: the record
+  // header draws the record's name and tags, and its button group, into these
+  // two slots. While it holds them, the bar draws no 「对象 › 记录名」 crumb
+  // and no counter or ↓ ↑ (the list is beside the drawer); the step keys stay.
+  const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
+  const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
+  const [headerClaimed, setHeaderClaimed] = useState(false);
+  const headerBar = useMemo<RecordHeaderBar>(
+    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed }),
+    [headerTitleSlot, headerActionSlot],
+  );
   const currentObject = current?.objectName;
   const bar = useMemo<RecordPaneBarApi>(
     () => ({
@@ -554,7 +567,11 @@ export function RecordStackDrawer({
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const headerTitleSlotEl = (
+    <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
+  );
   const trail = !current ? undefined : depth > 0 ? (
+    <>
     <nav className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground" data-testid="record-drawer-trail">
       {path.slice(0, depth).map((level, index) => (
         <span key={`${index}:${levelKey(level)}`} className="flex min-w-0 items-center gap-1">
@@ -565,9 +582,14 @@ export function RecordStackDrawer({
           <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
         </span>
       ))}
-      <span className="truncate" aria-current="page">{labelOf(current.objectName)}</span>
+      {!headerClaimed && <span className="truncate" aria-current="page">{labelOf(current.objectName)}</span>}
     </nav>
+    {headerTitleSlotEl}
+    </>
+  ) : headerClaimed ? (
+    headerTitleSlotEl
   ) : (
+    <>
     <nav
       aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
       className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
@@ -581,6 +603,8 @@ export function RecordStackDrawer({
         {titleOf(current)}
       </span>
     </nav>
+    {headerTitleSlotEl}
+    </>
   );
   const rootScope = current?.scope ?? stepScope;
   const scopedStepper = stepper && depth === 0 && rootScope ? { ...stepper, scope: rootScope } : stepper;
@@ -602,12 +626,16 @@ export function RecordStackDrawer({
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}
       stepper={scopedStepper}
+      stepperHidden={headerClaimed}
+      actionSlotRef={setHeaderActionSlot}
+      onExpand={headerClaimed && pane ? () => pane.openAsPage() : undefined}
       toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
           <RecordPaneContext.Provider value={pane}>
             <RecordPaneBarContext.Provider value={bar}>
+              <RecordHeaderBarContext.Provider value={headerBar}>
               <RecordDrawerUpcomingContext.Provider value={upcoming}>
                 {/* Keyed by level and object: a step to a sibling swaps the record
                     in place (the view follows `recordIdOverride`), while a level
@@ -616,6 +644,7 @@ export function RecordStackDrawer({
                   {current ? renderRecord(current) : null}
                 </Fragment>
               </RecordDrawerUpcomingContext.Provider>
+              </RecordHeaderBarContext.Provider>
             </RecordPaneBarContext.Provider>
           </RecordPaneContext.Provider>
         </RecordDrawerContext.Provider>
