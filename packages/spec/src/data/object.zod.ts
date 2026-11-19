@@ -2880,11 +2880,14 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * attaches to the rows it serves, computed per caller on read and never stored.
  *
  * The worked case is plugin-approvals: `ApprovalService.attachViewers` sets
- * `viewer: { can_act, is_submitter, can_override }` on every `sys_approval_request`
- * row it reads, from the CALLER's identity, and the object's own action
- * predicates gate on `record.viewer.can_act`. Before this key nothing could
- * declare such a block in a shape the build validator reads, so those
- * predicates were refused as naming an undeclared field.
+ * `viewer: { can_act, is_submitter, can_override, can_override_approve }` on
+ * every `sys_approval_request` row it reads, from the CALLER's identity, and
+ * the object's own action predicates gate on those leaves: `can_act` for an
+ * approver's actions, `is_submitter` for the submitter's, and an override arm
+ * that reads `can_override_approve` on Approve and `can_override` on Reject,
+ * Reassign and Recall. Before this key nothing could declare such a block in
+ * a shape the build validator reads, so those predicates were refused as
+ * naming an undeclared field.
  *
  * ## Shape — a strict record of strict records
  *

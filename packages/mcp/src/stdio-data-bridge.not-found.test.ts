@@ -187,7 +187,8 @@ async function callOnLongLivedServer(bridge: McpDataBridge, name: string, args: 
 async function getRecordOverHttp(objectName: string, recordId: string) {
   const bridge: McpDataBridge = {
     async listObjects() { return [{ name: 'task', label: 'Task', fieldCount: 0 }]; },
-    async describeObject() { return null; },
+    // [#35138] `task` is served, as the stdio side serves it: a miss on it is a missing record, not an unrecorded object.
+    async describeObject(name) { return name === 'task' ? { name: 'task', label: 'Task', fields: [] } : null; },
     async query(object) { return { object, records: [], total: 0 }; },
     async get(object, id) { throw recordNotFoundError(object, id); },
     async create(object, data) { return { object, id: 'n1', record: data }; },
@@ -209,7 +210,14 @@ async function getRecordOverHttp(objectName: string, recordId: string) {
 
 /** The coded envelope `get_record` answers a miss with, as both doors put it on the wire. */
 function notFoundWire(object: string, id: string) {
-  return { error: { code: 'RECORD_NOT_FOUND', message: `Record ${id} not found in ${object}`, status: 404 } };
+  // `userMessage`: the end user's sentence the producer marks (#34699). The stdio
+  // bridge passes no caller locale, so it is the English one.
+  return {
+    error: {
+      code: 'RECORD_NOT_FOUND', message: `Record ${id} not found in ${object}`, status: 404,
+      userMessage: 'This record does not exist, or you do not have access to it.',
+    },
+  };
 }
 
 describe('stdio get_record answers a missing or hidden id with the coded RECORD_NOT_FOUND / 404', () => {

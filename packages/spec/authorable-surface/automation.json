@@ -191,6 +191,7 @@
     "automation/Flow:_packageId",
     "automation/Flow:_packageVersion",
     "automation/Flow:_provenance",
+    "automation/Flow:defaultActive",
     "automation/Flow:description",
     "automation/Flow:edges",
     "automation/Flow:errorHandling",

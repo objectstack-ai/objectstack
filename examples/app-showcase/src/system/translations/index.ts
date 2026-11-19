@@ -1291,18 +1291,67 @@ export const ShowcaseTranslationBundle = {
     // the three the Chart Gallery shows as KPI subtitles: 任务数 matches
     // showcase_project's `task_count` column, 总预算 the `kpi_total_budget`
     // widget and the command center's `cc_k6`.
+    //
+    // Every member's `description` is its business definition (ADR-0149 D1),
+    // translated at birth beside the authored English on the dataset; the
+    // `synonyms` are not here, they are matched in every language at once.
     datasets: {
       showcase_task_metrics: {
+        dimensions: {
+          status: { description: '任务在交付看板上所处的状态：待规划、待办、进行中、评审中或已完成。' },
+          priority: { description: '任务的紧急程度：低、中、高或紧急。' },
+          progress: { description: '任务的完成程度，即任务上填写的 0 到 100 的百分比。' },
+          created_at: { description: '任务的创建日期，按自然月归组。' },
+        },
         measures: {
-          task_count: { label: '任务数' },
-          done_count: { label: '已完成任务' },
-          done_rate: { label: '完成率' },
+          task_count: { label: '任务数', description: '任务的个数，涵盖从待规划到已完成的所有状态。' },
+          est_hours: { description: '各任务预计工时的合计；未填写预计工时的任务不计入。' },
+          avg_estimate: { description: '单个任务的平均预计工时；未填写预计工时的任务不参与平均。' },
+          avg_progress: { description: '各任务的平均进度，以 0 到 100 的百分点表示。' },
+          done_count: { label: '已完成任务', description: '处于已完成状态的任务个数。' },
+          done_rate: { label: '完成率', description: '已完成任务所占的比例：已完成任务数除以任务数，以百分比显示。' },
         },
       },
       showcase_project_metrics: {
+        dimensions: {
+          account: { description: '项目所服务的客户公司；结果显示客户名称。' },
+          status: { description: '项目所处的状态：计划中、进行中、已暂停、已完成或已取消。' },
+          health: { description: '项目报告的健康度：绿色表示进展正常，黄色表示需要关注，红色表示存在风险。' },
+        },
         measures: {
-          project_count: { label: '项目数' },
-          budget_sum: { label: '总预算' },
+          project_count: { label: '项目数', description: '项目的个数，涵盖所有状态：已完成和已取消的项目也计入。' },
+          budget_sum: { label: '总预算', description: '各项目计划预算的合计，涵盖所有状态。' },
+          spent_sum: { description: '各项目迄今已花费金额的合计，涵盖所有状态；与总预算对照可看出预算已用了多少。' },
+        },
+      },
+      showcase_invoice_metrics: {
+        dimensions: {
+          status: { description: '发票所处的状态：草稿、已发送、已付款或已作废。' },
+          region: { description: '发票所属的开票区域：美洲、欧洲、中东和非洲，或亚太。' },
+          issued_on: { description: '发票的开具日期，按自然月归组。' },
+          account: { description: '发票开给的客户公司；结果显示客户名称。' },
+        },
+        measures: {
+          invoice_count: { description: '发票的张数，涵盖所有状态：草稿和已作废的发票也计入。' },
+          total_home_sum: {
+            description: '所有状态发票的含税总额，每张都折算为组织的本位币，因此以不同币种开具的发票可以相加。',
+          },
+          paid_count: { description: '处于已付款状态的发票张数。' },
+          paid_rate: { description: '已付款发票所占的比例：已付款发票数除以发票数，以百分比显示。' },
+        },
+      },
+      showcase_account_metrics: {
+        dimensions: {
+          industry: { description: '客户公司所在的行业：科技、金融、医疗或零售。' },
+          status: { description: '客户在生命周期中所处的阶段：潜在客户、活跃客户或已流失。' },
+          sales_region: { description: '负责该客户的销售区域：美洲、欧洲、中东和非洲，或亚太。' },
+          signed_on: { description: '公司成为客户的日期，按自然月归组。' },
+        },
+        measures: {
+          account_count: { description: '客户的个数：潜在客户和已流失的客户也计入。' },
+          revenue_sum: {
+            description: '各客户公司年收入的合计，潜在客户和已流失的客户也计入；这是每家公司自身的年营收，而不是向它开票的金额。',
+          },
         },
       },
     },
@@ -1498,6 +1547,11 @@ export const ShowcaseTranslationBundle = {
           guides: { label: '指南' },
         },
       },
+    },
+    // The named import mapping, as the import wizard offers it by name.
+    // Counted by `check-i18n-coverage` like the groups above (#34939).
+    mappings: {
+      showcase_inquiry_feed: { label: '询盘导入（营销 CSV）' },
     },
   },
 };

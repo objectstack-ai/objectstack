@@ -29,11 +29,12 @@ import {
     metaRequestLocale,
     translateMetaList,
     type FederationCallKind,
+    type MetaListTranslationSources,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
-import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
@@ -42,9 +43,15 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironment } from '../action-dispatch.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#34766] The open MCP draft door: its registry, behind `metadata:write` and the user's own `manage_metadata`.
+import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+// The engine's order-cut-count read option for `aggregate` (and the request it
+// carries): `aggregate_records`' ranking form rides to the engine on it.
+import { AGGREGATE_ORDER_CUT, type AggregateOrderCutRequest } from '@objectstack/objectql';
+import { LATEST_PER, type LatestPerRequest } from '@objectstack/objectql';
 import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
@@ -242,6 +249,12 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
     const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
+    // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
+    // Design A): resolved per request, so the user's own `manage_metadata` is
+    // read for every call. `undefined` for a grant without `metadata:write`
+    // (an API key or a session carries none) and for an envelope with no user;
+    // a user without the capability gets a registry that lists nothing.
+    const authoring = await resolveOpenAuthoringInjection(deps, context, grantedScopes);
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -250,6 +263,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             // undefined = not scope-limited (API key / session); an array
             // narrows the registered tool families inside the MCP runtime.
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
+            ...(authoring ? { authoring } : {}),
             // [#31605] Who this request was admitted as: the resolved
             // ExecutionContext and the environment it was dispatched for. A
             // host-installed tool-call interceptor reads every call's
@@ -723,6 +737,16 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
 }
 
 /**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The stdio twin is
+ * `describedFieldNames` in `packages/mcp/src/stdio-data-bridge.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+    const fields = described.fields;
+    return Array.isArray(fields) ? fields.map((f: any) => String(f?.name ?? '')).filter(Boolean) : [];
+}
+
+/**
  * [#34721] An object's or a field's `description` as `list_objects` and
  * `describe_object` serve it: `{ description }` when the definition, as the
  * caller is served it ({@link servedToCaller}), carries a non-blank string
@@ -1020,6 +1044,24 @@ export function buildMcpBridge(
         return { obj: projected.object ?? obj };
     };
 
+    /**
+     * [#34872] Served objects in THIS caller's locale: the `/meta` object
+     * door's translation (`translateMetaList`, the routine `GET /meta/object`
+     * and the dataset tools below run) for this request's locale
+     * ({@link metaTranslationSources}), ⛔ never a second translation routine.
+     * Handed the objects AS THIS CALLER IS SERVED THEM ({@link servedToCaller}):
+     * the translator rewrites the text of the fields it is given and adds
+     * none, so a field the mask removed stays absent, its translated label and
+     * description with it (ADR-0106 D3/D5). Computed per request (ADR-0156).
+     * No locale, or a key the bundle does not carry, leaves the authored text;
+     * names never change.
+     */
+    const inCallerLocale = async (served: readonly any[]): Promise<any[]> => {
+        if (served.length === 0) return [...served];
+        const translated = await translateMetaList(metaTranslationSources(deps, context, getProtocol), 'object', [...served]);
+        return Array.isArray(translated) ? translated : [...served];
+    };
+
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
     const readObjectForCaller = async (name: string): Promise<any> => {
         const def: any = await readServedObject(name);
@@ -1028,7 +1070,7 @@ export function buildMcpBridge(
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        const out: any[] = [];
+        const served: any[] = [];
         // [ADR-0106 D5(2)] Every listed object as this caller is served it,
         // so `fieldCount` counts the fields that exist for them. One object
         // that cannot be projected refuses the listing, as the `/meta`
@@ -1036,7 +1078,11 @@ export function buildMcpBridge(
         for (const listed of objs) {
             const o = await servedToCaller(listed);
             // [ruling record 6787890900] An object the caller may not read is left out.
-            if (o === undefined) continue;
+            if (o !== undefined) served.push(o);
+        }
+        const out: any[] = [];
+        // [#34872] …in the caller's locale, the page translated in one call.
+        for (const o of await inCallerLocale(served)) {
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
@@ -1046,6 +1092,24 @@ export function buildMcpBridge(
             });
         }
         return out;
+    };
+
+    /**
+     * `describe_object`'s answer for THIS caller: the object as they are
+     * served it ({@link readObjectForCaller}'s two steps, kept apart so the
+     * declaration it masks is in hand, [#32530] `readonly`), [#34872] in
+     * their locale, [#32435] each field and rule carrying what a write needs
+     * ({@link describeServedObject}). `null` for an object not served.
+     * [#35137] Also the served-schema half of `fieldVisibilityOf`, so the
+     * fields `withheldFields` may name are exactly the ones this answer lists.
+     */
+    const describeForCaller = async (name: string): Promise<Record<string, unknown> | null> => {
+        const declared: any = await readServedObject(name);
+        const def: any = declared ? await servedToCaller(declared) : declared;
+        if (!def) return null;
+        // `declared` is read for the `readonly` verdict alone, which no translation touches.
+        const [localized] = await inCallerLocale([def]);
+        return describeServedObject(localized, declared);
     };
 
     return {
@@ -1115,15 +1179,7 @@ export function buildMcpBridge(
                 : await ((await getMeta()) as any)?.getObject?.(name);
             return isAiReadExposed(def);
         },
-        describeObject: async (name: string) => {
-            // {@link readObjectForCaller}'s two steps, kept apart so the
-            // declaration it masks is in hand ([#32530] `readonly`).
-            const declared: any = await readServedObject(name);
-            const def: any = declared ? await servedToCaller(declared) : declared;
-            if (!def) return null;
-            // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def, declared);
-        },
+        describeObject: describeForCaller,
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
@@ -1152,7 +1208,16 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
-            return await callData('query', { object, query }, driver, envId, ec);
+            // [#35145] `query_records`' `expand`: the names, which `findData`
+            // lowers, gates (`assertExpandTargetsExist`, `servedExpand`) and
+            // the engine expands in one batched read per field, as on REST.
+            if (Array.isArray(o?.expand) && o.expand.length > 0) query.expand = o.expand;
+            if (!o?.latestPer) return await callData('query', { object, query }, driver, envId, ec);
+            // [latest per group] One row per group rides to the engine on the
+            // engine's own symbol key (never a wire key), through `findData`,
+            // which judges the query as it judges every other.
+            const latestPer: LatestPerRequest = { by: o.latestPer.by, orderBy: o.latestPer.orderBy };
+            return await callData('query', { object, query, [LATEST_PER]: latestPer }, driver, envId, ec);
         },
         /**
          * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] The
@@ -1184,6 +1249,27 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
+        /**
+         * [#35137] The two answers `query_records` and `get_record` name
+         * withheld fields from (`McpFieldVisibility`, `@objectstack/mcp`), both
+         * asked as THIS request's caller: the field names `describe_object`
+         * lists for them, read off the very answer it serves
+         * ({@link describeForCaller}, so whatever it leaves out is left out
+         * here too), and this request's security service's readable answer
+         * (`getReadableFields`). No security service, an object not served,
+         * or no readable answer: `undefined`, and nothing is named. A throw
+         * reaches the tool layer, which names nothing either.
+         */
+        fieldVisibilityOf: async (object: string) => {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.getReadableFields !== 'function') return undefined;
+            const described = await describeForCaller(object);
+            if (!described) return undefined;
+            const readable = await security.getReadableFields(object, ec);
+            if (!Array.isArray(readable)) return undefined;
+            return { served: describedFieldNames(described), readable };
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
@@ -1208,6 +1294,45 @@ export function buildMcpBridge(
             );
             return res?.rows ?? [];
         },
+        /**
+         * [aggregate order and cut] `aggregate_records` with an `orderBy` /
+         * `limit`: the same engine door as `aggregate` above, with the
+         * engine's request on its own symbol key (never a wire key). `callData`
+         * reads the engine's outcome back and answers its `totalGroups`; a read
+         * the driver's statement did not serve is refused there.
+         */
+        aggregateGroups: async (object: string, o: any) => {
+            const orderCut: AggregateOrderCutRequest = {
+                orderBy: o.orderBy,
+                ...(typeof o?.limit === 'number' ? { limit: o.limit } : {}),
+            };
+            const res: any = await callData(
+                'aggregate',
+                {
+                    object,
+                    where: o?.where,
+                    groupBy: o?.groupBy,
+                    aggregations: o?.aggregations,
+                    timezone: o?.timezone,
+                    [AGGREGATE_ORDER_CUT]: orderCut,
+                },
+                undefined,
+                envId,
+                ec,
+            );
+            if (typeof res?.totalGroups !== 'number') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${object}' came back without its group count, so its `
+                        + 'rows are not the answer and none is returned.',
+                };
+            }
+            return { rows: res?.rows ?? [], totalGroups: res.totalGroups };
+        },
+        // [#35138] The caller's locale ladder for a sentence the record tools
+        // compose (`ifNotRecorded`): this request's, as the dataset tools'
+        // `nextStep` reads it on this door (`userTextLocalesOf`).
+        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────
         // ADR-0063 §2 names skills the only third-party extension primitive,
@@ -1516,6 +1641,34 @@ export async function resolveMcpDatasetToolsService(
 }
 
 /**
+ * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
+ * the request's i18n service (a lookup that throws is none, and the text is
+ * then served untranslated), its protocol (an object's packaged base and a
+ * declared override's pair translations) and its locale — the
+ * `Accept-Language` / `?locale=` reading every `/meta` answer takes
+ * (`metaRequestLocale`), the i18n service's default last. One reading for the
+ * dataset tools and the object tools, so the two answer one caller in one
+ * locale.
+ */
+function metaTranslationSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    getProtocol: () => Promise<unknown>,
+): MetaListTranslationSources {
+    return {
+        resolveI18nService: async () => {
+            try {
+                return await deps.resolveService(context, 'i18n', context.environmentId);
+            } catch {
+                return undefined;
+            }
+        },
+        resolveProtocol: getProtocol,
+        requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+    };
+}
+
+/**
  * [ADR-0149 D2] The bridge's three dataset members over the analytics
  * service's executor, bound to THIS request's principal.
  *
@@ -1543,17 +1696,7 @@ function datasetToolMembers(
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
         const translated = await translateMetaList(
-            {
-                resolveI18nService: async () => {
-                    try {
-                        return await deps.resolveService(context, 'i18n', envId);
-                    } catch {
-                        return undefined;
-                    }
-                },
-                resolveProtocol: async () => protocol as any,
-                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
-            },
+            metaTranslationSources(deps, context, async () => protocol),
             'dataset',
             items,
         );

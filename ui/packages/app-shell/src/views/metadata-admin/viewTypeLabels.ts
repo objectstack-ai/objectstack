@@ -23,6 +23,7 @@ const VIEW_TYPE_FALLBACK_LABELS: Record<string, string> = {
   map: 'Map',
   chart: 'Chart',
   tree: 'Tree',
+  timesheet: 'Timesheet',
 };
 
 /** Whether `value` is a view type this module has a name for. */

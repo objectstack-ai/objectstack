@@ -56,6 +56,7 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+import type { UserMessageCaller } from '@objectstack/core';
 import {
     PackageScopedNameRefusedError,
     packageScopedHolderSource,
@@ -113,6 +114,10 @@ import {
     servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    AGGREGATE_ORDER_CUT,
+    type AggregateOrderCutRequest,
+    LATEST_PER,
+    type LatestPerRequest,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
@@ -699,7 +704,7 @@ export async function callData(deps: ActionExecutionDeps,
             // answered 200 or 404 depending only on whether the deployment
             // registered the protocol slot — a difference the caller cannot see
             // and never asked for.
-            if (!match) throw recordNotFoundError(params.object, params.id);
+            if (!match) throw recordNotFoundError(params.object, params.id, executionContext);
             return { object: params.object, id: params.id, record: match };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -748,7 +753,7 @@ export async function callData(deps: ActionExecutionDeps,
             // all read `.status` → `.statusCode` → 500). A caller mistake was
             // reported as an internal fault and taken to the error reporter
             // with it.
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for an update that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
@@ -824,7 +829,7 @@ export async function callData(deps: ActionExecutionDeps,
             if (all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for a delete that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.delete(params.object, findOpts({ where: { id: params.id } }))
@@ -862,8 +867,35 @@ export async function callData(deps: ActionExecutionDeps,
             const { object, ...rest } = params;
             return rest;
         })();
+        // [latest per group] The engine's one-row-per-group request, when an
+        // in-process door (the MCP tools) set it on `params` under the
+        // engine's own symbol key — never a wire key. Handed to `findData` on
+        // its request under the same key, and read back: a read that comes back
+        // without the engine's outcome on it was not served as one row per
+        // group, and its rows are no answer.
+        const latestPer = (params as Record<symbol, unknown> | undefined)?.[LATEST_PER] as LatestPerRequest | undefined;
         if (protocol && typeof protocol.findData === 'function') {
-            return await protocol.findData({ object: params.object, query, context: executionContext });
+            if (latestPer === undefined) {
+                return await protocol.findData({ object: params.object, query, context: executionContext });
+            }
+            const answer = await protocol.findData({ object: params.object, query, context: executionContext, [LATEST_PER]: latestPer });
+            if (latestPer.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The one-row-per-group read of '${params.object}' came back without being served as one row `
+                        + 'per group, so its rows are not the answer and none is returned.',
+                };
+            }
+            return answer;
+        }
+        if (latestPer !== undefined) {
+            // The fallback below serves canonical QueryAST keys only; one row
+            // per group is the engine's window, reached through `findData`.
+            throw {
+                statusCode: 501,
+                message: `Data query fallback cannot serve one row per group of '${params.object}': the protocol service `
+                    + '(metadata-protocol plugin) is not registered, and only its findData carries that read to the engine.',
+            };
         }
         if (ql) {
             // [#4386] This fallback used to pass only `{ context }` — the
@@ -960,6 +992,13 @@ export async function callData(deps: ActionExecutionDeps,
                 groupBy: params.groupBy,
                 aggregations: params.aggregations,
             });
+            // [aggregate order and cut] The engine's order-cut-count request,
+            // when an in-process door (the MCP tools) set it on `params` under
+            // the engine's own symbol key — never a wire key. Handed to the
+            // engine as its read option and read back: a read that comes back
+            // without the engine's outcome on it was not ordered and cut in
+            // the driver's statement, and its rows are no answer.
+            const orderCut = (params as Record<symbol, unknown> | undefined)?.[AGGREGATE_ORDER_CUT] as AggregateOrderCutRequest | undefined;
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -969,8 +1008,19 @@ export async function callData(deps: ActionExecutionDeps,
                     ...(params.timezone ? { timezone: params.timezone } : {}),
                     ...(executionContext ? { context: executionContext } : {}),
                 },
+                ...(orderCut !== undefined
+                    ? [{ [AGGREGATE_ORDER_CUT]: orderCut } as Parameters<typeof engine.aggregate>[2]] as const
+                    : [] as const),
             );
-            return { object: params.object, rows: rows ?? [] };
+            if (orderCut === undefined) return { object: params.object, rows: rows ?? [] };
+            if (orderCut.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${params.object}' came back without being served by the `
+                        + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+                };
+            }
+            return { object: params.object, rows: rows ?? [], totalGroups: orderCut.outcome.totalGroups };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -3397,10 +3447,10 @@ export async function refuseDeniedSubjectBeforeHandOff(
     const { objectName, recordId, subject, ec, envId } = wiring;
     if (isDeclarativeUpdateAction(action)) {
         if (subject.recordLoadDenied) await refuseUngrantedDeclarativeUpdate(deps, requestContext, objectName, ec, envId);
-        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        refuseDeniedSubjectLoad(objectName, recordId, subject, ec);
         return;
     }
-    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
+    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject, ec);
 }
 
 export function summarizeAction(
@@ -4231,18 +4281,26 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
  * refusal that distinguished the two would make this door the existence oracle
  * every other door declines to be. #15079 argued it; this consumes the argument
  * rather than reopening it.
+ *
+ * [#34699] `caller` is whose language the envelope's `userMessage` is in (the
+ * request's `locale`, then its `workspaceLocale`, then `en`): every door that
+ * holds the caller's execution context passes it, so the action and flow-start
+ * doors answer the sentence the data door answers for the same miss. It
+ * changes the language only — the sentence is one text for a hidden row and a
+ * missing one, so no door becomes an existence oracle through it.
  */
 export function refuseDeniedSubjectLoad(
     objectName: string,
     recordId: string | undefined,
     subject: ActionSubjectRecordLoad,
+    caller?: UserMessageCaller | null,
 ): void {
     if (!subject.recordLoadDenied) return;
     // The producer never attempts a load without a `recordId`, so the verdict
     // cannot be `true` without one. The `??` names the id in the envelope; it is
     // ⛔ NOT a second condition — a guard whose extra clause can switch it off is
     // the inert-guard shape this whole seam exists to remove.
-    throw recordNotFoundError(objectName, recordId ?? '');
+    throw recordNotFoundError(objectName, recordId ?? '', caller);
 }
 
 /**
@@ -4368,9 +4426,11 @@ export function refuseDeniedSubjectLoadBeforeDispatch(
     objectName: string,
     recordId: string | undefined,
     subject: ActionSubjectRecordLoad,
+    // [#34699] The caller whose language the refusal's `userMessage` is in.
+    caller?: UserMessageCaller | null,
 ): void {
     if (subject.recordLoadDenied && forwardsOnDeniedSubjectLoad(action)) return;
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    refuseDeniedSubjectLoad(objectName, recordId, subject, caller);
 }
 
 /**
@@ -4526,7 +4586,7 @@ export async function refuseUnreadableFlowStartRecords(
         const once = `${objectName}\u0000${recordId}`;
         if (loaded.has(once)) return;
         const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
-        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        refuseDeniedSubjectLoad(objectName, recordId, subject, executionContext);
         loaded.add(once);
     };
     const named = start.recordKeys.filter(([, value]) => isNamedStartValue(value));
@@ -4805,7 +4865,7 @@ export async function executeDeclarativeUpdateAction(
     if (subject.recordLoadDenied) {
         await refuseUngrantedDeclarativeUpdate(_deps, wiring.requestContext, objectName, ec, envId);
     }
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    refuseDeniedSubjectLoad(objectName, recordId, subject, ec);
 
     // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────
     // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this

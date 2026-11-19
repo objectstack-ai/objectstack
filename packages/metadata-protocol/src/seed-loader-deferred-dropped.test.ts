@@ -124,7 +124,7 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -134,14 +134,14 @@ const compositeSeeds = (region: string) => [
   {
     object: 'drop_department',
     externalId: ['name', 'region'],
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Engineering', region, head_id: 'Alice' }],
   },
   {
     object: 'drop_worker',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Alice', department_id: 'Engineering' }],
   },
@@ -205,7 +205,13 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
     });
 
     expect(logger.error).not.toHaveBeenCalled();
-    expect(logger.warn).not.toHaveBeenCalled();
+    // [#34613] The dataset is keyed now (the unkeyed `insert` it ran in is
+    // retired), so the one `warn` is #28952's notice that every record keys
+    // empty — a fact about the declaration. Nothing at warn is about the
+    // deferral the load healed.
+    const warned = logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatch(/keys every record on externalId 'name\+region', and no record carries a value for it/);
   });
 
   /**
@@ -281,7 +287,7 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
     {
       object: 'drop_department',
       externalId: 'name',
-      mode: 'insert',
+      mode: 'ignore',
       env: ['prod', 'dev', 'test'],
       records: [{ name: 'Engineering', region: 'APAC', head_id: 'Alice' }],
     },
@@ -291,7 +297,7 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
       // deferred update that would muddy the assertions below.
       object: 'drop_worker',
       externalId: 'name',
-      mode: 'insert',
+      mode: 'ignore',
       env: ['prod', 'dev', 'test'],
       records: [{ name: 'Alice' }],
     },

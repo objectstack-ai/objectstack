@@ -2439,12 +2439,12 @@ export class AuthManager {
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
       getAudience: (...a) => this.getAudience(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
       getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
       getApi: (...a) => this.getApi(...a),
-      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
@@ -2717,14 +2717,16 @@ export class AuthManager {
    * "policy says there will never be one" and skip a pointless re-read;
    * `undefined` means the reconciler could not be consulted at all.
    */
-  private settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
+  private settleMembership(userId: unknown, ctx?: unknown): Promise<ReconcileOutcome | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy'> = {
+    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'> = {
       get config() { return readConfig(); },
       getMembershipPolicy: (...a) => this.getMembershipPolicy(...a),
+      hasInvitationAdmissionInRequest: (...a) => this.hasInvitationAdmissionInRequest(...a),
+      isInvitationAdmissionInRequest: (...a) => this.isInvitationAdmissionInRequest(...a),
     };
-    return settleMembership.call(host, userId);
+    return settleMembership.call(host, userId, ctx);
   }
 
   /**
@@ -2832,6 +2834,7 @@ export class AuthManager {
   private pendingOwnerVerifiedStamps = new Map<string, { stagedAtMs: number }>();
 
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
+
 
   /**
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
@@ -2988,7 +2991,7 @@ export class AuthManager {
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageInvitationAdmission' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
@@ -2998,6 +3001,7 @@ export class AuthManager {
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
+      stageInvitationAdmission: (...a) => this.stageInvitationAdmission(...a),
       stageOwnerVerifiedStamp: (...a) => this.stageOwnerVerifiedStamp(...a),
       stageSelfRegistrationGrant: (...a) => this.stageSelfRegistrationGrant(...a),
     };
@@ -3409,6 +3413,45 @@ export class AuthManager {
     for (const [key, value] of this.pendingOwnerVerifiedStamps) {
       if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
+  }
+
+  /**
+   * The addresses the admission gate admitted in each in-flight better-auth
+   * request by their invitation alone (`isAdmittedByInvitationAlone`), keyed by
+   * that request's endpoint context — the object better-auth hands the
+   * admission gate and every database hook of the same endpoint call, as
+   * {@link usersCreatedInRequest} is. `settleMembership`
+   * (`auth-manager-membership-admission.ts`) states the rule it serves.
+   *
+   * Request-scoped on purpose: the admission belongs to the creation it
+   * admitted, so nothing staged here can be read by another creation of the
+   * same address (an administrator's, a boot command's) in a later request,
+   * and both settle seams of THIS creation read the same entry. A `WeakMap`,
+   * so the entry dies with the endpoint context.
+   */
+  private invitationAdmissionsInRequest = new WeakMap<object, Set<string>>();
+
+  /** Record that the current request's admission gate admitted `email` by its invitation alone. */
+  private stageInvitationAdmission(ctx: unknown, email: string): void {
+    if (!ctx || typeof ctx !== 'object') return;
+    let staged = this.invitationAdmissionsInRequest.get(ctx);
+    if (!staged) {
+      staged = new Set();
+      this.invitationAdmissionsInRequest.set(ctx, staged);
+    }
+    staged.add(email.trim().toLowerCase());
+  }
+
+  /** Did this request admit any address by its invitation alone? In-memory only. */
+  private hasInvitationAdmissionInRequest(ctx: unknown): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return (this.invitationAdmissionsInRequest.get(ctx)?.size ?? 0) > 0;
+  }
+
+  /** Did this request admit `email` by its invitation alone? In-memory only. */
+  private isInvitationAdmissionInRequest(ctx: unknown, email: string): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return this.invitationAdmissionsInRequest.get(ctx)?.has(email.trim().toLowerCase()) === true;
   }
 
   /**
@@ -5971,6 +6014,10 @@ export class AuthManager {
       // value served only while direct sign-in is on (registered in
       // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
       ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
+      // Where the console's explicit sign-out returns (`hold` | `identity-provider`),
+      // served on the same terms as `localSignIn` (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(directSignIn.enabled ? { afterSignOut: directSignIn.afterSignOut } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The public base URL every emailed / OAuth link is built on

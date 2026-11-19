@@ -129,6 +129,8 @@ export interface ProtocolHost {
     readonly getMetaItem: ObjectStackProtocolImplementation['getMetaItem'];
     readonly getMetaItems: ObjectStackProtocolImplementation['getMetaItems'];
     readonly getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    readonly getPackageTranslationBundle: ObjectStackProtocolImplementation['getPackageTranslationBundle'];
+    readonly getPackagedFieldPatchBases: ObjectStackProtocolImplementation['getPackagedFieldPatchBases'];
     readonly getPackagedObjectBase: ObjectStackProtocolImplementation['getPackagedObjectBase'];
     readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
     readonly governServedObject: ObjectStackProtocolImplementation['governServedObject'];

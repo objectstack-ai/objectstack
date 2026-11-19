@@ -53,6 +53,7 @@ import { flowVerdictBody } from './protocol-flow-save-replay.js';
 import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
+import { withStillShownBy } from './destructive-still-shown-by.js';
 import { canonicalMetaType, canonicalizeMetaRequestType, resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import {
     permissionSetOwnerBindingRefusal,
@@ -338,7 +339,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getMetaItems' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -1164,10 +1165,29 @@ export class ProtocolSaveFacet {
                     // detail made required: its finding names how many stored rows
                     // hold no master, since those stop serving everyone. One count
                     // per such finding, none on any other save; see the module.
-                    const issues = await withNullMasterRowCounts(
+                    const counted = await withNullMasterRowCounts(
                         detectDestructiveObjectChanges(prev, request.item), request.item, request.name,
                         (field) => host.engine.count(request.name, { where: { [field]: { $null: true } }, context: { isSystem: true } }),
                     );
+                    // A removed or retyped field names the items that still
+                    // show it (`stillShownBy`), read from one served listing per
+                    // type; it rides `issues`, which every door relays.
+                    // Caught HERE: the enclosing `catch` reads any other throw as
+                    // "skip the safety check", so a failure computing the names
+                    // must leave them absent and the 409 standing.
+                    let issues = counted;
+                    try {
+                        issues = await withStillShownBy(
+                            request.name, prev, request.item, counted,
+                            async (type) => (await host.getMetaItems({ type }))?.items ?? [],
+                        );
+                    } catch (error) {
+                        console.warn(
+                            `[Protocol] object '${request.name}': naming the items that still show a removed or `
+                            + `retyped field failed (${(error as { message?: string } | null)?.message ?? String(error)}); `
+                            + 'the refusal carries no `stillShownBy`.',
+                        );
+                    }
                     if (issues.length > 0) {
                         // [commit 809e61221] Deliberately NOT trimmed to a headline, and
                         // this is a MEASURED verdict rather than an oversight —

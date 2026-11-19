@@ -82,6 +82,27 @@ describe('collectExpectedEntries — a hook\'s declared texts (#34374)', () => {
   });
 });
 
+describe('collectExpectedEntries — a named import mapping\'s label', () => {
+  const entries = collectExpectedEntries({
+    mappings: [
+      { name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] },
+      { name: 'unlabelled_feed', targetObject: 'lead', fieldMapping: [] },
+    ],
+  }, { warnedGroups: new Set() });
+
+  it('yields mappings.<mapping>.label with the authored label, from the mapping', () => {
+    const entry = entries.find((e) => e.path.join('.') === 'mappings.lead_feed.label');
+    expect(entry?.sourceValue).toBe('Lead feed');
+    expect(entry?.source).toBe('mapping');
+  });
+
+  it('keys nothing from the field mapping, and no authored text for a mapping with no label', () => {
+    const keys = entries.map((e) => e.path.join('.'));
+    expect(keys.filter((k) => k.startsWith('mappings.lead_feed.'))).toEqual(['mappings.lead_feed.label']);
+    expect(entries.find((e) => e.path.join('.') === 'mappings.unlabelled_feed.label')?.sourceValue).toBeUndefined();
+  });
+});
+
 describe('authorWarnedTranslationGroups on the shipped ledger', () => {
   // A browser reads no ledger file, so there the default leaves no group out.
   // That matches the CLI only while the ledger warns on no translation group;
@@ -151,5 +172,139 @@ describe('collectExpectedEntries — preflight field labels', () => {
 
   it('emits nothing for a preflight that declares no `fields` (the panel shows the answer as JSON)', () => {
     expect(preflightKeys(['objects', 'sys_package', '_actions', 'install_bare'])).toEqual([]);
+  });
+});
+
+/**
+ * [#34652] `resultDialog.columns.<path>.<column_path>` and
+ * `preflight.columns.<path>.<column_path>` — one key per labelled column of a
+ * `format: 'table'` field, beside the field's own `fields.<path>` key, both
+ * levels keyed by the literal path (a dotted path stays ONE segment).
+ */
+describe('collectExpectedEntries — answer table column labels', () => {
+  const table = {
+    path: 'rows',
+    label: 'Result per row',
+    format: 'table',
+    columns: [
+      { path: 'email', label: 'Email' },
+      { path: 'error.message', label: { en: 'Not added because', 'zh-CN': '未添加的原因' } },
+      { path: 'row', format: 'json' },
+    ],
+  };
+  const stack = {
+    objects: [
+      {
+        name: 'sys_user',
+        label: 'User',
+        fields: {},
+        actions: [
+          {
+            name: 'import_users',
+            label: 'Import',
+            type: 'api',
+            params: [{ name: 'csv', type: 'text' }],
+            resultDialog: { title: 'Done', fields: [{ path: 'summary.added', label: 'Added' }, table] },
+            preflight: { read: { url: '/api/v1/x' }, fields: [table] },
+          },
+        ],
+      },
+    ],
+  };
+  const entries = collectExpectedEntries(stack, { warnedGroups: new Set() });
+  const root = ['objects', 'sys_user', '_actions', 'import_users'];
+  const blockKeys = (block: string) =>
+    entries
+      .filter((e) => root.every((seg, i) => e.path[i] === seg) && e.path[root.length] === block)
+      .map((e) => e.path.slice(root.length));
+
+  it('lists a key per labelled column beside the field key, an unlabelled column none', () => {
+    expect(blockKeys('resultDialog')).toEqual([
+      // The optional prose slots are listed whether authored or not.
+      ['resultDialog', 'title'],
+      ['resultDialog', 'description'],
+      ['resultDialog', 'acknowledge'],
+      ['resultDialog', 'fields', 'summary.added'],
+      ['resultDialog', 'fields', 'rows'],
+      ['resultDialog', 'columns', 'rows', 'email'],
+      ['resultDialog', 'columns', 'rows', 'error.message'],
+    ]);
+    const email = entries.find((e) => e.path.join('\u0000') === [...root, 'resultDialog', 'columns', 'rows', 'email'].join('\u0000'));
+    expect(email).toMatchObject({ sourceValue: 'Email', inline: 'Email', source: 'action', objectName: 'sys_user' });
+    const reason = entries.find((e) => e.path.join('\u0000') === [...root, 'resultDialog', 'columns', 'rows', 'error.message'].join('\u0000'));
+    expect(reason?.inlineLocales).toEqual({ en: 'Not added because', 'zh-CN': '未添加的原因' });
+  });
+
+  it('lists the same column keys under a preflight table field', () => {
+    expect(blockKeys('preflight')).toEqual([
+      ['preflight', 'fields', 'rows'],
+      ['preflight', 'columns', 'rows', 'email'],
+      ['preflight', 'columns', 'rows', 'error.message'],
+    ]);
+  });
+});
+
+describe('collectExpectedEntries — an action\'s declared texts (#34374 PR2)', () => {
+  const texts = { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } };
+  const body = { language: 'js', source: "await ctx.text('email_subject', { subject: input.subject });" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_contact',
+      fields: {},
+      actions: [{ name: 'send_email', label: 'Send email', type: 'script', body, texts }],
+    }],
+    actions: [
+      { name: 'send_digest', label: 'Send digest', type: 'script', body, texts },
+      { name: 'log_call', label: 'Log call', objectName: 'crm_contact', type: 'script', body, texts },
+    ],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.texts.<key>.message with the declared sentence, for an inline action', () => {
+    expect(at('objects.crm_contact._actions.send_email.texts.email_subject.message')).toMatchObject({
+      sourceValue: 'Email: {{ subject }}', source: 'action', objectName: 'crm_contact',
+    });
+  });
+
+  it('yields a top-level bound action\'s texts under its object', () => {
+    expect(at('objects.crm_contact._actions.log_call.texts.email_subject.message')?.sourceValue).toBe('Email: {{ subject }}');
+  });
+
+  it('yields an object-less action\'s texts under globalActions', () => {
+    expect(at('globalActions.send_digest.texts.email_subject.message')).toMatchObject({
+      sourceValue: 'Email: {{ subject }}', source: 'globalAction',
+    });
+  });
+});
+
+describe('collectExpectedEntries — an action\'s refusal catalogue (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'A {{ stage }} deal is closed.' } }, params: ['stage'] },
+  };
+  const body = { language: 'js', source: "throw { code: 'NOT_DRAFT' };" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_invoice',
+      fields: {},
+      actions: [{ name: 'submit_signoff', label: 'Submit', type: 'script', body, refusals }],
+    }],
+    actions: [{ name: 'export_all', label: 'Export', type: 'script', body, refusals: { NOT_DRAFT: refusals.NOT_DRAFT } }],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.refusals.<CODE>.message with the declared sentence', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+
+  it('yields each declared reason under its code', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.STAGE_LOCKED.reasons.closed.message')?.sourceValue)
+      .toBe('A {{ stage }} deal is closed.');
+  });
+
+  it('yields an object-less action\'s refusals under globalActions', () => {
+    expect(at('globalActions.export_all.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
   });
 });

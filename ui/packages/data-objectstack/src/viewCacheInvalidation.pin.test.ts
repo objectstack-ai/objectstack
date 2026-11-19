@@ -109,6 +109,12 @@ function makeDS(opts: {
           : opts.published != null && !(opts.published instanceof Error);
         return json({ success: true, reset: hasRow });
       }
+      // objectstack#35054 — `updateView` merges onto the stored view: the
+      // layered read answers the same rows as the stored ones.
+      if (/\/layers(\?|$)/.test(url)) {
+        const published = opts.published instanceof Error ? null : (opts.published ?? { name: 'v1', object: 'account' });
+        return json({ code: null, overlay: published, overlayScope: published ? 'env' : null, effective: published, draft: opts.draft ?? null });
+      }
       if (url.includes('state=draft')) {
         if (opts.draft == null) return json({ error: 'not found' }, 404);
         return json({ type: 'view', name: opts.draft.name, item: opts.draft });

@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/i18n",
-  "version": "18.5.0",
+  "version": "18.6.0",
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
@@ -47,6 +47,11 @@
       "types": "./dist/namespaces/developer/index.d.ts",
       "import": "./dist/namespaces/developer/index.js",
       "default": "./dist/namespaces/developer/index.js"
+    },
+    "./namespaces/timesheet": {
+      "types": "./dist/namespaces/timesheet/index.d.ts",
+      "import": "./dist/namespaces/timesheet/index.js",
+      "default": "./dist/namespaces/timesheet/index.js"
     }
   },
   "scripts": {

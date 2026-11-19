@@ -20,6 +20,7 @@ export const fr: TranslationData = {
         nav_account_profile: { label: 'Profil' },
         nav_account_mobile_app: { label: 'Application mobile' },
         nav_account_notifications: { label: 'Notifications' },
+        nav_account_notification_settings: { label: 'Paramètres de notification' },
         nav_account_approvals: { label: 'Mes approbations en attente' },
         nav_account_memberships: { label: 'Mes organisations' },
         nav_account_linked: { label: 'Comptes liés' },
@@ -38,7 +39,6 @@ export const fr: TranslationData = {
       navigation: {
         group_overview: { label: 'Aperçu' },
         group_apps: { label: 'Applications' },
-        nav_packaged_actions: { label: 'Actions fournies par les packages' },
         nav_marketplace_browse: { label: 'Parcourir la Marketplace' },
         nav_marketplace_installed: { label: 'Applications installées' },
         nav_cloud_connection: { label: 'Connexion au cloud' },
@@ -190,13 +190,55 @@ export const fr: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Nombre d’utilisateurs' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Nombre d’organisations' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Nombre de sessions' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Nombre d’installations' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Nombre d’utilisateurs',
+          description: 'Nombre de comptes utilisateur enregistrés, actifs ou non.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Nombre d’organisations',
+          description: 'Nombre d’organisations enregistrées ; chacune possède ses propres membres, données et paramètres.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Nombre de sessions',
+          description: 'Nombre de sessions de connexion enregistrées, une par connexion depuis un navigateur ou un appareil.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Nombre d’installations',
+          description: 'Nombre d’installations de paquets enregistrées, une par paquet installé.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Type d’action' }, user_id: { label: 'Utilisateur' } },
-      measures: { event_count: { label: 'Nombre d’événements' } },
+      dimensions: {
+        action: {
+          label: 'Type d’action',
+          description: 'Type d’action enregistré par une entrée du journal d’audit, par exemple une création, une modification, une suppression, une connexion ou un changement de configuration.',
+        },
+        user_id: {
+          label: 'Utilisateur',
+          description: 'Utilisateur qui a effectué l’action auditée ; les entrées écrites par la plateforme elle-même sont regroupées sous « Système ».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Nombre d’événements',
+          description: 'Nombre d’entrées du journal d’audit ; chacune enregistre une action effectuée dans le système, par un utilisateur ou par la plateforme elle-même.',
+        },
+      },
     },
   },
 

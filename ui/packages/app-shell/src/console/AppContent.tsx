@@ -72,7 +72,12 @@ import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
-import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
+import {
+  packagedActionsStudioPath,
+  packagedAutomationStudioPath,
+  setupMetadataRest,
+  setupMetadataStudioPath,
+} from '../views/studio-design/setupMetadataRedirect.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
@@ -1669,6 +1674,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                     Studio's Automations pillar. The static path outranks the
                     `:ns/:name` route below it. */}
                 <Route path="component/automation/packaged" element={<PackagedAutomationRedirect />} />
+                {/* objectstack#34724 (ADR-0146 D4, amended 2026-11-17) — the
+                    retired Setup › Packaged Actions page
+                    (`automation:packaged-actions`): a bookmark opens Studio,
+                    where a packaged action's switch is. */}
+                <Route path="component/automation/packaged-actions" element={<PackagedActionsRedirect />} />
                 <Route path="component/:ns/:name/*" element={<ComponentNavView />} />
                 {/* Legacy: old metadata routes built before the REST-style nesting
                     landed. Redirect to the new /metadata/:type/... shape. */}
@@ -2106,6 +2116,16 @@ function SetupMetadataRoute({ children }: { children?: ReactNode }) {
 function PackagedAutomationRedirect() {
   const location = useLocation();
   return <Navigate to={packagedAutomationStudioPath(location.search, location.hash)} replace />;
+}
+
+/**
+ * A bookmark of the retired Setup › Packaged Actions page (objectstack#34724)
+ * opens Studio: the named app's Data pillar, else the Studio landing
+ * (`packagedActionsStudioPath`).
+ */
+function PackagedActionsRedirect() {
+  const location = useLocation();
+  return <Navigate to={packagedActionsStudioPath(location.search, location.hash)} replace />;
 }
 
 /**

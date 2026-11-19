@@ -6,6 +6,7 @@
     "ACTION_CONFIRMATION_SERVICE (const)",
     "AIActionConfirmation (interface)",
     "AIConversation (interface)",
+    "AIConversationMessage (type)",
     "AIMessage (type)",
     "AIMessageWithTools (type)",
     "AIObjectResult (interface)",

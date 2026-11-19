@@ -570,6 +570,134 @@ describe('resolveActionPreflight + translateAction', () => {
   });
 });
 
+/**
+ * [#34652] `resultDialog.columns.<path>.<column_path>` and
+ * `preflight.columns.<path>.<column_path>` — the header labels of a
+ * `format: 'table'` field's `columns[]`, a SIBLING of `fields` keyed by the
+ * field's literal path and then the column's literal path (dots inside one
+ * key at both levels). A bundle with no column key answers as it did before.
+ */
+describe('answer table column labels (resultDialog.columns / preflight.columns)', () => {
+  const importUsers = {
+    name: 'import_users',
+    objectName: 'sys_user',
+    resultDialog: {
+      title: 'Import finished',
+      fields: [
+        { path: 'summary.added', label: 'Added', format: 'text' },
+        {
+          path: 'rows',
+          label: 'Result per row',
+          format: 'table',
+          columns: [
+            { path: 'email', label: 'Email' },
+            { path: 'error.message', label: 'Not added because' },
+            { path: 'row', format: 'json' },
+          ],
+        },
+      ],
+    },
+    preflight: {
+      read: { url: '/api/v1/x' },
+      fields: [
+        { path: 'plan', label: 'Plan', format: 'table', columns: [{ path: 'step.name', label: 'Step' }] },
+      ],
+    },
+  };
+
+  const bundle: TranslationBundle = {
+    en: {
+      objects: {
+        sys_user: {
+          _actions: {
+            import_users: {
+              resultDialog: { columns: { rows: { email: 'Email address' } } },
+            },
+          },
+        },
+      },
+    },
+    'zh-CN': {
+      objects: {
+        sys_user: {
+          _actions: {
+            import_users: {
+              resultDialog: {
+                title: '导入完成',
+                fields: { rows: '逐行结果' },
+                columns: {
+                  rows: { email: '邮箱', 'error.message': '未添加的原因', row: '行' },
+                  // A field path the dialog does not declare: read by nothing.
+                  ghost: { email: '幽灵' },
+                },
+              },
+              preflight: { columns: { plan: { 'step.name': '步骤' } } },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  it('overlays each declared column header in zh-CN, a dotted column path as ONE key', () => {
+    const out = resolveActionResultDialog(bundle, importUsers, { locale: 'zh-CN' });
+    expect(out?.fields?.[1]).toEqual({
+      path: 'rows',
+      label: '逐行结果',
+      format: 'table',
+      columns: [
+        { path: 'email', label: '邮箱' },
+        { path: 'error.message', label: '未添加的原因' },
+        // A column with no authored label gains the translated one.
+        { path: 'row', label: '行', format: 'json' },
+      ],
+    });
+    // A field that declares no columns is untouched by the columns map.
+    expect(out?.fields?.[0]).toEqual({ path: 'summary.added', label: 'Added', format: 'text' });
+    // Source spec is not mutated.
+    expect(importUsers.resultDialog.fields[1].columns?.[0].label).toBe('Email');
+  });
+
+  it('reads the en bundle in en, and keeps the authored header where en carries no key', () => {
+    const out = resolveActionResultDialog(bundle, importUsers, { locale: 'en' });
+    expect(out?.fields?.[1].columns?.map((c) => c.label)).toEqual(['Email address', 'Not added because', undefined]);
+  });
+
+  it('a bundle without any column key answers exactly as before (authored headers)', () => {
+    const noColumns: TranslationBundle = {
+      'zh-CN': { objects: { sys_user: { _actions: { import_users: { resultDialog: { fields: { rows: '逐行结果' } } } } } } },
+    };
+    const out = resolveActionResultDialog(noColumns, importUsers, { locale: 'zh-CN' });
+    expect(out?.fields?.[1]).toEqual({ ...importUsers.resultDialog.fields[1], label: '逐行结果' });
+    expect(TranslationDataSchema.safeParse(noColumns['zh-CN']).success).toBe(true);
+  });
+
+  it('walks the fallback chain per column', () => {
+    const out = resolveActionResultDialog(bundle, importUsers, { locale: 'ja-JP', fallbackChain: ['zh-CN'] });
+    expect(out?.fields?.[1].columns?.[1].label).toBe('未添加的原因');
+  });
+
+  it('overlays a preflight table field\'s column headers the same way', () => {
+    const out = resolveActionPreflight(bundle, importUsers, { locale: 'zh-CN' });
+    expect(out?.fields?.[0].columns).toEqual([{ path: 'step.name', label: '步骤' }]);
+  });
+
+  it('translateAction carries the translated column headers on both blocks', () => {
+    const out = translateAction(importUsers, bundle, { locale: 'zh-CN' });
+    expect(out.resultDialog?.fields?.[1].columns?.[0].label).toBe('邮箱');
+    expect(out.preflight?.fields?.[0].columns?.[0].label).toBe('步骤');
+  });
+
+  it('the columns shape parses through TranslationDataSchema; a non-string header is refused', () => {
+    expect(TranslationDataSchema.safeParse(bundle['zh-CN']).success).toBe(true);
+    const flat = TranslationDataSchema.safeParse({ globalActions: { x: { resultDialog: { columns: { rows: '邮箱' } } } } });
+    expect(flat.success).toBe(false);
+    expect(flat.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['invalid_type', 'globalActions.x.resultDialog.columns.rows'],
+    ]);
+  });
+});
+
 describe('translateAction — description + params (the declared-and-linted keys)', () => {
   // The card's own zh-CN fixture: `TranslationItemSchema` declares every key
   // below and the translation linter validates them, so this bundle is what an
@@ -6334,6 +6462,7 @@ describe('resolveMetadataFormSchemaTitles — bundle labels overlaid as JSON Sch
 import { type TranslateDocumentOptions } from './i18n-resolver';
 import { ReportSchema } from '../ui/report.zod';
 import { BookSchema } from './book.zod';
+import { MappingSchema } from '../data/mapping.zod';
 
 describe("label precedence on an overridden item — the pair's translation, then the override's label, then the base's translation (ADR-0146 D2)", () => {
   /** One translatable string of a served document, and the bundle address that translates it. */
@@ -6508,10 +6637,23 @@ describe("label precedence on an overridden item — the pair's translation, the
           ['books', 'crm_manual', 'groups', 'start', 'label'], '快速上手'),
       ],
     },
+    // An import mapping is an ADR-0146 D2 listed overridable type too, and its
+    // one translatable string is its label.
+    mapping: {
+      base: () => MappingSchema.parse({
+        name: 'crm_lead_feed',
+        label: 'Lead feed',
+        targetObject: 'crm_lead',
+        fieldMapping: [{ source: 'Company', target: 'company' }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['mappings', 'crm_lead_feed', 'label'], '线索导入'),
+      ],
+    },
   };
 
-  it('covers every document translator the ruling names — all eight types', () => {
-    expect(Object.keys(CASES).sort()).toEqual(['app', 'book', 'dashboard', 'dataset', 'object', 'page', 'report', 'view']);
+  it('covers every document translator the ruling names — all nine types', () => {
+    expect(Object.keys(CASES).sort()).toEqual(['app', 'book', 'dashboard', 'dataset', 'mapping', 'object', 'page', 'report', 'view']);
     for (const type of Object.keys(CASES)) expect(TRANSLATABLE_METADATA_TYPES.has(type), type).toBe(true);
   });
 

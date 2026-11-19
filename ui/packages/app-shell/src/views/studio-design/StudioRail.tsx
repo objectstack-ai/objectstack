@@ -22,24 +22,46 @@
  * box and offers to clear it. A blank query, or a list that is empty before any
  * search (`count === 0`), never shows that line: the pillar's own empty state
  * speaks there.
+ *
+ * objectstack#35061 — the narrow form (`studio-tokens.ts` says when it
+ * applies): 52 px, each row one character (`railAbbreviation`) with its full
+ * name on hover and as its accessible name, groups as a rule. A 「»」 bar at
+ * the top floats the whole rail over the content column; a picked row,
+ * Escape (focus back on 「»」) or a click outside puts it back. Both forms are
+ * the same DOM, so a pillar's rows and their handlers are untouched. Under
+ * the mobile breakpoint the rail keeps its own overlay and never narrows.
  */
 
 import * as React from 'react';
-import { Plus, Search } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight, Plus, Search } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import {
   STUDIO_RAIL_COUNT,
+  STUDIO_RAIL_FLOAT_BAR,
+  STUDIO_RAIL_FLOATING,
   STUDIO_RAIL_GROUP,
+  STUDIO_RAIL_GROUP_NARROW,
   STUDIO_RAIL_HEADER,
   STUDIO_RAIL_HEADING,
+  STUDIO_RAIL_LIST_NARROW,
+  STUDIO_RAIL_NARROW_HIDDEN,
+  STUDIO_RAIL_NARROW_WIDTH,
   STUDIO_RAIL_ROW,
+  STUDIO_RAIL_ROW_ABBR,
   STUDIO_RAIL_ROW_ACTIVE,
   STUDIO_RAIL_ROW_IDLE,
   STUDIO_RAIL_ROW_INDENT,
+  STUDIO_RAIL_ROW_LABEL_NARROW,
+  STUDIO_RAIL_ROW_NARROW,
+  STUDIO_RAIL_ROW_PART,
   STUDIO_RAIL_SEARCH,
   STUDIO_RAIL_WIDTH,
 } from './studio-tokens.js';
+import { railAbbreviation } from './railAbbreviation.js';
+
+/** The marker the narrow form keeps in the list: rows and groups carry it, anything else is left out. */
+const RAIL_ITEM = { 'data-studio-rail-item': '' } as const;
 
 export interface StudioRailSearch {
   value: string;
@@ -107,81 +129,124 @@ export function StudioRail({
   const locale = useMetadataLocale();
   const searchText = search?.value.trim() ?? '';
   const noMatches = search !== undefined && search.matchCount === 0 && searchText !== '' && count !== 0;
+  const navRef = React.useRef<HTMLElement | null>(null);
+  const floatToggleRef = React.useRef<HTMLButtonElement | null>(null);
+  // objectstack#35061 — the narrow rail floated over the content column.
+  const [floating, setFloating] = React.useState(false);
+  React.useEffect(() => {
+    if (!floating) return undefined;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!navRef.current?.contains(e.target as Node)) setFloating(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [floating]);
+  const floatLabel = t(floating ? 'engine.studio.rail.collapse' : 'engine.studio.rail.expand', locale);
   return (
     <nav
+      ref={navRef}
       data-testid={testId}
       aria-label={rest['aria-label']}
+      data-rail-peek={floating ? 'on' : 'off'}
+      onKeyDown={(e) => {
+        if (!floating || e.key !== 'Escape') return;
+        e.stopPropagation();
+        setFloating(false);
+        floatToggleRef.current?.focus();
+      }}
+      onClick={(e) => {
+        if (floating && (e.target as Element).closest?.('button[data-studio-rail-item]')) setFloating(false);
+      }}
       className={cn(
-        'flex shrink-0 flex-col border-r bg-sidebar',
+        'group/studio-rail relative flex shrink-0 flex-col border-r bg-sidebar',
         STUDIO_RAIL_WIDTH,
+        !isMobile && STUDIO_RAIL_NARROW_WIDTH,
         isMobile && 'absolute inset-y-0 left-0 z-20 shadow-lg transition-transform duration-200',
         isMobile && !open && '-translate-x-full',
         className,
       )}
     >
-      {pinned}
-      <div className={STUDIO_RAIL_HEADER}>
-        <span className={cn(STUDIO_RAIL_HEADING, 'min-w-0 truncate')} title={heading}>
-          {heading}
-        </span>
-        {count !== undefined && <span className={STUDIO_RAIL_COUNT}>{count}</span>}
-        <span className="ml-auto flex items-center gap-1">
-          {headerExtra}
-          {onAdd && (
+      <div className={cn('flex min-h-0 flex-col', floating ? STUDIO_RAIL_FLOATING : 'h-full w-full')}>
+        {!isMobile && (
+          <div className={STUDIO_RAIL_FLOAT_BAR}>
             <button
+              ref={floatToggleRef}
               type="button"
-              onClick={onAdd}
-              aria-label={addLabel}
-              title={addLabel}
-              data-testid={addTestId}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-expanded={floating}
+              aria-label={floatLabel}
+              title={floatLabel}
+              data-testid="studio-rail-float"
+              onClick={() => setFloating((v) => !v)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Plus className="h-4 w-4" />
-              <span className="sr-only">{addLabel}</span>
-            </button>
-          )}
-        </span>
-      </div>
-      {search && (
-        <div className="shrink-0 px-3 pb-2">
-          <label htmlFor={searchId} className="sr-only">
-            {search.label ?? search.placeholder}
-          </label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            <input
-              ref={searchRef}
-              id={searchId}
-              value={search.value}
-              onChange={(e) => search.onChange(e.target.value)}
-              placeholder={search.placeholder}
-              data-testid={search.testId}
-              className={STUDIO_RAIL_SEARCH}
-            />
-          </div>
-        </div>
-      )}
-      {filters}
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1">
-        {children}
-        {noMatches && (
-          <div data-testid="studio-rail-no-matches" className="px-2 py-3 text-[11px] text-muted-foreground">
-            <p>{tFormat('engine.list.emptyQuery', locale, { query: searchText })}</p>
-            <button
-              type="button"
-              data-testid="studio-rail-clear-search"
-              onClick={() => {
-                search?.onChange('');
-                searchRef.current?.focus();
-              }}
-              className="mt-1 rounded-sm font-medium text-foreground underline-offset-2 hover:underline"
-            >
-              {t('engine.studio.rail.clearSearch', locale)}
+              {floating ? <ChevronsLeft className="h-4 w-4" aria-hidden="true" /> : <ChevronsRight className="h-4 w-4" aria-hidden="true" />}
             </button>
           </div>
         )}
+        {pinned}
+        <div className={cn(STUDIO_RAIL_HEADER, STUDIO_RAIL_NARROW_HIDDEN)}>
+          <span className={cn(STUDIO_RAIL_HEADING, 'min-w-0 truncate')} title={heading}>
+            {heading}
+          </span>
+          {count !== undefined && <span className={STUDIO_RAIL_COUNT}>{count}</span>}
+          <span className="ml-auto flex items-center gap-1">
+            {headerExtra}
+            {onAdd && (
+              <button
+                type="button"
+                onClick={onAdd}
+                aria-label={addLabel}
+                title={addLabel}
+                data-testid={addTestId}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="sr-only">{addLabel}</span>
+              </button>
+            )}
+          </span>
+        </div>
+        {search && (
+          <div className={cn('shrink-0 px-3 pb-2', STUDIO_RAIL_NARROW_HIDDEN)}>
+            <label htmlFor={searchId} className="sr-only">
+              {search.label ?? search.placeholder}
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <input
+                ref={searchRef}
+                id={searchId}
+                value={search.value}
+                onChange={(e) => search.onChange(e.target.value)}
+                placeholder={search.placeholder}
+                data-testid={search.testId}
+                className={STUDIO_RAIL_SEARCH}
+              />
+            </div>
+          </div>
+        )}
+        {filters && <div className={cn('contents', STUDIO_RAIL_NARROW_HIDDEN)}>{filters}</div>}
+        <div className={cn('min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1', STUDIO_RAIL_LIST_NARROW)}>
+          {children}
+          {noMatches && (
+            <div data-testid="studio-rail-no-matches" className="px-2 py-3 text-[11px] text-muted-foreground">
+              <p>{tFormat('engine.list.emptyQuery', locale, { query: searchText })}</p>
+              <button
+                type="button"
+                data-testid="studio-rail-clear-search"
+                onClick={() => {
+                  search?.onChange('');
+                  searchRef.current?.focus();
+                }}
+                className="mt-1 rounded-sm font-medium text-foreground underline-offset-2 hover:underline"
+              >
+                {t('engine.studio.rail.clearSearch', locale)}
+              </button>
+            </div>
+          )}
+        </div>
+        {footer && <div className={cn('shrink-0 border-t px-3 py-2', STUDIO_RAIL_NARROW_HIDDEN)}>{footer}</div>}
       </div>
-      {footer && <div className="shrink-0 border-t px-3 py-2">{footer}</div>}
     </nav>
   );
 }
@@ -196,17 +261,30 @@ export interface StudioRailRowProps extends Omit<React.ButtonHTMLAttributes<HTML
   indent?: boolean;
   /** Let a long label wrap onto a second line instead of truncating (the objectui#11794 flow rail). */
   wrap?: boolean;
+  /**
+   * objectstack#35061 — the row's full name, for the narrow form's one
+   * character and its hover; a string `children` is used when this is absent.
+   * With neither, the narrow form keeps the row's icon.
+   */
+  name?: string;
   children: React.ReactNode;
 }
 
 /** One 32 px rail row. The label truncates (or wraps, when asked); the trailing slot never does. */
 export const StudioRailRow = React.forwardRef<HTMLButtonElement, StudioRailRowProps>(function StudioRailRow(
-  { active = false, icon, trailing, indent = false, wrap = false, className, children, ...buttonProps },
+  { active = false, icon, trailing, indent = false, wrap = false, name, className, children, ...buttonProps },
   ref,
 ) {
+  const locale = useMetadataLocale();
+  const fullName = name ?? (typeof children === 'string' ? children : undefined);
+  const abbr = railAbbreviation(fullName, locale);
   return (
     <button
       type="button"
+      {...RAIL_ITEM}
+      // The narrow form's hover: a row's own title when it has one, else its name.
+      title={fullName}
+      data-abbr={abbr || undefined}
       {...buttonProps}
       ref={ref}
       className={cn(
@@ -214,12 +292,14 @@ export const StudioRailRow = React.forwardRef<HTMLButtonElement, StudioRailRowPr
         wrap && 'h-auto min-h-8 py-1.5',
         active ? STUDIO_RAIL_ROW_ACTIVE : STUDIO_RAIL_ROW_IDLE,
         indent && STUDIO_RAIL_ROW_INDENT,
+        STUDIO_RAIL_ROW_NARROW,
+        abbr && STUDIO_RAIL_ROW_ABBR,
         className,
       )}
     >
-      {icon}
-      <span className={cn('min-w-0 flex-1', wrap ? 'break-words' : 'truncate')}>{children}</span>
-      {trailing}
+      {icon && <span className={abbr ? STUDIO_RAIL_ROW_PART : 'contents'}>{icon}</span>}
+      <span className={cn('min-w-0 flex-1', wrap ? 'break-words' : 'truncate', STUDIO_RAIL_ROW_LABEL_NARROW)}>{children}</span>
+      {trailing && <span className={STUDIO_RAIL_ROW_PART}>{trailing}</span>}
     </button>
   );
 });
@@ -257,7 +337,7 @@ export function StudioRailGroup({ label, count, collapsed = false, onToggle, tes
     </>
   );
   return (
-    <div data-testid={testId}>
+    <div data-testid={testId} {...RAIL_ITEM} className={STUDIO_RAIL_GROUP_NARROW}>
       {onToggle ? (
         <button type="button" onClick={onToggle} aria-expanded={!collapsed} className={cn(STUDIO_RAIL_GROUP, 'w-full rounded-md text-left hover:text-foreground')}>
           {header}

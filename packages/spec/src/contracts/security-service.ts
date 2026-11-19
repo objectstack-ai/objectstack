@@ -706,6 +706,36 @@ export interface ISecurityService {
   getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
+   * [ADR-0106 D1/D7] The METADATA-PLANE answer for the fields of `object` that
+   * a disabled package withholds from the served schema: which of those names
+   * may be DISCLOSED to `context`. A served object read carries the names in
+   * its `_withheldFields` read decoration; a schema-serving outlet keeps an
+   * entry for a caller only when this answer names it.
+   *
+   * **Why {@link getMetadataReadableFields} cannot answer it.** That answer
+   * enumerates the live object's fields, and a withheld field is not one of
+   * them, so it names a withheld field for no caller, admitted or denied. This
+   * member judges each withheld name against the field's STORAGE definition
+   * (the definition with every `extend` contribution folded in, disabled or
+   * not): the caller's permission-set field entry, the stored field's own
+   * `requiredPermissions`, the same zero-set fallback resolution as
+   * {@link getMetadataReadableFields}, and the on-behalf-of delegator's
+   * intersection. A name it cannot judge is not admitted.
+   *
+   * **Answers:** the admitted names, a subset of the withheld ones; `[]` when
+   * nothing is withheld or nothing withheld may be disclosed; `undefined` when
+   * the withheld set or the caller's posture cannot be determined. A system
+   * context yields every withheld name.
+   *
+   * **OPTIONAL, and absence fails CLOSED.** Unlike the readable-field answers,
+   * a consumer reads absence, `undefined` and a throw alike as "no withheld
+   * name may be disclosed" and drops every entry: the decoration is a hint to
+   * a client, never a field the caller needs to read, so dropping it costs a
+   * convenience and serving it on a guess discloses a field's existence.
+   */
+  getMetadataReadableWithheldFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
    * [#20935] The field names `context` may QUERY ON in `object` — filter, sort,
    * group or aggregate by — as far as field-level security decides. The
    * query-side twin of {@link getReadableFields}, for the doors that compile

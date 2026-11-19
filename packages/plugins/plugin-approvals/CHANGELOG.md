@@ -1,5 +1,212 @@
 # @objectstack/plugin-approvals
 
+## 18.6.0
+
+### Minor Changes
+
+- 27c0b20: feat(approvals): a `platform_admin` approver type routes a step to the platform administrators, from the deployment's own packaged flows only
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The widening: `ApproverType` accepts a new member, `platform_admin`, which takes no `value`. Nothing accepted before is refused. The narrowing that comes with it applies only to the new member: it is refused outside the running body of a `source: 'code'` package's flow.
+  
+  `{ type: 'platform_admin' }` on an approval node addresses the deployment's platform administrators: the people `hasPlatformAdminStanding` answers yes for, which covers a holder of the cross-tenant `admin_full_access` grant and a verified account whose email `OS_PLATFORM_OWNER_EMAIL` declares.
+  
+  - The step opens on ONE address slot, `platform_admin:*`, that names no person. Nobody is enumerated, nobody is notified, and the slot grants no record read. `onEmptyApprovers` does not treat the slate as empty.
+  - At the inbox and at every decision, the server asks whether the caller has platform-administrator standing at that moment, from the stored rows and never from the session's posture. A caller who has it decides as an ordinary approver, and the decision records the person (`actor_id`) and the slot (`acted_as`). A revoked administrator cannot decide, also on a request opened before the revocation. An organization administrator takes no slot. The #3424 tenant-admin override is withheld from a request whose slate holds `platform_admin:*`, including a mixed slate: an override decides the whole request, so the guard covers the whole request. Its ordinary approvers still decide as usual. The platform-admin override is unchanged.
+  - Only the `platform_admin` approver type opens the slot, on the slate as the decision, override and inbox doors read it: no other way a slate is resolved or later rewritten opens it. A request records, when it opens, that a `platform_admin` step opened its slot, and the doors honour the slot only on a request that carries that record. Moving the slot to someone else needs the platform's own standing, the platform-admin override, or the system.
+  - The new member is accepted only in the running body of a flow shipped by a package the deployment registers in code (registry `source: 'code'`, or a residual owner a code door recorded). The origin is answered for the body whose step is being opened, in every run state. Anywhere else the node refuses to open, fails closed and writes nothing: a flow authored in the environment, an environment override of a packaged flow, and a marketplace or authored package's flow. The runtime save door refuses an active flow naming it with `approval-approver-platform-admin-authored`. `os lint` knows the type and refuses nothing, because it cannot know which door will register a package. No designer offers the type.
+  
+  Nothing to migrate.
+
+### Patch Changes
+
+- 3a08833: fix(plugin-approvals): the record-lock refusal is worded in the writer's locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A user who saved a record held by an approval in progress was refused `409 RECORD_LOCKED` with an English sentence in every locale, while the other refusals on the same request answered in the request locale. A zh-CN writer read `Project '华东仓储客服平台实施' is locked while an approval is in progress, and cannot be edited until that approval is complete`.
+  
+  The sentence is now rendered through the shared Operation Message Catalog (`@objectstack/spec/system`, `renderOperationMessage`), the catalog the record door's other refusals use. Four new keys cover what the lock hook has in hand: `record_locked` (object label and record title), `record_locked_untitled` (label only), `record_locked_unlabeled` (title only) and `record_locked_opaque` (neither). They ship in `en`, `zh-CN`, `ja-JP` and `es-ES`. The object is named by its label in the writer's locale (`objects.<object>.label` from the deployment's language pack, else the declared label), never by its API name. The same zh-CN writer now reads `项目「华东仓储客服平台实施」正在审批中，已被锁定，审批完成前无法编辑`. Batch rows (`updateMany`, `batch` upsert) carry the same sentence.
+  
+  Unchanged: the English sentence is byte-identical, a locale the catalog does not carry reads English, and the wire code `RECORD_LOCKED`, the 409 status and the `RECORD_LOCKED: ` message prefix do not move. A deployment can override each sentence under `errors.record_locked`, `errors.record_locked_untitled`, `errors.record_locked_unlabeled` and `errors.record_locked_opaque`.
+- 21d84a8: fix(plugin-approvals): a deployment's `errors.*` override of an approvals refusal is read for a bare `zh` writer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two plugin-approvals refusals are worded through the shared Operation Message Catalog: the record-lock refusal (`409 RECORD_LOCKED`, the `record_locked*` keys) and the non-submitter recall refusal (`approval_recall_not_submitter`). Both asked the `i18n` service for the deployment's `errors.<key>` override with the request's locale tag as sent. The service matches tags exactly, so a browser sending `zh` missed a deployment's zh-CN override and read the built-in zh-CN sentence instead. Both now negotiate the tag against the locales the service holds first, the way objectql's catalog callers do, so a bare `zh` reads the zh-CN override. The object label in the same sentence was already asked this way.
+  
+  `renderOperationMessage` (`@objectstack/spec/system`) now asks the override for its template, without the parameters, and fills the placeholders once. Before, the `i18n` service filled them and the renderer filled the result again, so a value that itself contained a placeholder, such as a record titled `Q{{object}}`, was expanded on the second pass. An override's text now prints a record title exactly as written, as the built-in sentence already did. Overrides that use only `{{name}}` placeholders read the same as before.
+  
+  The wire code, status and `CODE: message` envelope of both refusals are unchanged.
+- 62d9d0d: fix(approvals): a decision stranded by a refused next step says which refusal stranded it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Say an approval flow's next step after the decision is an `update_record`, and a record hook refuses that write (a declared refusal, a validation rule, a permission). `POST /api/v1/approvals/requests/{id}/approve` answers `500 RESUME_FAILED`. The status code and the four #13807 facts are unchanged: the decision stands (`finalized: true`), and `runId` and `repairable` name the stranded run. The body did not say why the run stopped. The engine reported the refusal (`AutomationResult.innerRefusal` and `.userMessage`), and the approvals service dropped it before it built the error.
+  
+  The `RESUME_FAILED` body now also carries that refusal when there was one:
+  
+  - `innerRefusal`: `{ code, message }`, the same member the flow doors serve in their `FLOW_FAILED` details;
+  - `userMessage`: the refusal's marked end-user text at the top level, for example a hook's declared sentence in the caller's locale.
+  
+  Both are absent when the run met a fault rather than a refusal. `StrandedDecisionDetails` (`@objectstack/types`) declares them as optional members, and `strandedDecisionDetails` drops a malformed one without dropping the four facts.
+  
+  A flow author who wants the refusal handled instead of stranded can draw a `fault` edge from that step. The engine routes the refusal down it, and the decision then answers normally. This is now pinned and documented in the approvals guide.
+- e95210d: feat(approvals): the approval request page shows the whole business record, not a six-field summary
+  
+  Clause-②: yes (widening — new @object-ui/i18n locale keys only; no metadata or schema accept set)
+  Metadata-protocol: none
+  
+  An approver used to see the request's amount and at most six fields under "As submitted", and had to open the business record to read the rest. The request page (`sys_approval_request_detail`) now draws the request whole, with no tabs: the header, the highlights, then the decision panel (`record:approval_decision`), last.
+  
+  - **On top:** the deciding comment on a decided request, and the request's declared decision actions, unchanged.
+  - **Left, "As submitted":** every field of the request's snapshot the reader may read, in the sections and order of the target object's default record page, each through the record page's own cell. Field-level security is unchanged: the service's per-reader redaction and the client's field verdicts both apply. The panel reads the target record once (`findOne`, no params). A field whose current value differs from the submitted one is marked "Changed" with its current value. If the record cannot be read, nothing is marked and the card says so. Below the card are the record's child tables (owned `master_detail` children and `relatedList: 'primary'` tables). They are read-only and show CURRENT rows, with a note saying so, because the snapshot keeps the record's own row only.
+  - **Right rail, in this order:** approval progress (the step line, the decision tally, and who the request waits on), the record's attachment fields, and the request's activity (its `sys_approval_action` thread, newest first). The activity is read only when the reader's verdict allows reading that object. In the console the approvals route answers that read for every party to the request.
+  
+  Nothing is editable on the page, and the snapshot's storage is unchanged. The record approvals panel and the request page now share one action-timeline component. New `approvalsInbox.*` keys in all eleven `@object-ui/i18n` packs: `snapshotChanged`, `snapshotCurrentValue`, `snapshotOpenRecord`, `snapshotCurrentUnreadable`, `snapshotChildCurrent`, `progressTitle`, `attachmentsTitle`.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- 1354d2a: fix(plugin-approvals)!: the administrator override never approves a request its actor submitted
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. The approvals doors answer one more caller with a refusal, and the served viewer block gains one flag beside the three it had, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an administrator (a platform admin, or a tenant admin in their own organization) who submitted a pending approval request and holds no slot on its step:
+  
+  - `POST /api/v1/approvals/requests/:id/approve` answers `403 FORBIDDEN`, whatever the step's `excludeSubmitter` says. The override never approves its actor's own request.
+  - A `POST /api/v1/approvals/requests/:id/reassign` admitted through the override answers `400 VALIDATION_FAILED` when its target is the request's submitter (their user id, their email in any letter case, or a position only they hold in the request's organization), whoever makes it. When the submitter makes it themselves, every target they could act under is refused, a position they share with others included.
+  
+  **Not moved.** Rejecting and recalling their own request stay open to them. An administrator's override of a request they did not submit is unchanged, and still audited `via_override: true`; such an administrator may still reassign it to a position the submitter shares with others. A submitter who holds a real slot on the step stays `excludeSubmitter`'s question, and that step's reassign check now reads an email target in any letter case as well.
+  
+  The `viewer` block that `getRequest` / `listRequests` serve gains `can_override_approve`: `can_override`, except on a request the viewer submitted. `sys_approval_request`'s Approve action reads it in place of `can_override`, so the Approve control is not offered where the server refuses it. `can_override` keeps its meaning for Reject, Reassign and Recall, and `ApprovalRequestRow.viewer` in `@objectstack/spec/contracts` declares the new flag as optional.
+  
+  The fix for a caller: have an approver on the step or another administrator decide the request, reassign it to someone else, or recall it and send the record for approval again.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

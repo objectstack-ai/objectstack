@@ -1,16 +1,19 @@
 /**
  * useResponsiveSidebar
  *
- * Folds the sidebar to its icon rail while the window is narrower than
+ * Folds the sidebar while the window is narrower than
  * `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` (and wider than the phone breakpoint,
  * where the drawer takes over), and unfolds it when the window widens again
- * (objectstack#27593). A reader who keeps the sidebar open is left alone.
- * Must be called inside a SidebarProvider context.
+ * (objectstack#27593). Folded, the console's sidebar is hidden, and its full
+ * menu floats over the content from the window's left edge or the app bar's
+ * trigger (ruling 6973617688 on objectstack#35062; `consoleSidebarRail.ts`).
+ * A reader who keeps the sidebar open is left alone. Must be called inside a
+ * SidebarProvider context.
  *
  * The fold is not the reader's choice, so it does not keep one: every open
  * and close on a wide window is kept as the wide-window choice, and only
  * those (objectstack#28079). A window that turns wide, or a load that opens
- * wide, gets that choice back, whatever the fold, the overlay or a sidebar
+ * wide, gets that choice back, whatever the fold, the float or a sidebar
  * kept open on a narrow window did to the primitive's cookie meanwhile.
  * @module
  */
@@ -34,7 +37,7 @@ export function useResponsiveSidebar() {
     setOpenRef.current = setOpen;
   });
 
-  // A layout effect, so a window that opens narrow paints the rail first.
+  // A layout effect, so a window that opens narrow paints the hidden sidebar first.
   useLayoutEffect(() => {
     const previous = last.current;
     last.current = { wide, railMode };

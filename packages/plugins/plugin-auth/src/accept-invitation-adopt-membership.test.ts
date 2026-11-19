@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
-import { inviteForAudienceGate } from './audience-gate-test-support';
+import { operatorProvisioningField } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -180,10 +180,14 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
 
 /** Sign a user up and return their session cookie + user id. */
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
-  // [#11739] default posture invite_only: fixture users beyond the first
-  // enter through the invitation carve-out (see audience-gate-test-support).
-  const invitationId = await inviteForAudienceGate(engine, email);
-  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
+  // [#11739] default posture invite_only: fixture users beyond the first are
+  // members bound at creation — the auto-bound invitee this suite is about —
+  // so they enter through the operator door (`operatorProvisioningField`,
+  // audience-gate-test-support). A sign-up admitted by the invitation it
+  // presents joins no organization until it accepts.
+  const res = await post(manager, '/sign-up/email', {
+    email, password: PASSWORD, name: email, ...operatorProvisioningField(manager, email),
+  });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();
@@ -197,6 +201,17 @@ const membersOf = (engine: MemoryEngine, organizationId: string, userId: string)
 
 const invitationsFor = (engine: MemoryEngine, email: string) =>
   (engine.tables.get('sys_invitation') ?? []).filter((i) => i.email === email);
+
+/**
+ * Mark a fixture user's address verified, as completing the verification mail
+ * does: accepting an invitation needs a verified address
+ * (`invitation-acceptance-verified-address.test.ts`).
+ */
+const verify = (engine: MemoryEngine, userId: string) => {
+  const user = (engine.tables.get('sys_user') ?? []).find((u) => u.id === userId);
+  expect(user, `no user ${userId}`).toBeDefined();
+  user!.email_verified = true;
+};
 
 /** Force a membership role directly, the way an operator's data would look. */
 const setRole = (engine: MemoryEngine, organizationId: string, userId: string, role: string) => {
@@ -259,6 +274,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     const invitee = await signUp(manager, engine, 'invitee@example.com');
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)).toHaveLength(1);
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -300,6 +316,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     // The reconciler's default, which adoption must not silently keep.
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)[0]!.role).toBe('member');
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -336,6 +353,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
       expires_at: new Date(Date.now() + 86_400_000),
     });
 
+    verify(engine, owner.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -376,6 +394,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)).toHaveLength(1);
     expect(membersOf(engine, PARTNER_ORG, invitee.userId)).toHaveLength(0);
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',

@@ -240,6 +240,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Готово",
           fields: {
             email: "Электронная почта",
+            pendingAgain: "Уже ожидает",
             notApplied: "Уже ожидает входа, поэтому не применено (задайте в записи)",
             managerError: "Руководитель",
             "host.reason": "Приглашение не отправлено"
@@ -263,6 +264,19 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "Уже ожидают, уведомлены повторно",
             "summary.failed": "Не добавлено",
             rows: "Результат по строкам"
+          },
+          columns: {
+            rows: {
+              row: "Строка",
+              email: "Эл. почта",
+              ok: "Успешно",
+              alreadyPending: "Уже ожидает, уведомлён повторно",
+              "host.notified": "Хостинг-организация уведомлена",
+              "host.reason": "Почему не уведомлена",
+              "error.message": "Не добавлен, потому что",
+              notApplied: "Не применено (задайте в записи)",
+              managerError: "Руководитель"
+            }
           }
         }
       },

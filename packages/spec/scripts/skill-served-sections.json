@@ -1,0 +1,34 @@
+{
+  "about": "The sections of the published skills that the hosted MCP door serves by exact heading text. Read by check-skill-served-sections.ts, whose header states the matching rule. The hosted table is the cloud repository's packages/service-ai-studio/src/skills/published-refs.ts; when that table moves, its owner updates this list by pull request.",
+  "forms": {
+    "json": "the item's example is a JSON block; a one-line note says how TypeScript wraps the same literal",
+    "json+ts": "a JSON block beside a TypeScript block that carries what JSON cannot (a function, or lines the hosted door replaces)",
+    "neutral": "prose and tables only: no fenced TypeScript to translate"
+  },
+  "sections": [
+    { "file": "skills/objectstack-data/rules/naming.md", "heading": "Critical Rules", "item": 6, "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-data/SKILL.md", "heading": "Object Definition", "form": "json", "json": ["Object"] },
+    { "file": "skills/objectstack-data/SKILL.md", "heading": "Field Type Selection", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-data/SKILL.md", "heading": "Relationship Patterns", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-data/SKILL.md", "heading": "Validation Patterns", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-data/rules/validation.md", "heading": "State Machine Validation", "form": "json", "json": ["ValidationRule"] },
+    { "file": "skills/objectstack-data/rules/relationships.md", "heading": "Roll-up Summaries", "form": "json", "json": ["Field", "PermissionSet"] },
+    { "file": "skills/objectstack-data/references/seeds.md", "heading": "Seed best practices", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-data/rules/lifecycle.md", "heading": "Save Notice", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-ui/SKILL.md", "heading": "List Views", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-ui/SKILL.md", "heading": "Actions", "form": "json", "json": ["Action"] },
+    { "file": "skills/objectstack-ui/rules/list-views.md", "heading": "Adding a board, calendar, gallery or gantt beside the list", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "Data Operations", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "External Integration", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "`notify`", "form": "json", "json": ["FlowNode"] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "Failure routing & `runAs`", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "Filter operands (`config.filter`)", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "Valid-but-silently-wrong (passes build, fails at runtime)", "form": "json+ts", "json": ["FlowNodeList"] },
+    { "file": "skills/objectstack-automation/SKILL.md", "heading": "Integrations are declared, not coded", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/references/examples-flows.md", "heading": "Time-relative triggers — scheduled per-record date sweep", "form": "json+ts", "json": ["FlowNode", "FlowFilter"] },
+    { "file": "skills/objectstack-automation/references/state-machines-and-approvals.md", "heading": "Approvals (Flow Nodes)", "form": "json", "json": ["Flow"] },
+    { "file": "skills/objectstack-automation/references/state-machines-and-approvals.md", "heading": "Approver Types", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/references/state-machines-and-approvals.md", "heading": "Node Config (`ApprovalNodeConfigSchema`)", "form": "neutral", "json": [] },
+    { "file": "skills/objectstack-automation/references/state-machines-and-approvals.md", "heading": "Approval Best Practices", "form": "neutral", "json": [] }
+  ]
+}

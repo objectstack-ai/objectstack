@@ -596,7 +596,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const access = await security.getRecordFieldAccess(object, id, context);
                 // The row went away (or out of the caller's sight) after the
                 // read above: the read path's own no-row answer.
-                if (access === null) throw recordNotFoundError(object, id);
+                if (access === null) throw recordNotFoundError(object, id, context);
                 if (access === undefined) {
                     sendEnvelopeError(
                         res, 501, 'NOT_IMPLEMENTED',

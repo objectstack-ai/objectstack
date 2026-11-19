@@ -758,6 +758,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // Connect an Agent's key list (objectstack-ai/objectstack#30894): Revoke marks one of the caller's own keys revoked.
   'packages/app-shell/src/console/connect/AuthorizedAccessList.tsx :: AuthorizedAccessList > revoke :: update':
     outOfFamily("the caller's OWN sys_api_key row (Revoke on Connect an Agent's key list, whose read is filtered on user_id = the caller and offers Revoke only on an active key); the write sets revoked: true and the server's CRUD step asks the grant; no record the caller browses is written"),
+  // The account app's Notification Settings page (objectstack-ai/objectstack#34728): the caller's own preference rows.
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: create':
+    outOfFamily("the caller's OWN sys_notification_preference row (a switch, the digest or quiet hours on Notification Settings), created with user_id = the caller; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: update':
+    outOfFamily("the caller's OWN sys_notification_preference row, by the id the caller-scoped door GET /api/v1/messaging/me/preferences names as theirs; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),
@@ -895,6 +900,14 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['recordEdit'], RECORD_PANEL),
   'packages/plugin-kanban/src/ObjectKanban.tsx :: ObjectKanban > renderRecordOverlay > onDelete :: delete':
     mapped(['recordDelete'], DETAIL_VIEW),
+  // ── plugin-timesheet ── (#34382: typing into an empty cell creates, retyping
+  // a one-record cell updates its value field, clearing it deletes the record)
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: create':
+    mapped(['gridAddRow'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: update':
+    mapped(['listInlineEdit'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: delete':
+    mapped(['rowDelete'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
   // ── plugin-view ──
   'packages/plugin-view/src/ObjectView.tsx :: ObjectView > onClick :: delete':
     mapped(['rowDelete'], OBJECT_GRID),

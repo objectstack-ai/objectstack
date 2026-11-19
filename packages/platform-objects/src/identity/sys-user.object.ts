@@ -509,11 +509,14 @@ export const SysUser = ObjectSchema.create({
         title: 'User Added',
         acknowledge: 'Done',
         // Each field is skipped when its path is absent from the answer:
-        // `notApplied` only on a re-add of a person still pending, `managerError`
-        // only when no manager was linked, `host.reason` only when the hosting
-        // organisation was not told.
+        // `pendingAgain` only on a re-add of a person still pending (the door
+        // answers it only then, so no `false` row is drawn on a fresh add),
+        // `notApplied` only on such a re-add that sent grants or a manager,
+        // `managerError` only when no manager was linked, `host.reason` only
+        // when the hosting organisation was not told.
         fields: [
           { path: 'email', label: 'Email', format: 'text' },
+          { path: 'pendingAgain', label: 'Already pending', format: 'json' },
           { path: 'notApplied', label: 'Already pending, so not applied (set these on the record)', format: 'json' },
           { path: 'managerError', label: 'Manager', format: 'text' },
           { path: 'host.reason', label: 'Invitation not sent', format: 'text' },

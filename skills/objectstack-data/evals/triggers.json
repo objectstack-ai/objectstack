@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-data",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm building an ObjectStack app through its MCP server, with no project files. Create a `vendor` object with a company name, a contact email, and an Active / Inactive status.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Through MCP on our ObjectStack environment, add a lookup from `invoice` to `account`, and block deleting an account while it still has invoices.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Model invoices and their line items in ObjectStack: deleting an invoice deletes its lines, and the invoice shows the total of its lines.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Our ObjectStack app needs demo data: twenty sample `opportunity` rows for dev and test only, closing 30 days after install.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "在 ObjectStack 里给 `contract` 对象加一个「签署日期」字段：只有状态是已签署时才显示，并且那时必须填写。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Write an ObjectQL query on `ticket` that returns the ten newest open tickets assigned to me, with each ticket's account name.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "In plain PostgreSQL, with no ObjectStack involved, write a migration that adds a NOT NULL `region` column with a default to a 50-million-row table without holding a long lock.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}

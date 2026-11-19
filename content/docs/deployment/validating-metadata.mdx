@@ -519,6 +519,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Print page blocks — a page that declares `print` holds only printable component types (`print-page-block-unprintable`, #22158) | ✓ | ✓ | ✓ | ✓ᵖ |
 | Page variable declarations — each name once and never blank, a `defaultValue` of its declared type, a `source` naming a component the page holds (#28663, #28725) | ✓ | ✓ | ✓ | ✓ᵖ |
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
+| Script action bodies compile in the runtime's wrapper — an L2 action's `body.source` that does not compile as the body of `(async (input, ctx) => { … })`, most often `const input = …` redeclaring a parameter; an object write runs it over its inline `actions[]`, so an object write cannot republish a refused body (`action-body-does-not-compile`, #34884) | ✓ | ✓ | ✓ | ✓ᵃᶜᵒ |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
 | Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃᵒˣ |
@@ -865,7 +866,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (69)...
+  → Running author-time rules (70)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 
@@ -958,7 +959,10 @@ What the failure does depends on what the predicate guards:
 
 At **submit** a broken field rule is refused, not passed. A field `visibleWhen` that
 cannot be evaluated refuses the submit on the client, with a message naming the field
-and the rule, because no server evaluates a field's `visibleWhen`. A broken
+and the rule. The server reads a field's `visibleWhen` only when the field is also
+`required`, to decide whether the requirement applies to the write: hidden means not
+required, and a `visibleWhen` it cannot evaluate counts as shown, so the field stays
+required and the server logs the fault. A broken
 `requiredWhen` or `readonlyWhen`, or an option's `visibleWhen`, is refused by the
 server, and the form shows that refusal beside the input. One exception: a
 `readonlyWhen` that reads a name the write does not bind (a bare field name, or

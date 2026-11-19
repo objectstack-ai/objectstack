@@ -4325,6 +4325,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'FieldSchema.conditionalFormatting[]',
     keys: () => shapeKeysOf(FieldSchema.shape.conditionalFormatting),
   },
+  {
+    // [#34905] A `required` field with its own `visibleWhen` that also sets
+    // `storage.notNull` draws a warning naming that key: the column refuses the
+    // null the write contract now admits on a record the predicate hides.
+    receiver: 'storage',
+    expected: ['notNull'],
+    declaredBy: 'FieldSchema.storage',
+    keys: () => shapeKeysOf(FieldSchema.shape.storage),
+  },
 ];
 
 /**
@@ -4364,7 +4373,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     // have hidden the new surface from this very scan.
     // `conditionalFormatting` joined in #22228 — the cell formatting rules,
     // read literally for the same reason.
-    expect(read).toEqual(['conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
+    // `required`, `storage` and `visibleWhen` joined in #34905 — a `required`
+    // field's own `visibleWhen` now decides whether the field is required on a
+    // write (ADR-0113 D1, amended), so its reads are checked here, and a
+    // `storage.notNull` beside the pair is warned.
+    expect(read).toEqual([
+      'conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'required', 'requiredWhen', 'storage', 'visibleWhen',
+    ]);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);
@@ -6902,5 +6917,113 @@ describe('validateStackExpressions — a flow condition\'s record. / previous. r
         expect(validateStackExpressions(stackWith(site, source)), `${site}: ${source}`).toEqual([]);
       }
     }
+  });
+});
+
+/**
+ * [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides its
+ * requirement on the write, and a predicate the server cannot evaluate counts
+ * as SHOWN — the field keeps the unconditional `required` it had before. Two
+ * shapes the author can see at build time leave the field required where the
+ * form hides it, so both are WARNINGS (never refusals): a read through a
+ * reference field, and `storage.notNull` beside the pair. The roots the server
+ * cannot bind are already refused for every field `visibleWhen`
+ * (`FIELD_RULE_BOUND_ROOTS`), so no second warning is drawn for them.
+ * `packages/objectql/src/engine-required-when-shown.test.ts` pins the runtime.
+ */
+describe('a `required` field\'s `visibleWhen` the server cannot use to lift the requirement (ADR-0113 D1)', () => {
+  const account = {
+    name: 'rws_account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' }, tier: { type: 'text', label: 'Tier' } },
+  };
+  const order = (fields: Record<string, unknown>) => ({
+    name: 'rws_order',
+    label: 'Order',
+    fields: {
+      account: { type: 'lookup', label: 'Account', reference: 'rws_account' },
+      status: { type: 'text', label: 'Status' },
+      ...fields,
+    },
+  });
+  const run = (...objects: Array<Record<string, unknown>>) =>
+    validateStackExpressions(specValid({ objects: [account, ...objects] }));
+  const at = (issues: ReturnType<typeof run>, where: string) => issues.filter((i) => i.where === where);
+  const WHERE = "object 'rws_order' · field 'po_number' visibleWhen";
+
+  it('warns on a read through a reference, naming the counts-as-shown consequence', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message.startsWith('`visibleWhen` reads `tier` through `record.account`, a `lookup` field')).toBe(true);
+    expect(issues[0].message).toContain('counts as SHOWN (ADR-0113 D1)');
+  });
+
+  it('draws nothing for the same read on a field that is not required — display only', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('draws nothing for a required field whose predicate reads its own columns', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.status == 'sent'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('warns on `storage.notNull` beside `required` + `visibleWhen` — and the parse still accepts it', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, storage: { notNull: true }, visibleWhen: "record.status == 'sent'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain('`storage.notNull: true`');
+  });
+
+  // A formula the predicate reads: a reminder that the server judges it on the
+  // formula value it computes, and a formula the write path cannot compute (a
+  // hop, `label()`, `can`, at any depth) keeps the field required on every write.
+  it('warns when the predicate reads a formula field: the server judges it on the formula it computes', () => {
+    const issues = at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain("reads the formula field 'risk'");
+    expect(issues[0].message).toContain('the formula value it computes over the record being written');
+    expect(issues[0].message).not.toContain('counts the field as SHOWN');
+  });
+
+  it('…and names the chain when a formula it reads reads through a reference, at any depth', () => {
+    const issues = at(run(order({
+      tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.tier_name == 'gold' ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'risk' reads the formula 'tier_name', which reads through 'account'");
+    expect(issues[0].message).toContain('counts the field as SHOWN on every write');
+  });
+
+  it('…and when a formula it reads calls label()', () => {
+    const issues = at(run(order({
+      stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+      stage_label: { type: 'formula', label: 'Stage label', expression: 'label(record.stage)', returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.stage_label == 'Won'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'stage_label' calls label()");
+  });
+
+  it('draws no formula warning on a field that is not required', () => {
+    expect(at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.risk == 'high'" },
+    })), WHERE)).toEqual([]);
   });
 });

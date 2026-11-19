@@ -240,6 +240,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             email: "E-Mail",
+            pendingAgain: "Bereits ausstehend",
             notApplied: "Bereits ausstehend, daher nicht übernommen (am Datensatz festlegen)",
             managerError: "Führungskraft",
             "host.reason": "Einladung nicht gesendet"
@@ -263,6 +264,19 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "Bereits ausstehend, erneut benachrichtigt",
             "summary.failed": "Nicht hinzugefügt",
             rows: "Ergebnis pro Zeile"
+          },
+          columns: {
+            rows: {
+              row: "Zeile",
+              email: "E-Mail",
+              ok: "Erfolgreich",
+              alreadyPending: "Bereits ausstehend, erneut benachrichtigt",
+              "host.notified": "Hosting-Organisation benachrichtigt",
+              "host.reason": "Warum nicht benachrichtigt",
+              "error.message": "Nicht hinzugefügt, weil",
+              notApplied: "Nicht übernommen (am Datensatz festlegen)",
+              managerError: "Vorgesetzte(r)"
+            }
           }
         }
       },
