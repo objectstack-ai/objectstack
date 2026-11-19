@@ -114,6 +114,14 @@ hand:
   validation rules and hooks apply. It answers what moved, what failed and how
   many remain; call it again until `remaining` is 0.
 
+The owner field of a detail object (`sharingModel: 'controlled_by_parent'`)
+is neither counted nor moved. A detail's access follows its master record, so
+its owner records who did the work (the person on a timesheet, the spender on
+an expense line), not who holds it; handing it over would make the successor
+appear to have done that work. Hand over the master record instead. The
+detail's other user fields, such as an approver, are counted and moved as
+usual.
+
 The hand-over is optional and never delays the ban. Once a user is banned, a
 new record or edit that sets a user field to them is refused with the field
 code `reference_user_banned`; a record that already holds them stays editable.
