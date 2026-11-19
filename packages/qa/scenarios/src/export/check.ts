@@ -194,6 +194,8 @@ export function checkGallery(dir: string, opts: CheckOptions): GalleryFinding[] 
 /** The sample data a trial package arrives with: present, a valid non-empty dataset list, and read by the config. */
 function checkSampleData(dir: string, app: GalleryApp, add: AddFinding): void {
   const source = `apps/${app.id}/${APP_LAYOUT.source}`;
+  const config = join(dir, source, SOURCE_REQUIRED);
+  if (!isFile(config)) return; // an incomplete source is `app-incomplete` already
   const rel = `${source}/${SAMPLE_DATA_FILE}`;
   const file = join(dir, rel);
   if (!isFile(file)) {
@@ -219,8 +221,7 @@ function checkSampleData(dir: string, app: GalleryApp, add: AddFinding): void {
       add('app-sample-data', rel, `[${i}] (\`${parsed.data.object}\`) holds no record`);
     }
   });
-  const config = join(dir, source, SOURCE_REQUIRED);
-  if (isFile(config) && !readFileSync(config, 'utf8').includes(`'${SAMPLE_DATA_SPECIFIER}'`)) {
+  if (!readFileSync(config, 'utf8').includes(`'${SAMPLE_DATA_SPECIFIER}'`)) {
     add('app-sample-data', `${source}/${SOURCE_REQUIRED}`, `does not import '${SAMPLE_DATA_SPECIFIER}' into its \`data:\`, so the package installs without its sample data`);
   }
 }
