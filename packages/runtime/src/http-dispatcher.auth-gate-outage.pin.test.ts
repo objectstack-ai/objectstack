@@ -159,15 +159,24 @@ describe('[#23245] HttpDispatcher.enforceAuthGate — an active gate that cannot
         expect(off.member.handleRedeliver).toHaveBeenCalledTimes(1);
         expect(off.auth.isAuthGateActive).toHaveBeenCalled();
 
-        // "No read" measured, not assumed: an ACTIVE gate on the same request
-        // reads exactly once more than the inactive one does (the identity
-        // step's own reads are the shared baseline).
-        const on = harness({ gateActive: true, backend: 'healthy', user: CLEAR_USER });
-        const offHealthy = harness({ gateActive: false, backend: 'healthy', user: CLEAR_USER });
+        // "No read" measured, not assumed: for a caller the identity step did
+        // NOT admit (a cookie no session answers for), an ACTIVE gate on the
+        // same request reads exactly once more than the inactive one does (the
+        // identity step's own read is the shared baseline). A principal the
+        // request's own session admitted is judged off that read, so the gate
+        // adds no read for it, active or not.
+        const on = harness({ gateActive: true, backend: 'healthy' });
+        const offHealthy = harness({ gateActive: false, backend: 'healthy' });
         await on.dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request()));
         await offHealthy.dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request()));
         expect(on.auth.getSession.mock.calls.length).toBe(offHealthy.auth.getSession.mock.calls.length + 1);
         expect(off.auth.getSession.mock.calls.length).toBe(offHealthy.auth.getSession.mock.calls.length);
+
+        const onAdmitted = harness({ gateActive: true, backend: 'healthy', user: CLEAR_USER });
+        const offAdmitted = harness({ gateActive: false, backend: 'healthy', user: CLEAR_USER });
+        await onAdmitted.dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request()));
+        await offAdmitted.dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request()));
+        expect(onAdmitted.auth.getSession.mock.calls.length).toBe(offAdmitted.auth.getSession.mock.calls.length);
     });
 
     it('CASE 3 — ACTIVE, CLEAR: a successful read carrying no posture still admits', async () => {
