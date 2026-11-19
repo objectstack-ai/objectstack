@@ -403,3 +403,41 @@ export function usePersonalViews({
 
   return { status, views, save, update, rename, remove };
 }
+
+/** What a new view created in place is made of (the switcher's create card). */
+export interface InPlaceViewPicks {
+  /** The new view's type. */
+  type: string;
+  /** The type's picks, the spec block under the type's key (e.g. `{ groupByField }`). */
+  block?: Record<string, unknown>;
+}
+
+/**
+ * The `ListView` body of a view created in place from the open view: the open
+ * view's own body (its columns, filter, sort, grouping, row height) as the
+ * starting point, retyped to the chosen type with the type's picks laid over
+ * that type's block, and — when `state` is given, i.e. the reader kept 「include
+ * the current filters and sort」 — the list on screen laid over it the way Save
+ * as my view lays it ({@link buildPersonalViewConfig}). Without `state` only
+ * the reader's column layout and row height carry over; their unsaved filter,
+ * sort and grouping stay behind.
+ *
+ * One body for both scopes: it is what one of the reader's own views stores
+ * as `config`, and what the add-view door creates a shared view from. The
+ * fold refusal of Save as my view applies unchanged.
+ */
+export function buildInPlaceViewConfig(
+  objectName: string,
+  view: Record<string, any>,
+  picks: InPlaceViewPicks,
+  state: PersonalViewListState | { preference?: ListViewPreference },
+): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
+  const own = isRecord(view[picks.type]) ? (view[picks.type] as Record<string, unknown>) : {};
+  const draft: Record<string, any> = {
+    ...view,
+    type: picks.type,
+    ...(picks.block && Object.keys(picks.block).length > 0 ? { [picks.type]: { ...own, ...picks.block } } : {}),
+  };
+  const listState: PersonalViewListState = 'url' in state ? state : { url: {}, preference: state.preference };
+  return buildPersonalViewConfig(objectName, draft, listState);
+}

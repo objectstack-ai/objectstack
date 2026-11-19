@@ -24,6 +24,9 @@ import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from
 import type { buildViewTabs } from './objectViewTabs.js';
 import { dispatchViewPatches } from './objectViewOptions.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import type { InPlaceViewRequest } from './CreateViewDialog.js';
+import { buildInPlaceViewConfig, type PersonalViewListState } from './personalViews.js';
+import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
 
 export function useObjectViewViewCrud({
     dataSource,
@@ -424,4 +427,76 @@ export function useObjectViewViewCrud({
         handleConfigView,
         handleAddView,
     };
+}
+
+/**
+ * The switcher's in-place create (the create card's `onCreate`): build the new
+ * view's body from the open view ({@link buildInPlaceViewConfig}), then
+ *
+ * - `personal` — save it as one of the reader's own views (`sys_personal_view`)
+ *   and open it;
+ * - `shared` — hand it to the add-view door (`createShared`, the view-config
+ *   panel's create: an invisible draft opened in draft preview, published
+ *   explicitly), under the machine key the card generated. The draft and
+ *   publish rules are that door's, unchanged.
+ *
+ * Resolves `true` once the view exists; on a refusal it says why (a toast with
+ * the door's own words) and resolves `false`, so the card keeps its input.
+ */
+export function useCreateViewInPlace({
+    objectName,
+    activeView,
+    readListState,
+    savePersonal,
+    openPersonal,
+    createShared,
+    t,
+}: {
+    objectName: string;
+    /** The open view, the new view's starting point. */
+    activeView: Record<string, any> | undefined;
+    /** The list on screen, read at create time (the address's toolbar state, the panel, the reader's state). */
+    readListState: () => PersonalViewListState;
+    /** Save one of the reader's own views; resolves its id. */
+    savePersonal: (label: string, config: Record<string, unknown>) => Promise<string>;
+    /** Open one of the reader's own views by id. */
+    openPersonal: (id: string) => void;
+    /** The add-view door for a shared view (`handleViewCreate`). */
+    createShared: (config: Record<string, any>) => Promise<boolean>;
+    t: ReturnType<typeof useObjectTranslation>['t'];
+}) {
+    return useCallback(async ({ config, scope, includeCurrent }: InPlaceViewRequest): Promise<boolean> => {
+        const { type, label, name } = config;
+        const block = config[type];
+        const listState = readListState();
+        const built = buildInPlaceViewConfig(
+            objectName,
+            activeView ?? {},
+            { type, ...(block && typeof block === 'object' ? { block } : {}) },
+            includeCurrent ? listState : { preference: listState.preference },
+        );
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return false;
+        }
+        if (scope === 'shared') {
+            // The body's own identity is the open view's; the new view's is
+            // the name and key the card gave it.
+            const body: Record<string, unknown> = { ...built.config, type, label, name };
+            delete body.id;
+            return createShared(body);
+        }
+        try {
+            const id = await savePersonal(label, built.config);
+            openPersonal(id);
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to create a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    }, [objectName, activeView, readListState, savePersonal, openPersonal, createShared, t]);
 }
