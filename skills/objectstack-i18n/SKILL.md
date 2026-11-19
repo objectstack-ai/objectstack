@@ -394,7 +394,7 @@ stack config carries `translations` or `i18n` (kernel bootstrap is
 ## Server-Composed User Text (`userMessage`)
 
 Text the server addresses to the end user — `userMessage` on an error envelope, a save /
-publish advisory or a 422 issue — comes back in the REQUEST's locale, composed where it is
+publish advisory, a 422 or `probes` issue — comes back in the REQUEST's locale, composed where it is
 produced; a client renders it as received.
 
 - **Platform-composed** text follows one ladder over the platform locale table
