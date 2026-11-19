@@ -2297,6 +2297,23 @@ export class SeedLoaderService implements ISeedLoaderService {
       const authoredKeyValues = authoredKey === ''
         ? undefined
         : new Map([...referenceKeyFields].map((field) => [field, record[field]] as const));
+      /**
+       * [#34856] The key the record of landed rows keeps this row under when a
+       * reference in its key is empty on the load that lands it: the id the
+       * row lands with ({@link seedDeferredKeyRowId} over the AUTHORED key),
+       * spelled as an `id` key. The key as stored cannot serve — it has an
+       * empty component then, and once the reference resolves it names an id
+       * the landing load never knew — so a person's delete of such a row was
+       * recorded under nothing and undone by the next load. This one is the
+       * same while the reference stays empty and after it resolves. Read off
+       * the record before any reference resolves; `''` exactly when
+       * `authoredKey` is.
+       */
+      const deferredLandedKey = authoredKey === ''
+        ? ''
+        : seedLandedKey(
+          { id: seedDeferredKeyRowId(objectName, String(record[organizationColumn] ?? ''), authoredKey) }, 'id',
+        );
       /** [#34800] Key fields whose reference this record defers to pass 2. */
       const deferredKeyFields = new Set<string>();
 
@@ -2461,14 +2478,20 @@ export class SeedLoaderService implements ISeedLoaderService {
       const isWithdrawnRow = (): boolean => {
         if (!recordedKeys || !this.landedKeyLedger?.honour) return false;
         const key = this.externalIdKey(record, externalId);
-        if (key === '' || existingRecords?.has(key)) return false;
+        if (key !== '' && existingRecords?.has(key)) return false;
         // [#34800] Found by id: the row is there, under a key column still empty.
         if (rowLandedWithEmptyKeyReference() !== undefined) return false;
-        return recordedKeys.has(landedKeyOf(record, i));
+        if (key !== '' && recordedKeys.has(landedKeyOf(record, i))) return true;
+        // [#34856] Landed while a reference in its key was empty: recorded
+        // under the id it landed with, whether the reference is still empty
+        // (the record keys `''`) or resolves now.
+        return deferredLandedKey !== '' && recordedKeys.has(deferredLandedKey);
       };
       let withdrawnRow = false;
       let withdrawnAsked = recordedKeys === undefined;
       const referencesResolvedBeforeRow = referencesResolved;
+      const referencesDeferredBeforeRow = referencesDeferred; // [#34856]
+      const deferredUpdatesBeforeRow = deferredUpdates.length; // [#34856]
       for (const ref of recordRefs) {
         // [#31021] Asked once, the moment the key is final: before the first
         // reference that is not part of it.
@@ -2749,6 +2772,10 @@ export class SeedLoaderService implements ISeedLoaderService {
         // Nothing of this row is written, and the references its key resolved
         // on the way are not booked as this load's.
         referencesResolved = referencesResolvedBeforeRow;
+        // [#34856] Nor the key references it deferred: pass 2 has no row to
+        // write them onto, and would report each as a reference it dropped.
+        referencesDeferred = referencesDeferredBeforeRow;
+        deferredUpdates.length = deferredUpdatesBeforeRow;
         skipped++;
         const ledger = this.landedKeyLedger!;
         ledger.withdrawnRows.set(objectName, (ledger.withdrawnRows.get(objectName) ?? 0) + 1);
@@ -2908,6 +2935,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (recordedKeys) {
         const landedKey = landedKeyOf(record, i);
         if (landedKey !== '') landedKeyByRecordIndex.set(i, landedKey);
+        // [#34856] A key reference still empty: under the id it lands with.
+        else if (deferredKeyFields.size > 0 && deferredLandedKey !== '') landedKeyByRecordIndex.set(i, deferredLandedKey);
       }
 
       // Insert/upsert the record

@@ -17,7 +17,6 @@
 - N 项之外零改动且 PR 自证;范围外按立卡三类门槛分流,三类外进 Acceptance notes、不单开。
 - sweep 卡是认领对象,成员单保持标签但不再是可派发候选。
 - 积压告警:连续 COMPLETED 清空 fire 后裸卡仍 >15 ⇒ 入流大于吞吐,报维护者。
-- 阈值落地一周后随机抽 20 条 `noted, not filed`,由席位逐条重判,量出误记率并记档。
 
 ## 同趟成员卡写侧打包
 
@@ -71,7 +70,7 @@
 - 读侧对称:决策复读命中无可取回 id 的出箱按未裁处理,同笔转回、⛔ 不派。
 - 结论只落可核性,⛔ 不断成因。
 - 裁决执行中新生的问题另立卡并回链已裁卡,⛔ 不给已裁卡重挂 `needs-user-decision`。
-- 机械两旗 report-only,归半状态巡查;接线是另一张卡的事,⛔ 不随协议文本改脚本。
+- 机械两旗 report-only,归半状态巡查。
 - 旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`。
 - 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关单(PR 则已合并;关而未合并不算)。
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
@@ -127,7 +126,7 @@
 - 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程实施、开 draft PR、驱动 CI 与可合并。
-- 线程 ⛔ 不做 harness 开 PR 后指派/请审:「审核通过才会推送给我审核」,请审是席位交棒。
+- 线程 ⛔ 不做 harness 开 PR 后指派/请审:请审是席位交棒。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
@@ -214,7 +213,7 @@
 - 文件面两句原文照抄:预期落点是 X。
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
-- 例:`screen-input-contract.ts` 的 grep 命中「ruling A′」,裁决区写 `A′ · 5651909056` 与原句:
+- 例:`screen-input-contract.ts` 的 grep 命中「ruling A′」,裁决区写 `A′ · <裁决记录 id>` 与原句:
   「a non-number for a numeric field is refused, never silently passed」;路线随之为拒收(A′)。
 - 原令「有限数字串转数字」与之相左,应派发前送 L1 线程;栅栏点名 A′ spec 散文在范围。
 - 派发令带 L2 路由:dev 交回点名欠 L2 不自敲;席照 contract-review.md 自审或送 L2 席,⛔ 非分诊
@@ -240,7 +239,7 @@
 - 测量先行卡(修复由测量结果有条件授权)⇒ 只派只读读数 dev 或不派等裁;建设 dev 待裁。
 - 探针做在 dev 要留的分支上,⛔ 不用一次性分支:建得出删不掉,遗留分支被预检读成认领。
 
-## security-object 无判决枚举(座位贴常设 ⑦)的方法
+## security-object 无判决枚举的方法
 
 - 表面半边 ⛔ 不比总数:`git diff <基线ref> origin/main -- '<两插件>/src/objects/*.object.ts'`。
 - 过 `grep -E '^[+-]    [a-z_][a-z0-9_]*: Field\.'`;零命中 = 成员级同一,必记基线 ref。

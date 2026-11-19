@@ -1,0 +1,71 @@
+# 平台读数:API 配额与通道
+
+- 配额按账户计,不跨席共享:各席位跑在不同 GitHub 账户下;换身份即清零燃烧。
+- 所有 agent 共用一个身份只在席位内部成立,故认领必须在评论里写 session ID。
+- ⛔ 不据限流报文里的 user ID 推池子跨席共用;本席额度完全由本席做法决定。
+- 计费按查询复杂度、按节点数,不按调用次数 ⇒ 优化方向是每次少拿,不是少调用。
+- 读数:上限 5000/时;一次 `list_issues`(34 张卡、perPage=100)= 107 点。
+- 单个 dev 子代理 ~15 分钟烧 ~5658 点 ⇒ 最大消耗方是 dev 子代理,PM 巡检是噪声。
+- perPage 按预期 population 取,⛔ 不按习惯取 100:点数 ≈ 请求节点数除以 100。
+- 只要 `totalCount` 的健康指标取 perPage=1;只要最近 N 张就取 N。
+- 小时池之外还有分钟级二级限流:GraphQL 端点 2,000 点/分、并发 ≤100。
+- 中继读数:dispatch 后 5 s 建 run、17 s 起 job、22 s 评论落地、墙钟 31 s;上限 90 s / 5 min 不动。
+- REST 可达性是会话属性(GitHub App 会话门),⛔ 不是端点或席位类型的属性。
+- 开轮探一次、按班存档;探针必须是一条真 repo-scoped 读。
+- 门关着时 repo-scoped 路径整类回 403 `GitHub access is not enabled for this session`。
+- 那不是限流,重试无用;403 对具体端点零分辨力。
+- `/rate_limit` 照答 200,兼任不了探针;403 后凭据形态判别见 `rest-channel.md`。
+- 门态逐会话变,同窗顶层席可分裂成两 403 一 200 ⇒ ⛔ 不据他席、他日读数推本席。
+- 门开会话实测通道宽于标签:issue POST 201、评论写、卡与评论读同通,加法 POST 200。
+- 标签事件流 `GET /issues/{n}/events` 归门态:200 带 labeled/unlabeled 名与时刻,三容器两通一 403。
+- 门关着时的降级梯 ①:git 先行,走下方零成本等价物。
+- 降级梯 ②:公开仓 payload 档。③:MCP —— search 定向一击、单标签读全加求交。④:等重置。
+- CCR 容器的 GitHub 出口是代理加凭据的:无 header 的 REST 读回 200 带会话身份,core 上限 15000。
+- 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
+- ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
+- REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
+- 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
+- 403 与传输失败要试过另一侧才说得出我没手段;限流先比身份,同 ID 的他侧不是手段。
+- job 日志只有 MCP 取得回,REST 侧转 blob 存储 `http=000`;同分钟 MCP 限流而 REST core 满 15000。
+- ⇒ MCP 限流先 `GET /user` 比 ID:同 ID 的 REST 满额不是退路,写排队到重置;异 ID 才是。
+- MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
+- REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
+- 容器 curl 直写(`rest-channel.md` 的退路)署席位自己的账号;常规写经中继署车队机器人。
+- 署名只认每次写回读的 `user.login`/`user.type`,⛔ 不从开轮标记沿用。
+- 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
+- GraphQL 池 5000/时只留给 `rest-channel.md`〈不可迁移〉三件;draft 翻转与挂载走中继 op。
+- 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
+- MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
+- 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
+- `gh` CLI 的动词按传输分两桶,池枯竭时只死一半。
+- porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
+- 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器有 `gh`,porcelain 一律 403。
+- 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
+- 走队列的仓落地仍必经 auto-merge,红窗里照样走中继 op 挂载;直合仓合并本身有 REST 端点。
+- 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
+- `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
+- 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
+- 两个瘦身参数都不省池。`fields` 省载荷:MCP list/search 服务器端无条件抓 Project field_values。
+- ⇒ 池枯竭时最小字段请求同样全体失败,报错串是 failed to fetch issue field values。
+- `minimal_output` 不裁 `list_issues` 的 `body`,也无参数关得掉;⛔ 永不当省额度手段写进 skill。
+- 站得住的证据是直接观察 `body` 在,不是前后体积对比 —— 两次调用之间 population 已变。
+- git 先行:本地检出、`git log`、`ls-remote` 不花配额,断粮期分支存在性检查照常可用。
+- PR 文件读取同走 git:REST PR files 端点可瞬态 404。
+- 零成本等价物 ①:合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`。
+- ②:是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep。
+- ③:squash 验证 `git rev-list --parents -n1` 数父提交。④:`git ls-remote origin 'refs/heads/*<key>*'`。
+- 开轮先读配额:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,免费。
+- graphql remaining < 1000 ⇒ 本轮走 git 加 REST。
+- 中途撞限流的 dev 完不成强制查重,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。
+- 打满时待执行写排成有序清单挂进巡逻词,不靠记忆;恢复窗口按序连清。
+- 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
+- 停用报文 account was suspended 遍及 /rate_limit 与 git,不给理由;非会话门 403、非限流。
+- 账号停用销毁其名下 PR、卡与评论;分支与 commit 属仓库照留远端 ⇒ 代码从未真丢。
+- 停用同抹其事件:标签留在卡上而写它的 `labeled` 事件消失 ⇒ 谁打的标签事后不可重建。
+- 被销毁的 PR 仍占分支名:API 答 404,同名开新 PR 仍被拒 ⇒ 同批 commit 推新分支名再开。
+- 本地对象库是最后备份:L1/L2 审核时 fetch 过的每条分支,其 head 在停用后仍在本地可推。
+- 重建 PR 正文自报四件:head 逐字节同、无 rebase/amend/squash、数字出自旧基底、CI 为准。
+- 会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复:其后 `mcp__github__*` 全回 invalid session。
+- 只有新会话重绑 ⇒ 轮换前提醒维护者:在飞席位丢整条 GitHub 通道。
+- 文档载明未实测:`.claude/settings.json` 的 `permissions.deny` 云会话照读,deny 在任一层先于 allow。
+- 被拒的 MCP 工具从工具表整个消失:工具缺席读作 deny 生效,⛔ 不读作 MCP 服务器坏。
