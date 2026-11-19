@@ -28,9 +28,16 @@
 /**
  * The toolbar row: the list's view bar, 40px from `sm` up (objectstack#35548),
  * its border included. Below `sm` it keeps its padding so it can wrap.
+ *
+ * From `sm` up its ends are the list page's edges less the controls' own
+ * padding (objectstack#35663): every item here is a padded control, so 10px
+ * on the left puts the switcher's 6px-padded icon on the page's 16px line
+ * with the page bar's icon, the checkboxes and the footer, and 8px on the
+ * right ends the last trigger's 8px-padded label 16px in, where the page bar's
+ * button ends.
  */
 export const TOOLBAR_ROW =
-  'border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center justify-between gap-1 sm:gap-2 bg-background';
+  'border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-1 sm:gap-2 bg-background';
 /** Added to the row below `sm` when a host passes a leading node. */
 export const TOOLBAR_ROW_LEADING_PHONE = 'max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1';
 
