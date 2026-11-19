@@ -107,7 +107,7 @@ const mockClient = vi.hoisted(() => ({
     return [];
   }),
   listDrafts: vi.fn(async () => []),
-  get: vi.fn(async () => undefined),
+  get: vi.fn(),
   references: vi.fn(async () => []),
   layered: vi.fn(),
   getDraft: vi.fn(async () => null),
@@ -172,6 +172,7 @@ beforeEach(() => {
   srv.saves.length = 0;
   srv.refused.length = 0;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear?: () => void }).mockClear?.();
+  mockClient.get.mockImplementation(async (type: string) => (type === 'object' ? OBJECT_DEF : undefined));
   // The layered read at the base, as the server answers it for each kind of row (measured on a running server).
   mockClient.layered.mockImplementation(async (type: string, name: string) => {
     if (type === 'app') return { code: APP, overlay: null, overlayScope: null, effective: APP };
