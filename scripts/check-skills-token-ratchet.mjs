@@ -2048,6 +2048,23 @@ export const CEILINGS = new Map([
   // approval, which is the pricing act the header reserves to the maintainer.
   //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11603 / 4)
   ['skills/objectstack-project/SKILL.md', 2901],
+
+  // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
+  // (decision record: comment 6943107981 on #34691, "one copy of the shape
+  // knowledge, two thin procedures"). A new published process skill for a
+  // client that builds through the open MCP draft door: the order of work
+  // (read what exists, read the type's contract, save a draft, read the
+  // publish verdict, repair, hand the Studio review route to a person). It
+  // names the door's five tools, restates none of their arguments, and points
+  // to the domain skills for every shape. The row is an INITIAL measurement of
+  // the new file on the PR that adds it, pinned AT it — zero headroom, on the
+  // same terms as the objectstack-ask and objectstack-project rows above. Its
+  // evals are unpriced (population 1b). No existing row moves: no other skill
+  // file is edited. The PR that adds the row is Tier H and lands only on an
+  // authorized approval, which is the pricing act the header reserves to the
+  // maintainer.
+  //   ceil(($(wc -c < skills/objectstack-mcp-build/SKILL.md) - 20) / 4) == ceil(4530 / 4)
+  ['skills/objectstack-mcp-build/SKILL.md', 1133],
 ]);
 
 /**

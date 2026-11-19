@@ -1,0 +1,45 @@
+{
+  "skill_name": "objectstack-mcp-build",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You build through an ObjectStack environment's MCP draft door, in the package `com.acme.crm`. The user asked: \"After a lead is created, notify the regional sales manager.\" You saved the flow `crm_lead_created_notify` with `save_metadata_draft`: its `type` is `record_change`, and its start node's `config` names the object and no `triggerType`. The reply: `saved: { type: 'flow', name: 'crm_lead_created_notify', package: 'com.acme.crm', state: 'draft' }`, `verdict: { publishable: false, refusals: [{ rule: 'flow-trigger-unroutable', path: 'flows[0].nodes[0].config.triggerType', message: \"declares type: 'record_change' but its start node has no triggerType at all, so the engine routes it to no trigger, so the flow is demoted to a manual one and never fires\", hint: \"Set triggerType to record-{before,after}-{create,update,delete,write}, or declare type: 'autolaunched' or 'screen' if the flow is launched by hand or from a screen\", severity: 'error' }], advisories: [] }`, `review: { changes: '/studio/com.acme.crm/interfaces?changes=review', item: '/studio/com.acme.crm/metadata/flow/crm_lead_created_notify?review=1' }`. What do you do next, and what do you tell the user when you are done?",
+      "expected_output": "The draft is saved, and a publish would refuse it: `verdict.refusals` holds `flow-trigger-unroutable`. It reads the refusal's `path` and `hint` and repairs the item as the hint says: the user asked for a flow that runs after a lead is created, so the start node's `triggerType` becomes `record-after-create` (it does not turn the flow into an `autolaunched` one, which would drop what the user asked for). It sends the whole flow again with `save_metadata_draft` and reads the new reply's verdict before saying anything about the flow. Once `verdict.refusals` is empty, it tells the user that the flow `crm_lead_created_notify` is saved as a draft in `com.acme.crm` and would publish, that nothing is live yet, and that a person reviews and publishes it in Studio, giving the `review` routes as the reply wrote them (`/studio/com.acme.crm/interfaces?changes=review` for the package's changes, and the flow's own route). It never says the flow is published, live or already notifying anyone.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["save_metadata_draft", "record-after-create", "changes=review", "Studio"],
+        "must_not_contain": ["is now live", "is now active", "now published", "successfully published"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "You are connected to an ObjectStack environment over MCP, with no project files. The connection lists `list_metadata_items`, `get_metadata_item`, `list_drafts`, `save_metadata_draft` and `delete_metadata_draft`, and no data tool. The user asks: \"Add a Region picklist (North, South, East, West) to our account object.\" You have made no call yet. Which calls do you make, in what order, and what do you read before the save?",
+      "expected_output": "It reads what exists before it writes. `list_metadata_items` with type `object` finds the account object's real name, and `get_metadata_item` reads that object whole: its fields, its naming and the package it belongs to. `describe_object` is not on this connection, so the object read is `get_metadata_item`. It loads the domain skill for the type, objectstack-data, and takes the field's shape from it and the contract it points to, never from memory. Then it adds the field to the object it read and sends the whole object with `save_metadata_draft`, into that object's package, and reads the verdict in the reply. It does not send an object holding only the new field, and it guesses neither the object's name nor the package.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["get_metadata_item", "objectstack-data", "save_metadata_draft"],
+        "must_not_contain": ["create_record", "update_record"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Through an ObjectStack environment's MCP draft door you saved the dataset `crm_sales_metrics` in the package `com.acme.crm`. The reply: `saved: { type: 'dataset', name: 'crm_sales_metrics', package: 'com.acme.crm', state: 'draft' }`, `verdict: { publishable: true, refusals: [], advisories: [{ rule: 'dataset-member-no-vocabulary', path: 'datasets.crm_sales_metrics.measures[0]', message: 'declares neither `synonyms` nor a `description`, so it answers only to its own name and label', hint: 'Add `synonyms`, the words a person types for it, and a one-sentence `description`', severity: 'warning' }] }`, `review: { changes: '/studio/com.acme.crm/interfaces?changes=review', item: '/studio/com.acme.crm/metadata/dataset/crm_sales_metrics?review=1' }`. It was the only item the user asked for. What is your reply to the user?",
+      "expected_output": "The verdict is publishable, so the item is done, and the reply is the hand-over. It says the dataset `crm_sales_metrics` is saved as a draft in `com.acme.crm` and that a publish would accept it. It tells the user what the advisory says: the first measure has neither synonyms nor a description, so a question in a user's own words will not find it; it offers to add them, and does not treat the advisory as a refusal. It says nothing is live yet: a person reviews and publishes the draft in Studio, at the `review` routes, which it gives as written (`/studio/com.acme.crm/interfaces?changes=review` for the package's changes and the item's own route). It never says the dataset is published, live or ready to query.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["draft", "synonyms", "/studio/com.acme.crm/interfaces?changes=review"],
+        "must_not_contain": ["is now live", "is now available", "now published", "successfully published"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "You are connected to an ObjectStack environment over MCP. The connection lists `list_objects`, `describe_object`, `query_records`, `create_record` and `update_record`, and none of `list_metadata_items`, `get_metadata_item`, `list_drafts`, `save_metadata_draft` or `delete_metadata_draft`. The user asks: \"Add a `renewal_date` field to the contract object.\" What is your reply?",
+      "expected_output": "The authoring tools are not listed, so it cannot author on this connection, and it says so and stops. It names what the tools need: a connection granted the `metadata:write` scope, for a user who may manage metadata. It does not try to reach the same end by writing records, it adds no field, and it claims no change.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["metadata:write"],
+        "must_not_contain": ["has been added", "is now live", "I added"]
+      }
+    }
+  ]
+}
