@@ -72,3 +72,12 @@ ships that same tracked file in `packages/console/dist/`.
 
 Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
 your `ui/` src — only `:5180` reflects local UI edits.
+
+## The merge-queue speed budget
+
+← [`AGENTS.md` › Build & Test](../../AGENTS.md#build--test)
+
+The merge queue has a speed budget in `scripts/ci/queue-budget.json`: a 22-minute median and a 32-minute p90
+alarm, the maintainer's numbers to change. `queue-duration-budget.yml` reads the last 7 days of queue runs every
+week and files or refreshes one speed-up card when the queue is over. A PR that changes CI or adds a gate reports
+its job's before/after median in its body as advisory, never as a gate.
