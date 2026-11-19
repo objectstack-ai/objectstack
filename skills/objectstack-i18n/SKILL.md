@@ -180,11 +180,11 @@ picklist inherits them), `dashboards`, `datasets`, `reports`, `pages`, `flows`, 
 spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group_key}.label` by
 each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
 the pages themselves localize through `doc.translations`, and the inline `translations` map a
-book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, `positions` and
+book once carried stays retired), `mappings` (an import mapping's `label` by its `name`:
+`mappings.{mapping}.label`), `metadataForms`, `settingsCommon`; `reports`, `positions` and
 `permissions` hold `label` + `description` by name, so do `datasets` and each dataset member at
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
-authored list carries every language), `mappings` holds an import mapping's `label` by its `name`
-(`mappings.{mapping}.label`), and a joined report's block headings sit at
+authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
 Three keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
@@ -195,14 +195,15 @@ action declares in `texts` and writes through `ctx.text` — `hooks.{hook}.texts
 `_actions.{action_name}.texts.{key}.message` (also under `globalActions`) — is picked in the
 organization's language (the Localization setting if set, else `i18n.defaultLocale`; never the caller's).
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, all three keys included. The `inlineTitle`, report-block and table-column
-keys, as the shipped `app-crm`, `app-showcase` and platform bundles spell them for `zh-CN`
+`settingsCommon`, all three keys included. The `inlineTitle`, report-block, table-column and
+mapping keys, as the shipped `app-crm`, `app-showcase` and platform bundles spell them for `zh-CN`
 (`rows` is the table field's `path`, `error.message` one column's):
 
 ```typescript
 objects: { crm_opportunity_line_item: { fields: { opportunity: { inlineTitle: '产品明细' } } } },
 reports: { showcase_task_overview: { blocks: { open_block: { label: '未完成任务' } } } },
 objects: { sys_user: { _actions: { import_sso_users: { resultDialog: { columns: { rows: { email: '邮箱', 'error.message': '未添加的原因' } } } } } } },
+mappings: { showcase_inquiry_feed: { label: '询盘导入（营销 CSV）' } },
 ```
 
 `settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
@@ -307,8 +308,7 @@ os i18n check --strict --threshold=95  # CI gate: locale parity + minimum covera
 ```
 
 It compares registered bundles against source metadata and reports missing keys
-per locale for every surface the extractor walks — objects and their sub-keys,
-global actions, apps, dashboards, pages, flow screens. The platform's metadata
+per locale for every surface the extractor walks. The platform's metadata
 forms count only for a stack that ships their translations (`--include-platform`
 audits them anyway). Gaps in the source locale are errors, `--strict` promotes
 the rest, `--show-keys` lists them all; `os lint --i18n-strict` folds it in.
