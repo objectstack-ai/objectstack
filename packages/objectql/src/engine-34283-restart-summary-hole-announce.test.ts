@@ -35,14 +35,12 @@ function makeDriver() {
   let n = 0;
   const writes: Array<{ verb: string; object: string }> = [];
   const reads: Array<{ object: string; limit?: number }> = [];
-  const failFindOf = new Set<string>();
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
     async find(object: string, ast: any) {
       reads.push({ object, limit: ast?.limit });
-      if (failFindOf.has(object)) throw new Error(`fake driver: ${object} unreadable`);
       let rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
       rows = rows.sort((a, b) => String(a.id).localeCompare(String(b.id)));
       const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
@@ -78,7 +76,7 @@ function makeDriver() {
     async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
   };
-  return { driver, storeFor, writes, reads, failFindOf };
+  return { driver, storeFor, writes, reads };
 }
 
 const CONTRACT = 'qx_contract';
