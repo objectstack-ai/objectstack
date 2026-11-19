@@ -298,6 +298,17 @@ function fieldMapOf(fieldsRaw: unknown): Map<string, any> {
 }
 
 /**
+ * May a search hit be titled from this reference TARGET at all? Its declared
+ * exposure, asked for `get` of the one decision every door judges
+ * (`canServeApiOperation`, ADR-0049) — the operation a lookup title read is
+ * judged as wherever one is served (the approvals inbox, the activity
+ * summaries). A target that does not serve `get` is not read.
+ */
+function servesSearchTitleTarget(targetObj: { enable?: any }): boolean {
+    return canServeApiOperation(targetObj.enable, 'get');
+}
+
+/**
  * The titles of the `ids` records of `target`, read AS THE SEARCHER — the
  * second half of `searchAll`'s title for an object whose primary-title pointer
  * is a reference field. One read per call, `id $in` over the whole batch, `id`
@@ -334,7 +345,7 @@ async function readReferenceTitles(
     const titles = new Map<string, string>();
     const targetObj = engine.registry.getObject(target);
     if (!targetObj) return titles;
-    if (!canServeApiOperation(targetObj.enable, 'get')) return titles;
+    if (!servesSearchTitleTarget(targetObj)) return titles;
     const titleField = titlePointerOf(targetObj);
     if (!titleField || !fieldMapOf(targetObj.fields).has(titleField)) return titles;
     if (canReadObject && !(await canReadObject(target))) return titles;
