@@ -191,7 +191,8 @@ export interface ExpressionRefusalParams {
    * `reference` is the field as written, when it is known. A flattened (flow)
    * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`; a
    * fail-closed site is `date-text-arithmetic-fail-closed`, an advisory rule's
-   * `date-text-arithmetic-fail-open`.
+   * `date-text-arithmetic-fail-open`, and a flow value envelope's
+   * `date-text-arithmetic-value-run-may-fail`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -210,6 +211,16 @@ export interface ExpressionRefusalParams {
   'date-text-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
   /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-may-fail` site. */
   'date-text-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#34660] ERROR: `date-text-arithmetic` in a flow VALUE envelope
+   * (`ExprSchemaHint.flowValueEnvelope`: an `assignment` value, a
+   * `create_record` / `update_record` `fields.*` value) — it faults, and so
+   * fails the run at the step, wherever the field holds that text when the
+   * value is computed. No condition runs at a value slot, so its sentence is
+   * not `-run-may-fail`'s. The `sweep` precedent names the site before the
+   * outcome (`type-mismatch-sweep-run-fails`); `value` is this site.
+   */
+  'date-text-arithmetic-value-run-may-fail': { readonly operands: string; readonly reference?: string };
   /**
    * [#30250] ERROR: `date-arithmetic` at a site that FAILS CLOSED (an `error`
    * validation rule, a field write rule, an option `visibleWhen`, a hook
@@ -237,13 +248,16 @@ export interface ExpressionRefusalParams {
    * checks clean and faults on the `YYYY-MM-DD` text, `date(…)` in place of the
    * call, with the optional `shift` clause. A flattened (flow) condition is
    * `date-text-call-run-fails` / `-run-may-fail`; a fail-closed site is
-   * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`.
+   * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`,
+   * and a flow value envelope's `date-text-call-value-run-may-fail`.
    */
   'date-text-call': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-fails` site. */
   'date-text-call-run-fails': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-may-fail` site. */
   'date-text-call-run-may-fail': DateTextCallParams;
+  /** [#34660] ERROR: `date-text-call`, at a `date-text-arithmetic-value-run-may-fail` site (a flow value envelope). */
+  'date-text-call-value-run-may-fail': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-closed` site. */
   'date-text-call-fail-closed': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-open` site. */
@@ -359,6 +373,7 @@ const CODE_TABLE = {
   'date-arithmetic-run-may-fail': true,
   'date-text-arithmetic-run-fails': true,
   'date-text-arithmetic-run-may-fail': true,
+  'date-text-arithmetic-value-run-may-fail': true,
   'date-arithmetic-fail-closed': true,
   'date-text-arithmetic-fail-closed': true,
   'date-arithmetic-fail-open': true,
@@ -366,6 +381,7 @@ const CODE_TABLE = {
   'date-text-call': true,
   'date-text-call-run-fails': true,
   'date-text-call-run-may-fail': true,
+  'date-text-call-value-run-may-fail': true,
   'date-text-call-fail-closed': true,
   'date-text-call-fail-open': true,
   'date-duration-value': true,

@@ -22,9 +22,19 @@
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
  * deployment cannot send on yet says so in its header.
+ *
+ * A caller who holds neither a create nor an edit grant on
+ * `sys_notification_preference` (an external member: `external_default`
+ * grants none) sees the same page read-only: every control disabled, one
+ * visible reason that each control names as its description, and no write
+ * sent. The grant is the framework's own answer for the caller, the
+ * `/me/permissions` read `usePermissions()` serves; the page names no
+ * identity. With no permission answer at all (no provider, or not loaded
+ * yet) it stays writable and the server's refusal decides, as every other
+ * console grant read does.
  */
 
-import { Suspense, useCallback, useContext, useEffect, useState } from 'react';
+import { Suspense, useCallback, useContext, useEffect, useId, useState } from 'react';
 import { BellRing } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
 import {
@@ -45,6 +55,7 @@ import {
 } from '@object-ui/components';
 import { getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { usePermissions } from '@object-ui/permissions';
 import { SchemaRendererContext, useAdapter } from '@object-ui/react';
 import { PageHeader } from '../../layout/PageHeader.js';
 import {
@@ -53,6 +64,7 @@ import {
   quietHoursSaveable,
   generalWrite,
   loadMyPreferences,
+  PREFERENCE_OBJECT,
   PREFERENCE_WILDCARD,
   sendPreferenceWrite,
   type DigestCadence,
@@ -91,6 +103,12 @@ export function NotificationSettingsPage() {
   const { user } = useAuth();
   const adapter = useAdapter();
   const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const perms = usePermissions();
+  // A write is a create (no own row yet) or an edit (the person's own row):
+  // holding neither, every control is read-only.
+  const writeGranted =
+    !perms.isLoaded || perms.can(PREFERENCE_OBJECT, 'create') || perms.can(PREFERENCE_OBJECT, 'update');
+  const readOnlyReasonId = useId();
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -118,7 +136,7 @@ export function NotificationSettingsPage() {
 
   const apply = useCallback(
     async (write: PreferenceWrite | null) => {
-      if (!write || !adapter) return;
+      if (!write || !adapter || !writeGranted) return;
       setSaving(true);
       setSaveError(null);
       try {
@@ -131,7 +149,7 @@ export function NotificationSettingsPage() {
         setSaving(false);
       }
     },
-    [adapter, read],
+    [adapter, read, writeGranted],
   );
 
   const header = (
@@ -163,7 +181,9 @@ export function NotificationSettingsPage() {
 
   const { prefs } = load;
   const userId = user?.id;
-  const canWrite = !!userId && !!adapter && !saving;
+  const canWrite = !!userId && !!adapter && !saving && writeGranted;
+  // Every disabled control names the one visible reason as its description.
+  const readOnlyDescribedBy = writeGranted ? undefined : readOnlyReasonId;
   const quietValue = quietDraft === undefined ? prefs.general.quietHours.value : quietDraft;
 
   const topicLabel = (topic: PreferenceTopic) =>
@@ -176,6 +196,11 @@ export function NotificationSettingsPage() {
     <div data-testid="notification-settings-page">
       {header}
       <div className="space-y-6 p-4 sm:p-6">
+        {!writeGranted && (
+          <Alert data-testid="notification-settings-read-only">
+            <AlertDescription id={readOnlyReasonId}>{t('notificationSettings.readOnly')}</AlertDescription>
+          </Alert>
+        )}
         {saveError !== null && (
           <Alert variant="destructive" data-testid="notification-settings-save-failed">
             <AlertDescription>{t('notificationSettings.saveFailed', { reason: saveError })}</AlertDescription>
@@ -196,6 +221,7 @@ export function NotificationSettingsPage() {
                 className="block h-9 w-full max-w-xs rounded-md border bg-background px-2 text-sm"
                 value={prefs.general.digest.value}
                 disabled={!canWrite}
+                aria-describedby={readOnlyDescribedBy}
                 onChange={(e) => {
                   const digest = e.target.value as DigestCadence;
                   // `none` is offered only while it is already the value, so it never reaches a write.
@@ -232,6 +258,7 @@ export function NotificationSettingsPage() {
                   size="sm"
                   data-testid="notification-settings-quiet-hours-save"
                   disabled={!canWrite || !quietHoursSaveable(quietDraft)}
+                  aria-describedby={readOnlyDescribedBy}
                   onClick={() => {
                     if (quietHoursSaveable(quietDraft)) void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietDraft }));
                   }}
@@ -294,6 +321,7 @@ export function NotificationSettingsPage() {
                                 data-testid={`notification-settings-cell-${topic.topic}-${c.channel}`}
                                 checked={cell.enabled}
                                 disabled={!canWrite || topic.mandatory}
+                                aria-describedby={readOnlyDescribedBy}
                                 onCheckedChange={(on: boolean) => void apply(cellWrite(userId!, topic, cell, on))}
                               />
                               <span className="text-xs text-muted-foreground">{t(SOURCE_KEY[cell.source])}</span>
