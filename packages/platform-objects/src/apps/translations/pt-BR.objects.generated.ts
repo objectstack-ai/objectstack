@@ -72,6 +72,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Deve alterar a senha",
         help: "Quando ativado, o usuário precisa alterar a senha antes de continuar. É ativado quando um administrador cria ou importa a conta, ou redefine a senha dela; gerenciado pelo sistema."
       },
+      dev_seed_credential: {
+        label: "Credencial de seed de desenvolvimento",
+        help: "Definido em uma conta criada pelo seed de desenvolvimento. Enquanto a senha ainda for a senha do seed, um servidor de produção recusa o login e toda nova sessão; os user set-password define uma nova senha e o limpa. Gerenciado pelo sistema; nunca retornado em leituras."
+      },
       mfa_required_at: {
         label: "MFA exigida desde",
         help: "Quando a MFA obrigatória passou a valer para este usuário (relógio do período de carência). Base de mfa_required; gerenciado pelo sistema."

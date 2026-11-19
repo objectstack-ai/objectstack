@@ -54,6 +54,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { ConcurrentUpdateError, MalformedVersionTokenError, canonicalVersionInstant } from './protocol.js';
 import { recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { isObjectOfDisabledPackage } from './protocol-authoring-refusals.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { canServeApiOperation, referenceTargetOf, resolveSearchFieldResolution } from '@objectstack/spec/data';
 import type { EngineQueryOptionsParsed } from '@objectstack/spec/data';
@@ -324,6 +325,10 @@ function servesSearchTitleTarget(targetObj: { enable?: any }): boolean {
  *  - the target's declared exposure does not serve `get` (ADR-0049, the one
  *    decision every door judges) → not read, as a lookup title read elsewhere
  *    asks the same decision;
+ *  - the target is an object of a disabled package → not read: a disable
+ *    takes the package's records off every door (the data routes answer
+ *    `404 OBJECT_PACKAGE_DISABLED`), and a title is that record's data, so
+ *    an enabled object's hit keeps the bare id, as for an unreadable target;
  *  - the caller may not read the object (`canReadObject`, asked before any
  *    read, as the sweep asks it of each swept object) → not read;
  *  - the read itself answers the typed refusal → no titles;
@@ -346,6 +351,7 @@ async function readReferenceTitles(
     const targetObj = engine.registry.getObject(target);
     if (!targetObj) return titles;
     if (!servesSearchTitleTarget(targetObj)) return titles;
+    if (isObjectOfDisabledPackage(engine.registry, target)) return titles;
     const titleField = titlePointerOf(targetObj);
     if (!titleField || !fieldMapOf(targetObj.fields).has(titleField)) return titles;
     if (canReadObject && !(await canReadObject(target))) return titles;
@@ -486,6 +492,17 @@ export async function searchAll(
         // `search` operation. See the method doc. Asked first, so a refused
         // object is never queried, named or counted.
         if (!canServeApiOperation(obj.enable, 'search')) continue;
+        // An object of a DISABLED package is outside the sweep. A disable
+        // takes the package's records off every data door — each answers
+        // `404 OBJECT_PACKAGE_DISABLED` — while `getAllObjects()` still
+        // lists the object (the schema stays resolvable on purpose), so this
+        // sweep asks the same predicate those doors ask
+        // (`isObjectOfDisabledPackage`, optional-called: a registry that
+        // cannot answer hides nothing). Asked here, with the exposure
+        // decision, so the object is never queried, named or counted in
+        // `totalObjects`; an explicit `objects=` naming it answers as one
+        // naming no object at all — a sweep, not a by-name read.
+        if (isObjectOfDisabledPackage(this.engine.registry, obj.name)) continue;
         // `searchable: false` keeps its own meaning beside the decision, and
         // only because the decision does not cover it everywhere: it answers
         // an object with NO whitelist (`unrestricted`) without reading the

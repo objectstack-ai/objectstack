@@ -23,11 +23,14 @@
  * - {@link recordCurrencyUnfollowedRollupError}: (c), the arm of a
  *   `currencyMode: 'record'` roll-up whose child amount follows no parent.
  * - {@link storedHomeAmountSourceOf}: is a child field a stored home amount,
- *   named by a `homeAmount` that is valid where it is declared? The test (d)
- *   reads.
+ *   named by a `homeAmount` that is valid where it is declared? The (d)
+ *   refusal of a record-mode child reads it to name the home amount to roll up.
+ * - {@link isTenantCurrencyAmount}: is a child field an amount in the
+ *   organization's home (tenant) currency by declaration, a stored `currency`
+ *   field in `dynamic` mode? The test (d) reads.
  * - {@link recordCurrencyDynamicRollupNotHomeError}: (d), a
- *   `currencyMode: 'dynamic'` roll-up over a child field that is not a stored
- *   home amount.
+ *   `currencyMode: 'dynamic'` roll-up over a child field that is not such an
+ *   amount.
  *
  * Messages only and two predicates: each door decides when a pair is judged.
  */
@@ -187,7 +190,8 @@ function claimsHomeField(def: unknown, target: string): boolean {
 /**
  * [ADR-0144 D5] The amount field of `fields` whose `currencyConfig.homeAmount`
  * stores its home-currency value in `field`, or `undefined` when `field` is
- * not a stored home amount: the test (d) reads for "a stored home amount".
+ * not a stored home amount: the reading the (d) refusal of a record-mode child
+ * amount uses to name the home amount to roll up instead.
  *
  * A `homeAmount` counts only where it is valid as declared, the reading the
  * object door (`refuseDishonestHomeAmount`, `data/object.zod.ts`) guarantees
@@ -207,13 +211,39 @@ export function storedHomeAmountSourceOf(fields: Record<string, unknown>, field:
 }
 
 /**
+ * [ADR-0144 D8 rule 5, seat ruling record 7000258793] Is `def` an amount in the
+ * organization's home currency by declaration: a stored `currency` field in
+ * `dynamic` mode (an absent `currencyConfig` or `currencyMode` is `dynamic`)?
+ * The test (d) reads for the child field a `dynamic` summary may roll up.
+ *
+ * `dynamic` means "the field has no currency of its own — amounts display in
+ * the tenant default currency (the `localization.currency` setting)"
+ * (`CurrencyConfigSchema.currencyMode`), the one setting ADR-0144 D4 names the
+ * home currency, so every row of such a field is in that currency and a total
+ * of them is too. A stored home amount ({@link storedHomeAmountSourceOf}) is
+ * one such field (D8 rule 5: "the home field is a `dynamic`-mode currency
+ * field"). A `record` or `fixed` amount, a plain `number`, a `formula` and a
+ * `summary` are not: the first two name another currency, and the others
+ * declare no `currency` amount the roll-up reads.
+ */
+export function isTenantCurrencyAmount(def: unknown): boolean {
+  if (!isRecord(def) || def.type !== 'currency') return false;
+  return (currencyConfigOf(def)?.currencyMode ?? 'dynamic') === 'dynamic';
+}
+
+/** The fields of `fields` that {@link isTenantCurrencyAmount} admits, as the (d) prescription names them. */
+function tenantCurrencyAmountsOf(fields: Record<string, unknown>): string[] {
+  return Object.keys(fields).filter((name) => isTenantCurrencyAmount(fields[name]));
+}
+
+/**
  * [ADR-0144 D6, D8 rule 5] (d): a `summary` (`sum`, `min`, `max`, `avg`)
  * declaring `currencyMode: 'dynamic'` (or a `currencyConfig` with no
- * `currencyMode`) rolls up `childDef`, a field of `childFields` that is not a
- * stored home amount ({@link storedHomeAmountSourceOf}), with the declaration
- * the child field does support. The faces draw a `dynamic` summary in the
- * organization's home currency, which the amounts it reads are not known to
- * be in.
+ * `currencyMode`) rolls up `childDef`, a field of `childFields` that is not an
+ * amount in the home currency ({@link isTenantCurrencyAmount}), with the
+ * declaration the child field does support. The faces draw a `dynamic` summary
+ * in the organization's home currency, which the amounts it reads are not
+ * known to be in.
  */
 export function recordCurrencyDynamicRollupNotHomeError(
   rollup: RecordCurrencyRecordRollup,
@@ -226,7 +256,8 @@ export function recordCurrencyDynamicRollupNotHomeError(
   const home = declaredHome !== undefined && storedHomeAmountSourceOf(childFields, declaredHome) === rollup.childField
     ? declaredHome
     : undefined;
-  const homes = Object.keys(childFields).filter((name) => storedHomeAmountSourceOf(childFields, name) !== undefined);
+  const amounts = tenantCurrencyAmountsOf(childFields);
+  const kind = isRecord(childDef) && typeof childDef.type === 'string' ? `a '${childDef.type}' field` : 'not a field';
   const why = config?.currencyMode === 'record'
     ? `${named} is an amount in ${typeof config.currencyField === 'string' && config.currencyField.includes('.') ? 'its parent\'s' : 'each record\'s own'} `
       + `currency (\`currencyMode: 'record'\`), not the home currency. `
@@ -238,14 +269,15 @@ export function recordCurrencyDynamicRollupNotHomeError(
     : config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string'
       ? `${named} is fixed to ${config.defaultCurrency}. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: `
         + `'${config.defaultCurrency}' }\` on the summary instead.`
-      : `${named} is not a stored home amount, so its rows are not known to be in the home currency. `
-        + (homes.length > 0
-          ? `The home amounts of '${rollup.childObject}' are ${homes.map((h) => `'${h}'`).join(', ')}; roll up one of them, `
-          : `'${rollup.childObject}' stores no home amount; `)
+      : `${named} is ${kind}, not a \`currency\` field in \`dynamic\` mode, so its rows are not known to be in the home currency. `
+        + (amounts.length > 0
+          ? `The amounts of '${rollup.childObject}' in the home currency are ${amounts.map((h) => `'${h}'`).join(', ')}; `
+            + 'roll up one of them, '
+          : `'${rollup.childObject}' has no amount in the home currency; `)
         + 'or delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads is in '
         + 'one currency.';
   return `Object '${rollup.object}' field '${rollup.field}' currencyConfig: \`currencyMode: 'dynamic'\` on a summary is `
-    + 'admitted only for a roll-up of a stored home amount (a child field that a `homeAmount.field` on the child object '
-    + 'names), whose every row is in the organization\'s home currency. This summary rolls up '
-    + `${rollup.fn}(${rollup.childObject}.${rollup.childField}), and ${why}`;
+    + 'admitted only for a roll-up of an amount in the organization\'s home currency: a child `currency` field in '
+    + '`dynamic` mode (an absent `currencyMode` is `dynamic`), a stored home amount included, whose every row is in that '
+    + `currency. This summary rolls up ${rollup.fn}(${rollup.childObject}.${rollup.childField}), and ${why}`;
 }

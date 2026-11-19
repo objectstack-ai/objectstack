@@ -27,10 +27,7 @@ import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
 import {
   ExpressionProvider,
-  createExpressionEvaluator,
-  isObjectFieldVisible,
-  useExpressionPermissions,
-  useExpressionSystemPermissions,
+  isObjectFieldListed,
 } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
@@ -1170,48 +1167,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     navigate(`/apps/${newAppName}`);
   };
 
-  // Evaluator for the ModalForm's field-visibility gates below, over the SAME
-  // bag the `ExpressionProvider` this component mounts publishes — one builder,
-  // called with the same inputs (objectui#6493). This one sits ABOVE that
-  // provider in its own tree, so it cannot read it back through the hook; what
-  // it can do is stop hand-writing a second, narrower bag.
-  //
-  // Two roots the private bag dropped, both of which fail OPEN when named:
-  // `current_user` (and the `ctx.user` / `os.user` spellings of the same
-  // object) and `features`. Its `user` was hand-rolled too, without
-  // `positions` — so `'sales' in current_user.positions`, the gate the server
-  // enforces on write, faulted here rather than hiding the field.
-  // objectui#4421 — the same `permissions` input the provider below reads, so
-  // `current_user.can(...)` in a field's `visibleWhen` answers here exactly as
-  // it does under the provider (one bag, objectui#6493).
-  // objectui#13083 — and the `systemPermissions` list beside it, so
-  // `current_user.hasCapability(name)` answers here as it does under the
-  // provider (objectui#13006) instead of faulting on an unbound list.
-  const expressionPermissions = useExpressionPermissions();
-  const expressionSystemPermissions = useExpressionSystemPermissions();
-  const expressionEvaluator = useMemo(
-    // ⛔ No `app`: objectui#8155 removed it from the predicate scope, because
-    // neither ADR-0068 nor the engine's `SCOPE_ROOTS` declares such a root.
-    //
-    // ⛔ No `data` either: objectui#8166. This site passed `editingRecord` under
-    // that root, and it was the ONE mount in the repo where the ambient `data`
-    // was not empty — so an authored `visibleWhen: "data.status == 'x'"`
-    // RESOLVED here, silently, against the record being edited, while the SAME
-    // predicate on the SAME modal's per-field rules (form.tsx, over the
-    // provider's `data={{}}`) faulted, and the same predicate in CREATE mode
-    // (`editingRecord` null) faulted too. One authored string, three answers,
-    // none of them the row's canonical `record.*` binding (`83fe6e741`).
-    // The row reaches field predicates as `record`, from the form's own
-    // `ruleRecord` — not from this bag, which is why nothing is lost here.
-    () => createExpressionEvaluator({
-      user: buildExpressionUser(user),
-      features,
-      permissions: expressionPermissions,
-      systemPermissions: expressionSystemPermissions,
-    }),
-    [user, features, expressionPermissions, expressionSystemPermissions],
-  );
-
   // objectui#5619 — `isWorkspaceAdminResolved` belongs in this readiness gate
   // for the same reason `metadataLoading` does: everything below branches on
   // the verdict. The guard at the "no active app" strand turns a `false` into a
@@ -1769,22 +1724,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
                 open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
-                // objectui#6514 — the same declared-key gate `RecordFormPage`
-                // runs, through the same helper. This read `f.visible`, a key
-                // `FieldSchema` refuses by name, so nothing an author could
-                // legally write ever reached it; `isObjectFieldVisible` reads the
-                // static `hidden` (INVERTED) and the `visibleWhen` predicate,
-                // and the dead read is deleted rather than kept beside them.
+                // The list the form may draw: `isObjectFieldListed`, the same
+                // gate `RecordFormPage` runs. It reads the static `hidden` only
+                // (objectui#6514's declared keys; the refused `visible` is not
+                // read). A field's `visibleWhen` is evaluated by the form, where
+                // the record is bound — evaluated here, with no record, a
+                // `has()`-guarded predicate dropped the field before the form
+                // could draw it, and a form laid out from `fieldGroups` draws
+                // only listed fields.
                 fields: formObjectDef.fields
                   ? (Array.isArray(formObjectDef.fields)
                       ? formObjectDef.fields
-                          .filter((f: any) => {
-                            if (typeof f === 'string') return true;
-                            return isObjectFieldVisible(f, expressionEvaluator);
-                          })
+                          .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
                           .map((f: any) => typeof f === 'string' ? f : f.name)
                       : Object.entries(formObjectDef.fields)
-                          .filter(([_, f]: [string, any]) => isObjectFieldVisible(f, expressionEvaluator))
+                          .filter(([_, f]: [string, any]) => isObjectFieldListed(f))
                           .map(([key]: [string, any]) => key))
                   : [],
                 onSuccess: handleRecordFormSuccess,
