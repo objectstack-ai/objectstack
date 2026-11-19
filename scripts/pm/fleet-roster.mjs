@@ -753,7 +753,7 @@ export function renderHealth(h, { now }) {
     `1 可派发库存 — open ${QUEUE_LABEL}, no assignee: ${h.inventory.total} (${split(h.inventory.perRepo)}) · trend unread (named below)`,
     `2 决策箱 — 决策卡 ${h.inbox.decisionCards} · 待您审合 PR ${h.inbox.awaitingMergePulls} (two inboxes, never summed) · decision cards an open card names on a Blocked-by: line (reverse read, now): ${h.inbox.downstream.length} of ${h.inbox.decisionCards}${h.inbox.downstream.length ? ` — ${h.inbox.downstream.map((d) => `${ref(d.card)} ← ${d.dependents.map(ref).join(', ')}`).join('; ')}` : ''}`,
     `3 finding — ${h.findings.total} open (the bare label is the ungraded count; a held card has changed label), median age ${ageOf(h.findings.medianAgeHours)} (${split(h.findings.perRepo)})`,
-    `4 裸卡 — ${h.bare.total} bare (first-touch-sweep ①, off the sweep's own walk), median age ${ageOf(h.bare.medianAgeHours)} = first-touch debt · ungraded (④) ${h.bare.ungraded} (${split(h.bare.perRepo)})`,
+    `4 裸卡 — ${h.bare.total} bare (${split(h.bare.perRepo)}; first-touch-sweep ①, off the sweep's own walk), median age ${ageOf(h.bare.medianAgeHours)} = first-touch debt · ungraded (④) ${h.bare.ungraded}`,
     `5 发版阻塞 — open ${P0_LABEL} issues summed over the repos read: ${h.releaseBlockers.total} (${split(h.releaseBlockers.perRepo)}); zero means every board read is empty · the total open count is deliberately not an indicator`,
     'Not read by this reader — the seat reads these itself:',
     ...HEALTH_UNREAD_LEGS.map((l) => `  · ${l}`),
@@ -863,18 +863,26 @@ export function healthFixtureGet(health) {
 
 /**
  * Live search reads spaced `SEARCH_SPACING_MS` apart: the search API's secondary rate limit was measured firing on a
- * second repo's counts read back to back. A count still refused is a named gap, never retried into a number.
+ * second repo's counts read back to back, and again with the spacing on a shared token. A search the platform refuses
+ * for that limit is waited `SECONDARY_LIMIT_WAIT_MS` and read ONCE more; a count still refused is a named gap, never
+ * retried into a number.
  */
 export const SEARCH_SPACING_MS = 2500;
+export const SECONDARY_LIMIT_WAIT_MS = 60_000;
 export function pacedSearch(get, sleep) {
   let last = -Infinity;
-  return (path) => {
-    if (path.startsWith('/search/')) {
-      const wait = last + SEARCH_SPACING_MS - Date.now();
-      if (wait > 0) sleep(wait);
-      last = Date.now();
-    }
+  const spaced = (path) => {
+    const wait = last + SEARCH_SPACING_MS - Date.now();
+    if (wait > 0) sleep(wait);
+    last = Date.now();
     return get(path);
+  };
+  return (path) => {
+    if (!path.startsWith('/search/')) return get(path);
+    const r = spaced(path);
+    if (r.ok || !/secondary rate limit/i.test(String(r.error))) return r;
+    sleep(SECONDARY_LIMIT_WAIT_MS);
+    return spaced(path);
   };
 }
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -1059,7 +1067,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
   'the health rule text: every phrase --health is built from is in the file that writes it': 4,
-  '--health: five indicators off one walk, every count checked, every gap named': 22,
+  '--health: five indicators off one walk, every count checked, every gap named': 23,
 });
 const SELF_TEST_BATTERY_FLOOR = 12;
 
@@ -1356,6 +1364,11 @@ async function selfTest() {
     const paced = pacedSearch((p) => ({ ok: true, value: p }), (ms) => waits.push(ms));
     ['/search/issues?q=a', '/repos/o/r/issues?page=1', '/search/issues?q=b'].forEach(paced);
     t('live search reads are spaced, and only search reads', [waits.length, waits.every((w) => w > 0 && w <= SEARCH_SPACING_MS)], [1, true]);
+    const limited = [];
+    let calls = 0;
+    const once = pacedSearch(() => (++calls === 1 ? { ok: false, error: 'gh: You have exceeded a secondary rate limit. (HTTP 403)' } : { ok: true, value: 1 }), (ms) => limited.push(ms));
+    const always = pacedSearch(() => ({ ok: false, error: 'You have exceeded a secondary rate limit (HTTP 403)' }), () => {});
+    t('⭐ a secondary-limit refusal is waited and read once more, never twice', [once('/search/issues?q=a').ok, calls, limited.includes(SECONDARY_LIMIT_WAIT_MS), always('/search/issues?q=b').ok], [true, 2, true, false]);
     t('median: odd, even and empty', [median([3, 1, 2]), median([4, 1, 2, 3]), median([])], [2, 2.5, null]);
     t('--health is read-only: with --write it is a usage error; alone it parses', [parseArgs(['--health', '--write', '3']).errors.some((e) => e.includes('read-only')), parseArgs(['--health']).errors], [true, []]);
     const hcli = (args) => spawnSync(process.execPath, [SELF_PATH, '--health', ...args], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent' } });
