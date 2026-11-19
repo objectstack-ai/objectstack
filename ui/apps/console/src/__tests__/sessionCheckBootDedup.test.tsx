@@ -21,7 +21,7 @@ import indexHtml from '../../index.html?raw';
 import mainSource from '../main.tsx?raw';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
-import { AuthProvider, useAuth } from '@object-ui/auth';
+import { AuthGuard, AuthProvider, useAuth } from '@object-ui/auth';
 import { preflightAuth } from '../lib/auth-preflight';
 import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
@@ -231,15 +231,6 @@ describe('one page load, one get-session, started at parse time', () => {
 });
 
 describe('every safety of the preflight is kept', () => {
-  it('no token: no parse-time request, and the preflight sends none either', async () => {
-    runEarlySessionCheck();
-    expect(fetchStub).not.toHaveBeenCalled();
-    expect((globalThis as unknown as Record<symbol, unknown>)[EARLY_SLOT]).toBeUndefined();
-
-    await preflightAuth(authUrlFor());
-    expect(sessionCalls()).toHaveLength(0);
-  });
-
   it('blocked storage: no parse-time request, and the script does not throw', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError');
@@ -308,6 +299,127 @@ describe('every safety of the preflight is kept', () => {
     await preflightAuth(authUrlFor());
     await preflightAuth(authUrlFor());
 
+    expect(sessionCalls()).toHaveLength(2);
+  });
+});
+
+/**
+ * objectstack#35455 — with no stored Bearer (a cookie session, the hosted
+ * posture's first visit) `get-session` was asked by `AuthProvider` after the
+ * mount, so it waited on the language seed's race. The parse-time script now
+ * asks the cookie session's question and the preflight hands the answer on.
+ */
+describe('no stored token: the cookie session is asked at parse time and handed on', () => {
+  /** AuthProvider, read through a probe, behind the same gate a protected route uses. */
+  function renderApp() {
+    const probe: { current: ReturnType<typeof useAuth> | null } = { current: null };
+    function Probe() {
+      const value = useAuth();
+      useLayoutEffect(() => {
+        probe.current = value;
+      });
+      return <span>{value.isLoading ? 'loading' : value.user?.name ?? 'nobody'}</span>;
+    }
+    render(
+      <React.StrictMode>
+        <AuthProvider authUrl={authUrlFor()}>
+          <Probe />
+          <AuthGuard fallback={<span>sign-in</span>} loadingFallback={<span>guard-waits</span>}>
+            <span>protected</span>
+          </AuthGuard>
+        </AuthProvider>
+      </React.StrictMode>,
+    );
+    return probe;
+  }
+
+  it('sends the cookie question in the same parse pass, with no Authorization header', () => {
+    runScript('applyEarlyBranding');
+    runEarlySessionCheck();
+
+    const urls = fetchStub.mock.calls.map(([input]) => urlOf(input));
+    expect(urls).toEqual(['/api/v1/runtime/config', '/api/v1/auth/get-session']);
+    const [, init] = sessionCalls()[0]!;
+    expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+  });
+
+  it('asks exactly what the preflight would ask without a token', async () => {
+    runEarlySessionCheck();
+    const [earlyUrl, earlyInit] = sessionCalls()[0]!;
+
+    // CONTROL leg: the preflight alone, on a page without the script.
+    clearSlots();
+    fetchStub.mockClear();
+    await preflightAuth(authUrlFor());
+    const [ownUrl, ownInit] = sessionCalls()[0]!;
+
+    expect(earlyUrl).toBe(ownUrl);
+    expect(earlyInit?.credentials).toBe(ownInit?.credentials);
+    expect([...new Headers(earlyInit?.headers).entries()]).toEqual([...new Headers(ownInit?.headers).entries()]);
+  });
+
+  it('end to end: one get-session, signed in, and the protected route renders with the session', async () => {
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('Ada')).toBeTruthy();
+    expect(screen.getByText('protected')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isAuthenticated).toBe(true);
+    // The answer's token is synced exactly as `getSession()` syncs it.
+    expect(localStorage.getItem('auth-session-token')).toBe(TOKEN);
+  });
+
+  it('a signed-out answer is handed on too: still one get-session, and the sign-in fallback', async () => {
+    // better-auth answers "no session" 200 with a null body.
+    sessionAnswer = () => json(null);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isLoading).toBe(false);
+    expect(probe.current?.user).toBeNull();
+  });
+
+  it('CONTROL: a non-OK answer hands nothing on, and the protected route waits for AuthProvider\'s own read', async () => {
+    sessionAnswer = () => json(null, 503);
+    runEarlySessionCheck();
+    await settle();
+    // The preflight asks once itself and gets the 503 too.
+    await preflightAuth(authUrlFor());
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeUndefined();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    sessionAnswer = () => gate.then(() => json(SESSION_BODY));
+    renderApp();
+    expect(screen.getByText('guard-waits')).toBeTruthy();
+    expect(screen.queryByText('protected')).toBeNull();
+
+    await act(async () => { release(); await settle(); });
+    expect(await screen.findByText('protected')).toBeTruthy();
+    // Parse time and the preflight answered 503; AuthProvider asked itself.
+    expect(sessionCalls().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('CONTROL: a token stored since the cookie question was asked is not answered by it', async () => {
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    localStorage.setItem('auth-session-token', TOKEN);
+
+    renderApp();
+    expect(await screen.findByText('Ada')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    // The handed-on answer belonged to the cookie question; AuthProvider asked.
     expect(sessionCalls()).toHaveLength(2);
   });
 });
