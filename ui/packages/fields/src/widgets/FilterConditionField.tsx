@@ -679,24 +679,50 @@ export function FilterConditionField({
   const dependentValues: Record<string, any> = (props as any).dependentValues ?? {};
   const objectName = String(dependentValues.object_name ?? '');
 
-  const [fields, setFields] = React.useState<FilterFieldDef[] | null>(null);
+  /**
+   * The schema's answer, keyed by the object it answers for, so a render that
+   * names a new object never reads the previous object's field types.
+   */
+  const [schemaAnswer, setSchemaAnswer] = React.useState<{ object: string; fields: FilterFieldDef[] } | null>(null);
+  const canReadSchema = !!dataSource && !!objectName && typeof dataSource.getObjectSchema === 'function';
 
   React.useEffect(() => {
-    setFields(null);
-    if (!dataSource || !objectName || typeof dataSource.getObjectSchema !== 'function') return;
+    if (!canReadSchema) return;
     let cancelled = false;
     (async () => {
       try {
         const schema = await dataSource.getObjectSchema(objectName);
-        if (!cancelled) setFields(deriveFilterFields(schema));
+        if (!cancelled) setSchemaAnswer({ object: objectName, fields: deriveFilterFields(schema) });
       } catch {
-        if (!cancelled) setFields([]);
+        if (!cancelled) setSchemaAnswer({ object: objectName, fields: [] });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [dataSource, objectName]);
+  }, [canReadSchema, dataSource, objectName]);
+
+  const fields: FilterFieldDef[] | null =
+    canReadSchema && schemaAnswer?.object === objectName ? schemaAnswer.fields : null;
+
+  /**
+   * The schema read is still in flight, so no column has a type yet.
+   *
+   * A stored row is on screen before `getObjectSchema` answers, with a TEXT
+   * box for its value: the builder types the box from a field list that is
+   * still empty. A bound typed into that box was emitted as the string the box
+   * holds — `{"amount":{"$gt":"6"}}` rather than `{"amount":{"$gt":6}}` — and
+   * nothing retyped it when the schema arrived, so what got stored depended on
+   * whether the admin typed before or after a network read.
+   *
+   * So the builder takes no edit until the schema has answered: its controls
+   * sit in a disabled fieldset, and {@link handleBuilderChange} emits nothing
+   * while this holds. A failed read settles to an empty field list and
+   * releases the hold, and a host with no `getObjectSchema` never holds at
+   * all — there is no answer coming, so holding would lock the builder for
+   * good. Raw-JSON mode is not held: its text is the author's own document.
+   */
+  const schemaPending = canReadSchema && fields === null;
 
   const rawValue = React.useMemo(() => stringifyValue(value), [value]);
 
@@ -772,6 +798,7 @@ export function FilterConditionField({
   }, [group, storedKey, localKey]);
 
   const handleBuilderChange = (g: BuilderGroup) => {
+    if (schemaPending) return;
     setLocalGroup(g);
     const mongo = filterGroupToMongo(g, typeOf);
     onChange((mongo == null ? '' : JSON.stringify(mongo)) as any);
@@ -838,12 +865,18 @@ export function FilterConditionField({
           )}
         </>
       ) : (
-        <FilterBuilder
-          fields={fields ?? []}
-          value={localGroup as any}
-          onChange={handleBuilderChange as any}
-          extraOperators={FILTER_CONDITION_EXTRA_OPERATORS}
-        />
+        <fieldset
+          disabled={schemaPending}
+          aria-busy={schemaPending || undefined}
+          className="m-0 min-w-0 border-0 p-0"
+        >
+          <FilterBuilder
+            fields={fields ?? []}
+            value={localGroup as any}
+            onChange={handleBuilderChange as any}
+            extraOperators={FILTER_CONDITION_EXTRA_OPERATORS}
+          />
+        </fieldset>
       )}
       {/*
         The server refuses to save a criteria that would select every record

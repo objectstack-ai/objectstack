@@ -14,7 +14,8 @@
 
 ## 二、跨车道取卡(coordinator 每次唤醒读)
 
-- 取卡面 = 各车道 open 卡:p0/p1 先,再点名 area 或子专题的下一张;判据照 `execution-duties.md`。
+- 取卡面 = 各车道 open 卡,次序现读 `card-pick.mjs --order <序>`;判据照 `execution-duties.md`。
+- 维护者只说改级 ⇒ 只落级,评论照 `filing-gate.md` 引原话;⛔ 不借此开线程,照取卡全序。
 - 每张卡交其车道的席位线程;车道无席位线程而座位贴空着 ⇒ 先开席位线程再交卡。
 - 维护者 ⛔ 不逐卡点名车道:车道读卡的 `domain:*`;S/M 分流见 `dispatch-runbook.md` 卡线程节。
 
@@ -23,18 +24,19 @@
 - 卡线程上限全项目一个数,由维护者按项目言明;未言明取各席 `batch` 之和。
 - 席位攒批交候选,一线程一行:卡/PR、标题、级别、effort、汇报区、要读文件、续做分支。
 - 派发令全文随行;⛔ 不等自己的槽位;区与卡线程 ⛔ 不直找 coordinator,经席位。
-- coordinator 一批开完、一次回全部 id:p0/p1 先,余照点名次序;满即排队,交回或合入即释放。
+- coordinator 一批开完、一次回全部 id:p0/p1 先,余照点名次序(队列卡现读 `card-pick.mjs`)。
+- 满即排队;有空槽即开;先后只认卡上 `Blocked-by:` 与席位串行队,⛔ 不自排、不逐张等。
 - 槽位只算在建的线程:等人(授权批准、决策卡)或等席位 L1/L2 审核的卡线程不占槽。
-- S 卡的席内子代理只计该席 `batch`,不计本上限。
+- 交回或合入即释放槽位;S 卡的席内子代理只计该席 `batch`,不计本上限。
 
 ## 四、effort 与档位按难度(coordinator 开线程时读;席位请线程时读)
 
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
 - 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` L2 审核。
 
-## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
+## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位请裁时读)
 
-- 规则一处:`lanes/director.md` 与 `dispatch-runbook.md` 卡线程节;本文只指不抄。
+- 席位请裁 ⇒ 开天花板档决策线程(effort `xhigh`),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
 - 等裁的卡线程不占槽(见第三节);裁决记录 = 卡上裁决评论,⛔ 不落项目文件或记忆。
 
 ## 六、额度压力(coordinator 每次开线程前读)

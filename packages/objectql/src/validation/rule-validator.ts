@@ -253,6 +253,7 @@ import {
   buildFieldError,
   requiredWhenShown,
   resolveFieldLabel,
+  translatedLabels,
   type FieldValidationError,
   type ValidationMessageContext,
 } from './record-validator.js';
@@ -4066,8 +4067,8 @@ export function emitValidationAdvisories(
  *
  * It is not a second i18n path into objectql. The lookup runs on the SAME
  * `ValidationMessageContext.translate` hook — the engine's `i18nService`,
- * bridged by `ObjectQLPlugin` — that `resolveFieldLabel` and
- * `renderValidationMessage` already use. What was missing was a key shape for
+ * bridged by `ObjectQLPlugin` — that `renderValidationMessage` already uses
+ * (a metadata LABEL reads `labelTranslation` instead, #34030). What was missing was a key shape for
  * an author-written rule, not a channel to resolve one.
  *
  * The authored message is handed over verbatim on a miss and the translation is
@@ -4253,11 +4254,13 @@ function checkStateMachine(
  * field, the shared list's (`picklists.<name>.options.<value>`) → the option's
  * declared `label` → the raw value.
  *
- * The chain `translateObject` serves a field's options by on `/meta`, so the
- * refusal names a state with the word the form's dropdown showed. Asked through
- * the same `ValidationMessageContext.translate` hook `resolveFieldLabel` uses —
- * no second i18n path. The raw value is the last resort, as the API name is
- * for a field label: it stays available to clients in `constraint`.
+ * The chain `translateObject` serves a field's options by on `/meta`, and
+ * asked of `translateObject` itself, through the same
+ * `ValidationMessageContext.labelTranslation` `resolveFieldLabel` reads
+ * (#34030), so the refusal names a state with the word the form's dropdown
+ * showed — in the declared `sourceLocale`, the authored label. The raw value
+ * is the last resort, as the API name is for a field label: it stays
+ * available to clients in `constraint`.
  */
 function resolveOptionLabel(
   fieldName: string,
@@ -4265,30 +4268,29 @@ function resolveOptionLabel(
   value: string,
   ctx: ValidationMessageContext | undefined,
 ): string {
-  if (ctx?.translate && ctx.objectName && ctx.locale) {
-    const keys = [`objects.${ctx.objectName}.fields.${fieldName}.options.${value}`];
-    if (typeof def?.picklist === 'string' && def.picklist.length > 0) {
-      keys.push(`picklists.${def.picklist}.options.${value}`);
-    }
-    for (const key of keys) {
-      try {
-        const translated = ctx.translate(key, ctx.locale);
-        // II18nService echoes the key back on a miss.
-        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-          return translated;
-        }
-      } catch {
-        // A misbehaving i18n service must not turn a 400 into a 500.
-      }
-    }
-  }
   // A bare scalar option carries no label of its own.
   const option = (Array.isArray(def?.options) ? (def.options as unknown[]) : []).find(
     (o): o is ConditionalFieldOption =>
       typeof o === 'object' && o !== null && String((o as ConditionalFieldOption).value) === value,
   );
   const declared = typeof option?.label === 'string' ? option.label.trim() : '';
-  return declared.length > 0 ? declared : value;
+  let label: string | undefined = declared;
+  if (ctx?.objectName && ctx.locale) {
+    const picklist = typeof def?.picklist === 'string' && def.picklist.length > 0 ? def.picklist : undefined;
+    const doc = translatedLabels({
+      name: ctx.objectName,
+      fields: {
+        [fieldName]: {
+          ...(picklist !== undefined ? { picklist } : {}),
+          options: [{ value, ...(declared.length > 0 ? { label: declared } : {}) }],
+        },
+      },
+    }, ctx);
+    const fields = doc.fields as Record<string, { options?: Array<{ label?: unknown }> }> | undefined;
+    const translated = fields?.[fieldName]?.options?.[0]?.label;
+    label = typeof translated === 'string' ? translated : undefined;
+  }
+  return typeof label === 'string' && label.length > 0 ? label : value;
 }
 
 /**

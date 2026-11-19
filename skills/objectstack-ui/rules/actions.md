@@ -64,7 +64,7 @@ export const ReassignLeadAction = defineAction({
 
 ## Examples
 
-`onSuccess` hops once the flow run completes, not when it pauses at a screen; its URL template reads an `isOutput` variable as `${result.output.NAME}`:
+`onSuccess` hops once the flow run completes, not when it pauses at a screen; its URL template reads an `isOutput` variable:
 
 <!-- os:check -->
 ```typescript
@@ -141,6 +141,16 @@ sentence is answered as `userMessage`, translated at
 `objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
 failure toast shows it unless the action authors `errorMessage`.
 
+### Writing in the organization's language (`texts`)
+
+A sentence the body writes into a record (an activity's subject) is read organization-wide:
+the same actions declare it under `texts` and ask for it by key —
+`texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then
+`await ctx.text('email_subject', { subject: input.subject })`. It answers in the organization's
+language, never the caller's, translated at the same node's `texts.<key>.message`; with no
+translation the declared sentence is written, filled; an unreadable Localization setting
+rejects. An undeclared key is refused at save when named literally, else at run.
+
 ## Opening in a New Tab
 
 ### `openIn: 'new-tab'`
@@ -168,7 +178,7 @@ export const PrintA3Action = defineAction({
 A redirect URL **computed after a fetch**: `opensInNewTab:
 true` pre-opens the tab synchronously on click (no popup blocker), then navigates
 it to the handler's `redirectUrl`. `newTabUrl` skips the round-trip — a backend
-path starting with `/` (`{recordId}` placeholder; an external URL is refused, use
+path starting with `/` (an external URL is refused, use
 `openIn`), valid only with `opensInNewTab: true`; the endpoint enforces its own
 auth (the tab carries no in-app session).
 

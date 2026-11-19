@@ -118,6 +118,8 @@ import {
   warnWithheldCommentComposer,
 } from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
+import { useDefaultRecordPage } from '../defaultRecordPage';
+import { RecordFieldChangesContext, RecordFieldHistoryContext, mergeFieldHistoryIntoFeed } from '../recordTimelineStream';
 
 /** Dev mode, read per call — the guard `record-activity.tsx` puts on the same diagnostic. */
 const isDevBuild = (): boolean =>
@@ -245,10 +247,20 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
   React.useEffect(() => { setFilterMode(defaultFilterMode); }, [defaultFilterMode]);
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
+  // objectstack#33996 — on an authored page the record's field changes, which
+  // the host reads while a feed panel is on screen, join this panel's feed by
+  // the stream's pairing (one action, one row). On the default record page
+  // they are the stream's (`record:activity`), so a panel drawn there leaves
+  // them to it. `unifiedTimeline: false` un-mixes them again (below). A panel
+  // that shows no field history offers no `changes_only` (objectstack#30074).
+  const fieldChanges = React.useContext(RecordFieldChangesContext);
+  const onDefaultPage = useDefaultRecordPage();
+  const fieldHistoryShown =
+    React.useContext(RecordFieldHistoryContext) && !onDefaultPage && feed?.unifiedTimeline !== false;
   const applied = React.useMemo(
     () =>
       applyFeedConfig(
-        discussionItems ?? [],
+        onDefaultPage ? discussionItems ?? [] : mergeFieldHistoryIntoFeed(discussionItems ?? [], fieldChanges),
         {
           types: feed?.types,
           showCompleted: feed?.showCompleted,
@@ -257,7 +269,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         pageSize,
         blockName,
       ),
-    [discussionItems, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
+    [discussionItems, onDefaultPage, fieldChanges, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
   );
 
   // `record-activity.tsx` writes its own `handleLoadMore` with an empty
@@ -295,6 +307,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
 
   return (
     <div className={className} {...designer} {...ariaProps}>
+      <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
       <RecordChatterPanel
         items={applied.items}
         config={config}
@@ -337,6 +350,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         commentsFailed={discussion?.commentsFailed}
         onRetryFeed={discussion?.onRetryFeed}
       />
+      </RecordFieldHistoryContext.Provider>
     </div>
   );
 };

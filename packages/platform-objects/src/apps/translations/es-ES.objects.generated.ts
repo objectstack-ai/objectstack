@@ -72,6 +72,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Debe cambiar la contraseña",
         help: "Si es true, el usuario queda bloqueado (403 PASSWORD_RESET_REQUIRED) hasta que cambie su contraseña. Lo establecen las rutas de administración de usuarios; gestionado por el sistema."
       },
+      dev_seed_credential: {
+        label: "Credencial de semilla de desarrollo",
+        help: "Se establece en una cuenta que creó la semilla de desarrollo. Mientras su contraseña siga siendo la contraseña de la semilla, un servidor de producción rechaza su inicio de sesión y toda nueva sesión; os user set-password establece una contraseña nueva y lo borra. Gestionado por el sistema; nunca se devuelve en las lecturas."
+      },
       mfa_required_at: {
         label: "MFA exigido desde",
         help: "Cuándo se aplicó por primera vez el MFA obligatorio a este usuario (inicio del período de gracia). Sirve de base a mfa_required; gestionado por el sistema."
@@ -279,6 +283,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Quitar usuario pendiente",
+        confirmText: "¿Quitar a esta persona, que aún no ha iniciado sesión, y cancelar su invitación? Si ha iniciado sesión mientras tanto o no se puede contactar con la organización anfitriona, no se quita a nadie.",
+        successMessage: "Usuario pendiente quitado"
       },
       set_user_password: {
         label: "Establecer contraseña",

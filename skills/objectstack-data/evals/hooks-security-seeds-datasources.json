@@ -34,11 +34,31 @@
     {
       "id": 4,
       "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer, and refreshed from the seed on every replay except `stage`: a nightly job advances it, and a replay must not reset it.",
-      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { mode: 'upsert', env: ['dev', 'test'], ... })` for the refreshed demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so the `upsert` replay leaves the job-owned column (the `ignore` default would refresh nothing).",
+      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { mode: 'upsert', env: ['dev', 'test'], ... })` for the refreshed demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), lookups (not array order) ordering the load; `columns: { stage: { applyOn: 'create' } }` so the `upsert` replay leaves the job-owned column (the `ignore` default would refresh nothing).",
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
         "must_not_contain": ["new Date(", "defineDataset", "externalId: 'id'"]
+      }
+    },
+    {
+      "id": 30,
+      "prompt": "Seed demo rows into our `project_member` junction table (a `project` lookup and a `user` lookup; no other field names a row), dev/test only. The rows are loaded once: a restart must not duplicate them.",
+      "expected_output": "`defineSeed(ProjectMember, { externalId: ['project', 'user'], env: ['dev', 'test'], records })` with `mode` left at the default `ignore`: each replay matches a row on the composite of its two resolved lookups and inserts only the missing ones. Neither the `insert` nor the `replace` mode: both are refused, because every replay re-inserted each record; a composite `externalId` (or `'id'` when the records carry their own ids) is the conversion the refusal names.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSeed", "externalId"],
+        "must_not_contain": ["'insert'", "'replace'"]
+      }
+    },
+    {
+      "id": 31,
+      "prompt": "Our `price_book` seed ships a Chinese set for `zh-CN` and an English set. An organization whose locale resolves to `de-DE` installs the package and should get the English price book, not an empty table. How do we declare the two sets?",
+      "expected_output": "Two locale-scoped datasets: `defineSeed(PriceBook, { locale: ['zh-CN'], records })` and `defineSeed(PriceBook, { locale: ['en', 'en-US'], fallback: true, records })`. Without `fallback`, a `de-DE` load gets none of the object's locale-scoped rows, since no set lists that locale. `fallback: true` makes the English set also load for a resolved locale that no locale-scoped set of `price_book` lists. It needs `locale` (a set without one already loads for every locale), and one set per object carries it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["locale", "fallback"],
+        "must_not_contain": []
       }
     },
     {
@@ -192,6 +212,26 @@
       }
     },
     {
+      "id": 28,
+      "prompt": "A blocking `afterUpdate` hook body on `invoice` (default `onError: 'abort'`) runs `ctx.api.transaction`: it inserts a `payment`, then throws when the balance would go negative. The body catches that throw so the save still succeeds. Is the `payment` row rolled back? Is it committed when the callback returns? We also want it to insert a `bank_transfer`, a business object on our `finance` datasource, in the same callback.",
+      "expected_output": "Inside the save's unit (a blocking `afterUpdate` that can abort runs in it) `ctx.api.transaction` joins that unit: its throw is no rollback and its return is no commit. The caught throw keeps the `payment` row, and the outer unit commits it with the save, or rolls back all of it. To undo the payment, check the balance before inserting, or let the throw out of the body so the save is refused and everything rolls back. A body transaction is on the default datasource only: the `bank_transfer` insert is refused before it runs, `400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`, and a plain `ctx.api` write to it inside the save's unit is refused the same way. Keep the objects it writes on the default datasource, or make that write outside the unit (an `async: true` hook).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["join", "ERR_CROSS_DATASOURCE_TRANSACTION_WRITE"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 29,
+      "prompt": "Our organization works in German (Setup → Localization); reps save leads in English or French. Write an `afterInsert` hook on `crm_lead` that opens a `crm_task` whose subject reads `Follow up with lead: NAME`.",
+      "expected_output": "The hook declares the sentence in `texts` (`follow_up_subject: { message: 'Follow up with lead: {{ lead }}', params: ['lead'] }`) and its `js` body (capabilities `['api.write']`; `ctx.text` needs none) writes `subject: await ctx.text('follow_up_subject', { lead: ctx.input.name })` into the `crm_task` insert, linked by `ctx.result.id` (`ctx.input.id` is undefined on insert). The subject is written in the organization's language (German), never the saving rep's: translated first, then filled from `params`. A missing German translation writes the declared `message` and does not fail the hook; the translation key is objectstack-i18n's. No sentence is hard-coded in the body.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["texts", "ctx.text", "params"],
+        "must_not_contain": ["related_to_lead: ctx.input.id"]
+      }
+    },
+    {
       "id": 20,
       "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects, but must never be able to read tasks.",
       "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no Modify All on `project` (it overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
@@ -248,6 +288,26 @@
       "files": [],
       "assertions": {
         "must_contain": ["caller", "roll"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 25,
+      "prompt": "A `beforeInsert` hook on `time_entry`, declared in the stack's `hooks`, creates the week's `timesheet` row through `ctx.api` when there is none. A validation rule then refuses the entry (`hours > 24`). Is an empty timesheet left behind? Would `onError: 'log'` on the hook keep it? In which setups does it stay?",
+      "expected_output": "No: the save and the hook's `ctx.api` insert run in one transaction, so the refusal rolls the `timesheet` row back with the entry. `onError: 'log'` does not keep it: there is no per-hook opt-out. It stays stored only where no transaction is opened: `time_entry`, the hooked object, is off the default datasource, or the default driver has no transactions (Turso's remote transport). A hook registered in code with `registerHook` opens no transaction either, and inside a transaction the caller opened, the caller decides. MongoDB needs a replica set for this transaction (read in code, not measured).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["roll", "default datasource", "registerHook"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 26,
+      "prompt": "`order` is on the default datasource; `shipment`, a business object, is on our `warehouse` datasource. Write a `beforeInsert` hook on `order` that inserts the matching `shipment` row through `ctx.api`.",
+      "expected_output": "Redirects: a `before*` hook does not write a business record to another datasource through `ctx.api`. The hook's writes run in one transaction with the save, on the default datasource, and the `shipment` insert is refused there with `CrossDatasourceTransactionWriteError`. Keep the objects a `before*` hook writes on the default datasource: move `shipment` there. Only an append-only ledger on another datasource (`lifecycle.class` `audit` / `telemetry` / `event`) is written outside the transaction, and `shipment` is not one.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["CrossDatasourceTransactionWriteError", "default datasource"],
         "must_not_contain": []
       }
     }

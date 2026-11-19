@@ -1946,8 +1946,8 @@ export async function selfTest() {
     const two = await driveOffline({ rows: [ROW(62), ROW(63, { reason: 'completed' })] }, { cards: { ...QUEUED(62), ...QUEUED(63) } }, { route: dispatchRoute(), relay: 'success' });
     t('⛔ never two cards in one dispatch: two cards are two payloads, one card each', two.sent.map((p) => [...new Set(p.actions.map((a) => a.issue))]), [[62], [63]]);
     t('…each closed under ITS OWN row`s reason', [two.api.cards.get(62).state_reason, two.api.cards.get(63).state_reason], ['not_planned', 'completed']);
-    const residue = await driveOffline({ numbers: [64] }, { cards: QUEUED(64, { labels: ['pm:queue', 'pm:blocking', 'pm:epic', 'tooling'] }) }, { route: dispatchRoute(), relay: 'success' });
-    t('the strip takes the pm-state AND its residue (`pm:blocking`), never an identity sticker (`pm:epic`)', [residue.sent[0].actions[1].labels, residue.api.cards.get(64).labels, residue.res.exit], [['pm:queue', 'pm:blocking'], ['pm:epic', 'tooling'], EXIT_OK]);
+    const residue = await driveOffline({ numbers: [64] }, { cards: QUEUED(64, { labels: ['pm:queue', 'pm:epic', 'tooling'] }) }, { route: dispatchRoute(), relay: 'success' });
+    t('the strip takes the pm-state, never an identity sticker (`pm:epic`)', [residue.sent[0].actions[1].labels, residue.api.cards.get(64).labels, residue.res.exit], [['pm:queue'], ['pm:epic', 'tooling'], EXIT_OK]);
     const dryRelay = await driveOffline({ numbers: [65, 66], dryRun: true }, { cards: { ...QUEUED(65), ...QUEUED(66, { assignees: ['x'] }) } }, { route: dispatchRoute(), relay: 'success' });
     t('a DRY RUN packs ONE payload per actionable card, exactly three actions, and SENDS none', [dryRelay.res.exit, dryRelay.sent.length, dryRelay.res.payloads.length, dryRelay.res.payloads[0]?.actions.map((a) => a.op)], [EXIT_OK, 0, 1, [...PACK_ORDER]]);
     t('…printing that payload as the JSON that would be sent', dryRelay.text.includes(`#65 payload ${JSON.stringify(dryRelay.res.payloads[0])}`));
@@ -2028,8 +2028,12 @@ export async function selfTest() {
     t('…④ read all three back and MATCHES — the strip it did not owe reads as landed, not as missing', /#9180 ④ MATCHES — closed `not_planned`/.test(one.text));
     t('…the run says it is stateless, and that nothing was left to strip', /STATELESS — acts only on a card carrying NO pm-state/.test(one.text) && /#9180 ① 取现集 .* · strip none/.test(one.text));
     t('…and it is ONE write on the throttle, like any other card', /1 dispatch\(es\) sent — 1 write\(s\) on the throttle/.test(one.text));
-    const residue = await driveOffline({ numbers: [9181], ...SL }, { cards: STATELESS(9181, { labels: ['tracking', 'pm:blocking'] }) }, { route: dispatchRoute(), relay: 'success' });
-    t('a stateless card still carrying RESIDUE (`pm:blocking`) owes the strip: three actions, the residue taken', [residue.sent[0]?.actions.map((a) => a.op), residue.sent[0]?.actions[1]?.labels, residue.api.cards.get(9181).labels], [[...PACK_ORDER], ['pm:blocking'], ['tracking']]);
+    // The residue set holds no label that is not itself a pm-state (the one that
+    // was, a derived cache label, is retired), so a card this mode ACTS on has
+    // nothing to strip. The list is still the residue alone, pinned on the
+    // function — and the subset pin fails the day a non-state residue label
+    // returns, which is the day the three-action stateless pack is live again.
+    t('the stateless strip list is the residue alone — and every residue label is a pm-state, so a card this mode acts on owes no strip', [stripLabels({ labels: ['tracking', 'pm:on-hold'] }, null), stripLabels({ labels: ['tracking', 'domain:spec'] }, null), PM_RESIDUE_LABELS.every((l) => PM_EXCLUSIVE_STATE_LABELS.includes(l))], [['pm:on-hold'], [], true]);
     const stateful = await driveOffline({ numbers: [9182, 9183], ...SL }, { cards: { ...QUEUED(9182), ...STATELESS(9183, { labels: ['pm:queue', 'pm:blocked'] }) } }, { route: dispatchRoute(), relay: 'success' });
     t('⛔ under `--stateless` a card carrying one pm-state or two is SKIPPED: no payload, the board untouched', [stateful.res.exit, stateful.res.counts.skipped, stateful.sent.length, stateful.api.cards.get(9182).state, stateful.api.cards.get(9183).comments.length], [EXIT_OK, 2, 0, 'open', 0]);
     const owned = await driveOffline({ numbers: [9184], ...SL }, { cards: STATELESS(9184, { assignees: ['os-zhuang'] }) }, { route: dispatchRoute(), relay: 'success' });

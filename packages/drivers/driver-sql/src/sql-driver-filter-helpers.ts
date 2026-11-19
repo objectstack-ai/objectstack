@@ -45,6 +45,7 @@ import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAs
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { emitBalancedGroup } from './sql-driver-balanced-group.js';
+import { presentStoredBoolean, sqliteBooleanBinding } from './sql-driver-sqlite-serialisation.js';
 import type { Knex } from 'knex';
 import {
   AUDIT_TIMESTAMP_COLUMNS, CROSS_FIELD_COMPARISON_OPERATORS, SQLITE_TIME_EXPR_REFS, TEXT_OPERATORS,
@@ -176,9 +177,16 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'booleanFields' | 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'isSqlite' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
+
+    // [#35341] A boolean comparand against a declared scalar boolean column is
+    // bound the way `formatInput` binds the write (`sqliteBooleanBinding`), so
+    // `= false` selects the rows the row read presents as `false`.
+    if (this.isSqlite && typeof value === 'boolean' && this.booleanFields[table]?.includes(field) === true) {
+      return sqliteBooleanBinding(value);
+    }
 
     // [#31390] Oracle: a comparand against a `RAW(16)` uuid column (as the
     // catalog reports it — `SqlDriver#primeOracleRawUuidColumns`) binds as
@@ -331,7 +339,10 @@ export class FilterHelpersFacet {
         // `distinct()` — the divergence the conformance file's §D pins closed.
         return presentAuditTimestampOutput(value);
       case 'boolean':
-        return Boolean(value);
+        // [#34974] The presenter `formatOutput` applies to a `find()` row, so
+        // the text `'0'` / `'false'` a TEXT-affinity or unconverted column
+        // holds presents as `false` here too, never `Boolean('0')`.
+        return presentStoredBoolean(value);
       case 'number':
         // [#20889] The presenter lives in `@objectstack/core`, beside
         // `AGGREGATE_ANSWER_KIND`, so the analytics native-SQL face presents

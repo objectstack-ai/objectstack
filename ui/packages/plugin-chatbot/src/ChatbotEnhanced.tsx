@@ -3326,22 +3326,47 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // refuses for size is named to the user with the limit, instead of only
     // reaching `console.warn` while the file silently fails to attach. Cleared
     // by the next send or the notice's close button; a later refusal replaces it.
+    // A file whose type `acceptedFileTypes` does not admit is named the same way,
+    // with the accepted list. Refusals reported by ONE pick (a wrong-type file
+    // and an over-size one) all show: the sentences of the same tick are joined.
     const [attachmentNotice, setAttachmentNotice] = React.useState<string | null>(null);
+    const attachmentNoticeTickRef = React.useRef<string[] | null>(null);
     const handlePromptInputError = React.useCallback(
       (e: { code: string; message: string; files?: File[] }) => {
+        let sentence: string | null = null;
         if (e.code === 'max_file_size' && e.files?.length) {
-          setAttachmentNotice(
-            tCount('chatbot.composer.fileTooLarge', {
-              files: e.files.map((f) => f.name).join(', '),
-              limit: formatSizeLimit(maxFileSize, composerLanguage),
-              defaultValue: 'Not attached, over the {{limit}} limit: {{files}}',
-            }),
-          );
+          sentence = tCount('chatbot.composer.fileTooLarge', {
+            files: e.files.map((f) => f.name).join(', '),
+            limit: formatSizeLimit(maxFileSize, composerLanguage),
+            defaultValue: 'Not attached, over the {{limit}} limit: {{files}}',
+          });
+        } else if (e.code === 'accept' && e.files?.length) {
+          const allowed = acceptedFileTypes
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .join(', ');
+          sentence = tCount('fields.file.typeNotAccepted', {
+            name: e.files.map((f) => f.name).join(', '),
+            accept: allowed,
+            defaultValue: '"{{name}}" is not an accepted file type ({{accept}})',
+          });
+        }
+        if (sentence === null) {
+          console.warn('[plugin-chatbot] prompt-input error', e);
           return;
         }
-        console.warn('[plugin-chatbot] prompt-input error', e);
+        if (attachmentNoticeTickRef.current === null) {
+          const tick: string[] = [];
+          attachmentNoticeTickRef.current = tick;
+          queueMicrotask(() => {
+            if (attachmentNoticeTickRef.current === tick) attachmentNoticeTickRef.current = null;
+          });
+        }
+        attachmentNoticeTickRef.current.push(sentence);
+        setAttachmentNotice(attachmentNoticeTickRef.current.join(' '));
       },
-      [tCount, maxFileSize, composerLanguage],
+      [tCount, maxFileSize, composerLanguage, acceptedFileTypes],
     );
     const handleSubmit = React.useCallback(
       (payload: PromptInputMessage) => {

@@ -132,6 +132,22 @@ const DOORS: Array<[string, (engine: ObjectQL, ctx?: Ctx) => Promise<unknown>]> 
   ['update by predicate', (engine, ctx = {}) => engine.update('crm_account', { name: 'Acme' }, { where: { name: 'Old' }, multi: true, ...ctx } as any)],
 ];
 
+/**
+ * [#34030] A flat `a.b.c` key map as the nested translation data
+ * `II18nService.getTranslations()` hands over — what a refusal's labels are
+ * read off, as the metadata route reads them.
+ */
+const nested = (flat: Record<string, string>): Record<string, unknown> => {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+    cur[parts[parts.length - 1]] = value;
+  }
+  return out;
+};
+
 /** A `zh-CN` bundle for both labels, echoing the key on a miss as `II18nService` does. */
 const ZH: Record<string, string> = {
   'objects.crm_account.label': '客户',
@@ -140,6 +156,7 @@ const ZH: Record<string, string> = {
 const i18n = {
   t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
   getLocales: () => ['en', 'zh-CN'],
+  getTranslations: (locale: string) => (locale === 'zh-CN' ? nested(ZH) : {}),
 };
 
 describe('a unique refusal names the object and field by label (#24951)', () => {
@@ -359,6 +376,10 @@ describe('the duplicate refusal speaks the writer\'s locale, and names a declare
   const weeklyI18n = (overrides: Record<string, string> = {}) => ({
     t: (key: string, locale: string) => overrides[key] ?? ((locale === 'zh-CN' && WEEKLY_ZH[key]) || key),
     getLocales: () => ['en', 'zh-CN'],
+    // An override that echoes its key un-translates that row in the bundle too.
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+      ? nested(Object.fromEntries(Object.entries(WEEKLY_ZH).filter(([key]) => overrides[key] !== key)))
+      : {}),
   });
 
   /** better-sqlite3 on the `unique: 'organization'` index: the organization part, then the three authored columns. */

@@ -1249,8 +1249,14 @@ function ApprovalsQueue() {
   /**
    * Open a request on its page (objectui#12484): the page objectstack serves
    * for it, on the standard record route. A navigation, so Back returns to the
-   * queue with its tab, filters and scroll as they were. It opens under the
-   * app that owns the row's record (`requestPagePath`).
+   * queue with its tab, filters and scroll as they were.
+   *
+   * objectstack#35412 — a row opens in the app the inbox is mounted in: the
+   * inbox an app's navigation draws is that app's, and the reader stays in it
+   * (its name, its sidebar, its path). The record card on the request page
+   * still links the record under the app that owns it. Only an inbox with no
+   * app segment asks `requestPagePath`, as the deep link does for the opens
+   * that come from no app (Home, a notification, an email).
    *
    * objectstack#34586 — from 「待我审批」 the page is handed the queue as this
    * list shows it, filtered and sorted (`approvalQueueState`): its top bar
@@ -1261,12 +1267,14 @@ function ApprovalsQueue() {
   const openRequest = useCallback(
     (r: ApprovalRequestRow) =>
       navigate(
-        requestPagePath(
-          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
-          r.object_name,
-          appName,
-          r.id,
-        ),
+        appName
+          ? `/apps/${appName}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(r.id)}`
+          : requestPagePath(
+              Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
+              r.object_name,
+              appName,
+              r.id,
+            ),
         tab === 'pending'
           ? {
               state: approvalQueueState(

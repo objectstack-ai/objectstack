@@ -36,8 +36,9 @@
  * cloud registrations, so they never join {@link PLATFORM_TOOLS_BY_PACKAGE}:
  * a group there is the exact set one cloud package registers, and the MCP
  * bridge reads {@link PLATFORM_PROVIDED_TOOL_NAMES} to annotate the tools it
- * bridges from the cloud runtime. The door's file pair has its own constant,
- * {@link MCP_FILE_TOOL_NAMES}, which the `skill.tools[]` lint rule resolves
+ * bridges from the cloud runtime. The door's own tools have their own
+ * constant, {@link MCP_DOOR_TOOL_NAMES} (its file pair also
+ * {@link MCP_FILE_TOOL_NAMES}), which the `skill.tools[]` lint rule resolves
  * against beside this registry for a skill offered over MCP.
  */
 
@@ -131,14 +132,60 @@ export const PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Every tool the MCP door registers (`wireBridgeTools` in `@objectstack/mcp`,
+ * the one composition its HTTP and stdio transports share), on a bridge
+ * carrying every optional member under a grant naming every scope: the
+ * record reads and writes (`delete_record` and `delete_records` delete only
+ * on a confirmed call), `aggregate_records`, the file pair
+ * ({@link MCP_FILE_TOOL_NAMES}), the action family (`list_actions`,
+ * `run_action`, `resume_run`), the federation pair (`list_remote_tables`,
+ * `import_object`, under `metadata:write` only), the dataset pair and
+ * `validate_expression`.
+ *
+ * Some names are also cloud registrations (`get_record`, `query_records`,
+ * `describe_object`, …) and are in {@link PLATFORM_PROVIDED_TOOL_NAMES} as
+ * well; the rest are served by the door alone. The `skill.tools[]` lint rule
+ * resolves every name here for a skill offered over MCP, since the door serves
+ * it there. A skill kept out of MCP (`mcpPrompt: false`) runs only in the
+ * in-product agents, so a name served by the door alone is still reported for
+ * it, and the finding says why. A skill that runs an app action binds
+ * `action_<name>` rather than `run_action`: the door serves that entry through
+ * `run_action`, and the in-product agents call the action tool itself.
+ *
+ * Maintenance contract: this is the exact set `wireBridgeTools` registers on
+ * such a bridge. `@objectstack/mcp` carries the conformance test that holds
+ * the two equal, so a tool added to or renamed at the door fails there until
+ * this list follows it.
+ */
+export const MCP_DOOR_TOOL_NAMES: readonly string[] = [
+  'aggregate_records',
+  'create_record',
+  'create_upload_link',
+  'delete_record',
+  'delete_records',
+  'describe_object',
+  'get_record',
+  'import_object',
+  'list_actions',
+  'list_datasets',
+  'list_objects',
+  'list_remote_tables',
+  'query_dataset',
+  'query_records',
+  'read_file',
+  'resume_run',
+  'run_action',
+  'update_record',
+  'validate_expression',
+];
+
+/**
  * The file tools the MCP door registers (`registerFileTools` in
  * `@objectstack/mcp`): `read_file` reads a file a record carries, and
  * `create_upload_link` mints a single-use link to upload a file onto a record.
  * No cloud AI package registers either, so neither is in
- * {@link PLATFORM_PROVIDED_TOOL_NAMES}; a skill bound to them is served over
- * MCP, and the `skill.tools[]` lint rule resolves both names from this list
- * for a skill offered there. An in-product turn runs without them, so a skill
- * kept out of MCP (`mcpPrompt: false`) naming either is still reported.
+ * {@link PLATFORM_PROVIDED_TOOL_NAMES}. Both are members of
+ * {@link MCP_DOOR_TOOL_NAMES}, the list the `skill.tools[]` lint rule reads.
  *
  * Maintenance contract: this is the exact set `registerFileTools` registers on
  * a bridge carrying every file member. `@objectstack/mcp` carries the

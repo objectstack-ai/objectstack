@@ -24,6 +24,7 @@ import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import {
   auditEntriesToFeedItems,
   filterTimelineStream,
+  mergeFieldHistoryIntoFeed,
   mergeTimelineStream,
   RecordFieldChangesContext,
   RecordFieldHistoryContext,
@@ -32,6 +33,7 @@ import {
 } from '../recordTimelineStream';
 import { RecordActivityTimeline } from '../RecordActivityTimeline';
 import { RecordActivityRenderer } from '../renderers/record-activity';
+import { RecordChatterRenderer } from '../renderers/record-chatter';
 import { DefaultRecordPageContext } from '../defaultRecordPage';
 
 afterEach(cleanup);
@@ -142,10 +144,13 @@ describe('record:activity on the default record page is the stream', () => {
     expect(screen.getByText('Logged a call')).toBeTruthy();
   });
 
-  it('CONTROL — elsewhere the block keeps its panel face and ignores the field changes', () => {
+  // objectstack#33996 flipped the second half: elsewhere (an authored page)
+  // the field changes join the panel's feed instead of being ignored.
+  it('CONTROL — elsewhere the block keeps its panel face, and the field changes join its feed', () => {
     const { container } = mount(false);
     expect(container.querySelector('[data-stream-filters]')).toBeNull();
     expect(container.querySelector('[data-stream-system-row]')).toBeNull();
+    expect(screen.getByText('Contacted')).toBeTruthy();
   });
 });
 
@@ -430,4 +435,98 @@ describe("the stream folds exactly the spec's RECORD_TIMELINE_FOLDED_ACTIVITY_TY
       for (const activityType of foldedTypes) expect(pairs(action, activityType)).toBe(false);
     },
   );
+});
+
+describe("an authored page's feed panels hold the record's field history (objectstack#33996)", () => {
+  const at = (ms: number) => new Date(Date.UTC(2026, 10, 1, 9, 0, 0) + ms).toISOString();
+  const note = { id: 'n1', type: 'comment', actor: 'Ada', body: 'Kick-off note', createdAt: at(0) } as FeedItem;
+  const update = { id: 'u1', type: 'field_change', actor: 'Dev Admin', body: 'Updated the deal', createdAt: at(60_000), activityType: 'updated', actorId: 'u-dev' } as FeedItem;
+  const later = { id: 'n2', type: 'comment', actor: 'Ada', body: 'Follow-up note', createdAt: at(120_000) } as FeedItem;
+  const changes = auditEntriesToFeedItems(
+    [
+      // The `update` the activity row `u1` also wrote: one action, one row.
+      { id: 7, action: 'update', created_at: at(60_200), user_id: 'u-dev', user_name: 'Dev Admin', changes: [{ field: 'stage', label: 'Stage', from: 'Prospecting', to: 'Negotiation' }] },
+      // A change no activity row wrote: a row of its own.
+      { id: 8, action: 'update', created_at: at(180_000), user_id: 'u-dev', user_name: 'Dev Admin', changes: [{ field: 'amount', label: 'Amount', from: '100', to: '250' }] },
+    ],
+    { unknownUser: 'Unknown' },
+  );
+  const feed = [note, update, later];
+
+  it('pure: the same pairing as the stream, oldest first; no field changes leaves the feed itself', () => {
+    const merged = mergeFieldHistoryIntoFeed(feed, changes);
+    expect(merged.map((i) => i.id)).toEqual(['n1', 'u1', 'n2', 'audit:8']);
+    expect(fieldHistoryOf(merged[1])?.id).toBe('audit:7');
+    // The stream's order is the reverse, over the same items.
+    expect(mergeTimelineStream(feed, changes).map((i) => i.id)).toEqual(['audit:8', 'n2', 'u1', 'n1']);
+    expect(mergeFieldHistoryIntoFeed(feed, null)).toBe(feed);
+    expect(mergeFieldHistoryIntoFeed(feed, [])).toBe(feed);
+  });
+
+  type Block = 'record:activity' | 'record:discussion';
+  const mount = (block: Block, props: Record<string, unknown>, options: { history?: boolean; onDefaultPage?: boolean; fieldChanges?: FeedItem[] | null } = {}) => {
+    const { history = true, onDefaultPage = false, fieldChanges = changes } = options;
+    const node =
+      block === 'record:activity' ? (
+        <RecordActivityRenderer schema={{ type: block, ...props } as any} />
+      ) : (
+        <RecordChatterRenderer schema={{ type: block, feed: props } as any} />
+      );
+    return render(
+      <DefaultRecordPageContext.Provider value={onDefaultPage}>
+        <DiscussionContextProvider items={feed as any[]} loading={false}>
+          <RecordFieldChangesContext.Provider value={fieldChanges}>
+            <RecordFieldHistoryContext.Provider value={history}>{node}</RecordFieldHistoryContext.Provider>
+          </RecordFieldChangesContext.Provider>
+        </DiscussionContextProvider>
+      </DefaultRecordPageContext.Provider>,
+    );
+  };
+  const options = async () => {
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    return within(listbox).getAllByRole('option').map((option) => option.textContent);
+  };
+
+  describe.each<Block>(['record:activity', 'record:discussion'])('%s', (block) => {
+    it('全部 holds the changes: the paired update shows its before and after, the unpaired change is its own row', () => {
+      mount(block, {});
+      expect(screen.getByText('Updated the deal')).toBeTruthy();
+      expect(screen.getByText('Negotiation')).toBeTruthy();
+      expect(screen.getByText('250')).toBeTruthy();
+      expect(screen.getByText('Kick-off note')).toBeTruthy();
+    });
+
+    it('an authored `filterMode: changes_only` opens on Field Changes and holds the field history only', () => {
+      mount(block, { filterMode: 'changes_only' });
+      expect(screen.getByRole('combobox').textContent).toContain('Field Changes');
+      expect(screen.getByText('Negotiation')).toBeTruthy();
+      expect(screen.getByText('250')).toBeTruthy();
+      expect(screen.queryByText('Kick-off note')).toBeNull();
+      expect(screen.queryByText('Updated the deal')).toBeNull();
+    });
+
+    it('CONTROL: a reader whose history is not shown (refused, or no trackHistory) is not offered it, and the value reads as All', async () => {
+      mount(block, { filterMode: 'changes_only' }, { history: false, fieldChanges: null });
+      expect(screen.getByRole('combobox').textContent).toContain('All Activity');
+      expect(screen.getByText('Kick-off note')).toBeTruthy();
+      expect(await options()).not.toContain('Field Changes');
+    });
+
+    it('`unifiedTimeline: false` un-mixes them: no field change drawn, and no `changes_only` offered', async () => {
+      mount(block, { unifiedTimeline: false, filterMode: 'changes_only' });
+      expect(screen.queryByText('Negotiation')).toBeNull();
+      expect(screen.queryByText('250')).toBeNull();
+      expect(screen.getByRole('combobox').textContent).toContain('All Activity');
+      expect(await options()).not.toContain('Field Changes');
+    });
+  });
+
+  it('CONTROL: a discussion panel on the default record page leaves the changes to the stream', async () => {
+    mount('record:discussion', {}, { onDefaultPage: true });
+    expect(screen.getByText('Kick-off note')).toBeTruthy();
+    expect(screen.queryByText('Negotiation')).toBeNull();
+    expect(screen.queryByText('250')).toBeNull();
+    expect(await options()).not.toContain('Field Changes');
+  });
 });

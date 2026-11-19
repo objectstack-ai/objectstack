@@ -11,8 +11,7 @@ Since **ADR-0020** there is **no `workflow` metadata type** and no
 validation rule** in the object's `validations` array: a flat `field` +
 `{ from: [allowedTo] }` transition table. It is **enforced on the write path** —
 an update whose `field` moves to a state not listed for the current state is
-rejected with the rule's `message`. A `from` state mapped to `[]` is a declared
-dead-end.
+rejected with the rule's `message`.
 
 <!-- os:check -->
 ```typescript
@@ -36,7 +35,7 @@ const rule: StateMachineValidation = {
 
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
-  are N separate `state_machine` rules, one per field.
+  are N separate `state_machine` rules.
 - **`initialStates`** (optional) gates INSERT: a record created with its
   state field outside this list is rejected. `transitions` only governs
   updates, so without it a record can be born mid-flow (e.g. created already
@@ -55,6 +54,8 @@ Notes:
   you want guarded rather than relying on an implicit "any → any".
 - Predicate conditions in sibling rules evaluate against the merged record in
   the **`record.<field>`** CEL scope (bare field names do not resolve).
+- **An AI-gated irreversible transition** pairs this rule with a lock on
+  `field`: **objectstack-ai** → Common Pitfalls.
 
 ### Approvals (Flow Nodes)
 
@@ -128,13 +129,6 @@ walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
 window*) where the record unlocks and the submitter reworks it, and an explicit
 *resubmit* re-enters the approval node over a **declared back-edge**, opening
 round N+1 with a fresh approver slate.
-
-```
-approval ──approve──▶ …
-         ──reject───▶ …
-         ──revise───▶ approval_revise (record unlocked, submitter edits)
-                        └──resubmit──[type:'back']──▶ approval   (round N+1)
-```
 
 Three pieces author it:
 
@@ -260,8 +254,7 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 **`record` and bare field names are NOT available and fail the node loudly.**
 Everywhere else on this platform `record` means "the record at event time" — at an
 approval node that phrase is ambiguous between two different times, so you must
-say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
-over from conditions.
+say which one: `current.x` or `trigger.x`.
 
 Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
 result (present-but-empty field/variable) triggers `onEmptyApprovers`. A
@@ -362,14 +355,17 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 
 These are wired on the **graph**, not in node config:
 
-- **Conditional step** — put a `decision` node before the Approval node, or a
-  `condition` on the edge entering it.
 - **On approve / on reject** — wire downstream nodes (`update_record`,
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
+- **A write on that branch that may be refused** (a record hook, a validation
+  rule, a permission) — draw a `fault` edge from that step to a handler
+  (SKILL.md § Failure routing): the refusal takes it and the decision answers
+  normally. Without one, `POST …/approve` (or `/reject`) answers
+  `500 RESUME_FAILED`: the decision stands (`finalized: true`), the run is
+  stranded, and the body may carry `innerRefusal` (`{ code, message }`) and
+  `userMessage`, the hook's declared sentence for the approver.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise.
-- **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
-- **Hard reject** — route the `reject` edge to an `end` node.
 
 ### Approval Best Practices
 

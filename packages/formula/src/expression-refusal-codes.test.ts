@@ -464,6 +464,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
+  // [#34660] A flow value envelope: the run fails when the value is computed, and no condition runs there.
+  'date-text-arithmetic-value-run-may-fail': [
+    {
+      produce: () =>
+        onlyError('value', { dialect: 'cel', source: 'record.end_at - record.start_at' }, {
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+          flowValueEnvelope: true,
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults wherever `record.start_at` holds that text when the value is computed, and ' +
+        'a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
+    },
+  ],
   // [#32595] A call handed a date field's text that no overload accepts.
   'date-text-call': [
     {
@@ -583,6 +603,30 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
         'exists to do is not done (it does not read null). ' +
         'Parse the text into a timestamp first: `isoDate(date(start_at))`.',
+    },
+  ],
+  // [#34660] The same call in a flow value envelope, with the optional `shift` clause.
+  'date-text-call-value-run-may-fail': [
+    {
+      produce: () =>
+        onlyError('value', { dialect: 'cel', source: "isoDate(timestamp(record.borrow_date) + duration('168h'))" }, {
+          fieldTypes: { borrow_date: 'date' },
+          flowValueEnvelope: true,
+        }),
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+      message:
+        '`timestamp(record.borrow_date)` — `record.borrow_date` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults wherever `record.borrow_date` holds that text when the value is computed, and ' +
+        'a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Parse the text into a timestamp first: `date(record.borrow_date)`. ' +
+        'To shift it by N whole days and keep it a date, write `isoDate(addDays(record.borrow_date, N))`.',
     },
   ],
   'date-duration-value': [
@@ -954,6 +998,9 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
   // [#29959] A flattened (flow) condition with no declared outcome reaches
   // `type-mismatch-run-may-fail`, bare and through `record.`.
   { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },
+  // [#34660] A flow value envelope with a date field reaches the date-text
+  // verdicts' `-value-run-may-fail` codes.
+  { fieldTypes: { close_date: 'date' }, flowValueEnvelope: true },
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];
@@ -1011,8 +1058,8 @@ function refusalKey(said: ExprValidationError): string {
 }
 
 /**
- * The validateExpression sweep's budget. The case is synchronous: 5,760
- * validateExpression calls (3 roles x 128 inputs x 15 schemas), most of the
+ * The validateExpression sweep's budget. The case is synchronous: 6,144
+ * validateExpression calls (3 roles x 128 inputs x 16 schemas), most of the
  * time in building a typed CEL environment for each call. Its work is the
  * sweep's breadth, which is the claim, so the breadth stays; only re-judging
  * duplicate refusals was cut (see the case). Readings of the case, in ms:
@@ -1025,6 +1072,11 @@ function refusalKey(said: ExprValidationError): string {
  *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
  *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
  *     before, 1961 to 2137 after.
+ *   - Local, 4 vCPU, this file alone, when the flow value-envelope schema
+ *     joined (15 schemas to 16): 192 to 225 with it, 186 to 267 for the 15
+ *     in the same session. That schema stands down on every source but a
+ *     date field's value, so the 16th adds nothing measurable and the budget
+ *     stands.
  *
  * The rule follows `packages/cli/test/hook-timeout-override-refusal.test.ts`:
  * 3x the slowest reading, rounded up to the next second. 3 x 5034 = 15102, so

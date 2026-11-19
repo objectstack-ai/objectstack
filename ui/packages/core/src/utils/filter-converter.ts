@@ -534,6 +534,33 @@ function refuseEmptyOperatorMap(field: string): never {
 }
 
 /**
+ * Is a non-empty operator map really a NESTED-RELATION condition — a condition
+ * on the related record (`{ account: { owner: 'u1' } }`) rather than a map of
+ * operators? (objectstack#34990)
+ *
+ * The shape is the server's own: no key starts with `$`, which is what the
+ * engine's `isNoOperatorObject` reads, so the client and the server name one
+ * population. A map that MIXES `$` operators and plain keys stays an operator
+ * map and is refused by the unknown-operator arm, as before.
+ *
+ * It lowers to `[field, '=', condition]`: the spec's `parseFilterAST` hands
+ * that equality back as `{ field: condition }`, the form the server serves, and
+ * the condition travels verbatim in the object dialect, nested relations
+ * included. Nothing here judges it. Whether `field` is a relationship and the
+ * condition's keys are fields of the related object is decided where the
+ * declarations are: the engine refuses anything else with `INVALID_FILTER` /
+ * 400, and on a read it matches the relationship with one in-database
+ * subquery under the related object's own read scope, never an id list this
+ * app reads first.
+ *
+ * ⛔ This is the authorable nested form only. The engine-internal semi-join
+ * leaf it is lowered to (ADR-0139, ADR-0155) is never spelled here.
+ */
+function isNestedRelationCondition(entries: ReadonlyArray<[string, unknown]>): boolean {
+  return entries.every(([key]) => !key.startsWith('$'));
+}
+
+/**
  * Convert object-based filters to ObjectStack FilterNode AST format.
  * Converts MongoDB-like operators to ObjectStack filter expressions.
  * 
@@ -819,6 +846,12 @@ export function convertFiltersToAST(
       // by this same line (objectui#9164). See refuseEmptyOperatorMap.
       const operatorEntries = Object.entries(value);
       if (operatorEntries.length === 0) refuseEmptyOperatorMap(field);
+
+      // The NESTED-RELATION node: see isNestedRelationCondition.
+      if (isNestedRelationCondition(operatorEntries)) {
+        conditions.push([field, '=', value]);
+        continue;
+      }
 
       // Handle operator-based filters
       for (const [operator, operatorValue] of operatorEntries) {

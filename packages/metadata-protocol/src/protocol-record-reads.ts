@@ -54,10 +54,12 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { ConcurrentUpdateError, MalformedVersionTokenError, canonicalVersionInstant } from './protocol.js';
 import { recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { isObjectOfDisabledPackage } from './protocol-authoring-refusals.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { canServeApiOperation, resolveSearchFieldResolution } from '@objectstack/spec/data';
+import { canServeApiOperation, referenceTargetOf, resolveSearchFieldResolution } from '@objectstack/spec/data';
 import type { EngineQueryOptionsParsed } from '@objectstack/spec/data';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { I18nLabel } from '@objectstack/spec/ui';
 
@@ -270,6 +272,113 @@ export async function readAsCaller(
     return this.engine.findOne(object, opts);
 }
 
+/**
+ * The ADR-0112 code of the security layer refusing the CALLER's read — matched
+ * by the declared code alone, never by message prose, and never by a driver's
+ * own ACL code (that is the database refusing the platform, not the platform
+ * refusing a reader). The same reading objectql's `isReadRefusal` makes for the
+ * `$expand` family; this package sits below objectql and cannot import it.
+ */
+const READ_REFUSED: StandardErrorCode = 'PERMISSION_DENIED';
+
+/** The ADR-0079 primary-title pointer: `nameField`, else the deprecated `displayNameField` alias. */
+function titlePointerOf(obj: { nameField?: unknown; displayNameField?: unknown } | undefined | null): string | undefined {
+    if (!obj) return undefined;
+    if (typeof obj.nameField === 'string' && obj.nameField) return obj.nameField;
+    if (typeof obj.displayNameField === 'string' && obj.displayNameField) return obj.displayNameField;
+    return undefined;
+}
+
+/** A field map in either registered spelling (array of `{ name }` or a keyed record) as a name → definition map. */
+function fieldMapOf(fieldsRaw: unknown): Map<string, any> {
+    if (Array.isArray(fieldsRaw)) return new Map(fieldsRaw.map((f: any) => [f?.name, f]));
+    if (fieldsRaw && typeof fieldsRaw === 'object') {
+        return new Map(Object.entries(fieldsRaw).map(([name, f]: [string, any]) => [name, { name, ...(f || {}) }]));
+    }
+    return new Map();
+}
+
+/**
+ * May a search hit be titled from this reference TARGET at all? Its declared
+ * exposure, asked for `get` of the one decision every door judges
+ * (`canServeApiOperation`, ADR-0049) — the operation a lookup title read is
+ * judged as wherever one is served (the approvals inbox, the activity
+ * summaries). A target that does not serve `get` is not read.
+ */
+function servesSearchTitleTarget(targetObj: { enable?: any }): boolean {
+    return canServeApiOperation(targetObj.enable, 'get');
+}
+
+/**
+ * The titles of the `ids` records of `target`, read AS THE SEARCHER — the
+ * second half of `searchAll`'s title for an object whose primary-title pointer
+ * is a reference field. One read per call, `id $in` over the whole batch, `id`
+ * and the target's title column only.
+ *
+ * The read is the caller's own: `find` with the caller's context, so the
+ * target's object gate, row scope and field-level security apply exactly as
+ * they do to a direct read or to `$expand`, which takes the full gate on its
+ * sub-read. Every refusal leaves an id out of the answer, and an id left out
+ * keeps its bare value in the title — the answer `$expand` gives a reader it
+ * refuses the target:
+ *
+ *  - the target's declared exposure does not serve `get` (ADR-0049, the one
+ *    decision every door judges) → not read, as a lookup title read elsewhere
+ *    asks the same decision;
+ *  - the target is an object of a disabled package → not read: a disable
+ *    takes the package's records off every door (the data routes answer
+ *    `404 OBJECT_PACKAGE_DISABLED`), and a title is that record's data, so
+ *    an enabled object's hit keeps the bare id, as for an unreadable target;
+ *  - the caller may not read the object (`canReadObject`, asked before any
+ *    read, as the sweep asks it of each swept object) → not read;
+ *  - the read itself answers the typed refusal → no titles;
+ *  - a row outside the caller's row scope is not returned, and a title column
+ *    field-level security strips is absent → that id keeps its value.
+ *
+ * Every other failure of the read propagates, the same disposition the sweep
+ * gives a failing record read (#8896): a title read that could not run must
+ * not be answered "this record has no title". A target whose table was never
+ * provisioned holds no rows, so it titles nothing.
+ */
+async function readReferenceTitles(
+    engine: RecordReadHost['engine'],
+    target: string,
+    ids: string[],
+    context: unknown,
+    canReadObject: ((object: string) => Promise<boolean> | boolean) | undefined,
+): Promise<Map<string, string>> {
+    const titles = new Map<string, string>();
+    const targetObj = engine.registry.getObject(target);
+    if (!targetObj) return titles;
+    if (!servesSearchTitleTarget(targetObj)) return titles;
+    if (isObjectOfDisabledPackage(engine.registry, target)) return titles;
+    const titleField = titlePointerOf(targetObj);
+    if (!titleField || !fieldMapOf(targetObj.fields).has(titleField)) return titles;
+    if (canReadObject && !(await canReadObject(target))) return titles;
+    let rows: any[];
+    try {
+        const opts: EngineQueryOptionsParsed = {
+            where: { id: { $in: ids } },
+            fields: ['id', titleField],
+            limit: ids.length,
+        };
+        if (context !== undefined) opts.context = context as EngineQueryOptionsParsed['context'];
+        rows = (await engine.find(target, opts)) ?? [];
+    } catch (error) {
+        if ((error as { code?: unknown } | null)?.code === READ_REFUSED) return titles;
+        if (isMissingTableError(error, target)) return titles;
+        throw error;
+    }
+    for (const row of rows) {
+        if (row?.id == null) continue;
+        const v = row[titleField];
+        if (v == null || typeof v === 'object') continue;
+        const title = String(v);
+        if (title.trim()) titles.set(String(row.id), title);
+    }
+    return titles;
+}
+
 /** The body of `ObjectStackProtocolImplementation#searchAll`; the method's docblock there is its contract. */
 export async function searchAll(
     this: Pick<RecordReadHost, 'engine' | 'getMetaItems' | 'getServicesRegistry'>,
@@ -383,6 +492,17 @@ export async function searchAll(
         // `search` operation. See the method doc. Asked first, so a refused
         // object is never queried, named or counted.
         if (!canServeApiOperation(obj.enable, 'search')) continue;
+        // An object of a DISABLED package is outside the sweep. A disable
+        // takes the package's records off every data door — each answers
+        // `404 OBJECT_PACKAGE_DISABLED` — while `getAllObjects()` still
+        // lists the object (the schema stays resolvable on purpose), so this
+        // sweep asks the same predicate those doors ask
+        // (`isObjectOfDisabledPackage`, optional-called: a registry that
+        // cannot answer hides nothing). Asked here, with the exposure
+        // decision, so the object is never queried, named or counted in
+        // `totalObjects`; an explicit `objects=` naming it answers as one
+        // naming no object at all — a sweep, not a by-name read.
+        if (isObjectOfDisabledPackage(this.engine.registry, obj.name)) continue;
         // `searchable: false` keeps its own meaning beside the decision, and
         // only because the decision does not cover it everywhere: it answers
         // an object with NO whitelist (`unrestricted`) without reading the
@@ -437,10 +557,26 @@ export async function searchAll(
         // this function's own search-field resolution below — a fourth
         // spelling here would re-split what those merged.
         const titlePointer = obj.nameField ?? obj.displayNameField;
-        const renderTitle = (row: any): string => {
+        // A pointer that is a REFERENCE field (`lookup` / `master_detail` /
+        // `user` / `tree`) stores the target record's id, so the title is
+        // the TARGET's title: read for the whole batch of hits after the
+        // object's `find`, as the searcher, by `readReferenceTitles` (which
+        // says whose read it is and what a refused reader keeps — the bare
+        // id). `referenceTargetOf` is the spec's one answer to "what does
+        // this field point at", the same the `$expand` gate and engine ask.
+        // The hit's wire shape does not move: `record` still carries the
+        // stored id, and only `title` reads through.
+        const titleTarget = typeof titlePointer === 'string' && hasField(titlePointer)
+            ? referenceTargetOf(fieldByName.get(titlePointer))
+            : undefined;
+        const renderTitle = (row: any, referenceTitles?: Map<string, string>): string => {
             if (typeof titlePointer === 'string' && hasField(titlePointer)) {
                 const v = row[titlePointer];
-                if (v != null && String(v).trim()) return String(v);
+                if (v != null && String(v).trim()) {
+                    if (!referenceTitles) return String(v);
+                    const titleOf = (id: unknown) => referenceTitles.get(String(id)) ?? String(id);
+                    return Array.isArray(v) ? v.map(titleOf).join(', ') : titleOf(v);
+                }
             }
             if (typeof titleFormatSource === 'string') {
                 let allResolved = true;
@@ -572,9 +708,25 @@ export async function searchAll(
             if (request.context !== undefined) opts.context = request.context;
 
             const rows = await this.engine.find(obj.name, opts);
-            for (const row of rows || []) {
-                if (hits.length >= overallLimit) break;
-                const title = renderTitle(row);
+            // The rows this sweep will turn into hits — so a target read
+            // never covers a row the `overallLimit` cut drops.
+            const hitRows = (rows || []).slice(0, Math.max(0, overallLimit - hits.length));
+            let referenceTitles: Map<string, string> | undefined;
+            if (titleTarget && typeof titlePointer === 'string') {
+                const ids = new Set<string>();
+                for (const row of hitRows) {
+                    const v = row?.[titlePointer];
+                    for (const id of Array.isArray(v) ? v : [v]) {
+                        if (id != null && typeof id !== 'object' && String(id).trim()) ids.add(String(id));
+                    }
+                }
+                if (ids.size > 0) {
+                    const read = await readReferenceTitles(this.engine, titleTarget, [...ids], request.context, canReadObject);
+                    if (read.size > 0) referenceTitles = read;
+                }
+            }
+            for (const row of hitRows) {
+                const title = renderTitle(row, referenceTitles);
                 // Build snippet from first searchable field that contains a
                 // term. [#7643] `undefined` is a CORRECT answer here, not a
                 // miss: a companion (pinyin) hit matches the normalized
