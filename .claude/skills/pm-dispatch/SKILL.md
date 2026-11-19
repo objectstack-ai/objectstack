@@ -64,7 +64,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 运行中槽位的上限:一槽 = 一个在跑的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、入队、等 CI、等裁决不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`,一容器 dev ≤2;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 运行中槽位的上限:一槽 = 一个在跑的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、入队、等 CI、等裁决不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 现值(默认、天花板、一容器 dev 上限)住项目记忆 |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
 | `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread`;大卡判据照 `dispatch-runbook.md` 卡线程节 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
@@ -121,7 +121,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项与整树席改标归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
 | `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
-| `target:<major>` | ⛔ 不再作发版阻塞标记:阻塞卡只升 `priority:p0`,窗与回落见 `references/filing-gate.md` 定级判据 |
 | `pm:epic`(父单或 sub-issue) | 子专题,只由维护者开;已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免重叠检查(`references/area-lease.md`)与认领协议 |

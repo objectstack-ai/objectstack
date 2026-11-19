@@ -430,7 +430,8 @@ export const CEILINGS = new Map([
   // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
   // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
   // line the renaming touched kept its line. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 329],
+  // 329 → 328 (#35215 G-A, current values and quotes out of the skill): the batch row's current values moved out, the retired `target:<major>` label row deleted; landed count.
+  ['.claude/skills/pm-dispatch/SKILL.md', 328],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -473,7 +474,8 @@ export const CEILINGS = new Map([
   // carries the route, the dev names the owed review in its hand-back and never
   // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
+  // 246 → 245 (#35215 G-A, current values and quotes out of the skill): an expired one-time calibration line deleted, quotes and ids trimmed; landed count.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -617,7 +619,8 @@ export const CEILINGS = new Map([
   // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
   // provenance carrying those two operative quotes (+1). Measured delta +3.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
+  // 63 → 62 (#35215 G-A, current values and quotes out of the skill): the verbatim provenance line deleted; the route it backed stands above it; landed count.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 62],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1396,7 +1399,8 @@ export const CEILINGS = new Map([
   // one line, the moving seat — an outgoing account still draining moves to a free
   // seat with its own mailbox, the seat post carries the ownership split, and it posts
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
+  // 100 → 99 (#35215 G-A, current values and quotes out of the skill): the expired pre-filed-children transition line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
   // or shift, startup with the maintainer's authorising line per seat thread (an area
   // thread carries none), the in-area rules as pointers to their owning references, the
@@ -1663,7 +1667,8 @@ export const CEILINGS = new Map([
   // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
   // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
   // as his. Measured delta +1. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
+  // 83 → 79 (#35215 G-A, current values and quotes out of the skill): the dated quote block and one maintainer quote deleted; the rules under them stand; landed count.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1833,7 +1838,8 @@ export const CEILINGS = new Map([
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
+  // 82 → 81 (#35215 G-A, current values and quotes out of the skill): a provenance line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 81],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
