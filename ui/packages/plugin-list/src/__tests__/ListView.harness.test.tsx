@@ -62,6 +62,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
+import { openAdvancedSort } from './conditionPanels';
 
 /**
  * Puts back, after the calling block's last test, what the block's hooks and
@@ -1968,7 +1969,13 @@ describe('ListView.draftOnlyColumn-34807', () => {
     const content = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
     if (!content) throw new Error(`no popover content for "${text(trigger)}"`);
     try {
-      return await comboboxOptions(within(content).getAllByRole('combobox')[0]);
+      // The trigger opens the shared field list (objectstack#35549); its
+      // advanced step is the builder, whose first picker reads the same list.
+      // Both are read, so a field either offers is caught.
+      const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
+      fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = await within(content).findByTestId(/^(filter|sort)-panel-advanced$/);
+      return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
     } finally {
       fireEvent.click(trigger);
       await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
@@ -2822,7 +2829,7 @@ describe('ListView.resetSortToDefaultNoProviderFallback', () => {
     );
     await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
   }
 
   describe('ListView reset-sort control — English fallback with no provider (objectui#4396)', () => {

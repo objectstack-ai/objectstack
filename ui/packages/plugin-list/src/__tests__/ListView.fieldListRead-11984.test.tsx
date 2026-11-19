@@ -188,6 +188,18 @@ async function inPopover<T>(trigger: HTMLElement, read: (content: HTMLElement) =
 
 const toolbarButton = (name: RegExp) => screen.getByRole('button', { name });
 
+/** The rows of the shared field list (objectstack#35549), in the order it draws them. */
+function fieldListLabels(scope: HTMLElement): string[] {
+  return Array.from(scope.querySelectorAll('[role="option"][data-field]')).map(text);
+}
+
+/** Step from the field list into its advanced panel (today's builder) and read its first field picker. */
+async function advancedFieldOptions(content: HTMLElement, kind: 'filter' | 'sort'): Promise<string[]> {
+  fireEvent.click(within(content).getByTestId(`${kind}-panel-open-advanced`));
+  const advanced = await within(content).findByTestId(`${kind}-panel-advanced`);
+  return comboboxOptions(within(advanced).getAllByRole('combobox')[0]);
+}
+
 function checkboxLabels(scope: HTMLElement): string[] {
   // The Display panel's Edit inline entry is a `role="switch"` button since
   // objectui#12423, so every checkbox here is a field's.
@@ -243,6 +255,9 @@ async function sweepToolbar(): Promise<Sweep> {
     const content = await openPopover(trigger);
     const items = [
       ...Array.from(content.querySelectorAll('option')).map(text),
+      // The shared field list the Filter and Sort triggers open
+      // (objectstack#35549, objectstack#35550): a row per field, `role="option"`.
+      ...fieldListLabels(content),
       ...checkboxLabels(content),
     ];
     for (const combobox of Array.from(content.querySelectorAll<HTMLElement>('[role="combobox"]'))) {
@@ -308,12 +323,22 @@ const POSITIONS: Position[] = [
   {
     name: 'the Filter panel (objectui#11925)',
     props: HELD_FILTER,
-    read: () => inPopover(toolbarButton(/^filter/i), (c) => comboboxOptions(within(c).getAllByRole('combobox')[0])),
+    read: () => inPopover(toolbarButton(/^filter/i), fieldListLabels),
+  },
+  {
+    name: 'the Filter panel, advanced step',
+    props: HELD_FILTER,
+    read: () => inPopover(toolbarButton(/^filter/i), (c) => advancedFieldOptions(c, 'filter')),
   },
   {
     name: 'the Sort picker (objectui#11943)',
     schemaExtra: { sort: [{ field: 'title', order: 'asc' }] },
-    read: () => inPopover(toolbarButton(/^sort/i), (c) => comboboxOptions(within(c).getAllByRole('combobox')[0])),
+    read: () => inPopover(toolbarButton(/^sort/i), fieldListLabels),
+  },
+  {
+    name: 'the Sort picker, advanced step',
+    schemaExtra: { sort: [{ field: 'title', order: 'asc' }] },
+    read: () => inPopover(toolbarButton(/^sort/i), (c) => advancedFieldOptions(c, 'sort')),
   },
   {
     name: 'the hide-fields popover',

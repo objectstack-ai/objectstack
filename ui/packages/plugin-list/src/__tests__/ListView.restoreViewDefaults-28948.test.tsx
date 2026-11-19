@@ -30,6 +30,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, type ListViewProps } from '../ListView';
+import { openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won', amount: 3 }];
 const OBJECT_DEF = {
@@ -90,7 +91,7 @@ async function openSort(dataSource: ReturnType<typeof makeDataSource>) {
   await screen.findByTestId('grid-stub');
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
 }
 
 beforeEach(() => {

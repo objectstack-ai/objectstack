@@ -31,6 +31,7 @@ import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
 import { PHONE_TOUCH_TARGET, useBelowSm } from '../components/ViewSettingsPopover';
+import { openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won' }];
 
@@ -125,7 +126,7 @@ describe('an active sort shows on the phone bar (objectstack#29057)', () => {
     expect(trigger).toHaveAccessibleName('Sort');
 
     fireEvent.click(trigger);
-    expect(await screen.findByText('Sort Records')).toBeVisible();
+    expect(await openAdvancedSort()).toBeVisible();
   });
 
   it('narrow, sorted: the open search field takes the Sort trigger slot, which comes back when it folds', async () => {

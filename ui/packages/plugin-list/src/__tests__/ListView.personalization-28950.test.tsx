@@ -26,6 +26,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, type ListViewProps } from '../ListView';
+import { openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won', amount: 3 }];
 const OBJECT_DEF = {
@@ -208,7 +209,7 @@ describe('with the callback wired, the host owns the one reset (objectstack#2895
     await screen.findByTestId('grid-stub');
     await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
     expect(screen.getByTestId('sort-reset-default')).toBeEnabled();
   });
 });

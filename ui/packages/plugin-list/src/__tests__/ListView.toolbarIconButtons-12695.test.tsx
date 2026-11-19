@@ -33,6 +33,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
+import { openAdvancedFilter, openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won' }];
 
@@ -171,12 +172,12 @@ describe('Filter, Sort and Options: text buttons from `sm` up, icons below it (o
     await screen.findByTestId('grid-stub');
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
-    expect(await screen.findByText('Filter Records')).toBeInTheDocument();
+    expect(await openAdvancedFilter()).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Filter Records')).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
-    expect(await screen.findByText('Sort Records')).toBeInTheDocument();
+    expect(await openAdvancedSort()).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Sort Records')).toBeNull());
 
