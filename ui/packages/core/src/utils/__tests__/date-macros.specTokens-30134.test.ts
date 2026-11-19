@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DATE_MACRO_TOKENS } from '@objectstack/spec/data';
-import { resolveDateMacros } from '../date-macros';
+import { DATE_MACRO_TOKENS, PERIOD_KEY_TOKENS } from '@objectstack/spec/data';
+import { resolveDateMacros, resolvePeriodKeyTokens } from '../date-macros';
 
 /**
  * The client resolver answers every fixed token the spec declares
@@ -42,5 +42,27 @@ describe('resolveDateMacros covers the spec vocabulary (objectstack#30134)', () 
     expect(resolveDateMacros('{next_year_end}', new Date(2026, 11, 31, 12))).toBe('2027-12-31');
     // On Jan 1 the year has rolled: next year is 2028.
     expect(resolveDateMacros('{next_year_end}', new Date(2027, 0, 1, 12))).toBe('2028-12-31');
+  });
+});
+
+/**
+ * The sibling pin for the period keys (objectstack#34938): every token in the
+ * spec's `PERIOD_KEY_TOKENS` resolves here to a key, read from the spec, never
+ * copied. The list is kept out of `DATE_MACRO_TOKENS`, so the block above
+ * never sees it.
+ */
+describe('resolvePeriodKeyTokens covers the spec period-key list (objectstack#34938)', () => {
+  const now = new Date(2026, 4, 25, 12, 0, 0);
+
+  it('the list is the real one, not an empty one', () => {
+    expect(PERIOD_KEY_TOKENS.length).toBeGreaterThan(0);
+  });
+
+  it.each(PERIOD_KEY_TOKENS.map((t) => [t]))('{%s} resolves to a key, and is no date macro here', (token) => {
+    const out = resolvePeriodKeyTokens(`{${token}}`, now);
+    expect(out).not.toContain('{');
+    expect(out).toMatch(/^\d{4}-W\d{2}$/);
+    expect((DATE_MACRO_TOKENS as readonly string[]).includes(token)).toBe(false);
+    expect(resolveDateMacros(`{${token}}`, now)).toBe(`{${token}}`);
   });
 });

@@ -719,3 +719,122 @@ describe('#35109 — an upgrade replaces the package\'s datasets on the shared l
         expect(helperMerge.mock.calls[0][2]).toBe(MANIFEST.id);
     });
 });
+
+/**
+ * #35375 — an uninstall in a running process takes the package's datasets off
+ * the shared list. The uninstall door withdrew the package from the registry
+ * and ran its cleanups, but left its entries on `seed-datasets`, so every
+ * organization founded before the next restart replayed the removed package's
+ * seed sets (over objects that may be gone). The door now merges an empty list
+ * under the package id once the registry withdrawal succeeded — the owner-keyed
+ * replace #35109 added, with nothing to put back.
+ *
+ * Driven on the inline fallback (`helpersPresent = false`) for the end-to-end
+ * legs, as the #35109 block is; the helper leg pins that the door hands it the
+ * package id and an empty list.
+ */
+describe('#35375 — an uninstall takes the package\'s datasets off the shared list', () => {
+    // The locale is not this block's subject; an earlier block leaves a throwing answer behind.
+    beforeEach(() => { localeAnswer = async () => undefined; });
+
+    const uninstall = (rawApp: any, manifestId: string) => {
+        const c = makeC({});
+        c.req.param = ((k: string) => (k === 'manifestId' ? manifestId : undefined)) as any;
+        return rawApp.routes.get('DELETE /api/v1/marketplace/install-local/:manifestId')!(c);
+    };
+
+    /**
+     * A registry that holds the installed package from the uninstall on (the
+     * mocked `manifest.register` registers nothing at install time). `refuse`
+     * picks the refusal: the pre-check's coded 409, or the withdrawal's throw.
+     */
+    const holdInRegistry = (harness: ReturnType<typeof makeCtx>, refuse: 'precheck' | 'withdrawal') => {
+        const objectql = harness.ctx.getService('objectql');
+        objectql.registry = {
+            getPackage: (id: string) => (id === MANIFEST.id ? { manifest: { id } } : undefined),
+            ...(refuse === 'precheck'
+                ? {
+                    assertPackageUninstallable: (id: string) => {
+                        throw Object.assign(new Error(`Package '${id}' is extended by another package.`), {
+                            code: 'RESOURCE_CONFLICT', status: 409, extenders: ['app.test.other'],
+                        });
+                    },
+                }
+                : {}),
+            uninstallPackage: vi.fn(() => { throw new Error('the registry refused the withdrawal'); }),
+        };
+    };
+
+    it('install, uninstall, then create an organization: none of the package\'s sets are replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload?.success).toBe(true);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        const summary = await replayer('org_after_uninstall');
+
+        expect(harness.peek('seed-datasets')).toEqual([]);
+        expect(loadCalls).toHaveLength(0);
+        expect(summary.inserted).toBe(0);
+    });
+
+    it('CONTROL: another package\'s sets are kept, and still replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        await installOn(harness, rawApp, MANIFEST_2, plugin);
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        await replayer('org_after_uninstall');
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST_2.data);
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].seeds).toEqual(MANIFEST_2.data);
+    });
+
+    it('CONTROL: an uninstall the registry refuses up front leaves the list as it was', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        holdInRegistry(harness, 'precheck');
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload?.error?.code).toBe('RESOURCE_CONFLICT');
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('CONTROL: a withdrawal the running kernel refuses leaves the list as it was — the package stays loaded until the restart', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        holdInRegistry(harness, 'withdrawal');
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload?.data?.cleanups).toContainEqual(expect.objectContaining({ name: 'registry.uninstallPackage', success: false }));
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('hands the runtime helper the package id and an empty list', async () => {
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        helperMerge.mockClear();
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        expect(helperMerge).toHaveBeenCalledTimes(1);
+        expect(helperMerge.mock.calls[0]).toEqual([harness.ctx, [], MANIFEST.id]);
+    });
+});

@@ -6,8 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect } from 'vitest';
-import { resolveDateMacros } from '../date-macros';
+import { afterEach, describe, it, expect } from 'vitest';
+import { resolveDateMacros, resolvePeriodKeyTokens } from '../date-macros';
+import { setDisplayTimeZone } from '../date-display';
+import { resolveFilterPlaceholders } from '../filter-tokens';
 
 describe('resolveDateMacros', () => {
   // A fixed "now" — Monday 2026-05-25 (Q2 2026) — keeps assertions deterministic.
@@ -109,5 +111,89 @@ describe('resolveDateMacros', () => {
     expect(resolveDateMacros('{1_hour_from_now}', now)).toBe(
       new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
     );
+  });
+});
+
+/**
+ * `{current_iso_week}` — the period key (`PERIOD_KEY_TOKENS` in
+ * `@objectstack/spec/data`). The week rule is written twice, here and in
+ * `@objectstack/core`'s `bucketDateKey(value, 'week', timezone)`, which this
+ * package cannot import. The table below is the parity pin: the same rows,
+ * instant and zone in, key out, are asserted against the server resolver in
+ * the period-key block of `packages/core/src/utils/filter-tokens.test.ts`.
+ * Change a row in one file and change it in the other.
+ *
+ * The test process clock is UTC (`ui/vitest.config.mts` pins `TZ`), so a row
+ * with no zone is the UTC day on both sides.
+ */
+describe('resolvePeriodKeyTokens — {current_iso_week} (objectstack#34938)', () => {
+  afterEach(() => setDisplayTimeZone(undefined));
+
+  /** instant · workspace zone (none = UTC) · ISO week key */
+  const PARITY_TABLE: ReadonlyArray<readonly [string, string | undefined, string]> = [
+    ['2026-11-19T12:00:00Z', undefined, '2026-W47'],
+    // Year edges: the ISO week-numbering year is the year of the week's Thursday.
+    ['2026-12-31T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-01T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-03T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-04T12:00:00Z', undefined, '2027-W01'],
+    ['2020-12-31T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-03T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-04T12:00:00Z', undefined, '2021-W01'],
+    ['2025-12-29T12:00:00Z', undefined, '2026-W01'],
+    ['2024-12-30T12:00:00Z', undefined, '2025-W01'],
+    // The workspace zone decides the day, and so the week.
+    ['2026-11-22T20:00:00Z', 'Asia/Tokyo', '2026-W48'],
+    ['2026-11-22T20:00:00Z', 'America/New_York', '2026-W47'],
+    ['2026-11-23T03:00:00Z', 'America/Los_Angeles', '2026-W47'],
+    ['2026-11-23T03:00:00Z', undefined, '2026-W48'],
+    ['2027-01-03T23:30:00Z', 'Asia/Shanghai', '2027-W01'],
+    ['2027-01-03T23:30:00Z', undefined, '2026-W53'],
+  ];
+
+  it.each(PARITY_TABLE)('%s in %s is %s', (instant, zone, key) => {
+    setDisplayTimeZone(zone);
+    expect(resolvePeriodKeyTokens('{current_iso_week}', new Date(instant))).toBe(key);
+    expect(resolvePeriodKeyTokens('${current_iso_week}', new Date(instant))).toBe(key);
+  });
+
+  it('resolves a whole-string placeholder anywhere in a filter tree, and nothing else', () => {
+    const now = new Date('2026-11-19T12:00:00Z');
+    const filter = {
+      $and: [
+        { cost_week: '{current_iso_week}' },
+        { supply_week: { $in: ['{current_iso_week}', '2026-W46'] } },
+        { note: 'plan {current_iso_week}' },
+        { created_at: { $gte: '{today}' } },
+        { owner: '{current_user_id}' },
+      ],
+    };
+    expect(resolvePeriodKeyTokens(filter, now)).toEqual({
+      $and: [
+        { cost_week: '2026-W47' },
+        { supply_week: { $in: ['2026-W47', '2026-W46'] } },
+        // An embedded placeholder is left as written, as on the server.
+        { note: 'plan {current_iso_week}' },
+        // The other vocabularies are not this function's.
+        { created_at: { $gte: '{today}' } },
+        { owner: '{current_user_id}' },
+      ],
+    });
+  });
+
+  it('is not a date macro: resolveDateMacros leaves it as written', () => {
+    const now = new Date('2026-11-19T12:00:00Z');
+    expect(resolveDateMacros('{current_iso_week}', now)).toBe('{current_iso_week}');
+    // Lit control: the same call resolves a date macro.
+    expect(resolveDateMacros('{current_week_start}', now)).toBe('2026-11-16');
+  });
+
+  it('resolveFilterPlaceholders resolves it beside the other vocabularies, on one instant', () => {
+    const now = new Date('2026-11-19T12:00:00Z');
+    expect(resolveFilterPlaceholders(
+      { cost_week: '{current_iso_week}', day: { $gte: '{current_week_start}' }, owner: '{current_user_id}' },
+      { currentUserId: 'usr_1', onUnresolved: null },
+      now,
+    )).toEqual({ cost_week: '2026-W47', day: { $gte: '2026-11-16' }, owner: 'usr_1' });
   });
 });

@@ -557,10 +557,12 @@ field is `currencyMode: 'fixed'`, that field's `currencyConfig.defaultCurrency`;
 tenant default currency (the `localization.currency` setting), if one is set. A
 `dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
 so its column shows the tenant default. A derived `sum` or `difference` whose monetary
-operands all resolve to one `fixed` code takes that code at the field's step; any other
-derived measure (a `ratio`, a `product`, operands in the tenant's currency) is monetary
-only by its own `currency`, else its column carries none. The cube query on this page
-carries no column `currency`.
+operands all resolve to one `fixed` code takes that code at the field's step; one whose
+operands are all amounts in the tenant's currency (or such derived measures) takes the
+tenant default, as a plain sum of one of them does; any other derived measure (a `ratio`,
+a `product`, operands mixing the tenant's currency with a code, a record's currency or a
+`count`) is monetary only by its own `currency`, else its column carries none. The cube
+query on this page carries no column `currency`.
 
 Over a `fixed` field the measure's `currency` may only restate the field's code. A
 different code is refused when the dataset compiles, with `DATASET_INVALID` / 400: delete
