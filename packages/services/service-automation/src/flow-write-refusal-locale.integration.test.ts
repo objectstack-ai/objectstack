@@ -77,8 +77,19 @@ const ZH_BUNDLE: Record<string, string> = {
   'objects.crm_deal.label': '商机',
   'objects.crm_deal.fields.account.label': '所属客户',
 };
+// [#34030] A refusal's labels are read off `getTranslations`, the bundle the
+// metadata route serves them from; the rule message stays on `t()`.
 const zhI18n = {
   t: (key: string, locale: string) => (locale?.startsWith('zh') ? ZH_BUNDLE[key] ?? key : key),
+  getLocales: () => ['zh-CN'],
+  getTranslations: (locale: string) => (locale === 'zh-CN'
+    ? {
+      objects: {
+        crm_account: { label: '客户' },
+        crm_deal: { label: '商机', fields: { account: { label: '所属客户' } } },
+      },
+    }
+    : {}),
 };
 
 const USER = { userId: 'usr_seller', tenantId: 'org_1', positions: [] as string[], permissions: [] as string[] };

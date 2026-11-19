@@ -41,14 +41,21 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   // No `group_apps` entry ships from this package.
   //
   // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
-  // full `developer:packages` list is a development surface, so its one
-  // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
-  // reaches installed packages through the marketplace-filtered "Installed
-  // Apps" door (`nav_marketplace_installed`, `developer:packages` with
+  // full `developer:packages` list is a development surface, so its door is in
+  // Studio only. The Studio that every boot serves is the console's own, at
+  // `/_console/studio` (the `@objectstack/studio` app is not default-loaded,
+  // so `studio.app.ts`'s Overview → Packages entry is served only where a host
+  // loads that app). There, the landing's "All packages" link opens the
+  // unfiltered page, and each package card's Manage (like the top-bar
+  // switcher's "Package info & settings") opens the package's detail sheet,
+  // with Disable / Enable (#35196, pinned on the console side by
+  // `BuilderLanding.packagesDoor-35196.test.tsx`). Setup reaches installed
+  // packages through the marketplace-filtered "Installed Apps" door
+  // (`nav_marketplace_installed`, `developer:packages` with
   // `params: { source: 'marketplace' }`), which
   // `@objectstack/cloud-connection` contributes to this group wherever the
   // marketplace capability is present. `setup-packages-door.test.ts` pins
-  // both halves.
+  // what this package ships for each app.
   //
   // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
   // amendment of 2026-11-17): a packaged action's on/off switch for this

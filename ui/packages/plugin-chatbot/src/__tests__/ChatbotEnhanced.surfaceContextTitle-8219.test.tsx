@@ -63,3 +63,22 @@ describe('ChatbotEnhanced surface-context chip tooltip (objectui#8219)', () => {
     expect(screen.queryByTestId('surface-context-chip')).not.toBeInTheDocument();
   });
 });
+
+describe('the chip sits on the input’s top edge, never over the conversation (objectstack#35445)', () => {
+  it('is inside the composer’s input frame, ordered first, above the text area — and not in the message log', () => {
+    render(
+      <ChatbotEnhanced
+        surfaceContextLabel="Viewing: Opportunities"
+        messages={[{ id: 'a1', role: 'assistant', content: 'An answer' }]}
+      />,
+    );
+    const chip = screen.getByTestId('surface-context-chip');
+    const frame = chip.closest('[data-slot="input-group"]');
+    expect(frame).not.toBeNull();
+    expect(chip.className).toContain('order-first');
+    const textarea = frame!.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+    expect(chip.compareDocumentPosition(textarea!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('log').contains(chip)).toBe(false);
+  });
+});

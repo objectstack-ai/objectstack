@@ -17,10 +17,23 @@
 //
 // Posture: development / in-memory. `NODE_ENV` is forced to `development` so the
 // auth plugin's dev-admin bootstrap provisions a known, loginable admin (mirrors
-// `objectstack dev`). This is a verification harness — it never touches a real
-// database or production data, and it never touches the host's key custody
+// `objectstack dev`). This is a verification harness: its own database is the
+// in-memory one it creates here, and it never touches the host's key custody
 // either: it seals under a data key held in this process's memory only (see
 // `harnessCryptoProvider`).
+//
+// Datasources the app DECLARES are connected the way `objectstack dev`
+// connects them (ADR-0062 D1/D2, the datasource-connection service below), so
+// a read of an object bound to one reaches that datasource, and so does a
+// write the APP makes there: its seed, or a hook or flow of its own that
+// writes such an object when one of verify's writes fires it. Verify's own
+// writes never reach an object on an EXTERNAL datasource: every derived write
+// family leaves it out and reports it "not exercised", whatever its write gate
+// says (`deriveCrudCases`, `derive.ts`). An object bound to a declared MANAGED
+// datasource (or one that declares no `schemaMode`) is written through that
+// datasource, as under `objectstack dev`; only the local flow run refuses a
+// write to any object routed away from this database (`flow-run.ts`).
+// `verify.external-datasource-no-writes.test.ts` pins the external half.
 
 import { randomBytes } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
@@ -1561,8 +1574,9 @@ async function bootClaimed(
       // in this function.)
       //
       // Posture, load-bearing for all of the above: `@objectstack/verify`
-      // boots in-process against in-memory SQLite and "never touches a real
-      // database or production data" (this file's header). There is no
+      // boots in-process against in-memory SQLite, and "its own database is
+      // the in-memory one it creates" (this file's header): a sign-up's rows
+      // land there, not in any datasource the app declares. There is no
       // deployed plane here that could go on looking healthy while something
       // it claims is persisted did not land.
     }
