@@ -575,6 +575,9 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(switcher()).toHaveTextContent('Paris leads');
     await waitFor(() => expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter, 1 active'));
     fireEvent.click(filterTrigger());
+    // The trigger opens the shared field list (objectstack#35549); the panel
+    // rows are its advanced step.
+    fireEvent.click(await screen.findByTestId('filter-panel-open-advanced'));
     expect(await screen.findByDisplayValue('Paris')).toBeInTheDocument();
     // The panel row is the condition: it is not laid under the list as well.
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
