@@ -1015,8 +1015,9 @@ export function AppCreationWizard({
   // Leaving objects → navigation: fill an empty navigation from the selected
   // objects, or merge the selection into the one the draft holds. The new
   // entries' labels are decided from the objects' AUTHORED definitions
-  // (objectstack#35101), so the step waits for those reads; navigation is
-  // disabled meanwhile so the selection cannot move under them.
+  // (objectstack#35101), so the step waits for those reads; the step buttons
+  // and the object selection are disabled meanwhile, so neither the step nor
+  // the selection can move under them.
   const enterNavigationStep = useCallback(() => {
     const pending = readAuthoredObject ? objectsNeedingEntries(draft.navigation, draft.objects) : [];
     const advance = (labels: AuthoredEntryLabels) => {
@@ -1158,7 +1159,9 @@ export function AppCreationWizard({
         {currentStep === 1 && (
           <ObjectSelectionStep
             objects={draft.objects}
-            readOnly={readOnly}
+            // The selection is frozen while its entries' authored reads run:
+            // an object toggled mid-read would get an entry nobody read for.
+            readOnly={readOnly || generatingNav}
             onToggle={toggleObject}
             onToggleAll={toggleAllObjects}
             search={objectSearch}

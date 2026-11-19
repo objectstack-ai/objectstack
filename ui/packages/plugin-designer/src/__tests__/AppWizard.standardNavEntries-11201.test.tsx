@@ -171,3 +171,34 @@ describe('objectstack#35101 — the generated entry’s label is decided from th
     expect(entry).not.toHaveProperty('label');
   });
 });
+
+describe('objectstack#35101 — the selection cannot move under the authored reads', () => {
+  it('while the reads run, the step buttons and the object cards are disabled; the step advances once they settle', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    getAuthoredItem.mockImplementationOnce(async (_type: string, name: string) => {
+      await gate;
+      return AUTHORED[name] ?? null;
+    });
+    render(<CreateAppPage />);
+    fireEvent.change(screen.getByTestId('app-name-input'), { target: { value: 'acme_crm' } });
+    fireEvent.change(screen.getByTestId('app-title-input'), { target: { value: 'Acme CRM' } });
+    next(); // → objects
+    fireEvent.click(screen.getByTestId('object-card-project'));
+    next(); // → reads start
+    await waitFor(() => expect(getAuthoredItem).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('wizard-next').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByTestId('wizard-back').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByTestId('object-card-task').hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByTestId('wizard-step-navigation-content')).toBeNull();
+    release();
+    await screen.findByTestId('wizard-step-navigation-content');
+    expect(screen.getByTestId('wizard-next').hasAttribute('disabled')).toBe(false);
+    next(); // → branding
+    fireEvent.click(screen.getByTestId('wizard-complete'));
+    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+    const navigation = (saveItem.mock.calls[0][2] as { navigation: Array<Record<string, unknown>> }).navigation;
+    expect(navigation.filter((e) => e.type === 'object').map((e) => e.objectName)).toEqual(['project']);
+    expect(entryFor(navigation, 'project').label).toBe('Projects');
+  });
+});
