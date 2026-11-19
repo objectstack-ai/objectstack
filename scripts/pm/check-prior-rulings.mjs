@@ -2104,6 +2104,8 @@ export async function selfTest() {
     const h = (line, text) => ({ file: 'a.ts', line, text });
     const hinted = surfaceVerdict({ ruling: [h(1, 'ruling record 6181973363'), h(2, 'ruling')], '⛔': [h(3, '⛔ ADR-0131 D8')] });
     t('--paths: an id shape is a HINT on its line, the reading owed is the same for every hit', J([hinted.hinted.length, hinted.text.includes(READING_OWED), 'cited' in hinted]), J([2, true, false]));
+    const log = parseLog('abc1234\t2026-11-19T10:03:00+00:00\tfeat: today\ndef5678\t2026-11-19T07:00:00+08:00\tfix: yesterday in UTC\n', '2026-11-19');
+    t('--paths: ⭐ same-day is the UTC day of the commit, an offset date converted', J(log.sameDay.map((c) => c.sha)), J(['abc1234']));
 
     // A declared path that matches no file: zero files read is not zero hits.
     const unmatched = surfaceVerdict({ ruling: [] }, ['scripts/pmm/**']);
@@ -2128,7 +2130,7 @@ export async function selfTest() {
     const pr = await premiseReadings({ paths: ['x/**', 'gone/**'], rev: 'origin/main', todayUtc: '2026-11-19', card, thread: { comments: [{ body: 'and #14' }] }, repo: 'o/r', git: fakeGit, getRow: (ref) => (fetched.push(ref.key), rows[ref.key]) });
     t('--paths: ⭐ the unmatched path is found against the revision\'s tree and its clean verdict withheld, the matched one is not named', J([pr.unmatchedPaths, pr.verdict.clean]), J([['gone/**'], false]));
     t('--paths: every word is grepped fixed-string over the glob pathspecs at the revision', J(asked.filter((a) => a[0] === 'grep').map((a) => [a[4], a[5], a.at(-1)])), J(SURFACE_RULING_PATTERNS.map((w) => ['-e', w, ':(glob)gone/**'])));
-    t('--paths: the log is -20 at the revision on the same paths', J(asked.find((a) => a[0] === 'log').slice(0, 2)), J(['log', '-20']));
+    t('--paths: the log is -20 at the revision on the same paths', J(asked.find((a) => a[0] === 'log').slice(0, 2).concat(asked.find((a) => a[0] === 'log').slice(-2))), J(['log', '-20', ':(glob)x/**', ':(glob)gone/**']));
     const text = renderPremise(pr);
     t('--paths: the render names the path that matched no file', text.includes('declared path `gone/**` matched NO file'), true);
     t('--paths: the same-day line is printed verbatim when one commit is today', text.includes(SAME_DAY_LINE), true);
