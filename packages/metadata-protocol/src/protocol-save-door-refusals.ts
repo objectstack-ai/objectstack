@@ -1101,7 +1101,14 @@ export async function seedExternalIdSaveRefusal(
  * (`readMetaItem`); a name two packages hold is held, so known too. An object
  * of a dependency package answers the same registry read as the package's
  * own. Answered as the schema gate answers: `422 INVALID_METADATA`, one
- * finding at `object`, naming the seed and the object, and the fix.
+ * finding at `object`, naming the seed and the object, and the fix: correct
+ * the name, or create the object first (a draft of it is enough for a draft
+ * seed; a live seed needs it published).
+ *
+ * Asked by the save door alone (`door` as `'save'`), in draft and in publish
+ * mode, never for a `migrate-stored` re-save. The publish promotion and the
+ * restore doors pass no `door` and leave such an object to the load, which
+ * reports it (#27393 keeps the publish as it is).
  */
 async function unknownSeedObjectRefusal(
     host: Pick<SaveDoorRefusalHost, 'readMetaItem'>,

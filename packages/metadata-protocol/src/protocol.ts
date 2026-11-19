@@ -9064,20 +9064,9 @@ export class ObjectStackProtocolImplementation implements
      * same package batch (`pending` as the batch's object declarations), else
      * the engine's registered definition, whose fields include extension
      * fields; the columns the registry injects (`id`, the audit and tenant
-     * columns) count. On a draft save, an object that is itself still a draft
-     * (`pending` as `'drafts'`) is judged at the seed's publish.
-     *
-     * [#34864] An object resolved by none of these, nor by the by-name object
-     * read (an object stored here or defined in code that the registry has
-     * not registered yet), is refused by the save door alone (`door` as
-     * `'save'`), whatever the mode: `422 INVALID_METADATA`, one finding at
-     * `object` naming the object and the fix (correct the name, or create the
-     * object first: a draft of it is enough for a draft seed, a live seed
-     * needs it published). Before this, such a seed was stored and its
-     * publish answered `published` with a load that wrote nothing. The
-     * publish promotion and the restore doors pass no `door` and leave that
-     * object to the load, which reports it (#27393 keeps the publish as it
-     * is). A registry that cannot look an object up by name refuses nothing.
+     * columns) count; on a draft save, an object itself still a draft (`pending`
+     * as `'drafts'`) is judged at the seed's publish. [#34864] One nothing resolves is
+     * refused by the save door alone (`door`): `unknownSeedObjectRefusal`'s docblock.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing

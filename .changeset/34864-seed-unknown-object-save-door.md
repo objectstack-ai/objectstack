@@ -16,3 +16,5 @@ Metadata-protocol: narrowed
 Fix for a refused save: correct `object` to the object's full name (for example `crm_lead`, not `lead`), or create the object first, as a draft for a draft seed or published for a live one.
 
 **The publish probe names a missing object.** When a published seed's object does not exist, the `seed_not_applied` finding now says so: `message` and `fix` name the missing object, and the person's sentence (`userMessage`, cause `missing`, in every platform locale) tells them to correct the object or create and publish it. A read that fails on an object that does exist still asks to publish again (cause `unreadable`).
+
+<!-- adr-0087: not-required (no-migration-prescription) no key, value or type is retired: a seed naming an object that does not exist was never loadable, and the refusal carries its own fix -->
