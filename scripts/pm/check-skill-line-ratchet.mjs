@@ -1199,11 +1199,27 @@ export const CEILINGS = new Map([
   // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
   // now holds were deleted whole (lowering is always legitimate). Landed count.
   // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 458],
+  // 458 → 14: split by subject (card #35236, step 5 of the skills-review order of improvements,
+  // ordered by the maintainer's 「同意」 of 2026-11-18 16:19Z, quoted on that card) — every
+  // reading moved verbatim into the nine `readings-*.md` files below and this file became their
+  // index (lowering is always legitimate). Each new row is its file's landed count, headroom 0;
+  // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
+  // paid by that ruling and by nothing else.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 84],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
-  // readings. The policy lives in platform-readings.md's quota section; this
+  // readings. The policy lives in readings-channels.md (platform-readings.md's
+  // quota section until the subject split); this
   // file is the lookup table it points at, so the policy flip did not have to
   // grow the hot file. Set at landed line count (headroom 0, same convention
   // as the entries above).
@@ -1442,7 +1458,14 @@ export const CEILINGS = new Map([
   // It is beside seat-lifecycle.md because the coordinator is not a
   // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
   // set at the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
+  // 49 → 51: an ordinary ruled raise. The ruling of record is the maintainer's
+  // 2026-11-19 word, verbatim: 「同意」 on the coordinator's three dispatch rules,
+  // 「用 fable先评审你这个意见」, then his decision-card choice 「加两行,并修代改级漏洞」;
+  // quoted in the body of the card it ordered, claim comment 7000373266. Two
+  // lines: open whenever a slot is free, ordering only by `Blocked-by:` and the
+  // seat's serial queue; a grade-only word writes the grade and opens nothing.
+  // Measured delta +2. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 51],
   // The external-text reference (whose text instructs, whose is data) and the
   // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
   // set at the landed line count, headroom 0, same convention as above.
@@ -1652,7 +1675,11 @@ export const CEILINGS = new Map([
   // area's loose-ends card, and the dedupe search before a review files. The
   // quota line (one card per defect) is untouched. Measured delta +3.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 82],
+  // 82 → 83: an ordinary ruled raise by the same ruling of record as
+  // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
+  // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
+  // as his. Measured delta +1. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -2746,6 +2773,15 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 0],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 0],
   ['.claude/skills/pm-dispatch/references/rest-channel.md', 0],
   ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 0],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 0],

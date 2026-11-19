@@ -154,7 +154,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 标签写恒四步:取现集 → 只增删目标 → 写合并集 → 回读 diff 对 union(现集, 增删)。
 - union 有而回读缺 = 被并发剥掉,重挂并报告。
 - PM 写进 GitHub 的文本 ⛔ 不用尖括号路径占位符,改写成后跟显式路径的说法。
-- 携带易损片段的评论(派发令与裁决)post 后读回;写侧形状见 `references/platform-readings.md`。
+- 携带易损片段的评论(派发令与裁决)post 后读回;写侧形状见 `references/readings-write-shapes.md`。
 
 ## 域车道
 
