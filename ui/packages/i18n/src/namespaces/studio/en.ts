@@ -1954,6 +1954,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.submit': 'Create package',
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
+  'engine.packages.create.created': 'Created package “{name}”.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
