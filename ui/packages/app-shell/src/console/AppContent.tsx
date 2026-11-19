@@ -598,7 +598,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // outside a draft preview, whose list read is another request.
   const viewReadObject = objectViewRouteObject(appSubPath, hostRoutePaths);
   const viewReadReady =
-    !!viewReadObject && routeReadsSettled && allObjects.some((o: any) => o?.name === viewReadObject);
+    !!viewReadObject && routeReadsSettled && allObjects.some((o) => o?.name === viewReadObject);
   useEffect(() => {
     if (!viewReadObject || !viewReadReady || !bundleAppName || previewDrafts) return;
     prefetchObjectViewRows(dataSource, viewReadObject);
