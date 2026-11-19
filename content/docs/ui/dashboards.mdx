@@ -308,7 +308,11 @@ to the object's full list page (sort / bulk-select / export / shareable URL),
 scoped by the same drill filter. In-place drawer is the default (keep context);
 the escape hatch is there when you need the full surface. **Reports drill
 identically**: a `summary` / `matrix` report opens the same in-place drawer on
-row/cell click, so dashboard and report drill behave the same.
+row/cell click, so dashboard and report drill behave the same. The exception
+today is a dimension whose `field` is a relationship path, such as `region` in
+the `sales` dataset above (`account.region`): the list page's URL filter has no
+spelling for a condition on a related record, so that drill stays in the drawer
+and offers no link.
 
 ```typescript
 // A drill-through table widget. No drill configuration is required — it is
@@ -336,7 +340,8 @@ click-drillable; expose the detail through a `table`/`pivot` widget instead.
 > whitelist, and chart-segment drill for the `scatter` / `treemap` / `sankey`
 > families. Those knobs live in the renderer; dataset-bound dashboards drill
 > through the semantic layer as described above (and get the "Open in list →"
-> escape hatch from the host app, e.g. the console).
+> escape hatch from the host app, e.g. the console, except today on a
+> relationship-path dimension, as noted above).
 
 ### Aggregation Functions
 
