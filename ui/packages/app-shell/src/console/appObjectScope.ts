@@ -734,11 +734,9 @@ export function readAppObjectScope(
   const own = readObjectScope({ packageId });
   if (!own.settled) return { candidate, scope: own, ready: false, ...NOT_READ };
   // objectui#13046 — a package that holds no objects of its own: an object's
-  // route reads its names by name all the same, below; the app's root keeps the
-  // whole registry (the header says why).
-  if (!route.objectName && !own.served.some((o: any) => o?._packageId === packageId)) {
-    return { candidate, scope: null, ready: false, ...NOT_READ };
-  }
+  // route reads its names by name all the same, below, and so does the app's
+  // root (objectstack#34211): the objects its entries require, never the whole
+  // registry.
   return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId) };
 }
 

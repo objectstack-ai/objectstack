@@ -100,9 +100,9 @@
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
-import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { sharedGetJson } from '@object-ui/types';
 import { resolveLocaleAmong } from '@objectstack/spec/system';
+import { readConsoleDiscovery } from './lib/early-discovery';
 
 /**
  * How long a true first visit will wait for the resolved locale before booting
@@ -117,37 +117,8 @@ interface MeLocalizationResponse {
   locale?: string | null;
 }
 
-/**
- * How long the console's discovery request may run before it is abandoned.
- * The request is shared with the data adapter's `connect()`, so this bound is
- * the adapter's too; it matches the shell's own discovery bound.
- */
-const DISCOVERY_TIMEOUT_MS = 10_000;
-
 /** This page-load's read of the language a choice-less read states, once started. */
 let preferredLocale: Promise<string | undefined> | null = null;
-
-/** The discovery document, through the console's one shared request. */
-async function fetchDiscovery(serverBase: string): Promise<unknown> {
-  return getSharedDiscovery(serverBase, async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), DISCOVERY_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${serverBase}/api/v1/discovery`, {
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      if (!res.ok) {
-        throw Object.assign(new Error(`discovery ${res.status}`), { status: res.status });
-      }
-      const body = await res.json();
-      return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
-    } finally {
-      clearTimeout(timer);
-    }
-  });
-}
 
 /**
  * The language a read with no explicit choice states (objectstack#33985,
@@ -196,7 +167,7 @@ function readSupportedLocales(discovery: unknown): string[] {
  */
 export function loadPreferredLocale(serverBase: string): Promise<string | undefined> {
   if (!preferredLocale) {
-    preferredLocale = fetchDiscovery(serverBase).then(
+    preferredLocale = readConsoleDiscovery(serverBase).then(
       (discovery) => {
         const browser = typeof navigator === 'undefined' ? undefined : navigator.language;
         return pickPreferredLocale(browser, readSupportedLocales(discovery));
