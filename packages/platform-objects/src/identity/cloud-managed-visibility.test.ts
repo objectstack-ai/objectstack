@@ -334,6 +334,20 @@ describe('import_sso_users draws the per-row report as a table', () => {
       ['rows', 'table'],
     ]);
   });
+
+  // A deactivated pending person is re-added with `alreadyPending: true` and
+  // `host: { notified: false, reason: 'deactivated' }`: whether anyone was told
+  // is the host columns' answer, so the `alreadyPending` count and column say
+  // only that the person was already pending, as Add User's `pendingAgain` does.
+  it('labels `alreadyPending` "Already pending", leaving "told" to the host columns', () => {
+    const dialog = declared('import_sso_users').resultDialog as { fields?: Array<{ path: string; label?: unknown }> };
+    const summary = dialog.fields?.find((field) => field.path === 'summary.alreadyPending');
+    const columns = (rowsField()?.columns ?? []) as Array<{ path: string; label?: unknown }>;
+    const column = (path: string) => columns.find((entry) => entry.path === path)?.label;
+    expect(summary?.label).toBe('Already pending');
+    expect(column('alreadyPending')).toBe('Already pending');
+    expect(column('host.notified')).toMatch(/\btold\b/);
+  });
 });
 
 /**
