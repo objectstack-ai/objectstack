@@ -385,10 +385,10 @@ const TYPED_VALUE_ENVELOPE_CODES: ReadonlySet<string> = new Set([
  * `registerFlow` appends the same sentence (`flow-registration-checks.ts`).
  */
 const SHARED_STEPS_REWRITE =
-  'This flow has its own record trigger, which hands it a row of that object on every run it starts, so this '
-  + 'stands even where another flow also starts it through a `subflow` or `map` node. To share these steps with '
-  + 'such a flow, move them into a child flow with no trigger of its own, which is judged untyped because its '
-  + '`record` is whatever each caller hands it, and start that child from both flows.';
+  'This flow has its own record trigger or time-relative sweep, which hands it a row of that object on every '
+  + 'run it starts, so this stands even where another flow also starts it through a `subflow` or `map` node. '
+  + 'To share these steps with such a flow, move them into a child flow with no trigger of its own, which is '
+  + 'judged untyped because its `record` is whatever each caller hands it, and start that child from both flows.';
 
 /** Minimal structural view of a `parseCelToAst` node (`{ op, args }`). */
 type CelNodeLike = { op?: string; args?: unknown };

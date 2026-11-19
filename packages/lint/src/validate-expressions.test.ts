@@ -6686,6 +6686,14 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
     expect(issues.filter((i) => /isoDate\(addDays\(record\.borrow_date, N\)\)/.test(i.message))).toHaveLength(1);
   });
 
+  it('a sweep\'s refusal names the rewrite under its own entrance (ruling 7023700548)', () => {
+    const issues = validateStackExpressions(stackWith('update_record', MEASURED, {
+      schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('This flow has its own record trigger or time-relative sweep, which hands it a row');
+  });
+
   it('CONTROL: a datetime field in the same envelope, and the taught shift, stay clean', () => {
     for (const source of ["isoDate(timestamp(record.picked_up_at) + duration('168h'))", 'isoDate(addDays(record.borrow_date, 7))']) {
       expect(validateStackExpressions(stackWith('update_record', source)), source).toEqual([]);

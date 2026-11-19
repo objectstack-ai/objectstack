@@ -642,6 +642,12 @@ describe('value envelope — the date-text family at registerFlow (#34451)', () 
       .toThrow(/isoDate\(addDays\(record\.borrow_date, N\)\)/);
   });
 
+  it('a sweep\'s refusal names the rewrite under its own entrance (ruling 7023700548)', () => {
+    const start = { schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 } };
+    const error = catchError(() => engineWith(true).registerFlow('loan_due', loanFlow('update_record', MEASURED, start)));
+    expect(error.message).toContain('This flow has its own record trigger or time-relative sweep, which hands it a row');
+  });
+
   it('CONTROL: a datetime field, and a text field in arithmetic, still register', () => {
     for (const source of ["isoDate(timestamp(record.picked_up_at) + duration('168h'))", 'record.title * 2', 'record.due_date + 1']) {
       expect(() => engineWith(true).registerFlow('loan_due', loanFlow('update_record', source)), source).not.toThrow();
