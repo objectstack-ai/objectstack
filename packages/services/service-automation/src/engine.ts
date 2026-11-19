@@ -2166,6 +2166,17 @@ export interface SubflowParentStrand {
     repairable: true;
     /** The parent's own downstream failure text, verbatim — `resumeInternal`'s `error` for that run. */
     error: string;
+    /**
+     * [#34638] The refusal the parent's downstream step met, as the parent's
+     * own result reported it (`AutomationResult.innerRefusal`, ruling B′ on
+     * #24914) — so the caller that reads this strand can tell WHY the parent
+     * stopped, as the thrown `RESUME_FAILED` tells it for a run's own strand
+     * (#34579). Absent when the parent stranded on a fault that met no
+     * refusal; ⛔ never synthesised from {@link error}'s text.
+     */
+    innerRefusal?: FlowInnerRefusal;
+    /** [#34638] That refusal's producer-marked end-user text (`AutomationResult.userMessage`), verbatim; absent when none was marked. */
+    userMessage?: string;
 }
 
 /**
@@ -9725,6 +9736,10 @@ export class AutomationEngine implements IAutomationService {
                         runId: parentRunId,
                         repairable: true,
                         error: parentRes.error ?? 'unknown error',
+                        // [#34638] The refusal the parent met, off its own
+                        // result (`{}` when it met none) — so the caller that
+                        // takes this strand tells WHY, not only THAT.
+                        ...carriedRefusalOfResult(parentRes),
                     });
                     while (this.subflowParentStrands.size > MAX_CONSUMED_SUSPENSIONS) {
                         const oldest = this.subflowParentStrands.keys().next().value;
