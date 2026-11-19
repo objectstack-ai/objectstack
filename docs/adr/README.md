@@ -82,7 +82,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0010-nl-to-flow-authoring](./0010-nl-to-flow-authoring.md) | Natural-Language → Flow Authoring (Platform Capability) | Draft — 2026-05-24 | 2026-05-24 | — | — |
 | [ADR-0011](./0011-actions-as-ai-tools.md) | Actions as AI Tools (Operational Parity) | Accepted — implemented (2026-06-04) | 2026-06-04 | — | — |
 | [ADR-0012](./0012-notification-platform.md) | Messaging Platform — Outbound Notifications on a Generalized Outbox | Draft — 2026-05-25 · scope-revised 2026-05-26 · Superseded by ADR-0030… | 2026-05-25 | — | ADR-0030 |
-| [ADR-0013](./0013-bidirectional-messaging.md) | Bidirectional Messaging — Conversational Channels, Slack First | Draft — 2026-05-26 | 2026-05-26 | — | — |
+| [ADR-0013](./0013-bidirectional-messaging.md) | Bidirectional Messaging — Conversational Channels, Slack First | Draft — 2026-05-26 · Amended (2026-11-19, ruling `7023437637` on #34730… | 2026-05-26 | — | — |
 | [ADR-0014](./0014-record-form-field-type.md) | `record` Form Field Type | Accepted | 2026-04-17 | — | — |
 | [ADR-0015](./0015-external-datasource-federation.md) | External Datasource Federation | Accepted — backend/REST/CLI implemented; Studio UI + extra dialect drivers… | 2026-05-29 | — | — |
 | [ADR-0016](./0016-studio-package-authoring-and-publish.md) | Studio Package Authoring & One-Click Publish | Partially implemented — revised 2026-05-30 | 2026-05-30 | — | — |
