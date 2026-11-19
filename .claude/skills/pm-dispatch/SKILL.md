@@ -208,7 +208,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地,守卫仪器除外。
-- Tier S = `Rule-change:` 申报且记录核过的 `.claude/**`+下行 S 面,余皆 H;达档 PASS 后 ready→入队。
+- Tier S = `Rule-change: none`/`ruled` 记录核过的 `.claude/**`+下行面,余皆 H;达档 PASS 后 ready→入队。
 - 本仓 workflows 读 `readWorkflowDiff`(发布面/C2/拒读⇒H),技能与只增 ADR `lowRiskArmVerdict`,未读⇒H。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
