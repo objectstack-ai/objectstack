@@ -612,7 +612,8 @@
  *
  * ⛔ Fail closed: an unreadable pull, changeset, review list or thread is a
  * refusal on its own code, and a near-arm spelling (`(narrowed)`) counts as
- * declared. ⛔ Not read: a narrowing nobody declared — that stays the contract
+ * declared — all but the pull-request template's own unfilled menu line, which
+ * chose nothing (`UNFILLED_PROTOCOL_MENU`). ⛔ Not read: a narrowing nobody declared — that stays the contract
  * review's finding. `pull_request` leg: silent, like the SIZE leg.
  *
  * ## Exit codes — the refusal is impossible to read as clean
@@ -735,7 +736,7 @@ import {
   repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
-import { readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
+import { METADATA_PROTOCOL_KINDS, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -803,7 +804,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // own workflow are H; `.claude/**` is S only on the declared body line AND the record's verified line.
   '⚖️ #35321 at the queue: guard instruments are Tier H, `.claude/**` splits by declaration': 26,
   // The narrowed leg (same ruling): a declared narrowing needs BOTH halves; `added`, `semantic`, `none` are untouched.
-  '⚖️ #35321: a declared narrowing lands like Tier H — an authorized approval AND a PASS record': 22,
+  '⚖️ #35321: a declared narrowing lands like Tier H — an authorized approval AND a PASS record': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3232,14 +3233,20 @@ export const NARROWED_RULING = 'maintainer ruling 2026-11-19 on #35321: a spec c
  * is the readers' own `describing` near miss and declares nothing. ⛔ One direction fails closed: a line that
  * IS the key, reads `malformed` and spells `narrow` anywhere (`no (narrowed)`, `narrowing`) counts as declared —
  * the readers collapse a near-arm into `malformed` exactly so it cannot read as no narrowing. `added`,
- * `semantic`, `none`, a bare `yes`/`no` and `yes (widening)` declare none. Pure.
+ * `semantic`, `none`, a bare `yes`/`no` and `yes (widening)` declare none.
+ * ⛔ ONE malformed line that spells `narrow` declares nothing: the pull-request template's own UNFILLED line, the
+ * whole menu with no value chosen (`UNFILLED_PROTOCOL_MENU`, built from the readers' closed set). A body that
+ * left the template as it came chose nothing, and reading it as a narrowing would refuse every such pull —
+ * the maintainer's own included. Exactly that menu: a partial one (`narrowed | none`) still counts. Pure.
  */
+export const UNFILLED_PROTOCOL_MENU = METADATA_PROTOCOL_KINDS.join(' | ');
 export function narrowingDeclarationsIn(text) {
+  const unfilled = (value) => String(value ?? '').replace(/[ \t]+/g, ' ').trim() === UNFILLED_PROTOCOL_MENU;
   const out = [];
   for (const line of String(text ?? '').split(/\r?\n/)) {
     const kind = readMetadataProtocolLine(line);
     if (kind?.kind === 'declared' && kind.value === 'narrowed') out.push({ key: 'Metadata-protocol', line: kind.line });
-    else if (kind?.kind === 'malformed' && /narrow/i.test(line)) out.push({ key: 'Metadata-protocol', line: kind.line });
+    else if (kind?.kind === 'malformed' && /narrow/i.test(line) && !unfilled(kind.value)) out.push({ key: 'Metadata-protocol', line: kind.line });
     const clause = readClause2Line(line);
     if (clause?.kind === 'declared' && clause.arm === 'narrowing') out.push({ key: 'Clause-②', line: clause.line });
     else if (clause?.kind === 'malformed' && /narrow/i.test(line)) out.push({ key: 'Clause-②', line: clause.line });
@@ -7616,6 +7623,15 @@ export async function selfTest() {
         narrowingDeclarationsIn('Clause-②: no (narrowed)').length === 1 && narrowingDeclarationsIn('Clause-②: no (narrowing)\nMetadata-protocol: narrowed').map((d) => d.key).join() === 'Clause-②,Metadata-protocol' &&
         ['Metadata-protocol: added', 'Metadata-protocol: semantic', 'Metadata-protocol: none', 'Clause-②: yes (widening)', 'Clause-②: no', 'a narrowed spec change, in prose', 'see `Metadata-protocol: narrowed` in the template', '- `Metadata-protocol: narrowed` ⇒ `minor`', '', null].every((t) => narrowingDeclarationsIn(t).length === 0),
       JSON.stringify(narrowingDeclarationsIn('- `Metadata-protocol: narrowed` ⇒ `minor`')));
+    assert('⛔ the-pull-request-template-left-UNFILLED-declares-no-narrowing-and-a-partial-menu-still-does',
+      await (async () => {
+        const template = readFileSync(join(repoRoot, '.github', 'PULL_REQUEST_TEMPLATE.md'), 'utf8');
+        const v = await narrowRun({ body: template });
+        return template.includes(`\nMetadata-protocol: ${UNFILLED_PROTOCOL_MENU}\n`) && UNFILLED_PROTOCOL_MENU === 'added | narrowed | semantic | none' && narrowingDeclarationsIn(template).length === 0 &&
+          v.exitCode === EXIT_CLEAR && v.entries[0].state === 'not-declared' && reads.join() === 'pull 70' &&
+          narrowingDeclarationsIn('Metadata-protocol:  added |  narrowed | semantic | none').length === 0 &&
+          ['Metadata-protocol: narrowed | none', 'Metadata-protocol: added | narrowed', 'Metadata-protocol: added | narrowed | semantic | none (narrowed)', 'Metadata-protocol: narrowed.'].every((line) => narrowingDeclarationsIn(line).length === 1);
+      })());
     assert('a-narrowing-with-no-schema-path-stands-on-the-narrowing-face-its-record-at-the-default-tier-does-not',
       await (async () => {
         const runtime = { files: ['packages/runtime/src/x.ts'], body: `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n`, changesetText: changeset('Clause-②: no (narrowing)'), reviews: approval };
