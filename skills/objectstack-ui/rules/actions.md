@@ -6,11 +6,11 @@ Register them under `defineStack({ actions: [...] })`; the six types:
 `script`.
 
 **A record button needs a placement and a body that writes.** `objectName`
-folds the action into that object's record surfaces: `locations` without it
+folds the action into that object's surfaces: `locations` without it
 is refused at validate and publish (`action-no-object-binding`; set it, or
 `locations: []` if headless). With neither `locations` nor a view naming it in
 `rowActions` / `bulkActions` it renders nowhere (`action-no-placement`). A body
-that returns or assigns the new values writes nothing
+that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
 `capabilities: ['api.write']`: without it the sandbox throws on a write.
