@@ -29,11 +29,22 @@
 // writes such an object when one of verify's writes fires it. Verify's own
 // writes never reach an object on an EXTERNAL datasource: every derived write
 // family leaves it out and reports it "not exercised", whatever its write gate
-// says (`deriveCrudCases`, `derive.ts`). An object bound to a declared MANAGED
-// datasource (or one that declares no `schemaMode`) is written through that
-// datasource, as under `objectstack dev`; only the local flow run refuses a
-// write to any object routed away from this database (`flow-run.ts`).
-// `verify.external-datasource-no-writes.test.ts` pins the external half.
+// says (`deriveCrudCases`, `derive.ts`).
+//
+// A declared MANAGED datasource (or one that declares no `schemaMode`) is NOT
+// connected to the database it names. Ruling A of the composition rule
+// (`bootStack`, #22301) already swaps the app's own default store for an
+// ephemeral one; the same swap now covers every declared managed store:
+// verify's driver factory builds it as a fresh in-memory store of the default
+// store's engine (`managed-datasource-stand-in.ts`), so every write that
+// reaches it — verify's derived writes, a REST create, the app's seed — lands
+// in memory and dies with the kernel. A managed datasource whose engine has no
+// faithful stand-in (`mongodb`, or a driver a plugin supplies) keeps its real
+// driver, and every derived write family leaves its objects out and names
+// them, as for an external one. Only the local flow run refuses a write to any
+// object routed away from the default store (`flow-run.ts`).
+// `verify.external-datasource-no-writes.test.ts` pins the external half and
+// `verify.managed-datasource-stand-in.test.ts` the managed one.
 
 import { randomBytes } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
@@ -61,6 +72,7 @@ import { MetadataPlugin } from '@objectstack/metadata';
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
+import { createVerifyDatasourceDriverFactory } from './managed-datasource-stand-in.js';
 import { constructServedProviders } from './required-providers.js';
 import { registryLevelFor, resolveBootLogLevel, scopeRegistryLogLevel } from './boot-log-level.js';
 
@@ -1168,7 +1180,16 @@ async function bootClaimed(
       const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
         '@objectstack/service-datasource'
       );
-      await kernel.use(new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }));
+      // Verify's own factory over the one `objectstack dev` uses: a declared
+      // MANAGED datasource is built as an ephemeral store of the default
+      // store's engine instead of its real connection, the same swap ruling A
+      // makes for `default` (`./managed-datasource-stand-in.ts`).
+      await kernel.use(new DatasourceAdminServicePlugin({
+        driverFactory: createVerifyDatasourceDriverFactory({
+          real: createDefaultDatasourceDriverFactory(),
+          defaultStore: databaseDriver,
+        }),
+      }));
     }
   }
 

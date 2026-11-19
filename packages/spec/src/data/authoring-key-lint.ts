@@ -43,7 +43,7 @@
  * @see ADR-0049 enforce-or-remove · ADR-0104 · #4001 (the strict tiers)
  */
 
-import { findClosestMatches } from '../shared/suggestions.zod';
+import { suggestRename } from '../shared/rename-guess';
 
 /**
  * Which authoring surface a finding came from — a metadata type machine name
@@ -267,7 +267,9 @@ export function lintAuthoredRecordKeys(
     // A retirement (`why`, no `to`) deliberately suppresses the edit-distance
     // fallback: there IS no successor, and the nearest declared key by spelling
     // is noise — `pii` is 3 edits from `min`, which would read as real advice.
-    const suggestion = hint?.to ?? (hint?.why ? undefined : findClosestMatches(key, candidates, 3, 1)[0]);
+    // The fallback is the package's one rename rule (`shared/rename-guess.ts`):
+    // a flat distance of 3 answered a short key with anything three edits away.
+    const suggestion = hint?.to ?? (hint?.why ? undefined : suggestRename(key, candidates));
     out.push({
       path: `${basePath}.${key}`,
       surface,

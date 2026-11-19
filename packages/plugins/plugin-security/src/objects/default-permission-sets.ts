@@ -897,6 +897,22 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // `sys_approval_action` and `sys_approval_approver` are not named. An
       // external member resolves `external_default` and gets no such line.
       sys_approval_request: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [ADR-0158 U3, the owning seat's settlement under U3] The organization's
+      // own units of measure, READ only, so the label of a quantity's unit
+      // displays to every member who reads the quantity. A new read grant on
+      // this baseline, ruled for this object alone: `sys_exchange_rate`'s
+      // posture (no member line at all) is deliberately not copied.
+      //
+      // ⛔ No row policy: every row of this object is reference data of the
+      // member's own organization, and Layer 0, the tenant wall (ADR-0095 D1),
+      // already confines a read to it. ⛔ No write bit (ADR-0158 Open item 2):
+      // organization administrators create, edit and retire units through
+      // `organization_admin`'s wildcard grant; a unit's ratio is an admin act
+      // (L1). No `allowDelete` either way: the object serves no delete, since
+      // retiring is its delete (Open item 11), and this set is anchor-safe
+      // (ADR-0090 D5). An external member resolves `external_default` and gets
+      // no such line.
+      sys_unit: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,

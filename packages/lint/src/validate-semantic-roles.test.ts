@@ -130,7 +130,7 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(findings[0].message).toContain('amount');
   });
 
-  it('rule d counts the title field as hidden-from-body and respects the 4-entry strip cap', () => {
+  it('rule d counts the title field as hidden-from-body and respects the 6-entry strip cap', () => {
     // A group holding only the record title never renders in the body even
     // though the title is filtered OUT of the strip.
     const titleOnly = validateSemanticRoles(stack([{
@@ -141,15 +141,15 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     }]));
     expect(titleOnly.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
 
-    // Entry #5 is beyond the strip (first 4 after the title filter), so a
+    // Entry #7 is beyond the strip (first 6 after the title filter), so a
     // group containing it still renders → clean.
     const beyondCap = validateSemanticRoles(stack([{
       name: 'wide',
-      highlightFields: ['name', 'a', 'b', 'c', 'd', 'e'],
+      highlightFields: ['name', 'a', 'b', 'c', 'd', 'e', 'f', 'g'],
       fieldGroups: [{ key: 'tail', label: 'Tail' }],
       fields: {
-        name: {}, a: {}, b: {}, c: {}, d: {},
-        e: { type: 'text', group: 'tail' },
+        name: {}, a: {}, b: {}, c: {}, d: {}, e: {}, f: {},
+        g: { type: 'text', group: 'tail' },
       },
     }]));
     expect(beyondCap).toEqual([]);
@@ -169,6 +169,43 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(hiddenMember.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
   });
 
+  // The record page hoists RECORD_HIGHLIGHTS_MAX (6) highlights and its body
+  // leaves them out. The rule used to cut at 4, so a group whose only member
+  // sat 5th or 6th was emptied on the page and passed the lint.
+  it('rule d judges the six highlights the record page hoists, not four', () => {
+    for (const position of [5, 6]) {
+      const strip = ['a', 'b', 'c', 'd', 'e', 'f'];
+      const owner = strip[position - 1];
+      const findings = validateSemanticRoles(stack([{
+        name: 'lead',
+        highlightFields: strip,
+        fieldGroups: [{ key: 'basics', label: 'Basics' }, { key: 'assignment', label: 'Assignment' }],
+        fields: {
+          name: { type: 'text', group: 'basics' }, notes: { type: 'textarea', group: 'basics' },
+          ...Object.fromEntries(strip.map((n) => [n, { type: 'text', ...(n === owner ? { group: 'assignment' } : {}) }])),
+        },
+      }]));
+      expect(findings, `position ${position}`).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ severity: 'warning', rule: FIELD_GROUP_SHADOWED, path: 'objects[0].fieldGroups' });
+      expect(findings[0]?.message).toContain('"assignment"');
+      expect(findings[0]?.hint).toContain('first 6 highlightFields');
+    }
+
+    // Control: four highlights out of a six-slot strip, every group keeping
+    // a member the body draws → clean.
+    const fourOfSix = validateSemanticRoles(stack([{
+      name: 'lead',
+      highlightFields: ['a', 'b', 'c', 'd'],
+      fieldGroups: [{ key: 'basics', label: 'Basics' }, { key: 'assignment', label: 'Assignment' }],
+      fields: {
+        name: { type: 'text', group: 'basics' }, notes: { type: 'textarea', group: 'basics' },
+        a: { type: 'text', group: 'basics' }, b: { type: 'text' }, c: { type: 'text' },
+        d: { type: 'text', group: 'assignment' }, owner_id: { type: 'text', group: 'assignment' },
+      },
+    }]));
+    expect(fourOfSix).toEqual([]);
+  });
+
   // #6326 — rule (d)'s title resolution used to read
   // `[nameField, primaryField, displayNameField]`. `primaryField` is declared
   // NOWHERE in `packages/spec`: measured on 17.0.0-rc.5,
@@ -183,26 +220,26 @@ describe('validateSemanticRoles (ADR-0085)', () => {
   // make the fixture schema-valid: that deletes the coverage.
   //
   // The pair below is the discriminating one. Title resolution matters here
-  // because the title is filtered OUT of the 4-entry strip, so whether
-  // `ref_no` counts as the title decides whether entry #5 (`d`) lands inside
-  // the strip. Read as the title → strip is [a,b,c,d], group "tail" (only
-  // member `d`) is fully hidden → SHADOWED. Not read → strip is
-  // [ref_no,a,b,c], `d` still renders → clean. No field here is one of the
+  // because the title is filtered OUT of the 6-entry strip, so whether
+  // `ref_no` counts as the title decides whether entry #7 (`f`) lands inside
+  // the strip. Read as the title → strip is [a,b,c,d,e,f], group "tail"
+  // (only member `f`) is fully hidden → SHADOWED. Not read → strip is
+  // [ref_no,a,b,c,d,e], `f` still renders → clean. No field here is one of the
   // conventional fallbacks (name/full_name/title/subject/display_name), and
   // none is an injected system column, so nothing else can supply a title.
   it('ignores primaryField in title resolution; nameField still resolves (#6326)', () => {
     const withPhantomKey = validateSemanticRoles(stack([{
       name: 'ledger_entry',
       primaryField: 'ref_no',
-      highlightFields: ['ref_no', 'a', 'b', 'c', 'd'],
+      highlightFields: ['ref_no', 'a', 'b', 'c', 'd', 'e', 'f'],
       fieldGroups: [{ key: 'tail', label: 'Tail' }],
       fields: {
         ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
-        c: { type: 'text' }, d: { type: 'text', group: 'tail' },
+        c: { type: 'text' }, d: { type: 'text' }, e: { type: 'text' }, f: { type: 'text', group: 'tail' },
       },
     }]));
     // Goes red the moment the `primaryField` entry returns to the chain:
-    // `ref_no` would become the title, `d` would fall inside the strip, and
+    // `ref_no` would become the title, `f` would fall inside the strip, and
     // one FIELD_GROUP_SHADOWED finding would appear.
     expect(withPhantomKey).toEqual([]);
 
@@ -212,11 +249,11 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     const withNameField = validateSemanticRoles(stack([{
       name: 'ledger_entry',
       nameField: 'ref_no',
-      highlightFields: ['ref_no', 'a', 'b', 'c', 'd'],
+      highlightFields: ['ref_no', 'a', 'b', 'c', 'd', 'e', 'f'],
       fieldGroups: [{ key: 'tail', label: 'Tail' }],
       fields: {
         ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
-        c: { type: 'text' }, d: { type: 'text', group: 'tail' },
+        c: { type: 'text' }, d: { type: 'text' }, e: { type: 'text' }, f: { type: 'text', group: 'tail' },
       },
     }]));
     // Indexed rather than `.map((f) => f.rule)` on purpose: this file's

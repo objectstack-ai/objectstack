@@ -37,7 +37,10 @@
  *   refuses to hand the slot back to them; an SLA escalation leaves them off;
  * - CONTROLS: the option off leaves every slate, timeline and decision as
  *   before; the option on with a slate that never named the submitter writes
- *   no note.
+ *   no note;
+ * - a request that opens on the slate naming no one says so on its timeline
+ *   and tells its submitter, and the submitter's refused approval names the
+ *   remedy — only when no one else is on the slate.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -160,6 +163,8 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
     return JSON.parse(row.node_config_json);
   };
   const EXCLUDED = "The request's submitter was removed from its approvers because this step sets excludeSubmitter";
+  const NO_ONE_ELSE = 'No one else can approve this request yet. An organization administrator must add a member '
+    + 'who can approve it, then reassign the request to them.';
 
   beforeAll(async () => {
     engine = new ObjectQL();
@@ -263,9 +268,7 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
     it('an organization whose only administrator is the submitter opens on the slate that names no one', async () => {
       const row = await open('solo', FIELD_STEP, ON, { org: SOLO_ORG });
       expect(row.pending_approvers).toEqual([]);
-      expect(await notesOf(row.id)).toEqual([
-        `${EXCLUDED}; no one else could take it, so only a privileged override can decide it.`,
-      ]);
+      expect(await notesOf(row.id)).toEqual([`${EXCLUDED}, and no one else could take it.`, NO_ONE_ELSE]);
       // …and the submitter, that organization's administrator, cannot take it
       // through the override either.
       await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any,
@@ -411,6 +414,59 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       const row = await open('own_override_elsewhere', [{ type: 'user', value: 'u_bob' }]);
       const moved = await svc.reassign(row.id, { actorId: 'u_sub', to: 'position:procurement_director' } as any, submitterAdmin);
       expect(moved.request.pending_approvers).toEqual(['position:procurement_director']);
+    });
+  });
+
+  // A request no one can decide tells its submitter so, and the refusal of the
+  // submitter's own approval names what to do instead of an approver who does
+  // not exist. The ruled outcome is unchanged: they still cannot approve it.
+  describe('a request no one but its submitter can decide names the remedy', () => {
+    const sent: any[] = [];
+    const soloAdmin = as('u_sub', SOLO_ORG, ['organization_admin']);
+    beforeAll(() => {
+      svc.attachMessaging({ emit: (async (input: any) => { sent.push(input); }) as any });
+    });
+
+    it('the slate that names no one: the timeline says so, the submitter is told, and the refusal names the remedy', async () => {
+      const row = await open('solo_told', FIELD_STEP, ON, { org: SOLO_ORG });
+      expect(row.pending_approvers).toEqual([]);
+      expect((await notesOf(row.id)).at(-1)).toBe(NO_ONE_ELSE);
+      const told = sent.filter((e) => e.source?.id === row.id);
+      expect(told.map((e) => [e.topic, e.audience, e.keyedText.titleKey, e.keyedText.bodyKey])).toEqual([
+        ['approval.comment', ['u_sub'], 'messages.approvalNoApproverTitle', 'messages.approvalNoApprover'],
+      ]);
+      expect(told[0].payload.body).toBe(NO_ONE_ELSE);
+      await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter, so they cannot "
+          + `approve it. ${NO_ONE_ELSE}`,
+      );
+    });
+
+    it('the override refusal names the literal a member must hold, when only it is left on the slate', async () => {
+      const row = await open('solo_literal', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "through the administrator override. No one else can approve this request yet. An organization "
+          + "administrator must add a member who holds position 'legal'; that member can then decide it. To "
+          + 'withdraw it instead, reject it or recall it.',
+      );
+    });
+
+    it('CONTROL: with another approver on the slate, both refusals keep naming that approver', async () => {
+      const excluded = await open('ctl_excluded', [{ type: 'user', value: 'u_bob' }], ON);
+      await engine.update('sys_approval_request', { id: excluded.id, pending_approvers: 'u_sub,u_bob' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(excluded.id, { decision: 'approve', actorId: 'u_sub' } as any, SUB)).rejects.toThrow(
+        'so they cannot approve it. Another approver on the step decides it; if the submitter holds the only '
+          + 'slot, reassign it to someone else.',
+      );
+      const overridden = await open('ctl_override', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: overridden.id, pending_approvers: 'u_bob' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(overridden.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin))
+        .rejects.toThrow('through the administrator override. An approver on the step decides it. To move it');
+      expect(sent.filter((e) => e.source?.id === excluded.id && e.topic === 'approval.comment')).toEqual([]);
     });
   });
 });

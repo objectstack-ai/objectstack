@@ -1897,6 +1897,42 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "記憶體（MB）",
         helpText: "單次呼叫記憶體上限（MB，最大 256）"
       },
+      refusals: {
+        label: "拒絕目錄",
+        helpText: "拒絕目錄，以操作內文丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 SIGN_IN_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。適用於 script 操作的 JavaScript（L2）內文；運算式內文宣告會被拒絕"
+      },
+      "refusals.message": {
+        label: "提示語",
+        helpText: "內文丟擲此錯誤碼時使用者讀到的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "refusals.status": {
+        label: "狀態碼",
+        helpText: "拒絕的 HTTP 狀態碼（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一錯誤碼下的更多句子，以內文在錯誤碼旁丟擲的 snake_case 原因為鍵（{ code, reason }）。線上的錯誤碼和狀態碼仍取本條目的；未在此宣告的原因會被拒絕。不填：丟擲的原因不被讀取"
+      },
+      "refusals.reasons.message": {
+        label: "提示語",
+        helpText: "內文在此錯誤碼下丟擲此原因時使用者讀到的句子。其中的 {{ }} 預留位置遵循本條目的參數"
+      },
+      "refusals.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
+      },
+      texts: {
+        label: "文字",
+        helpText: "操作寫入記錄的句子，以其內文透過 ctx.text 請求的 snake_case 鍵為鍵（例如 email_subject）。內文取得依組織語言翻譯的宣告句子，無翻譯時退回宣告的句子。適用於 script 操作的 JavaScript（L2）內文；運算式內文宣告會被拒絕"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "內文請求此鍵時操作寫入的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "texts.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 subject）：內文請求 ctx.text(key, { subject })，{{ subject }} 預留位置即顯示該值。不填：句子為純文字"
+      },
       params: {
         label: "參數",
         helpText: "執行前向使用者收集的輸入參數"
