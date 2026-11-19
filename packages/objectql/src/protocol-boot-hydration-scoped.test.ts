@@ -352,7 +352,9 @@ describe('security catalog read — a name two packages ship (ADR-0131 D4, ruled
  * `packages/qa/dogfood` and the artifact boot in `packages/runtime`.
  */
 describe('cold boot — a package-held catalog name the environment catalog holds refuses the boot (ADR-0048 N.3)', () => {
-    type CatalogType = 'permission' | 'position';
+    // `capability` joined the environment-held types with #35157: an unmanaged
+    // copy saves its app's capabilities into the environment catalog.
+    type CatalogType = 'permission' | 'position' | 'capability';
     type Envelope = Error & {
         code?: string;
         status?: number;
@@ -371,6 +373,7 @@ describe('cold boot — a package-held catalog name the environment catalog hold
         type: 'app',
         ...(decl.position ? { positions: decl.position.map((n) => catalogBody('position', n, 'shipped')) } : {}),
         ...(decl.permission ? { permissions: decl.permission.map((n) => catalogBody('permission', n, 'shipped')) } : {}),
+        ...(decl.capability ? { capabilities: decl.capability.map((n) => catalogBody('capability', n, 'shipped')) } : {}),
     });
 
     const kernels: ObjectKernel[] = [];
@@ -419,7 +422,7 @@ describe('cold boot — a package-held catalog name the environment catalog hold
     const environmentConflict = (type: CatalogType, name: string) =>
         ({ catalogType: type, name, incomingPackageId: PKG, existingHolder: { kind: 'environment' } });
 
-    describe.each(['permission', 'position'] as const)('%s', (type) => {
+    describe.each(['permission', 'position', 'capability'] as const)('%s', (type) => {
         const name = `coldboot_${type}`;
 
         it('a package-held name the environment catalog already holds refuses the boot, naming both holders', async () => {

@@ -27,24 +27,32 @@
  * acting user) are already refused for every field `visibleWhen` by the
  * predicate editor itself, so they draw nothing here.
  *
- * ## A `formula` the predicate reads
+ * ## A `formula` the predicate reads, that the form cannot compute
  *
  * The server computes each formula the predicate reads over the record being
- * saved, and that value decides. The form computes the same formulas over the
- * record being edited; a check that computes none (a wizard's final-submit
- * check, or a form whose data source serves no object schema) judges the
- * formula value last read, none on a create, and can disagree with the server.
- * The advisory is that reminder, for any formula read. A formula the server
- * cannot compute on a save at all (it reads through a reference, calls
- * `label()` or `current_user.can()`, or reads such a formula) keeps the field
- * required on every save, and the form, which cannot compute it either, shows
- * the field and keeps it required; the advisory says that too. A `can` call is
- * uncomputed on the server only on a save that picks no permission-gated
- * option (a save that picks one resolves the permission map, and the server
- * computes it). The server's fourth mark, a formula reading the acting user on a system
- * write with no user, is not advised: a save from Studio's form always has a
- * user. The lint's `required-visible-when-formula-issue.ts` is the same
- * verdict at `objectstack validate`.
+ * saved, and that value decides. The form computes the object's formulas over
+ * the record being edited (`planObjectFormulas`, `@object-ui/core`), so for a
+ * formula it can compute both judge the same value and nothing is advised.
+ * The advisory is for a formula the form cannot compute, the one arm where
+ * the two still part:
+ *
+ *  - one the server cannot compute on a save either (it reads through a
+ *    reference, calls `label()` or `current_user.can()`, or reads such a
+ *    formula): the field stays required on every save, and the form shows it
+ *    and keeps it required. A `can` call is uncomputed on the server only on a
+ *    save that picks no permission-gated option (a save that picks one
+ *    resolves the permission map, and the server computes it);
+ *  - one only the form cannot compute (it reads `os`, or reads such a
+ *    formula): the server binds `os` from the user and the tenant, computes
+ *    it and can waive the field, where the form shows it and keeps it
+ *    required.
+ *
+ * Two more the form cannot compute are not advised. A formula reading the
+ * acting user: a save from Studio's form always has one, and the form then
+ * computes it as the server does. One served without its expression (a
+ * field-level-security mask) is a per-reader fact the draft does not hold.
+ * The lint's `required-visible-when-formula-issue.ts` is the same verdict at
+ * `objectstack validate`.
  *
  * ## The reads are found by the parser, never by a pattern
  *
@@ -106,24 +114,32 @@ export type FieldReader = (source: string, root: string) => { bare: ReadonlySet<
 /** A call of `label(`, spelled as the server's `planCallsOptionLabel` reads it. */
 const LABEL_CALL = /\blabel\s*\(/;
 
+/** The formulas a required field's `visibleWhen` reads that the form cannot compute, by who else cannot. */
+export interface FormulaReadVerdict {
+  /** The server cannot compute them on a save either: the field stays required on every save. */
+  writePath: string[];
+  /** Only the form cannot (they read `os`): the server computes them and can waive the field. */
+  formOnly: string[];
+}
+
 /**
- * The `formula` fields a `required` field's `visibleWhen` reads, and which of
- * them the server cannot compute on a save: a formula that reads through a
- * reference, calls `label()` or calls `current_user.can()`, or reads such a
- * formula at any depth (the server's `unservableReason`). Both empty when the
- * field is not required, has no predicate, or the predicate reads no formula.
- *
- * Any formula read draws the advisory: a reminder that the server judges the
- * predicate on the formula value it computes over the record being saved. An
- * unservable one keeps the field required on every save, and the form shows it.
+ * The `formula` fields a `required` field's `visibleWhen` reads that the form
+ * cannot compute, split as {@link FormulaReadVerdict} says. A formula that
+ * reads through a reference, calls `label()` or calls `current_user.can()`,
+ * or reads such a formula at any depth, is one the server cannot compute
+ * either (the server's `unservableReason`); one that reads `os`, or reads such
+ * a formula, only the form cannot (`planObjectFormulas`). A mark the server
+ * shares outranks `os` at any depth. Both empty when the field is not
+ * required, has no predicate, or every formula it reads the form computes.
  */
 export function formulaReadsInRequiredVisibleWhen(
   def: Record<string, unknown> | null | undefined,
   siblings: Readonly<Record<string, Record<string, unknown> | undefined>>,
   readFields: FieldReader,
   callsCan: (source: string) => boolean,
-): { formulas: string[]; unservable: string[] } {
-  const none = { formulas: [], unservable: [] };
+  readsOs: (source: string) => boolean,
+): FormulaReadVerdict {
+  const none: FormulaReadVerdict = { writePath: [], formOnly: [] };
   if (!def || def.required !== true) return none;
   const source = predicateSource(def.visibleWhen);
   if (!source) return none;
@@ -135,26 +151,35 @@ export function formulaReadsInRequiredVisibleWhen(
     for (const name of [...reads.bare, ...reads.through]) if (isFormula(name) && !formulas.includes(name)) formulas.push(name);
   }
   if (formulas.length === 0) return none;
-  const verdicts = new Map<string, boolean>();
-  const unservable = (name: string): boolean => {
+  // `'write-path'` / `'form-only'`, or `null` when the form computes it.
+  type Verdict = 'write-path' | 'form-only' | null;
+  const verdicts = new Map<string, Verdict>();
+  const unservable = (name: string): Verdict => {
     const known = verdicts.get(name);
     if (known !== undefined) return known;
-    verdicts.set(name, false);
+    verdicts.set(name, null);
     const expr = predicateSource(siblings[name]?.expression);
-    let blocked = false;
+    let verdict: Verdict = null;
     if (expr) {
       const reads = readFields(expr, 'record');
       const hop = reads ? [...reads.through].some((f) => {
         const type = siblings[f]?.type;
         return typeof type === 'string' && REFERENCE_VALUE_TYPES.has(type);
       }) : false;
-      blocked = hop || LABEL_CALL.test(expr) || callsCan(expr)
-        || [...(reads?.bare ?? []), ...(reads?.through ?? [])].some((f) => isFormula(f) && unservable(f));
+      if (hop || LABEL_CALL.test(expr) || callsCan(expr)) verdict = 'write-path';
+      else {
+        const inner = [...(reads?.bare ?? []), ...(reads?.through ?? [])].filter(isFormula).map(unservable);
+        if (inner.includes('write-path')) verdict = 'write-path';
+        else if (readsOs(expr) || inner.includes('form-only')) verdict = 'form-only';
+      }
     }
-    verdicts.set(name, blocked);
-    return blocked;
+    verdicts.set(name, verdict);
+    return verdict;
   };
-  return { formulas, unservable: formulas.filter(unservable) };
+  return {
+    writePath: formulas.filter((f) => unservable(f) === 'write-path'),
+    formOnly: formulas.filter((f) => unservable(f) === 'form-only'),
+  };
 }
 
 /* ── The lazily loaded traversal reader ───────────────────────────────── */
@@ -188,6 +213,27 @@ function loadParser(): Promise<ParseAst | null> {
   return parseCached;
 }
 
+type CollectRoots = (source: string) => { ok: true; roots: string[] } | { ok: false };
+
+let rootsCached: Promise<CollectRoots | null> | null = null;
+
+function loadRootCollector(): Promise<CollectRoots | null> {
+  if (!rootsCached) {
+    rootsCached = import('@objectstack/formula')
+      .then(({ collectCelRootIdentifiers }) =>
+        typeof collectCelRootIdentifiers === 'function' ? (collectCelRootIdentifiers as unknown as CollectRoots) : null,
+      )
+      .catch(() => null);
+  }
+  return rootsCached;
+}
+
+/** Does a source read the `os` root, which the form does not bind for a formula (`planObjectFormulas`)? */
+export function readsOsRoot(collect: CollectRoots, source: string): boolean {
+  const roots = collect(source);
+  return roots.ok && roots.roots.includes('os');
+}
+
 /** Does a cel-js AST hold a receiver call named `method` (`current_user.can(…)`)? */
 export function callsReceiverMethod(node: unknown, method: string): boolean {
   if (Array.isArray(node)) return node.some((child) => callsReceiverMethod(child, method));
@@ -205,15 +251,15 @@ export function callsReceiverMethod(node: unknown, method: string): boolean {
 export function useRequiredVisibleWhenFormulaReads(
   def: Record<string, unknown> | null | undefined,
   siblings: Readonly<Record<string, Record<string, unknown> | undefined>>,
-): { formulas: string[]; unservable: string[] } {
+): FormulaReadVerdict {
   const source = def && def.required === true ? predicateSource(def.visibleWhen) : null;
   const key = source ? JSON.stringify([source, siblings]) : '';
-  const [state, setState] = React.useState<{ key: string; formulas: string[]; unservable: string[] }>({ key: '', formulas: [], unservable: [] });
+  const [state, setState] = React.useState<{ key: string } & FormulaReadVerdict>({ key: '', writePath: [], formOnly: [] });
 
   React.useEffect(() => {
     if (!key || !source) return;
     let cancelled = false;
-    void Promise.all([loadAnalyzer(), loadParser()]).then(([analyze, parse]) => {
+    void Promise.all([loadAnalyzer(), loadParser(), loadRootCollector()]).then(([analyze, parse, collect]) => {
       if (cancelled || !analyze) return;
       const readFields: FieldReader = (src, root) => {
         try {
@@ -231,7 +277,15 @@ export function useRequiredVisibleWhenFormulaReads(
           return false;
         }
       };
-      setState({ key, ...formulaReadsInRequiredVisibleWhen(def, siblings, readFields, callsCan) });
+      const readsOs = (src: string) => {
+        if (!collect) return false;
+        try {
+          return readsOsRoot(collect, src);
+        } catch {
+          return false;
+        }
+      };
+      setState({ key, ...formulaReadsInRequiredVisibleWhen(def, siblings, readFields, callsCan, readsOs) });
     });
     return () => {
       cancelled = true;
@@ -240,7 +294,7 @@ export function useRequiredVisibleWhenFormulaReads(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  return key && state.key === key ? { formulas: state.formulas, unservable: state.unservable } : { formulas: [], unservable: [] };
+  return key && state.key === key ? { writePath: state.writePath, formOnly: state.formOnly } : { writePath: [], formOnly: [] };
 }
 
 /**

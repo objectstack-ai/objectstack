@@ -149,13 +149,19 @@ export interface DeleteAndAggregateHost {
 /** The bodies of the "Delete, count, aggregate and execute" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class DeleteAndAggregateFacet {
   /** The body of `ObjectQL#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'delete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
+  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782, #34412] An aborting `afterDelete`, or a refusal after a `beforeDelete` hook's
     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.delete(object, options));
-    }
+    //
+    // [#35167] As in `insert` and `update`: the unit opens around the ENGINE
+    // BODY (the executor below), never around the door, so the middleware
+    // chain — the authorization gate's reads, and whatever a middleware does
+    // after `next()` — runs outside it. Nothing between here and the executor
+    // writes; the cascade claim below is an in-memory marker.
+    const ownUnit = this.opensAfterAbortUnit('afterDelete', object, options?.context);
+    const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+      ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -225,7 +231,7 @@ export class DeleteAndAggregateFacet {
       opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
     }
 
-    await this.executeWithMiddleware(opCtx, async () => {
+    await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
       // [ADR-0139 D1] As in `update`: a leaf the middleware chain wrote into a
       // delete's predicate is refused at the executor's entry, before the
       // pre-image reads reach the driver.
@@ -930,7 +936,7 @@ export class DeleteAndAggregateFacet {
           );
           throw e;
       }
-    });
+    }));
 
     return opCtx.result;
   }
