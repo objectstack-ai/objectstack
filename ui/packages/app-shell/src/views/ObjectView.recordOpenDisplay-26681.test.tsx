@@ -167,14 +167,16 @@ async function openList(objects: ReturnType<typeof objectsWith>) {
   await screen.findByTestId('primary-field-link', undefined, { timeout: 5000 });
 }
 
-function openDisplay() {
+/** Open records is a section of the Display menu's More level. */
+async function openDisplay() {
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  fireEvent.click(await screen.findByTestId('options-row-more'));
 }
 
 describe('objectstack#26681 — Open records in the Display menu', () => {
   it('objectstack#28915 — a drawer object: the section offers Drawer and Full page only', async () => {
     await openList(objectsWith());
-    openDisplay();
+    await openDisplay();
     const drawerSegment = await screen.findByRole('radio', { name: 'Drawer' });
     expect(drawerSegment.getAttribute('aria-checked')).toBe('true');
     const segments = within(screen.getByTestId('display-record-open')).getAllByRole('radio');
@@ -193,7 +195,7 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
   it('objectstack#28915 — a stored `split`: the section reads Drawer, and the row opens the drawer', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
     await openList(objectsWith());
-    openDisplay();
+    await openDisplay();
     expect((await screen.findByRole('radio', { name: 'Drawer' })).getAttribute('aria-checked')).toBe('true');
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     fireEvent.click(screen.getByTestId('primary-field-link'));
@@ -203,7 +205,7 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
   it('a reader who prefers the page chooses Drawer: the preference is kept, and the next row click opens the drawer', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'page');
     await openList(objectsWith());
-    openDisplay();
+    await openDisplay();
     const pageSegment = await screen.findByRole('radio', { name: 'Full page' });
     expect(pageSegment.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByRole('radio', { name: 'Drawer' }));
@@ -222,7 +224,7 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
 
   it('objectstack#27545 — choosing Full page: the next row click lands on the record page', async () => {
     await openList(objectsWith());
-    openDisplay();
+    await openDisplay();
     fireEvent.click(await screen.findByRole('radio', { name: 'Full page' }));
     expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('page');
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
@@ -235,7 +237,7 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
     await openList(objectsWith({ mode: 'page' }));
     expect(screen.queryByTestId('record-open-as-page')).toBeNull();
-    openDisplay();
+    await openDisplay();
     expect(await screen.findByTestId('display-record-open-declared')).toBeTruthy();
     expect(within(screen.getByTestId('display-record-open')).queryByRole('radio')).toBeNull();
   });

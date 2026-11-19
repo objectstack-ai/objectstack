@@ -88,7 +88,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, waitFor, screen, fireEvent } from '@testing-library/react';
+import { render, cleanup, waitFor, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
@@ -236,13 +236,14 @@ async function mountObjectList(view: Record<string, unknown>) {
 }
 
 /**
- * Find a visualization option by accessible name, in either switcher form —
+ * Find a visualization option by accessible name, in any switcher form —
+ * the Display menu's Layout level lists each as `role="radio"`; on the bar
  * two-to-four resolvable types render an inline segmented control exposing
  * `role="tab"`, five or more collapse into a dropdown of plain buttons.
  * Mirrors the helper in `plugin-list`'s `ListView.chart-capability-7544`.
  */
 const queryViewOption = (name: string) =>
-  screen.queryByRole('tab', { name }) ?? screen.queryByRole('button', { name });
+  screen.queryByRole('radio', { name }) ?? screen.queryByRole('tab', { name }) ?? screen.queryByRole('button', { name });
 
 /**
  * Is the Chart toggle offered for a view whitelisting exactly
@@ -252,11 +253,13 @@ const queryViewOption = (name: string) =>
  */
 async function chartOffered(view: Record<string, unknown>): Promise<boolean> {
   await mountObjectList({ appearance: { allowedVisualizations: ['grid', 'chart'] }, ...view });
-  // objectui#12423 — the switcher is the Display panel's Layout row by default.
+  // objectui#12423 — the switcher is the Display menu's Layout level by default.
   const display = screen.queryByTestId('toolbar-display-trigger');
   if (display) {
     fireEvent.click(display);
-    await screen.findByTestId('view-settings-content');
+    const content = await screen.findByTestId('view-settings-content');
+    const layout = within(content).queryByTestId('options-row-layout');
+    if (layout) fireEvent.click(layout);
   }
   const trigger = screen.queryByTestId('view-switcher-dropdown');
   if (trigger) fireEvent.click(trigger);
