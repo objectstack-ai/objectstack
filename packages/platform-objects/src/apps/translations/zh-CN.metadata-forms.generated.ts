@@ -427,7 +427,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "用户操作",
-        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。"
+        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。更改负责人不属于该矩阵：其默认值取决于共享模型（见其条目）。"
       },
       "userActions.create": {
         label: "新建",
@@ -448,6 +448,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "导出 CSV",
         helpText: "CSV 导出入口。未设置：显示，因为每个 managedBy 类别默认都提供导出。"
+      },
+      "userActions.transfer": {
+        label: "更改负责人",
+        helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读，外部对象上 owner_id 已声明或已映射）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
       },
       editMode: {
         label: "编辑方式",

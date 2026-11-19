@@ -427,7 +427,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "Actions utilisateur",
-        helpText: "Les entrées génériques (Nouveau, Importer, Modifier, Supprimer, Exporter) que les clients d’interface proposent sur les enregistrements de cet objet, en remplaçant la valeur par défaut de managedBy entrée par entrée. Une entrée non définie conserve cette valeur par défaut : platform propose les cinq ; config et system-data toutes sauf Importer ; engine-owned, append-only et better-auth uniquement Exporter. Un interrupteur non modifié n’écrit rien : il apparaît donc désactivé même là où la valeur par défaut propose l’entrée. Sur un objet engine-owned ou append-only, activer une entrée permet aussi aux utilisateurs d’effectuer cette écriture via l’API de données. Les utilisateurs ont toujours besoin de l’autorisation correspondante."
+        helpText: "Les entrées génériques (Nouveau, Importer, Modifier, Supprimer, Exporter) que les clients d’interface proposent sur les enregistrements de cet objet, en remplaçant la valeur par défaut de managedBy entrée par entrée. Une entrée non définie conserve cette valeur par défaut : platform propose les cinq ; config et system-data toutes sauf Importer ; engine-owned, append-only et better-auth uniquement Exporter. Un interrupteur non modifié n’écrit rien : il apparaît donc désactivé même là où la valeur par défaut propose l’entrée. Sur un objet engine-owned ou append-only, activer une entrée permet aussi aux utilisateurs d’effectuer cette écriture via l’API de données. Les utilisateurs ont toujours besoin de l’autorisation correspondante. Changer de propriétaire ne fait pas partie de cette matrice : sa valeur par défaut suit le modèle de partage (voir son entrée)."
       },
       "userActions.create": {
         label: "Créer",
@@ -448,6 +448,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "Exporter en CSV",
         helpText: "L’entrée d’export CSV. Non défini : affichée, puisque chaque catégorie managedBy propose l’export."
+      },
+      "userActions.transfer": {
+        label: "Changer de propriétaire",
+        helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
       },
       editMode: {
         label: "Mode de modification",
