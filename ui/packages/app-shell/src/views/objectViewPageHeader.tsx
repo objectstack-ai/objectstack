@@ -35,6 +35,17 @@ import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
+/**
+ * objectstack#35446 — the list header's width under which it takes
+ * `PageHeader`'s compact form: the folded actions (New labelled, Import and
+ * the rest in the 「⋯」 menu). The `md` breakpoint, read against the header's
+ * own width, so a main area narrowed by the AI panel, a small window or the
+ * record drawer gets it, and a full-width list does not. (Since
+ * objectstack#35548 the list bar draws no description at any width: it waits
+ * in the ⋮.)
+ */
+const LIST_HEADER_COMPACT_WIDTH = 768;
+
 export function ObjectViewPageHeader({
     objectDef,
     objectPluralLabel,
@@ -156,6 +167,7 @@ export function ObjectViewPageHeader({
                    </>
                  }
                  foldedActions={foldedHeaderActions}
+                 compactBelow={LIST_HEADER_COMPACT_WIDTH}
              />
              </div>
     );
