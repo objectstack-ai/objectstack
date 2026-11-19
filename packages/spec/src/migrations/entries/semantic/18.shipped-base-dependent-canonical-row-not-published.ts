@@ -21,7 +21,8 @@ export const entry: SemanticMigration = {
     'GET /api/v1/meta/TYPE/NAME/published, naming no package, for a bundled metadata name a base package ships '
     + 'only in members other than the canonical one, where a dependent package (one that declares the base) stores '
     + 'a row of the canonical member. Before a restart it served the dependent\'s row; after one it answered 404. '
-    + 'The plain read, ?member=CANONICAL and the execution read do not move',
+    + '?member=CANONICAL does not move. The plain read and the execution read naming no member served the base\'s '
+    + 'other member there and now answer 404 too: that move is registered as bundle-without-canonical-member-bare-read-absent',
   replacement:
     'Name the dependent: GET /api/v1/meta/TYPE/NAME?package=DEPENDENT&member=CANONICAL serves its row, as before.',
   reason:

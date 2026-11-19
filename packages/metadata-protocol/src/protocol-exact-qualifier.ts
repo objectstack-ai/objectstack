@@ -58,6 +58,7 @@ import {
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ServedOverrideRow } from './served-override.js';
 
@@ -364,7 +365,13 @@ export async function admitExactQualifier(
     }
 
     const candidates: PackageScopedHolder[] = holders.map((holder) => ({ kind: 'package' as const, packageId: holder }));
-    if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) {
+    // [#34682] The environment's item AT the addressed member: the named one,
+    // else the canonical one (naming no member is naming the canonical value).
+    // Asked with the raw selector, a read naming no member counted the
+    // environment's first member of a bundle it holds only in another member,
+    // so `?package=X` was refused 409 naming the environment where
+    // `?package=X&member=<canonical>` was admitted and answered 404.
+    if (registry.getEnvironmentScopedItem(request.type, request.name, bundleMemberDiscriminator(request.type, request.member)) !== undefined) {
         candidates.push({ kind: 'environment' });
     }
     // No holder anywhere: nothing to name, and the read answers its own miss.
@@ -491,7 +498,15 @@ export function exactQualifierItem(
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
     }
     const [holder] = address.registryHolders;
-    return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+    // [#34682] The admitted holder's item AT the addressed member: the named
+    // one, else the canonical one (the selector's contract: naming no member
+    // is naming the canonical value). Asked with the raw selector, a read
+    // naming no member got the holder's FIRST member when it ships no
+    // canonical one, while `?member=<canonical>` answered nothing. `undefined`
+    // for a type with no members, which reads as before.
+    return holder === undefined
+        ? undefined
+        : registry.getPackageScopedItem(request.type, request.name, holder, bundleMemberDiscriminator(request.type, member));
 }
 
 /**

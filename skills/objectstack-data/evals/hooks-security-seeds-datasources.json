@@ -290,6 +290,26 @@
         "must_contain": ["caller", "roll"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 25,
+      "prompt": "A `beforeInsert` hook on `time_entry`, declared in the stack's `hooks`, creates the week's `timesheet` row through `ctx.api` when there is none. A validation rule then refuses the entry (`hours > 24`). Is an empty timesheet left behind? Would `onError: 'log'` on the hook keep it? In which setups does it stay?",
+      "expected_output": "No: the save and the hook's `ctx.api` insert run in one transaction, so the refusal rolls the `timesheet` row back with the entry. `onError: 'log'` does not keep it: there is no per-hook opt-out. It stays stored only where no transaction is opened: `time_entry`, the hooked object, is off the default datasource, or the default driver has no transactions (Turso's remote transport). A hook registered in code with `registerHook` opens no transaction either, and inside a transaction the caller opened, the caller decides. MongoDB needs a replica set for this transaction (read in code, not measured).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["roll", "default datasource", "registerHook"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 26,
+      "prompt": "`order` is on the default datasource; `shipment`, a business object, is on our `warehouse` datasource. Write a `beforeInsert` hook on `order` that inserts the matching `shipment` row through `ctx.api`.",
+      "expected_output": "Redirects: a `before*` hook does not write a business record to another datasource through `ctx.api`. The hook's writes run in one transaction with the save, on the default datasource, and the `shipment` insert is refused there with `CrossDatasourceTransactionWriteError`. Keep the objects a `before*` hook writes on the default datasource: move `shipment` there. Only an append-only ledger on another datasource (`lifecycle.class` `audit` / `telemetry` / `event`) is written outside the transaction, and `shipment` is not one.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["CrossDatasourceTransactionWriteError", "default datasource"],
+        "must_not_contain": []
+      }
     }
   ]
 }

@@ -39,7 +39,7 @@
  *
  * | code | params | names |
  * |---|---|---|
- * | `seed_not_applied` | `object`, `cause` (`no-rows` · `unreadable`) | the seeded object's label; the seed has none |
+ * | `seed_not_applied` | `object`, `cause` (`no-rows` · `unreadable` · `missing`) | the seeded object's label; the seed has none. `missing` names the object by the API name the seed carries: there is no object to read a label from |
  * | `view_read_failed` | `view`, `object` | both labels |
  * | `object_field_ref_unknown` | `object` | the object's label |
  * | `object_field_ref_rule_failed` | `object` | the object's label |
@@ -80,68 +80,103 @@ const WIDGET_ON_DASHBOARD: Readonly<Record<PlatformLocaleTag, (p: UserTextParams
   ko: (p) => `대시보드 "${p.dashboard}"의 위젯 "${p.widget}"`,
 };
 
-/** `seed_not_applied`: the sample data did not land (`no-rows`), or the probe could not look (`unreadable`). */
+/**
+ * `seed_not_applied`: the sample data did not land (`no-rows`), the probe could not look (`unreadable`), or
+ * [#34864] the object the seed names does not exist (`missing`), so publishing again cannot help.
+ */
 const SEED_NOT_APPLIED: UserTextEntry = {
   en: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `The sample data could not load, because "${p.object}" does not exist. Correct the object the sample ` +
+        `data names, or create and publish "${p.object}", then publish again.`
+      : p.cause === 'unreadable'
       ? `The sample data for "${p.object}" could not be checked, because "${p.object}" could not be read after ` +
         `publishing. Publish again, and contact your administrator if it happens again.`
       : `The sample data for "${p.object}" did not load, so "${p.object}" has no records yet. Check the sample ` +
         `data, then publish again.`,
   'zh-Hans': (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `示例数据无法加载，因为“${p.object}”不存在。请更正示例数据所指的对象，或先创建并发布“${p.object}”，然后重新发布。`
+      : p.cause === 'unreadable'
       ? `无法检查“${p.object}”的示例数据，因为发布后无法读取“${p.object}”。请重新发布；如果问题再次出现，请联系管理员。`
       : `“${p.object}”的示例数据没有加载成功，所以“${p.object}”中还没有任何记录。请检查示例数据，然后重新发布。`,
   'zh-Hant': (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `示例資料無法載入，因為「${p.object}」不存在。請更正示例資料所指的物件，或先建立並發布「${p.object}」，然後重新發布。`
+      : p.cause === 'unreadable'
       ? `無法檢查「${p.object}」的示例資料，因為發布後無法讀取「${p.object}」。請重新發布；如果問題再次出現，請聯絡管理員。`
       : `「${p.object}」的示例資料沒有載入成功，所以「${p.object}」中還沒有任何記錄。請檢查示例資料，然後重新發布。`,
   es: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `Los datos de ejemplo no se pudieron cargar, porque "${p.object}" no existe. Corrija el objeto que indican ` +
+        `los datos de ejemplo, o cree y publique "${p.object}", y vuelva a publicar.`
+      : p.cause === 'unreadable'
       ? `No se pudieron comprobar los datos de ejemplo de "${p.object}", porque no se pudo leer "${p.object}" ` +
         `después de publicar. Vuelva a publicar y, si ocurre de nuevo, póngase en contacto con su administrador.`
       : `Los datos de ejemplo de "${p.object}" no se cargaron, por lo que "${p.object}" aún no tiene registros. ` +
         `Revise los datos de ejemplo y vuelva a publicar.`,
   ar: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `تعذّر تحميل البيانات التجريبية، لأن "${p.object}" غير موجود. صحّح الكائن الذي تشير إليه البيانات التجريبية، ` +
+        `أو أنشئ "${p.object}" وانشره، ثم أعد النشر.`
+      : p.cause === 'unreadable'
       ? `تعذّر التحقق من البيانات التجريبية لـ "${p.object}"، لأنه تعذّرت قراءة "${p.object}" بعد النشر. ` +
         `أعد النشر، وإذا تكرر ذلك فتواصل مع المسؤول.`
       : `لم يتم تحميل البيانات التجريبية لـ "${p.object}"، لذلك لا يحتوي "${p.object}" على أي سجلات بعد. ` +
         `راجع البيانات التجريبية ثم أعد النشر.`,
   fr: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `Les données d’exemple n’ont pas pu être chargées, car « ${p.object} » n’existe pas. Corrigez l’objet ` +
+        `indiqué par les données d’exemple, ou créez et publiez « ${p.object} », puis publiez à nouveau.`
+      : p.cause === 'unreadable'
       ? `Les données d’exemple de « ${p.object} » n’ont pas pu être vérifiées, car « ${p.object} » n’a pas pu ` +
         `être lu après la publication. Publiez à nouveau et, si cela se reproduit, contactez votre administrateur.`
       : `Les données d’exemple de « ${p.object} » n’ont pas été chargées ; « ${p.object} » ne contient donc ` +
         `encore aucun enregistrement. Vérifiez les données d’exemple, puis publiez à nouveau.`,
   'pt-BR': (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `Os dados de exemplo não puderam ser carregados, porque "${p.object}" não existe. Corrija o objeto ` +
+        `indicado nos dados de exemplo, ou crie e publique "${p.object}", e publique novamente.`
+      : p.cause === 'unreadable'
       ? `Não foi possível verificar os dados de exemplo de "${p.object}", porque não foi possível ler ` +
         `"${p.object}" após a publicação. Publique novamente e, se acontecer de novo, entre em contato com o ` +
         `administrador.`
       : `Os dados de exemplo de "${p.object}" não foram carregados, então "${p.object}" ainda não tem registros. ` +
         `Verifique os dados de exemplo e publique novamente.`,
   ru: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `Примеры данных не удалось загрузить: объекта «${p.object}» не существует. Исправьте объект, указанный ` +
+        `в примерах данных, или создайте и опубликуйте «${p.object}», затем опубликуйте снова.`
+      : p.cause === 'unreadable'
       ? `Не удалось проверить примеры данных для объекта «${p.object}»: после публикации объект «${p.object}» ` +
         `не удалось прочитать. Опубликуйте снова, а если это повторится, обратитесь к администратору.`
       : `Примеры данных для объекта «${p.object}» не загрузились, поэтому в объекте «${p.object}» пока нет ` +
         `записей. Проверьте примеры данных и опубликуйте снова.`,
   de: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `Die Beispieldaten konnten nicht geladen werden, weil „${p.object}“ nicht existiert. Korrigieren Sie das ` +
+        `Objekt, das die Beispieldaten nennen, oder erstellen und veröffentlichen Sie „${p.object}“, und ` +
+        `veröffentlichen Sie dann erneut.`
+      : p.cause === 'unreadable'
       ? `Die Beispieldaten für „${p.object}“ konnten nicht geprüft werden, weil „${p.object}“ nach dem ` +
         `Veröffentlichen nicht gelesen werden konnte. Veröffentlichen Sie erneut und wenden Sie sich an Ihren ` +
         `Administrator, wenn das wieder passiert.`
       : `Die Beispieldaten für „${p.object}“ wurden nicht geladen, daher enthält „${p.object}“ noch keine ` +
         `Datensätze. Prüfen Sie die Beispieldaten und veröffentlichen Sie dann erneut.`,
   ja: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `「${p.object}」が存在しないため、サンプルデータを読み込めませんでした。サンプルデータが指すオブジェクトを` +
+        `修正するか、「${p.object}」を作成して公開してから、もう一度公開してください。`
+      : p.cause === 'unreadable'
       ? `公開後に「${p.object}」を読み取れなかったため、「${p.object}」のサンプルデータを確認できませんでした。` +
         `もう一度公開し、再び発生する場合は管理者にお問い合わせください。`
       : `「${p.object}」のサンプルデータが読み込まれなかったため、「${p.object}」にはまだレコードがありません。` +
         `サンプルデータを確認してから、もう一度公開してください。`,
   ko: (p) =>
-    p.cause === 'unreadable'
+    p.cause === 'missing'
+      ? `"${p.object}"이(가) 존재하지 않아 샘플 데이터를 불러오지 못했습니다. 샘플 데이터가 가리키는 개체를 ` +
+        `수정하거나 "${p.object}"을(를) 만들어 게시한 다음 다시 게시하세요.`
+      : p.cause === 'unreadable'
       ? `게시 후 "${p.object}"을(를) 읽을 수 없어 "${p.object}"의 샘플 데이터를 확인하지 못했습니다. ` +
         `다시 게시하고, 문제가 반복되면 관리자에게 문의하세요.`
       : `"${p.object}"의 샘플 데이터를 불러오지 못해 "${p.object}"에 아직 레코드가 없습니다. ` +

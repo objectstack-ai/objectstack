@@ -242,6 +242,65 @@ export function keySetMatches(set: KeySetGuidance, key: string): boolean {
   return set.keys instanceof RegExp ? key.search(set.keys) !== -1 : set.keys.includes(key);
 }
 
+/**
+ * One unknown key as the refusal names it: in backticks, the spelling the
+ * author typed. An EMPTY key is spelled out, because backticks around nothing
+ * render as an empty code span (or as two stray backticks), and the author is
+ * left looking for a key the message never shows.
+ */
+function renderUnknownKey(key: string): string {
+  return key === '' ? 'an empty key (`""`)' : `\`${key}\``;
+}
+
+/**
+ * Edit distance in which swapping two adjacent letters costs ONE edit (the
+ * optimal-string-alignment variant of Levenshtein). Used only by
+ * {@link shortKeyScreenedGuess}; scoring for every other length is
+ * {@link levenshteinDistance}, unchanged.
+ */
+function adjacentSwapDistance(a: string, b: string): number {
+  const rows: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    rows.push([i]);
+    for (let j = 1; j <= b.length; j++) rows[i]![j] = i === 0 ? j : 0;
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let best = Math.min(rows[i - 1]![j]! + 1, rows[i]![j - 1]! + 1, rows[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, rows[i - 2]![j - 2]! + 1);
+      }
+      rows[i]![j] = best;
+    }
+  }
+  return rows[a.length]![b.length]!;
+}
+
+/**
+ * The rename guess for one unknown key, or `undefined`.
+ *
+ * Above five characters this is {@link findClosestMatches}' first answer,
+ * exactly as before. At five characters or fewer the budget is the floor of 2,
+ * not a third of the key, and the floor exists for one slip: a swap of two
+ * adjacent letters, which plain Levenshtein charges as two edits (`nmae` →
+ * `name`). The same 2 also admits two UNRELATED edits, which on a four-letter
+ * key is half of it — `aria` → `areas` (one substitution, one insertion), a
+ * removed accessibility key answered with the app's navigation areas. So a
+ * short key's guess must be one edit away counting a swap as one; the candidates
+ * are still ranked by {@link findClosestMatches}, and the first that passes wins.
+ */
+function shortKeyScreenedGuess(
+  key: string,
+  knownKeys: readonly string[],
+  maxDistance: number,
+): string | undefined {
+  if (Math.floor(key.length / 3) >= 2) return findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+  const folded = foldForScoring(key);
+  return findClosestMatches(key, knownKeys, maxDistance, knownKeys.length)
+    .find((candidate) => adjacentSwapDistance(folded, foldForScoring(candidate)) <= 1);
+}
+
 /** Options for {@link strictUnknownKeyError}. */
 export interface StrictUnknownKeyErrorOptions {
   /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
@@ -410,9 +469,13 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
         }
         continue;
       }
+      // An empty key names nothing, so nothing is a spelling of it: every
+      // declared key of two letters or fewer sits inside the budget, and the
+      // first of them would be offered as the fix.
+      if (key === '') continue;
       const maxDistance = Math.max(2, Math.floor(key.length / 3));
       const declared = aliases[aliasProbe(key)];
-      const guessed = declared ? undefined : findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+      const guessed = declared ? undefined : shortKeyScreenedGuess(key, knownKeys, maxDistance);
       // Screen the GUESS, never the declaration. `findClosestMatches` ranks by
       // edit distance and nothing else, so on a shape declaring both ends of a
       // range it answers a key that names neither end with whichever end is
@@ -441,7 +504,7 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     // an AI — reads the front of that line and acts on it, so the prescription
     // has to be there. Nothing is dropped or made conditional: the sentence is
     // still emitted verbatim, once per message, just last (#5955).
-    let message = `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}.`;
+    let message = `Unrecognized key(s) on ${surface}: ${keys.map(renderUnknownKey).join(', ')}.`;
     if (renames.length) message += ` Did you mean ${renames.join(', ')}?`;
     if (prescriptions.length) message += `\n${prescriptions.map((p) => `  • ${p}`).join('\n')}`;
     // The last fix channel, still ahead of `history`: where an aged-out
