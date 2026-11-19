@@ -86,8 +86,20 @@ export async function readDeclaredCapabilityContext(
   ql: any,
   metadataService?: any,
 ): Promise<AnchorBindingContext | undefined> {
-  let caps: any[] = readDeclared(ql, 'capability');
-  if (caps.length === 0) {
+  const registered: any[] = readDeclared(ql, 'capability');
+  // [ADR-0090 D5, #35157] Only a declaration with PACKAGE provenance is the
+  // app's own token (「带 package provenance 的应用声明 capability 令牌不计」).
+  // A capability is runtime-creatable since #35157, and an environment save
+  // registers it in this same collection with no `_packageId` — counting it
+  // would let a metadata author excuse any name from the anchor gate by
+  // saving a declaration of it. An unmanaged copy's capabilities carry the
+  // copy package's id, so they still count. Dropping one errs toward
+  // refusing a binding, never toward granting one.
+  let caps: any[] = registered.filter(
+    (c) => typeof (c as { _packageId?: unknown } | null)?._packageId === 'string'
+      && (c as { _packageId: string })._packageId.length > 0,
+  );
+  if (registered.length === 0) {
     try {
       const listed = metadataService?.list?.('capability');
       caps = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);

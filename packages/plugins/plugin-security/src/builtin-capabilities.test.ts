@@ -73,4 +73,31 @@ describe('readDeclaredCapabilityContext, beside the curated declarations', () =>
       .toEqual(describeHighPrivilegeBits(setGranting(APP.name), undefined));
     expect(describeHighPrivilegeBits(setGranting(APP.name), undefined)).not.toBeNull();
   });
+
+  // [ADR-0090 D5, #35157] A capability saved in the environment registers in the
+  // same collection with no `_packageId` (measured: `{ name, label, _provenance }`).
+  // It is not an app's own token, so it excuses nothing; an unmanaged copy's
+  // capability carries the copy package's id and still does.
+  const ENV_SAVED = { name: 'envcap.export', label: 'Saved in the environment', _provenance: 'org' };
+  const COPIED = { name: 'trial1.export', label: 'Copied', _packageId: 'com.example.field-copy', _provenance: 'org' };
+
+  it('an environment-saved declaration is not the app\'s own token: it excuses nothing', async () => {
+    const context = await readDeclaredCapabilityContext(engineWith([OWN, APP, ENV_SAVED]), undefined);
+    expect(context).toEqual({ declaredCapabilities: [OWN, APP] });
+    expect(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), context)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), context))
+      .toEqual(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), undefined));
+  });
+
+  it('an unmanaged copy\'s capability carries its package and is excused like the source\'s', async () => {
+    const context = await readDeclaredCapabilityContext(engineWith([COPIED]), undefined);
+    expect(describeHighPrivilegeBits(setGranting(COPIED.name), context)).toBeNull();
+  });
+
+  it('a registry holding only environment-saved declarations does not fall back to the metadata service', async () => {
+    let listed = false;
+    const metadata = { list: () => { listed = true; return [APP]; } };
+    expect(await readDeclaredCapabilityContext(engineWith([ENV_SAVED]), metadata)).toBeUndefined();
+    expect(listed).toBe(false);
+  });
 });

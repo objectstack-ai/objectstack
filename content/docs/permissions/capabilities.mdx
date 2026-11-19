@@ -247,6 +247,12 @@ Every such write is judged before anything is stored:
   requirement match a capability by name across the whole deployment, so one
   name has one holder.
 
+A capability saved this way is not an app's own token at the `everyone`
+anchor. Binding a permission set that grants it to `everyone` is judged as for
+any undeclared token, and is refused as high-privilege. Only a declaration that
+carries a package (one an app ships, or an unmanaged copy's) is excused there
+(ADR-0090 D5).
+
 Under a `group` or `isolated` tenancy posture, a caller below the platform
 operator reads the walled refusal every environment-metadata write takes there
 (ADR-0131 D3, D12 items 7–8) before any of these.
