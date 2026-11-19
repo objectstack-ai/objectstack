@@ -290,6 +290,8 @@ describe('the console page header’s opt-in compact form (objectstack#35446)', 
     const { header, cluster, labelled } = mount({ compactBelow: 768, onImport });
     expect(header.getAttribute('data-compact')).toBe('true');
     expect(within(header).queryByText(DESCRIPTION)).toBeNull();
+    // No description to share the row with: the title is not capped to 60 % of it.
+    expect(header.querySelector('h1')!.className).not.toContain('sm:max-w-[60%]');
     expect(cluster.getAttribute('data-folded')).toBe('true');
     expect(labelled()).toEqual(['New']);
     fireEvent.pointerDown(within(cluster).getByTestId('more'), { button: 0, pointerType: 'mouse' });
@@ -315,6 +317,7 @@ describe('the console page header’s opt-in compact form (objectstack#35446)', 
     const { header, labelled } = mount();
     expect(header.getAttribute('data-compact')).toBeNull();
     expect(within(header).getByText(DESCRIPTION)).toBeTruthy();
+    expect(header.querySelector('h1')!.className).toContain('sm:max-w-[60%]');
     expect(labelled()).toEqual(['New', 'Import', 'Update Stage']);
   });
 

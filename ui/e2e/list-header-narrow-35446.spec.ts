@@ -71,6 +71,13 @@ const FULL_PAGE = 1184;
 /** Short enough that the full-width header keeps every action labelled beside it. */
 const DESCRIPTION = 'Open deals and their expected close dates';
 
+/**
+ * The view's label in the title 「Opportunities / VIEW」. Long enough that the
+ * title is wider than 60 % of the narrow row in any font, the share the full
+ * row keeps for its title beside the description.
+ */
+const VIEW_LABEL = 'Open opportunities this quarter';
+
 interface Case {
   name: string;
   viewport: number;
@@ -122,6 +129,7 @@ const t = (key, opts) => TEXT[key] ?? (opts && opts.defaultValue) ?? key;
 const objectDef = { name: 'opportunity', label: 'Opportunity', pluralLabel: 'Opportunities', icon: 'briefcase', description: ${JSON.stringify(DESCRIPTION)} };
 const toolbarBar = { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 };
 const listFavorite = { isFavorite: false, toggle: () => {} };
+const VIEW_LABEL = ${JSON.stringify(VIEW_LABEL)};
 
 function Header() {
   const [, setShowImport] = React.useState(false);
@@ -135,8 +143,8 @@ function Header() {
   });
   return h(ObjectViewPageHeader, {
     objectDef,
-    titleSwitcher: h('span', { 'data-testid': 'view-switcher' }, 'Open opportunities'),
-    titleLabel: 'Open opportunities',
+    titleSwitcher: h('span', { 'data-testid': 'view-switcher' }, VIEW_LABEL),
+    titleLabel: VIEW_LABEL,
     objectListHref: '/apps/sales/opportunity',
     objectPluralLabel: () => 'Opportunities',
     objectDesc: (def) => def.description,
@@ -295,6 +303,8 @@ interface Reading {
   spill: string[];
   /** The title is cut (its content wider than its box). */
   titleClipped: boolean;
+  /** The title's box, its content, and the row's text block it sits in, in px. */
+  title: { box: number; content: number; block: number; maxWidth: string };
 }
 
 async function read(page: Page): Promise<Reading> {
@@ -316,6 +326,12 @@ async function read(page: Page): Promise<Reading> {
       newButton: visible(header.querySelector('[data-testid="object-view-new-button"]')),
       spill,
       titleClipped: h1.scrollWidth > h1.clientWidth + 1,
+      title: {
+        box: h1.clientWidth,
+        content: h1.scrollWidth,
+        block: h1.parentElement!.clientWidth,
+        maxWidth: getComputedStyle(h1).maxWidth,
+      },
     };
   }, DESCRIPTION);
 }

@@ -313,7 +313,10 @@ export function PageHeader({
               `border-box` a min-height there would count that row's padding. */}
           <div ref={textRef} className="flex items-center gap-2.5 min-w-0 flex-1 min-h-9">
             {icon && <IconTile size="row">{icon}</IconTile>}
-            <h1 className="min-w-0 max-w-full sm:max-w-[60%] shrink-0 text-base sm:text-lg font-semibold tracking-tight text-foreground truncate leading-tight">
+            {/* The 60 % cap keeps room for the description beside the title;
+                the compact form draws none, so its title takes the whole row
+                (objectstack#35446). */}
+            <h1 className={cn('min-w-0 max-w-full shrink-0 text-base sm:text-lg font-semibold tracking-tight text-foreground truncate leading-tight', !compact && 'sm:max-w-[60%]')}>
               {title}
             </h1>
             {badge}
