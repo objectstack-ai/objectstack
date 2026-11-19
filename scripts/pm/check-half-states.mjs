@@ -3825,11 +3825,22 @@ export const PM_STATE_LABELS = [
 export const TRACKING_ANCHOR_LABEL = 'tracking';
 
 /**
+ * The run-record kinds: one card per completed run, kept as evidence and never
+ * work — `qa-run` (`checklist-test` §4) and `eval-run` (`scenario-eval` §5).
+ * By rule a run record takes no area, no type and no grade
+ * (`docs/NORTH-STAR.md`, Grading step one), so the patrol rows that ask for one
+ * of those exempt it: H13, H74 and H78 here, and the first-touch sweep's
+ * exclusion list (`first-touch-sweep.mjs`). One spelling, four readers: a new
+ * record kind is one edit here.
+ */
+export const RUN_RECORD_LABELS = Object.freeze(['qa-run', 'eval-run']);
+
+/**
  * Labels whose NORMAL shape is area-without-pm-state, excluded by the
  * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
  * report the protocol's design as a defect.
  */
-export const H13_EXEMPT_LABELS = [TRACKING_ANCHOR_LABEL, 'status:parked', 'qa-run'];
+export const H13_EXEMPT_LABELS = [TRACKING_ANCHOR_LABEL, 'status:parked', ...RUN_RECORD_LABELS];
 
 /**
  * H13 threshold — "one sweep cycle": the triage Routine fires HOURLY and its
@@ -4096,11 +4107,11 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 export const GRADE_LADDER = Object.freeze(['priority:p0', 'priority:p1', 'priority:p2', 'priority:p3']);
 
 /**
- * Cards that by rule take NO grade — a generated anchor and a seat-registry
- * post. An ungraded card of either kind that something waits on is not a
- * grading gap, so H78 stays silent on it.
+ * Cards that by rule take NO grade — a generated anchor, a seat-registry
+ * post and a run record. An ungraded card of any of these kinds that something
+ * waits on is not a grading gap, so H78 stays silent on it.
  */
-export const GRADELESS_CARD_LABELS = Object.freeze([TRACKING_ANCHOR_LABEL, 'pm:seat']);
+export const GRADELESS_CARD_LABELS = Object.freeze([TRACKING_ANCHOR_LABEL, 'pm:seat', ...RUN_RECORD_LABELS]);
 
 /**
  * The rung a card's grade sits on (0 = the top), or null when it carries no
@@ -8480,7 +8491,7 @@ export const H74_POPULATION_LABELS = Object.freeze(['pm:queue', 'pm:blocked']);
  * `pm:queue,tooling`, identity label `platform-checklist-watchdog`). Read by
  * its identity label the way `queue-flake-anchor` is, because the identity
  * label is the machine's and is never graded off, while the title is one
- * template's wording. Tracking anchors, epics, seat posts, QA runs, parked
+ * template's wording. Tracking anchors, epics, seat posts, run records, parked
  * cards and both machine anchors are never first-touched the way a lane card
  * is, so their silence is the design. Census 2026-11-03 of every
  * `.github/workflows/**` template that files a card: only this one applies
@@ -8492,7 +8503,7 @@ export const H74_EXEMPT_LABELS = Object.freeze([
   TRACKING_ANCHOR_LABEL,
   'pm:epic',
   'pm:seat',
-  'qa-run',
+  ...RUN_RECORD_LABELS,
   'status:parked',
   'queue-flake-anchor',
   'platform-checklist-watchdog',
@@ -8656,7 +8667,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     'audit` on the triage mailbox in the same round (`record-recognisers.mjs --mailbox-keys` prints the shape) ' +
     '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
     'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
-    '`pm:seat`, `qa-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
+    '`pm:seat`, `qa-run`, `eval-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
     'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
   );
 }
@@ -26371,12 +26382,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // unreadable inputs, the text, the band and the wiring; H19's full-discharge
   // sentence both ways; the grade ladder; the cycle finder over rings, chains
   // and a 4000-card ring; and the retirement of H14/H15 read off the registry.
-  'H77-H81 blocking relation read from the lines': 102,
+  'H77-H81 blocking relation read from the lines': 103,
   // Registered with the first-touch audit row, pin just under the count: the
   // firing case with both record shapes as its positive controls, the body
   // channel, every exemption beside a non-exempt twin, the population edges,
   // the three thread states, the text, the summary pair and the band.
-  'H74 first-touch audit': 46,
+  'H74 first-touch audit': 61,
   // Registered with the premise-freshness row, pin just under the count: the measured timeline firing, its
   // before-open / open / local / unanchored controls, the UNJUDGED leg, the cap, the text and the band.
   'H75 premise freshness': 15,
@@ -28013,6 +28024,7 @@ async function selfTest() {
   t('H13: status:parked exemption (its normal shape IS this one)', h13AreaWithoutPmState(labelledCard(['area:workflow', 'status:parked'], hoursAgo(200)), NOW), null);
   t('H13: tracking exemption', h13AreaWithoutPmState(labelledCard(['area:fleet', 'tracking'], hoursAgo(200)), NOW), null);
   t('H13: qa-run exemption', h13AreaWithoutPmState(labelledCard(['area:package', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: eval-run exemption — a run record of either kind, read from the one record list', `${h13AreaWithoutPmState(labelledCard(['area:ai', 'eval-run'], hoursAgo(200)), NOW)}/${H13_EXEMPT_LABELS.includes('eval-run')}`, 'null/true');
   t('H13: no area label is out of scope however bare', h13AreaWithoutPmState(labelledCard(['bug'], hoursAgo(200)), NOW), null);
   // The routing reading moved from `domain:*` to `area:*`: a card carrying
   // only the old lane label is unrouted (the sweep's ① owns it), not H13's.
@@ -29705,6 +29717,7 @@ async function selfTest() {
   b(BATTERY_REL, 'H78: only the dependents graded ABOVE are named', `${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('graded BELOW 1 of them: #10 (`priority:p1`).')}/${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('#11 (')}`, 'true/false');
   b(BATTERY_REL, 'H78: an UNGRADED blocker sits below every rung', row78(carded(5, ['pm:queue']), [carded(5, ['pm:queue']), cards78[2]]).includes('no grade label on a card that 1 open card(s) name'), true);
   b(BATTERY_REL, '⛔ H78: …except a generated anchor and a seat post, which take no grade', `${h78(carded(5, ['tracking']), [carded(5, ['tracking']), cards78[1]])}/${h78(carded(5, ['pm:seat']), [carded(5, ['pm:seat']), cards78[1]])}`, 'null/null');
+  b(BATTERY_REL, '⛔ H78: …and a run record of either kind (`qa-run`, `eval-run`), which takes no grade either', ['qa-run', 'eval-run'].map((kind) => h78(carded(5, [kind]), [carded(5, [kind]), cards78[1]])).join('/'), '/');
   b(BATTERY_REL, 'H78 control: …while an anchor that DOES carry a lower grade is reported like any card', typeof h78(carded(5, ['tracking', 'priority:p3']), [carded(5, ['tracking', 'priority:p3']), cards78[1]]), 'string');
   b(BATTERY_REL, '⛔ H78: an UNGRADED dependent contributes nothing', h78(cards78[0], [cards78[0], carded(10, ['pm:blocked'], 'Blocked-by: #5')]), null);
   b(BATTERY_REL, '⛔ H78: a card nothing waits on is silent, whatever its grade', h78(graded(99, 'p3'), [...cards78, graded(99, 'p3')]), null);
@@ -29846,7 +29859,7 @@ async function selfTest() {
   b(BATTERY74, 'H74 thread states: UNREADABLE fires UNJUDGED, never clean', row74(null).startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(row74(null)) && row74(null).includes('not empty'), true);
   b(BATTERY74, 'H74 population: `pm:blocked` is spoken about too, and the row names it', row74([], { labels: [{ name: 'pm:blocked' }, { name: 'domain:spec' }] }).startsWith('`pm:blocked` with'), true);
   b(BATTERY74, '⛔ H74 population: a `pm:dispatched` card is out of scope (its claim is H2\'s subject)', h74([], { labels: [{ name: 'pm:dispatched' }, { name: 'domain:spec' }] }), null);
-  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'status:parked', 'queue-flake-anchor', 'platform-checklist-watchdog']) {
+  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'eval-run', 'status:parked', 'queue-flake-anchor', 'platform-checklist-watchdog']) {
     b(BATTERY74, `⛔ H74 exempt: a \`${exempt}\` carrier is silent`, h74([], { labels: [{ name: 'pm:queue' }, { name: exempt }] }), null);
   }
   b(BATTERY74, 'H74 exempt control: the same card with an unrelated label beside `pm:queue` still fires', typeof h74([], { labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
@@ -29880,7 +29893,7 @@ async function selfTest() {
   b(BATTERY74, 'H74 inherit reader: a null, undefined or sentinel parent inherits nothing, never a crash', [h74InheritsFromParent(card74(), null), h74InheritsFromParent(card74(), undefined), h74InheritsFromParent(card74(), H74_PARENT_UNREADABLE), h74InheritsFromParent(card74(), { labels: undefined })].some(Boolean), false);
   b(BATTERY74, '⛔ H74 population: a closed card, a PR row, an unreadable `labels` and a missing row are all silent, none a crash', [h74([], { state: 'closed' }), h74([], { pull_request: {} }), h74([], { labels: undefined }), h74QueuedWithoutTriageAudit(undefined, [])].every((v) => v === null), true);
   b(BATTERY74, 'H74 population: a null body is no crash and no record — the card still fires on an empty thread', typeof h74([], { body: null }), 'string');
-  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels plus the watchdog anchor\'s identity label', [...H74_EXEMPT_LABELS].sort().join(), ['platform-checklist-watchdog', 'pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
+  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels, the watchdog anchor\'s identity label and the second run-record kind', [...H74_EXEMPT_LABELS].sort().join(), ['eval-run', 'platform-checklist-watchdog', 'pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
   // The watchdog anchor as fleet-patrols.yml files it: App author, `pm:queue,tooling` routing, identity label. Its
   // title does NOT open the main-red regex (no colon before `red on main`), so the identity label is what exempts it.
   const WATCHDOG74 = { title: 'check:platform-checklist is red on main', user: APP74, body: 'os-platform-checklist-watchdog\n\nThe gate is red on main.' };
