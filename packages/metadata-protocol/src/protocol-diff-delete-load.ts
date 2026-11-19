@@ -66,7 +66,7 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { packagelessHolderRefusal } from './protocol-save.js';
+import { packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -454,7 +454,7 @@ export class ProtocolDiffDeleteLoadFacet {
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
+    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'declinesStoredRow' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'readItemActiveRows' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
             success: boolean;
             message?: string;
             reset?: boolean;
@@ -713,23 +713,39 @@ export class ProtocolDiffDeleteLoadFacet {
                 // door orders it. The rows read here are also what the receipt
                 // below tells the truth about: what is still stored, and so
                 // still served, once this row is gone.
-                const draftAddress = request.packageId == null && targetState === 'draft'
+                //
+                // [#34681] …except where the read naming no package serves the
+                // row-held base of rows bound to two or more packages
+                // ({@link packagelessRowHeldBaseAddress}): the delete and the
+                // draft discard remove the base's row or draft, as the request
+                // naming that base does, and the dependents' rows stay (the
+                // receipt below names them).
+                let draftAddress = request.packageId == null && targetState === 'draft'
                     ? await host.packagelessDraftAddress(singularTypeForRepo, request.name, member)
                     : undefined;
                 if (draftAddress?.kind === 'ambiguous') {
-                    addressRefusal = packagelessAddressAmbiguityRefusal(
-                        'delete', request.type, request.name, draftAddress.candidates,
-                    );
-                    throw addressRefusal;
+                    const base = await packagelessRowHeldBaseAddress(host, singularTypeForRepo, request.name, member);
+                    if (base === undefined) {
+                        addressRefusal = packagelessAddressAmbiguityRefusal(
+                            'delete', request.type, request.name, draftAddress.candidates,
+                        );
+                        throw addressRefusal;
+                    }
+                    request = { ...request, packageId: base };
+                    draftAddress = undefined;
                 }
                 const rowsAtAddress = draftAddress?.drafts ?? await host.packagelessAddress(
                     singularTypeForRepo, request.name, member, targetState,
                 );
                 if (request.packageId == null && draftAddress === undefined && rowsAtAddress.candidates.length > 1) {
-                    addressRefusal = packagelessAddressAmbiguityRefusal(
-                        'delete', request.type, request.name, rowsAtAddress.candidates,
-                    );
-                    throw addressRefusal;
+                    const base = await packagelessRowHeldBaseAddress(host, singularTypeForRepo, request.name, member);
+                    if (base === undefined) {
+                        addressRefusal = packagelessAddressAmbiguityRefusal(
+                            'delete', request.type, request.name, rowsAtAddress.candidates,
+                        );
+                        throw addressRefusal;
+                    }
+                    request = { ...request, packageId: base };
                 }
                 // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
                 // read naming no package counts, as the save door asks them
