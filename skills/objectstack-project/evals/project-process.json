@@ -1,0 +1,108 @@
+{
+  "skill_name": "objectstack-project",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our ObjectStack app's `crm_invoice` list shows the wrong total on its dashboard widget: `pnpm validate` passes, and the widget sums `amount` correctly in the database. You traced it to the platform's dataset query adding the org timezone offset twice. The issue is due Friday. What do you do?",
+      "expected_output": "Treats it as a platform gap and does not work around it in the app: no hook or formula that subtracts the offset, no second dataset that recomputes the total, no reshaped metadata. Files an issue at objectstack-ai/objectstack with the platform version, the smallest metadata that shows it, expected and actual. Marks the app's issue blocked with a `Blocked by:` link and keeps its priority, and notes that it unblocks only when the fix is in an installable `@objectstack/*` version, read with `npm view` and the package's CHANGELOG.md. Any relief before then is the owner's decision, recorded on the issue.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "objectstack-ai/objectstack",
+          "Blocked by",
+          "npm view"
+        ],
+        "must_not_contain": [
+          "event: 'beforeFind'",
+          "event: 'afterFind'"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Write a vitest test for our ObjectStack app that fails if any view, action or app navigation entry names a field or object that does not exist.",
+      "expected_output": "Does not hand-write the test: reference integrity between metadata is a consistency check the platform already makes. `os validate` runs it (the same author-time rules `os build` and `os lint` run), so a view, action or navigation entry that names a missing field or object already fails `pnpm validate`, which the scaffold's CI runs. Runs `pnpm validate` and `pnpm lint` and shows the output, optionally naming the rule with `npx os explain <rule-id>`. Offers instead to test a business fact the platform cannot know. Only a consistency check the platform does not make would be carried as an app test, marked `// PLATFORM-GAP:` and filed upstream.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "validate",
+          "lint"
+        ],
+        "must_not_contain": [
+          "readdirSync",
+          "for (const view of"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "In our ObjectStack app a quote's discount may not exceed 20% unless a sales manager approves it. Add a test for that rule.",
+      "expected_output": "Writes an app test, because the ceiling is this business's own fact. Uses `bootStack` from `@objectstack/verify` on the app's config and takes a bearer token from the stack (`stack.signIn()` for the seeded admin, `stack.signUp(email)` for a plain member). Through `stack.hooks.run` on the quote object it asserts that an insert with a discount above 0.20 is refused with `code: 'VALIDATION_FAILED'` and that one at or below 0.20 is saved, and it covers the manager-approval path through the handle (`stack.flows.run` or `stack.actions.run`, as the app declares it). Stops the stack in `afterAll`. It does not mock the engine and does not boot a hand-assembled `LiteKernel` for this.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "bootStack",
+          "@objectstack/verify",
+          "hooks.run"
+        ],
+        "must_not_contain": [
+          "vi.mock(",
+          "new LiteKernel("
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Our ObjectStack app is a product installed by customers (AGENTS.md says `Project kind: product`). We are removing the `legacy_region` text field from `account` because `territory` replaced it. Make the change.",
+      "expected_output": "Before removing the field, writes a backfill script in `scripts/` that copies `legacy_region` into `territory` where needed: run against each deployment while it is still on the old release, over the REST API only with no import from `src/`, report-only unless `--apply`, touching only rows that need it and reporting zero on a second run, signed in as an administrator named on the command line. Then removes the field from `src/`; the column itself is dropped through `os migrate plan` then `os migrate apply --allow-destructive`. Adds a `major` changeset written for the customer's administrator: FROM `legacy_region` TO `territory`, the minimum `@objectstack/*` version, and the steps in order with the backfill first. Runs the four checks.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "--apply",
+          "REST",
+          "changeset",
+          "os migrate"
+        ],
+        "must_not_contain": [
+          "from '../src",
+          "from \"../src"
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Bump our ObjectStack app from @objectstack/* 18.5.0 to 18.6.0.",
+      "expected_output": "Moves every `@objectstack/*` package to 18.6.0 together, `@objectstack/skills` included, re-syncs the skills with `npx skills@1.7.2 experimental_sync --agent <runtime> --copy -y` and commits them. Reads each package's CHANGELOG.md between the two versions for breaking entries (no protocol major is crossed, so objectstack-upgrade is not needed). Runs `pnpm validate`, `pnpm lint`, `pnpm typecheck` and `pnpm test`; fixes any newly reported metadata rather than silencing a rule. Sweeps the blocked issues whose fix is now installed, and the `PLATFORM-GAP` tests the platform now checks, retiring each only after the platform command fails on the same injected defect.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "experimental_sync",
+          "--copy",
+          "CHANGELOG",
+          "pnpm test"
+        ],
+        "must_not_contain": [
+          "--skip-i18n",
+          "eslint-disable"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "I'm the only user of my small ObjectStack app for tracking my book collection. Rename the label of the `book` object's `isbn` field to \"ISBN-13\".",
+      "expected_output": "Just makes the change: edits the field's `label` in `src/objects/`, updates its translation entries if the app has any, runs the checks the project declares (`pnpm validate`, `pnpm lint`, `pnpm typecheck`, and `pnpm test` where it has one) and commits. It does not ask for or create a requirement record, a design note, a changeset or a release note, and does not ask whether the app is a product: the user said they are its only user, so this is own use and the light path applies.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "label",
+          "validate"
+        ],
+        "must_not_contain": [
+          "docs/requirements",
+          "REQ-",
+          "pnpm changeset"
+        ]
+      }
+    }
+  ]
+}
