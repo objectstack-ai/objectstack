@@ -88,7 +88,8 @@ import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
-import { servedAddressJudgment } from './protocol-meta-item-face.js';
+import { rowHeldBaseAddressOf, servedAddressJudgment } from './protocol-meta-item-face.js';
+import { overlayMemberValue } from './migrations/overlay-index.js';
 import { packagelessContentPackage, shippingPackageIds } from './protocol-environment-rows.js';
 import type { StoredOverlayRow } from './item-lock.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
@@ -850,10 +851,15 @@ export class ProtocolSaveFacet {
                 // The package-unbound row: `packageId` stays empty.
             } else if (served !== undefined) {
                 if (served.packageId !== null) request = { ...request, packageId: served.packageId };
+            } else if (address.candidates.length > 1) {
+                // [#34681] …where the read naming no package serves the
+                // row-held base, the save writes the base's row
+                // ({@link packagelessRowHeldBaseAddress}); otherwise refused
+                // naming every package the rows are bound to.
+                const base = await packagelessRowHeldBaseAddress(host, writeType, request.name, member);
+                if (base === undefined) throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+                request = { ...request, packageId: base };
             } else {
-                if (address.candidates.length > 1) {
-                    throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
-                }
                 // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
                 // read naming no package counts ({@link packagelessHolderRefusal}):
                 // two or more enabled holders are refused naming them, and a name
@@ -878,7 +884,7 @@ export class ProtocolSaveFacet {
         // [ADR-0150 D4] …asked of the body this save writes, so an action
         // draft the environment owns is judged as the package-unbound draft
         // the repository writes it as.
-        const draftAddress = mode === 'draft'
+        let draftAddress = mode === 'draft'
             && request.packageId == null
             && request.source === undefined
             && request.writeFace !== 'package-duplicate'
@@ -886,6 +892,26 @@ export class ProtocolSaveFacet {
                 singularType, request.name, itemDiscriminator(singularType, request.item), request.item,
             )
             : undefined;
+        // [#34681] An item whose active rows are bound to two or more packages
+        // where the read naming no package serves the row-held base: the
+        // draft save writes the base's draft, as the save naming that base
+        // does ({@link packagelessRowHeldBaseAddress}). Otherwise the
+        // ambiguous address is left to the repository's `409`, as before.
+        // `followedBase` keeps the base for the two rules below that judge a
+        // draft save's inherited package (the named-base rule and the late
+        // override re-judgment): the base is judged exactly as the save
+        // naming it is, an id no installed package has refused `422`.
+        let followedBase: string | undefined;
+        if (draftAddress?.kind === 'ambiguous') {
+            const base = await packagelessRowHeldBaseAddress(
+                host, singularType, request.name, itemDiscriminator(singularType, request.item),
+            );
+            if (base !== undefined) {
+                request = { ...request, packageId: base };
+                draftAddress = undefined;
+                followedBase = base;
+            }
+        }
         // [ADR-0150 D4] The environment's own action draft is one slot per
         // name, and its per-item publish writes the one package-unbound row:
         // a holder's customization stored in either is refused, never moved
@@ -925,7 +951,7 @@ export class ProtocolSaveFacet {
         // repository's `409`, as before. See {@link uninstalledNamedBaseRefusal}.
         if (namedNoPackage && request.source === undefined && request.writeFace !== 'package-duplicate') {
             const inherited = mode === 'draft'
-                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                ? followedBase ?? (draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null)
                 : request.packageId ?? null;
             const unboundInherited = host.uninstalledNamedBaseRefusal(
                 { type: singularType, name: request.name, packageId: inherited },
@@ -1392,7 +1418,10 @@ export class ProtocolSaveFacet {
             // through the console's plain `?mode=draft` save. An ambiguous
             // address has no row to land in, and is refused with the refusal
             // the repository answers it with.
-            if (singularType === 'permission') {
+            // [#35157] …and a `capability` the same way: one name, one
+            // holder, and never a platform capability's name — the same
+            // predicate, judged against the same landing binding.
+            if (singularType === 'permission' || singularType === 'capability') {
                 let landsIn: string | null = null;
                 if (typeof request.packageId === 'string' && request.packageId !== '') {
                     landsIn = request.packageId;
@@ -1989,7 +2018,7 @@ export class ProtocolSaveFacet {
             && request.writeFace !== 'package-duplicate'
         ) {
             const inheritedPackage = mode === 'draft'
-                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                ? followedBase ?? (draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null)
                 : request.packageId ?? null;
             if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
                 lateOverrideVerdict = host.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
@@ -3188,6 +3217,63 @@ export function disabledHoldersOnlyRefusal(
     err.code = 'RESOURCE_CONFLICT';
     err.status = 409;
     return err;
+}
+
+/**
+ * [#34681, epic ruling 6781691009, #34348 ruling (b), ADR-0150 D3/D5] THE
+ * ROW-HELD BASE a write naming no package takes, where the stored rows at the
+ * member are bound to two or more packages: the base whose dependents' rows
+ * there are bundle additions to it ({@link rowHeldBaseAddressOf}), the one
+ * holder the read naming no package serves at that address (the plain read,
+ * `/layers` and the execution read, since the read half of #34441 cell 2).
+ * "A write resolves its address exactly as the read at the same address
+ * resolves it", so the bare save (publish and draft mode), the bare delete
+ * and draft discard, the bare per-item publish, and the bare history, diff
+ * and rollback (through `historySlotOf`) answer as the same request naming
+ * that base does, and every dependent's row stays where it is, read and
+ * written at its own `?package=`.
+ *
+ * Asked only where those doors would refuse naming two or more packages, and
+ * answered over the item's ACTIVE rows at `member`, as the read judges them:
+ *
+ *  - the base, when two or more packages hold a row there, none of them
+ *    package-less (#33210: a package-less row beside them is a customization
+ *    of no one holder, and the refusal stands), and one is the row-held base;
+ *  - `undefined` otherwise, and the door refuses as before: a type with no
+ *    members (#34441 contract review M1: no bundle additions), a name a
+ *    package ships, holders with no base relation, a disabled holder (the
+ *    served-holder judgment's), and a member the base holds no row of (the
+ *    read takes the base's address there and answers 404; that cell is not
+ *    moved here).
+ *
+ * FROM (`main` 8596c80eda): each of those doors refused `409
+ * RESOURCE_CONFLICT` naming the base and the dependent while the read
+ * naming no package served the base's row (`200`); the diff and the rollback
+ * refused the same way (measured on branch head 90d943c7f5).
+ */
+export async function packagelessRowHeldBaseAddress(
+    host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,
+    type: string,
+    name: string,
+    member: string | undefined,
+): Promise<string | undefined> {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const registry = host.engine?.registry as { readsByPackage?: (type: string) => boolean } | undefined;
+    // The judgment's own first two exclusions, asked before any row is read.
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(singular) !== true) return undefined;
+    if (overlayMemberValue(singular, member) === undefined) return undefined;
+    let activeRows: Awaited<ReturnType<ProtocolHost['readItemActiveRows']>>;
+    try {
+        activeRows = await host.readItemActiveRows(singular, name);
+    } catch (error) {
+        // [#5532] An unprovisioned store holds no row, so no holder.
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        return undefined;
+    }
+    const address = await host.packagelessAddress(singular, name, member, 'active', activeRows);
+    if (address.candidates.length < 2 || address.unbound) return undefined;
+    const base = await rowHeldBaseAddressOf(host, singular, name, member, activeRows);
+    return base !== undefined && address.candidates.includes(base) ? base : undefined;
 }
 
 /**

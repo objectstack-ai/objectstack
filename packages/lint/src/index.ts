@@ -1241,6 +1241,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';

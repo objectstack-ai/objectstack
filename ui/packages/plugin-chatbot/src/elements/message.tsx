@@ -430,6 +430,18 @@ const MessageResponseImpl = ({
   const exitTableLabel =
     translations?.exitFullscreen ??
     tt("chatbot.answer.exitExpandedTable", "Close");
+  // objectstack#35445 — a table's copy and download tools are named in the
+  // reader's language. streamdown draws them as icon buttons whose `title` is
+  // both the tooltip and the accessible name, and its own names are English.
+  const tableToolLabels = {
+    copyTable: tt("chatbot.answer.copyTable", "Copy table"),
+    copyTableAsMarkdown: tt("chatbot.answer.copyTableAsMarkdown", "Copy table as Markdown"),
+    copyTableAsCsv: tt("chatbot.answer.copyTableAsCsv", "Copy table as CSV"),
+    copyTableAsTsv: tt("chatbot.answer.copyTableAsTsv", "Copy table as TSV"),
+    downloadTable: tt("chatbot.answer.downloadTable", "Download table"),
+    downloadTableAsCsv: tt("chatbot.answer.downloadTableAsCsv", "Download table as CSV"),
+    downloadTableAsMarkdown: tt("chatbot.answer.downloadTableAsMarkdown", "Download table as Markdown"),
+  };
 
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -518,6 +530,7 @@ const MessageResponseImpl = ({
           linkSafety={answerLinkSafety}
           plugins={{ ...CHAT_MARKDOWN_PLUGINS, ...plugins }}
           translations={{
+            ...tableToolLabels,
             ...translations,
             viewFullscreen: expandTableLabel,
             exitFullscreen: exitTableLabel,

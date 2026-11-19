@@ -146,6 +146,7 @@ of going unnoticed.
 | MongoDB Operator | ObjectStack Operator | Example |
 |------------------|---------------------|---------|
 | plain value (no operator) | `=` | `{ status: 'active' }` → `['status', '=', 'active']` |
+| nested relation condition (an object with no operator key) | `=` | `{ account: { owner: 'u1' } }` → `['account', '=', { owner: 'u1' }]` |
 | `$eq` | `=` | `{ status: { $eq: 'active' } }` → `['status', '=', 'active']` |
 | `$ne` | `!=` | `{ status: { $ne: 'archived' } }` → `['status', '!=', 'archived']` |
 | `$gt` | `>` | `{ age: { $gt: 18 } }` → `['age', '>', 18]` |
