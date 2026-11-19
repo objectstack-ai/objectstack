@@ -32,9 +32,11 @@ const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 test('row-action `visible` predicates are CEL-evaluated on the showcase task list', async ({ page }) => {
   await page.goto('/apps/showcase_app/showcase_task');
 
-  const trigger = page.locator('[data-testid="row-action-trigger"]').first();
-  await trigger.waitFor();
-  await trigger.click();
+  // objectstack#35554 — the list page draws no row "⋮": a row's actions are
+  // its context menu (right-click), the same items.
+  const row = page.locator('tbody tr').filter({ hasText: /\S/ }).first();
+  await row.waitFor();
+  await row.locator('td').last().click({ button: 'right' });
 
   // The row menu renders; its items are gated by CEL `visible` predicates.
   // "Edit" is always present — proves the menu opened.
