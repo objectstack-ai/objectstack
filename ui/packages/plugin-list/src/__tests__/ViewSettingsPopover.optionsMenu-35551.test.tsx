@@ -306,7 +306,8 @@ describe('Options menu — words', () => {
     openMenu({ recordOpen: { resolvedMode: 'drawer', preference: 'drawer', setPreference: () => {} } }, 'zh');
     fireEvent.click(screen.getByTestId('options-row-more'));
     const text = screen.getByTestId('view-settings-content').textContent ?? '';
-    expect(text).not.toContain(zhPack.list.recordOpenNote);
+    // The note the menu dropped (its key is gone from every pack).
+    expect(text).not.toContain('个人偏好');
     expect(text).not.toContain('对象声明');
     cleanup();
     openMenu({ recordOpen: { resolvedMode: 'page', preference: 'drawer', setPreference: () => {} } }, 'zh');
