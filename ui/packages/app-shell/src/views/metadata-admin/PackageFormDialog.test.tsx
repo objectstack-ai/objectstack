@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
 import { toast } from 'sonner';
@@ -221,7 +221,7 @@ describe('PackageFormDialog — capability refusal (objectstack#8270)', () => {
  *  - CONTROL: an edit save does not answer with the created sentence.
  */
 describe('PackageFormDialog — a create answers with a toast naming the package (objectstack#33865)', () => {
-  let success: ReturnType<typeof vi.spyOn>;
+  let success: MockInstance<typeof toast.success>;
   beforeEach(() => {
     success = vi.spyOn(toast, 'success').mockImplementation(() => 'toast');
   });
