@@ -1058,8 +1058,8 @@ function refusalKey(said: ExprValidationError): string {
 }
 
 /**
- * The validateExpression sweep's budget. The case is synchronous: 5,760
- * validateExpression calls (3 roles x 128 inputs x 15 schemas), most of the
+ * The validateExpression sweep's budget. The case is synchronous: 6,144
+ * validateExpression calls (3 roles x 128 inputs x 16 schemas), most of the
  * time in building a typed CEL environment for each call. Its work is the
  * sweep's breadth, which is the claim, so the breadth stays; only re-judging
  * duplicate refusals was cut (see the case). Readings of the case, in ms:
@@ -1072,6 +1072,11 @@ function refusalKey(said: ExprValidationError): string {
  *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
  *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
  *     before, 1961 to 2137 after.
+ *   - Local, 4 vCPU, this file alone, when the flow value-envelope schema
+ *     joined (15 schemas to 16): 192 to 225 with it, 186 to 267 for the 15
+ *     in the same session. That schema stands down on every source but a
+ *     date field's value, so the 16th adds nothing measurable and the budget
+ *     stands.
  *
  * The rule follows `packages/cli/test/hook-timeout-override-refusal.test.ts`:
  * 3x the slowest reading, rounded up to the next second. 3 x 5034 = 15102, so
