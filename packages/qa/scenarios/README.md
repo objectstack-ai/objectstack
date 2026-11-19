@@ -720,7 +720,14 @@ that version, it prints one `skip: …` line and exits 0, having run nothing. It
 1. runs every card the gallery may show (origin `generic`, tier `starter` or `delivery`; `--debut`: the first of them
    by id) with `run-scenarios --modes scratch --packages published --create-version <version>`, so the apps are built
    on exactly that release, the turns recorded;
-2. exports with screenshots into the checkout (`export-gallery`'s rules: only a run that passed every half);
+2. exports with screenshots into the checkout (`export-gallery`'s rules: only a run that passed every half). Each
+   app's `source/` is written as a package a customer installs to try, after scoring so the build is never graded on
+   it (`src/export/trial-package.ts`): `objectstack.manifest.json` carries the card's English title and one-sentence
+   requirement as `displayName` and `description`, the Chinese pair under `translations.zh`, and the card's
+   `businessFunctions`; `src/sample-data.json` carries the card's seed rows as stack `data:` datasets (namespaced
+   objects, `externalId: 'id'`, a user-handle field left out), which `objectstack.config.ts` imports into its `data:`.
+   `installModes` and `solutionType` are not written: `installModes: ['unmanaged']` makes `defineStack` refuse an app
+   that carries code `plugins` or `capability` items, which an app on the standard scaffold does;
 3. creates the branch `export/<version>`, commits `apps/` and `index.json` under the checkout's own git identity, and
    prints the branch, the commit and a ready PR body.
 
@@ -786,7 +793,9 @@ The check a PR on objectstack-ai/gallery must pass before it is merged (`src/exp
 layout), so the two cannot drift. It prints one `CODE PATH: MESSAGE` line per finding and exits 1 on any, 0 on a clean
 tree: `index.json` that does not validate (absent is an empty gallery); an entry without a complete `apps/<id>/`
 (README, run record, scorecard and transcript in JSON and Markdown, `source/objectstack.config.ts`, at least one
-screenshot, every listed screenshot on disk and none unlisted); a directory under `apps/` no entry lists; a
+screenshot, every listed screenshot on disk and none unlisted); an app whose package arrives with no sample data (no
+`source/src/sample-data.json`, one that is not a non-empty list of stack `data:` datasets the spec's `SeedSchema`
+accepts, each with a record, or a `source/objectstack.config.ts` that does not import it); a directory under `apps/` no entry lists; a
 `framework.version` that is not a stable release published for `@objectstack/cli` (read with `npm view … versions`,
 only when the index lists an app); and anywhere in the tree a `.env*` name, a `node_modules` directory, a symbolic link
 or a text file naming a local absolute path.

@@ -501,10 +501,10 @@ const STUDIO_ZH: Record<string, string> = {
     '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
   'designer.field.requiredVisibleWhenReference':
     '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。条件经由引用字段 {fields} 读取关联记录，服务器在这里无法读取，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。请改为读取本对象自己的字段。',
-  'designer.field.requiredVisibleWhenFormula':
-    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填，其中的 {fields} 按要保存的记录计算。表单在你编辑时也会同样计算该公式；但向导最后提交时的检查，以及数据源不提供对象定义的表单，用的是上次读取的公式值（新建记录时没有值），可能与服务器的判断不一致。',
   'designer.field.requiredVisibleWhenFormulaUnservable':
-    '{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录都仍要求填写。表单同样无法计算它：会显示该字段并保持必填。',
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录都仍要求填写。会计算本对象公式的表单同样无法计算它，因此会显示该字段并保持必填；不计算公式的表单检查用的是上次读取的值，可能隐藏该字段或不要求填写。',
+  'designer.field.requiredVisibleWhenFormulaFormOnly':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。{fields} 读取了 os（直接或通过其他公式）：服务器会计算它（按登录用户和租户绑定 os），可能免除该字段的必填；但表单无法计算，因此会计算本对象公式的表单会显示该字段并保持必填；不计算公式的表单检查用的是上次读取的值，可能隐藏该字段或不要求填写。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',

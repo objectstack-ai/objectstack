@@ -318,3 +318,35 @@ describe('the approvals queue steps from request to request (objectstack#34586)'
     expect(screen.queryByTestId('approval-queue-open-next')).toBeNull();
   });
 });
+
+describe('the queue stays in the app its inbox is mounted in (objectstack#35412)', () => {
+  /** The inbox's app lists another object; another app owns the requests' records; Setup is there too. */
+  const apps = [
+    { name: APP, navigation: [{ type: 'object', objectName: 'leave_request' }] },
+    { name: 'finance', _packageId: 'com.example.finance', navigation: [{ type: 'object', objectName: 'invoice' }] },
+    { name: 'setup', _packageId: 'com.objectstack.setup', navigation: [{ type: 'object', objectName: 'sys_user' }] },
+  ];
+  beforeEach(() => {
+    (metadata as { apps: unknown[] }).apps = apps;
+  });
+  afterEach(() => {
+    (metadata as { apps: unknown[] }).apps = [];
+  });
+
+  it('a row opens under the inbox\'s app, and each decision opens the next one there, then returns to the inbox', async () => {
+    renderAt([INBOX]);
+    fireEvent.click(await inboxRow('Alpha one'));
+    await requestPage();
+    expect(where()).toBe(pageOf('req_a'));
+    await waitFor(() => expect(counter()).not.toBeNull());
+
+    await decide('req_a', { status: 'approved', viewer: { can_act: false, is_submitter: false, can_override: false } });
+    await waitFor(() => expect(where()).toBe(pageOf('req_b')));
+    await requestPage();
+    await decide('req_b', { status: 'approved', viewer: { can_act: false, is_submitter: false, can_override: false } });
+    await waitFor(() => expect(where()).toBe(pageOf('req_c')));
+    await requestPage();
+    await decide('req_c', { status: 'approved', viewer: { can_act: false, is_submitter: false, can_override: false } });
+    await waitFor(() => expect(where()).toBe(INBOX));
+  });
+});

@@ -66,10 +66,10 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // its `fields: {}` is where a new field goes. Same category as
       // `capability` / `api`, not deferred work.
       'field',
-      // [#5961] `capability` is code-only by declaration
-      // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`, ADR-0066 D1):
-      // there is no runtime create surface for a create seed to seed. It is on
-      // this list for `job`/`agent`'s reason, not as deferred work.
+      // [#5961, #35157] `capability` is runtime-creatable (an unmanaged copy
+      // carries its app's capabilities) but has no Studio designer: it is
+      // created by the install copy or a `/meta` save, never from a blank form.
+      // It sits here with `permission` and `position`, not as deferred work.
       'capability',
       // [#5488] `api` joined them on 2026-08-09 (maintainer ruling
       // 2026-08-07T16:59Z). It HAD a seed (#5271) and lost it with the runtime
@@ -79,11 +79,11 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // `publishPackage`. Same category as `capability`, not deferred work.
       'api',
       // `picklist` is package-owned (`allowRuntimeCreate: false`): there is no
-      // runtime create surface to seed. Same category as `capability`.
+      // runtime create surface to seed. Same category as `api`.
       'picklist',
       // [ADR-0131 D6] `sharing_rule` is code-only (regime C): an organization
       // authors its own rules through the sharing door, not `/meta`. Same
-      // category as `capability`.
+      // category as `api`.
       'sharing_rule',
       // [ADR-0142 D1/D5] `queue` and `assignment_rule` are code-only (regime C,
       // `allowRuntimeCreate: false`): an organization staffs its own queues as
