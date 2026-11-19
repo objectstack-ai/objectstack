@@ -46,6 +46,8 @@ const SETS = [MEMBER_DEFAULT, SET];
 const memberOf = (userId: string) => ({
   userId, tenantId: ORG, positions: ['org_member'], permissions: [SET.name, 'member_default'], posture: 'MEMBER',
 });
+/** What the `afterInsert` hook throws, asserted by identity. */
+const HOOK_REFUSAL = new Error('refused by the afterInsert hook');
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
 
 type HookShape = 'none' | 'beforeInsert' | 'afterInsert';
@@ -73,7 +75,7 @@ async function boot(hook: HookShape) {
     const bound = hook === 'afterInsert'
       ? {
           name: 'uim_after', object: OBJ, events: ['afterInsert'], onError: 'abort',
-          handler: (ctx: any) => { if (ctx.result?.name === 'boom') throw new Error('refused by the afterInsert hook'); },
+          handler: (ctx: any) => { if (ctx.result?.name === 'boom') throw HOOK_REFUSAL; },
         }
       : { name: 'uim_touch', object: OBJ, events: ['beforeInsert'], handler: () => {} };
     bindHooksToEngine(engine as never, [bound as never], { packageId: 'app:uim', logger: QUIET as never });
@@ -134,7 +136,8 @@ for (const hook of ['none', 'beforeInsert', 'afterInsert'] as const) {
     it('a second writer\'s insert lands while the first one is parked in the middleware chain', async () => {
       const { engine, release, arrival } = await boot(hook);
       const first = insertAs(engine, A, 'tk_a');
-      await arrival;
+      // `first` settling before it parks fails the cell below, not the timeout.
+      await Promise.race([arrival, first.then(() => undefined, () => undefined)]);
       const second = await settledWithin(insertAs(engine, B, 'tk_b'), WINDOW_MS);
       release();
       expect(second, 'the second insert, while the first is parked before next()').toBe('fulfilled');
@@ -150,7 +153,7 @@ describe('[#35167] control — the unit around the engine body still rolls an ab
     const { engine, release } = await boot('afterInsert');
     release();
     const err = await insertAs(engine, B, 'tk_boom', 'boom').then(() => undefined, (e: unknown) => e);
-    expect((err as Error)?.message).toContain('refused by the afterInsert hook');
+    expect(err, 'the afterInsert hook\'s own throw reaches the caller').toBe(HOOK_REFUSAL);
     expect(await engine.findOne(OBJ, { where: { id: 'tk_boom' } } as never, SYS)).toBeNull();
     await expect(insertAs(engine, B, 'tk_ok')).resolves.toMatchObject({ id: 'tk_ok' });
   });
