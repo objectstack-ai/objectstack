@@ -5393,9 +5393,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const approvalTagText = approvals.pendingRequest
     ? isActingApprover(approvals.pendingRequest)
       ? t('approvalsInbox.awaitingYourDecision', { defaultValue: 'Awaiting your approval' })
-      : t('detail.approvalPending', { defaultValue: 'Pending approval' })
+      : t('detail.approvalPending', { defaultValue: 'In approval' })
     : lockedForReader
-      ? t('detail.approvalPending', { defaultValue: 'Pending approval' })
+      ? t('detail.approvalPending', { defaultValue: 'In approval' })
       : approvals.latestRequest?.status === 'returned'
         ? t('approvalsInbox.statusReturned', { defaultValue: 'Returned for revision' })
         : approvals.latestRequest?.status === 'rejected'

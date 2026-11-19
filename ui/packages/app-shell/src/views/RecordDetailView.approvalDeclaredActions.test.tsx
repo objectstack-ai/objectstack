@@ -640,7 +640,7 @@ describe('record header — the approval is the ONE button group (objectstack#35
 
     await waitFor(() => expect(screen.getByTestId('stub-record-row')).toBeTruthy());
     const tag = await screen.findByTestId('record-approval-tag');
-    expect(tag.textContent).toMatch(/pending approval|审批中/i);
+    expect(tag.textContent).toMatch(/in approval|审批中/i);
     for (const name of [...APPROVER_DECISIONS, 'approval_recall', 'approval_remind']) {
       expect(decisionButton(name), `${name} must stay hidden`).toBeNull();
     }
