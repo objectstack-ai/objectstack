@@ -487,13 +487,19 @@ function nestedRelationRefusalReason(field: string, key: string): string {
 /**
  * The first key of an AST comparand that is a nested relation condition, or
  * `undefined` when it is not one. The shape is the one `convertFiltersToAST`
- * lowers to `[rel, '=', condition]`: a non-empty object with no `$` key. An
- * object the spec reads as a comparand (`isAcceptedFilterComparand`, a `Date`)
- * is not one, and the object arm makes the same split before its operator loop.
+ * lowers to `[rel, '=', condition]`: a non-empty PLAIN object with no `$` key.
+ *
+ * Plain means prototype `Object.prototype` or `null`, the test the spec's
+ * filter walk uses to tell filter structure from data. A class instance is
+ * data even when it carries its own non-`$` keys: a moment or luxon date, or a
+ * decimal object, under `>` / `<` compares through its `valueOf` in the switch
+ * below and is not refused as a relation.
+ * A `Date` has no own keys, so it is never one either.
  */
 function nestedRelationComparandKey(target: unknown): string | undefined {
   if (!target || typeof target !== 'object' || Array.isArray(target)) return undefined;
-  if (isAcceptedFilterComparand(target)) return undefined;
+  const proto = Object.getPrototypeOf(target) as object | null;
+  if (proto !== Object.prototype && proto !== null) return undefined;
   const keys = Object.keys(target);
   if (keys.length === 0 || keys.some((key) => key.startsWith('$'))) return undefined;
   return keys[0];
