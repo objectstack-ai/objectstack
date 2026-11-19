@@ -421,6 +421,82 @@ export interface McpDataBridge {
    * holds no second copy of it. OPTIONAL — see {@link listDatasets}.
    */
   datasetToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
+  /**
+   * [#35442] `search_package_docs`: the installed apps' manual pages (their
+   * `doc` items) whose title, a heading or text contains one of
+   * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
+   * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
+   * gate, so a page the caller may not read is never searched.
+   *
+   * OPTIONAL: a host that cannot read docs for the caller omits both doc
+   * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
+   * doc tool registers. The pair registers only when both are present
+   * (`registerPackageDocTools`).
+   */
+  searchPackageDocs?(input: SearchPackageDocsInput, opts: { maxResults: number }): Promise<SearchPackageDocsOutput>;
+  /**
+   * [#35442] `read_package_doc`: one manual page by name, as this caller may
+   * read it, or a coded refusal (a page the caller may not read answers as
+   * not found). OPTIONAL — see {@link searchPackageDocs}.
+   */
+  readPackageDoc?(input: ReadPackageDocInput): Promise<ReadPackageDocOutput>;
+}
+
+/** [#35442] Where a manual page lives: its name, app, title, manual and the console address to cite. */
+export interface McpPackageDocAddress {
+  /** The page's name: what `read_package_doc` takes. */
+  name: string;
+  /** The app (package) that ships the page. */
+  package?: string;
+  /** The page's title, in the locale it was read or matched in. */
+  title: string;
+  /** The manual (book) the page opens in. */
+  book?: { name: string; label?: string };
+  /** The console address of the page (`/_console/apps/PACKAGE/docs/BOOK/NAME`), to cite as the source. */
+  url?: string;
+}
+
+/** [#35442] One `search_package_docs` hit. */
+export interface McpPackageDocHit extends McpPackageDocAddress {
+  /** The best place a term was found: the title, a heading, or the text. */
+  matchedOn: 'title' | 'heading' | 'text';
+  /** The terms this page contains. */
+  matchedTerms: string[];
+  /** The heading a term was found under or in, when there is one. */
+  heading?: string;
+  /** A short passage around the first match. */
+  excerpt: string;
+  /** The translation the match was found in, when it was not the page's base text. */
+  locale?: string;
+}
+
+/** [#35442] `search_package_docs` input. */
+export interface SearchPackageDocsInput {
+  terms: string[];
+  package?: string;
+}
+
+/** [#35442] `search_package_docs` answer. */
+export interface SearchPackageDocsOutput {
+  terms: string[];
+  results: McpPackageDocHit[];
+  /** More pages matched than `results` carries. */
+  truncated: boolean;
+}
+
+/** [#35442] `read_package_doc` input. */
+export interface ReadPackageDocInput {
+  name: string;
+  package?: string;
+  locale?: string;
+}
+
+/** [#35442] `read_package_doc` answer: the page's Markdown content and where it lives. */
+export interface ReadPackageDocOutput extends McpPackageDocAddress {
+  description?: string;
+  /** The translation served, when it was not the page's base text. */
+  locale?: string;
+  content: string;
 }
 
 export interface RegisterObjectToolsOptions {
@@ -3061,6 +3137,9 @@ export function wireBridgeTools(
   // [ADR-0149 D2] `list_datasets` / `query_dataset`, only where the bridge
   // carries all three dataset members and the grant admits `data:read`.
   registered.push(...registerDatasetTools(server, bridge, options));
+  // [#35442] `search_package_docs` / `read_package_doc`, only where the bridge
+  // carries both doc members and the grant admits `data:read`.
+  registered.push(...registerPackageDocTools(server, bridge, options));
   return registered;
 }
 
@@ -3198,6 +3277,145 @@ export function registerDatasetTools(
   }
 
   return registered;
+}
+
+/** [#35442] The app-docs search tool's name, the one the cloud `service-ai` registry already holds. */
+export const SEARCH_PACKAGE_DOCS_TOOL_NAME = 'search_package_docs';
+
+/** [#35442] The app-docs read tool's name, the one the cloud `service-ai` registry already holds. */
+export const READ_PACKAGE_DOC_TOOL_NAME = 'read_package_doc';
+
+/** [#35442] The most pages one `search_package_docs` answer lists; its description states it. */
+export const PACKAGE_DOC_SEARCH_MAX_RESULTS = 10;
+
+/**
+ * [#35442] The most characters of a page `read_package_doc` returns. A longer
+ * page answers its first part and says it was cut, rather than an answer no
+ * client can hold.
+ */
+export const READ_PACKAGE_DOC_MAX_CHARS = 60_000;
+
+/**
+ * [#35442] Whether this bridge and grant register BOTH doc tools: the bridge
+ * carries both doc members and the grant is the read family's
+ * (`aggregate_records`'s: an undefined grant keeps them, a scope list without
+ * `data:read` registers neither). The one gate: `registerPackageDocTools`
+ * registers from it, and `handleHttpRequest` reads it to decide whether the
+ * `initialize` instructions carry the answer-order rule, so the rule is sent
+ * exactly where `tools/list` lists both tools.
+ */
+export function packageDocToolsServed(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): boolean {
+  if (!bridge) return false;
+  if (typeof bridge.searchPackageDocs !== 'function' || typeof bridge.readPackageDoc !== 'function') return false;
+  const scopes = options.grantedScopes;
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+}
+
+/**
+ * [#35442] Register the app-docs pair over the bridge's doc members:
+ * `search_package_docs` finds the installed apps' manual pages that contain a
+ * business word, and `read_package_doc` reads one page.
+ *
+ * - **No second gate.** Neither tool judges what the caller may read: the
+ *   host's members read the `doc` items through the `/meta/doc` docs-audience
+ *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
+ *   is neither found nor read, and reads as not found.
+ * - **The search is a substring match**, stated in the description: no
+ *   server-side doc search exists, so the honest search is a term found in a
+ *   page's title, a heading or its text (case aside), ranked in that order and
+ *   capped at {@link PACKAGE_DOC_SEARCH_MAX_RESULTS}.
+ * - **Each answer carries the page's console address**, so the client can
+ *   cite a source the user can open.
+ */
+export function registerPackageDocTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  if (!packageDocToolsServed(bridge, options)) return [];
+  const search = bridge.searchPackageDocs!.bind(bridge);
+  const read = bridge.readPackageDoc!.bind(bridge);
+
+  server.registerTool(
+    SEARCH_PACKAGE_DOCS_TOOL_NAME,
+    {
+      description:
+        'Find pages in the manuals of the apps installed here that contain business words, before you answer what '
+        + 'a term means or how a process works. Send each term as the user wrote it, without question words '
+        + '("回款", not "什么是回款"). A page matches when its title, a heading or its text contains a term, case '
+        + `aside; results are ranked title, then heading, then text, at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each `
+        + 'with an excerpt and the page\'s url to cite. Only pages you may read are searched. Read a page with '
+        + `${READ_PACKAGE_DOC_TOOL_NAME}.`,
+      inputSchema: strictToolInput(
+        {
+          surface: `this ${SEARCH_PACKAGE_DOCS_TOOL_NAME} call`,
+          aliases: { query: 'terms', q: 'terms', keywords: 'terms', term: 'terms', packageId: 'package', app: 'package' },
+        },
+        {
+          terms: z.array(z.string().trim().min(1)).min(1).max(5)
+            .describe('One to five business words or short phrases, as the user wrote them'),
+          package: z.string().optional().describe('Only this app\'s manuals'),
+        },
+      ),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ terms, package: pkg }) => {
+      try {
+        return textResult(await search(
+          { terms, ...(pkg !== undefined ? { package: pkg } : {}) },
+          { maxResults: PACKAGE_DOC_SEARCH_MAX_RESULTS },
+        ));
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    READ_PACKAGE_DOC_TOOL_NAME,
+    {
+      description:
+        'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
+        + 'title, its manual, its url to cite and its Markdown content. Send package when two apps ship a page '
+        + 'of that name. A page you may not read answers as not found.',
+      inputSchema: strictToolInput(
+        {
+          surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,
+          aliases: { doc: 'name', docName: 'name', doc_name: 'name', packageId: 'package', app: 'package' },
+        },
+        {
+          name: z.string().trim().min(1).describe('The page\'s name'),
+          package: z.string().optional().describe('The app that ships the page, when two apps ship that name'),
+          locale: z.string().optional().describe('A translation of the page to read, e.g. zh-CN; the base text when it has none'),
+        },
+      ),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ name, package: pkg, locale }) => {
+      try {
+        const page = await read({
+          name,
+          ...(pkg !== undefined ? { package: pkg } : {}),
+          ...(locale !== undefined ? { locale } : {}),
+        });
+        if (typeof page?.content === 'string' && page.content.length > READ_PACKAGE_DOC_MAX_CHARS) {
+          return textResult({
+            ...page,
+            content: page.content.slice(0, READ_PACKAGE_DOC_MAX_CHARS),
+            truncated: `The page is ${page.content.length} characters; this answer carries the first ${READ_PACKAGE_DOC_MAX_CHARS}. Open its url for the rest.`,
+          });
+        }
+        return textResult(page);
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
+  return [SEARCH_PACKAGE_DOCS_TOOL_NAME, READ_PACKAGE_DOC_TOOL_NAME];
 }
 
 /**

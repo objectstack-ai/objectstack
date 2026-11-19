@@ -139,8 +139,10 @@ export const PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string> = new Set(
  * on a confirmed call), `aggregate_records`, the file pair
  * ({@link MCP_FILE_TOOL_NAMES}), the action family (`list_actions`,
  * `run_action`, `resume_run`), the federation pair (`list_remote_tables`,
- * `import_object`, under `metadata:write` only), the dataset pair and
- * `validate_expression`.
+ * `import_object`, under `metadata:write` only), the dataset pair, the
+ * app-docs pair (`search_package_docs`, `read_package_doc`: the same names the
+ * cloud `service-ai` group registers, served at the door over the docs-audience
+ * gate) and `validate_expression`.
  *
  * Some names are also cloud registrations (`get_record`, `query_records`,
  * `describe_object`, …) and are in {@link PLATFORM_PROVIDED_TOOL_NAMES} as
@@ -173,8 +175,10 @@ export const MCP_DOOR_TOOL_NAMES: readonly string[] = [
   'query_dataset',
   'query_records',
   'read_file',
+  'read_package_doc',
   'resume_run',
   'run_action',
+  'search_package_docs',
   'update_record',
   'validate_expression',
 ];
