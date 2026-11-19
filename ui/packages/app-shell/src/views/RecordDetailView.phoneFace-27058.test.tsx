@@ -479,8 +479,8 @@ function stubApprovals(request: Record<string, unknown> | null) {
   );
 }
 
-function mountApprovalPage() {
-  const objects = [...objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]), APPROVAL_DEF];
+function mountApprovalPage(pageObjects: unknown[] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')])) {
+  const objects = [...pageObjects, APPROVAL_DEF];
   const metadata = {
     ...(metadataFor(objects) as object),
     getItem: async (type: string, name: string) => (type === 'object' && name === APPROVAL_OBJECT ? APPROVAL_DEF : null),
@@ -658,5 +658,101 @@ describe('a phone bar never leads with an Edit that is off, for any reason (obje
     const edit = await desktopRowEdit();
     await waitFor(() => expect(edit.disabled).toBe(true));
     expect(actionBar()).toBeNull();
+  });
+});
+
+/**
+ * objectstack#35135 — an Edit or Delete greyed by `userActions.*.disabledWhen`
+ * says why, with the generic sentence an authored action without a declared
+ * reason gives (`actions.notAvailableForRecord`):
+ *
+ *  - desktop: the header row's Edit is described by the reason, and its
+ *    wrapper opens it as a tooltip; the `⋯`'s Delete shows it as its second
+ *    line;
+ *  - phone: the bar's `⋯` entry for Edit shows it as its second line.
+ *
+ * Controls: the approval band and the state-lock badge explain their own
+ * locks, so an Edit they turn off gives no second, generic reason; a
+ * `disabledWhen` that does not hold gives none.
+ */
+const PREDICATE_REASON = 'Not available for this record';
+
+function leadWithDisabledDelete(when: string): PageObjects {
+  const [lead, ...rest] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]);
+  return [{ ...lead, userActions: { delete: { disabledWhen: when } } }, ...rest] as never;
+}
+
+const describedText = (el: Element) => {
+  const id = el.getAttribute('aria-describedby');
+  return id ? document.getElementById(id)?.textContent ?? null : null;
+};
+
+describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', () => {
+  beforeEach(() => {
+    __resetRecordApprovalsStore();
+  });
+
+  it('desktop, edit.disabledWhen holds: Edit is off and described by the generic reason, which its wrapper shows', async () => {
+    setWidth(1440);
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
+    const edit = await desktopRowEdit();
+    await waitFor(() => expect(edit.disabled).toBe(true));
+    await waitFor(() => expect(describedText(edit)).toBe(PREDICATE_REASON));
+    expect(edit.parentElement!.hasAttribute('data-disabled-reason')).toBe(true);
+  });
+
+  it('phone, edit.disabledWhen holds: the bar\'s ⋯ entry for Edit shows the reason', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
+    await expectEditInBarOverflowOff();
+    const menu = screen.getByRole('menu');
+    const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.startsWith('Edit'))!;
+    expect(describedText(edit)).toBe(PREDICATE_REASON);
+  });
+
+  it('desktop, delete.disabledWhen holds: the ⋯\'s Delete is off and shows the reason', async () => {
+    setWidth(1440);
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledDelete(LOCKS_NEW));
+    const header = await waitFor(() => {
+      const el = document.querySelector('[data-record-page-root] header') as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el!;
+    }, { timeout: 5000 });
+    const more = await waitFor(() => within(within(header).getByRole('toolbar')).getByRole('button', { name: 'More actions' }));
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    const del = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.startsWith('Delete'))!;
+    expect(del.getAttribute('aria-disabled')).toBe('true');
+    expect(describedText(del)).toBe(PREDICATE_REASON);
+  });
+
+  it('control, desktop: a disabledWhen that does not hold leaves Edit on and silent', async () => {
+    setWidth(1440);
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit("record.status == 'closed'"));
+    const edit = await desktopRowEdit();
+    expect(edit.disabled).toBe(false);
+    expect(edit.hasAttribute('aria-describedby')).toBe(false);
+    expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
+  });
+
+  it('control, desktop: a state-locked Edit whose disabledWhen also holds gives the badge, never the generic reason too', async () => {
+    setWidth(1440);
+    const [lead, ...rest] = leadLockedByState() as unknown as Array<Record<string, unknown>>;
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], [{ ...lead, userActions: { edit: { disabledWhen: LOCKS_NEW } } }, ...rest] as never);
+    await waitFor(() => expect(screen.getByTestId('record-state-lock').textContent).toBe('Not editable in its current state'), { timeout: 5000 });
+    const edit = await desktopRowEdit();
+    expect(edit.disabled).toBe(true);
+    expect(edit.hasAttribute('aria-describedby')).toBe(false);
+    expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
+  });
+
+  it('control, desktop: an approval-locked Edit whose disabledWhen also holds gives the band, never the generic reason', async () => {
+    setWidth(1440);
+    stubApprovals(PENDING_REQUEST);
+    mountApprovalPage(leadWithDisabledEdit(LOCKS_NEW) as unknown[]);
+    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
+    const edit = await desktopRowEdit();
+    await waitFor(() => expect(edit.disabled).toBe(true));
+    expect(edit.hasAttribute('aria-describedby')).toBe(false);
+    expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
   });
 });

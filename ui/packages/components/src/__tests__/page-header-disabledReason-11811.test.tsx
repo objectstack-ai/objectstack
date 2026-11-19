@@ -173,3 +173,65 @@ describe('page:header — a predicate-disabled authored action says why (objectu
     expect(screen.queryByText(REASON_EN)).toBeNull();
   });
 });
+
+/**
+ * objectstack#35135 — a host action that hands its own `disabledReason` with
+ * its host-computed `disabled` shows that text, inline and in the overflow, the
+ * way an authored action shows its declared one. The host never earns the
+ * generic reason (the control above), and a reason handed with an action that
+ * is not off is not drawn.
+ */
+describe('page:header — a host action shows the reason the host hands with it (objectstack#35135)', () => {
+  const HOST_REASON = 'Not available for this record';
+
+  it('inline: the host Edit is described by its reason and opens it as a tooltip', async () => {
+    const user = userEvent.setup();
+    mount([], {}, { host: [{ ...HOST_EDIT, disabledReason: HOST_REASON }] });
+    const edit = screen.getByRole('button', { name: 'Edit' });
+    expect(edit).toBeDisabled();
+    expect(describedBy(edit)).toHaveTextContent(HOST_REASON);
+    const trigger = edit.parentElement as HTMLElement;
+    expect(trigger).toHaveAttribute('data-disabled-reason');
+    await user.hover(trigger);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(HOST_REASON);
+  });
+
+  it('overflow: the host Delete shows its reason as the item description', async () => {
+    const user = userEvent.setup();
+    mount([], {}, { host: [{ ...HOST_DELETE, disabledReason: HOST_REASON }] });
+    await user.click(screen.getByRole('button', { name: /More actions/i }));
+    const del = await screen.findByRole('menuitem', { name: 'Delete' });
+    expect(del).toHaveAttribute('data-disabled');
+    expect(describedBy(del)).toHaveTextContent(HOST_REASON);
+    expect(describedBy(del)).toBeVisible();
+  });
+
+  it('control — a pending record (no row yet) draws no reason, even one the host handed', () => {
+    render(
+      <ActionProvider>
+        <RecordContextProvider
+          objectName="showcase_task"
+          recordId="t-1"
+          data={null as never}
+          objectSchema={{ name: 'showcase_task', label: 'Task' }}
+          headerSystemActions={[{ ...HOST_EDIT, disabledReason: HOST_REASON }]}
+        >
+          <PageHeader schema={{ type: 'page:header', title: 'Task', actions: [] }} />
+        </RecordContextProvider>
+      </ActionProvider>,
+    );
+    const edit = screen.getByRole('button', { name: 'Edit' });
+    expect(edit).toBeDisabled();
+    expect(edit).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(HOST_REASON)).toBeNull();
+  });
+
+  it('control — a reason handed with a host action that is on is not drawn', () => {
+    mount([], {}, { host: [{ ...HOST_EDIT, disabled: false, disabledReason: HOST_REASON }] });
+    const edit = screen.getByRole('button', { name: 'Edit' });
+    expect(edit).not.toBeDisabled();
+    expect(edit).not.toHaveAttribute('aria-describedby');
+    expect(edit.parentElement).not.toHaveAttribute('data-disabled-reason');
+    expect(screen.queryByText(HOST_REASON)).toBeNull();
+  });
+});
