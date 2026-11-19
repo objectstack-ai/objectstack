@@ -44,6 +44,8 @@ name: Queue Duration Budget
 # or the sample fell under the budget's floor). That is the patrol reporting its
 # own death, never a verdict on the queue. hotcrm's reading is report-only: a
 # line in the run summary, no card, and its failure never reds the run.
+#
+# dispatch-gates: no-check-families -- the steps are a live Actions API reading (a token and the network) and a card write, not named local checks; the script's offline check is its --self-test, which Lint & Repo Gates runs
 
 on:
   schedule:

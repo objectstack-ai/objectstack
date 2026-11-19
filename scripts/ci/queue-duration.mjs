@@ -378,7 +378,7 @@ export function renderReading(reading, budget) {
   if (crit.length > 0) lines.push(`- The run that finished last (the critical run), per all-green SHA: ${crit.map(([n, c]) => `${n} ${c}`).join(' · ')}.`);
   if (reading.criticalJobs.jobs.length > 0) {
     lines.push('', `Slowest jobs of the critical run, median over ${reading.criticalJobs.sampled} sampled all-green SHAs:`, '',
-      '| Job | Median duration | Median wait for a runner | Sampled |', '|:---|---:|---:|---:|',
+      '| Job | Median duration | Median wait, job created to started | Sampled |', '|:---|---:|---:|---:|',
       ...reading.criticalJobs.jobs.map((j) => `| ${j.job.replace(/\|/g, '/')} | ${j.medianMinutes} min | ${j.medianWaitMinutes} min | ${j.sampled} |`));
   }
   return lines;
