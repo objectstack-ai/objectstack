@@ -81,14 +81,26 @@ const STRAY_MODULE = 'com.qa.stray';
 const PLATFORM_MODULE = 'com.qa.platform.module';
 const PLATFORM_PLUGIN = 'com.qa.platform';
 
+/** [#34900] A module of the suite that depends on the orders module, carrying a script action. */
+const PROJECTS = 'com.qa.suite.projects';
+
 const ORDER = 'qs_order';
+const PROJECT = 'qs_project';
+/** [#34900] The projects module's script action: its sandboxed body writes into the orders module's object. */
+const PREPARE_BILLING = 'prepare_billing';
+const BILLED_BY_ACTION = 'billed by action';
 const ACCOUNT = 'qs_account';
 const APP_NAME = 'qs_app';
 
 const textField = (label: string) => ({ name: label.toLowerCase(), type: 'text' as const, label });
 
-/** The suite artifact, composed the way HotCRM composes its four packages. */
-function suiteArtifact() {
+/**
+ * The suite artifact, composed the way HotCRM composes its four packages.
+ * [#34900] `withProjects` adds a fifth, a module depending on the orders
+ * module (HotCRM's Project Delivery over Order to Cash), for the one describe
+ * that runs its script action; every other boot keeps the four.
+ */
+function suiteArtifact(options: { withProjects?: boolean } = {}) {
     const app = defineStack({
         manifest: { id: APP, name: 'QA Suite', namespace: 'qs', version: '1.0.0', type: 'app' },
         objects: [{ name: ACCOUNT, label: 'Account', fields: { name: textField('Name') } }],
@@ -124,7 +136,31 @@ function suiteArtifact() {
             dependencies: { [PLUGIN]: '^1.0.0' },
         },
     });
-    return composeStacks([orders, addon, tools, app], { manifest: 'preserve' });
+    const projects = defineStack({
+        manifest: {
+            id: PROJECTS, name: 'QA Suite Projects', namespace: 'qs', version: '1.0.0', type: 'module',
+            dependencies: { [APP]: '^1.0.0', [MODULE]: '^1.0.0' },
+        },
+        objects: [{
+            name: PROJECT,
+            label: 'Project',
+            fields: { name: textField('Name') },
+            actions: [{
+                name: PREPARE_BILLING,
+                label: 'Prepare billing',
+                type: 'script',
+                body: {
+                    language: 'js',
+                    source: `await ctx.api.object('${ORDER}').insert({ name: '${BILLED_BY_ACTION}' }); return { prepared: true };`,
+                    capabilities: ['api.write'],
+                },
+            }],
+        }],
+    });
+    return composeStacks(
+        options.withProjects ? [orders, projects, addon, tools, app] : [orders, addon, tools, app],
+        { manifest: 'preserve' },
+    );
 }
 
 /** The packages registered beside the suite, each through the `manifest` door on its own. */
@@ -162,7 +198,7 @@ let lastHostContext: PluginContext | undefined;
  * The `AppPlugin` is there on both, with the environment's id, because it is
  * what replays the state file at boot.
  */
-async function bootKernel(path: InstallPath, root: string): Promise<Booted> {
+async function bootKernel(path: InstallPath, root: string, suite: { withProjects?: boolean } = {}): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     const engine = new ObjectQL();
     engine.registerDriver(new SqlDriver({
@@ -172,14 +208,14 @@ async function bootKernel(path: InstallPath, root: string): Promise<Booted> {
     }) as any, true);
     await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
     await kernel.use(new ObjectQLPlugin({ ql: engine }));
-    await kernel.use(new AppPlugin(path === 'code' ? suiteArtifact() : {}, { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
+    await kernel.use(new AppPlugin(path === 'code' ? suiteArtifact(suite) : {}, { environmentId: ENVIRONMENT_ID, organizationId: 'org_qa' }));
     const host: Plugin = {
         name: 'qa.suite-host',
         dependencies: ['com.objectstack.engine.objectql'],
         init: async (ctx: PluginContext) => {
             lastHostContext = ctx;
             const door = ctx.getService<ManifestDoor>('manifest');
-            if (path === 'marketplace') await door.register(suiteArtifact(), { source: 'marketplace' });
+            if (path === 'marketplace') await door.register(suiteArtifact(suite), { source: 'marketplace' });
             for (const manifest of STANDALONE) await door.register(manifest);
         },
     };
@@ -450,5 +486,59 @@ describe('[#28117 addendum 6523684730] what an app hook meets reading a disabled
         // The same object, on the data plane, in the same disabled window.
         const read = await dispatchAs(booted!.kernel, 'GET', `/data/${ORDER}`);
         expect({ status: read.status, code: read.code }).toEqual(PACKAGE_DISABLED);
+    });
+});
+
+/**
+ * [#34900] An enabled module's script action writing into a disabled module's
+ * object. Ruling record 6545646924 on #28117 (letter A) keeps an app's own
+ * in-process access served, and a script body's `ctx.api` is that path: it
+ * runs in system context inside the server, never through the data plane. So
+ * the action answers 200 and the row is there on re-enable, while the data
+ * plane refuses the same object `404 OBJECT_PACKAGE_DISABLED` in the same
+ * window (the control). That the disabled module's own `beforeInsert` hook
+ * runs on the row is today's measured answer, pinned here; it is not ruled
+ * (decision letter 6538936519 on #28117 lists it as an open gap).
+ */
+describe('[#28117 ruling 6545646924] what an enabled module\'s script action meets writing into a disabled module\'s object through ctx.api', () => {
+    let root: string;
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-action-'));
+        process.env.OS_HOME = mkdtempSync(join(home, 'action-'));
+        booted = await bootKernel('code', root, { withProjects: true });
+    }, 60_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    it('serves the action\'s insert (200, the module\'s hook runs, the row is kept); the data plane refuses the same object', async () => {
+        const stamped: unknown[] = [];
+        booted!.engine.registerHook('beforeInsert', async (ctx: any) => {
+            stamped.push(ctx.input?.data?.name);
+        }, { object: ORDER, packageId: MODULE });
+
+        expect((await dispatchAs(booted!.kernel, 'PATCH', `/packages/${MODULE}/disable`)).status).toBe(200);
+        expect(enabledOf(booted!.engine, MODULE)).toBe(false);
+        expect(enabledOf(booted!.engine, PROJECTS), 'precondition: the projects module stays enabled').toBe(true);
+
+        // The control: the data plane's write and read on the same object, in the same disabled window.
+        const write = await dispatchAs(booted!.kernel, 'POST', `/data/${ORDER}`, { name: 'from the data plane' });
+        expect({ status: write.status, code: write.code }).toEqual(PACKAGE_DISABLED);
+        const read = await dispatchAs(booted!.kernel, 'GET', `/data/${ORDER}`);
+        expect({ status: read.status, code: read.code }).toEqual(PACKAGE_DISABLED);
+        expect(stamped, 'the refused data-plane write ran no hook').toEqual([]);
+
+        const action = await dispatchAs(booted!.kernel, 'POST', `/actions/${PROJECT}/${PREPARE_BILLING}`, {});
+        expect(action.status).toBe(200);
+        expect(stamped).toEqual([BILLED_BY_ACTION]);
+
+        expect((await dispatchAs(booted!.kernel, 'PATCH', `/packages/${MODULE}/enable`)).status).toBe(200);
+        const after = await dispatchAs(booted!.kernel, 'GET', `/data/${ORDER}`);
+        expect(after.status).toBe(200);
+        expect(JSON.stringify(after.data)).toContain(BILLED_BY_ACTION);
+        expect(JSON.stringify(after.data)).not.toContain('from the data plane');
     });
 });

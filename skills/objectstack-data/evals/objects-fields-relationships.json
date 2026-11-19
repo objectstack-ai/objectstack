@@ -381,6 +381,57 @@
           "overrides:"
         ]
       }
+    },
+    {
+      "id": 22,
+      "prompt": "Add a `uom` text field to our `product` object for the unit of measure (pcs, kg, box, …).",
+      "expected_output": "Does not add a free-text unit. Checks the platform catalog (objectstack-project §0, question 3): units of measure are a Planned row there, not available yet, with the accepted contract linked. Builds the smallest thing the app needs meanwhile, a `select` field whose option values are the contract's UN/ECE Rec 20 codes in exact uppercase (`H87` for a piece, `KGM`, `XBX`) with this business's spellings (pcs, kg, box) as the labels, so the platform unit table later adds validation and leaves stored values unchanged, and marks it `// PLATFORM-CANDIDATE: <link>` so the bump sweep replaces it when that table ships. If the request only wanted a quantity, says the quantity stays a `number` and the unit lives on the field, not inside the value.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "PLATFORM-CANDIDATE",
+          "select",
+          "H87",
+          "KGM"
+        ],
+        "must_not_contain": [
+          "uom: Field.text(",
+          "uom: { type: 'text'"
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "prompt": "On `account`, store each customer's country as a two-letter code and their time zone.",
+      "expected_output": "Two `text` fields that declare a value domain: `country` with `valueDomain: 'iso_3166_alpha2'` (`CN`, `US`) and `time_zone` with `valueDomain: 'iana_time_zone'` (`Asia/Shanghai`). The write path refuses a value outside the standard; the form shows a plain text input for both (only the currency code gets a picker), and no list or filter reads the domain. No picklist of countries to maintain and no regex `pattern`. Mentions that a `text` field named `country` or `time_zone` without the domain is an `os lint` warning.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "iso_3166_alpha2",
+          "iana_time_zone"
+        ],
+        "must_not_contain": [
+          "type: 'select'",
+          "pattern:"
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "prompt": "Quotes are entered in EUR, GBP and USD and finance wants a USD total on every quote. Create an `exchange_rate` object (currency, rate, valid from) and an `afterInsert` hook on `quote` that converts `amount`.",
+      "expected_output": "Does not create the object or the hook: the platform ships `sys_exchange_rate`, maintained in Setup, and the conversion at write. On `quote`, `amount` is a `currency` field with `currencyMode: 'record'`, a `currencyField` (`currency_code`, a `text` field with `valueDomain: 'iso_4217_currency'`) and `homeAmount: { field, rateDate, rateField }`, so the engine stores the home-currency amount and the rate it used, both `readonly`. The home currency is the organization's `localization.currency`; the metadata never names it. Totals sum the home field.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "sys_exchange_rate",
+          "homeAmount",
+          "currencyMode: 'record'"
+        ],
+        "must_not_contain": [
+          "name: 'exchange_rate'",
+          "event: 'afterInsert'"
+        ]
+      }
     }
   ]
 }
