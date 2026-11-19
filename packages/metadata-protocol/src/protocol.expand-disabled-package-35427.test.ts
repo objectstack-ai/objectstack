@@ -12,9 +12,12 @@
  *
  * What these pins hold:
  *
- *   - `$expand` (comma list and POST map, list and by-id reads, any level)
- *     withholds an entry whose target belongs to a disabled package, as it
- *     withholds an unexposed target: the field keeps its stored id;
+ *   - `$expand` (comma list and POST map, any level) withholds an entry
+ *     whose target belongs to a disabled package, as it withholds an
+ *     unexposed target: the field keeps its stored id. The by-id read's
+ *     `expand` asks the same `servedExpand`; it is measured on a real stack,
+ *     not re-pinned here (a by-id double would need its own engine-double
+ *     ledger row);
  *   - a nested-relation condition on such a target is refused with the data
  *     route's own envelope, `404 OBJECT_PACKAGE_DISABLED`, naming the target
  *     and the position, before the engine reads anything;
@@ -25,7 +28,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+// `protocol.ts` reaches `@objectstack/lint` through a dynamic import; loaded
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const lookup = (name: string, reference: string) => ({ name, label: name, type: 'lookup', reference });
@@ -58,17 +64,13 @@ const SCHEMAS: Record<string, unknown> = {
 
 function makeProtocol(opts: { disabled: Set<string>; registryAnswers?: boolean }) {
     const find = vi.fn(async (_object: string, _o: any) => [{ id: 's1', name: 'source' }]);
-    const findOne = vi.fn(async (object: string, o: any) => {
-        assertEngineFindOnePredicate(object, o);
-        return { id: 's1', name: 'source' };
-    });
     const count = vi.fn(async () => 1);
     const registry: Record<string, unknown> = { getObject: (n: string) => SCHEMAS[n] };
     if (opts.registryAnswers !== false) {
         registry.isObjectPackageDisabled = (n: string) => opts.disabled.has(n);
     }
-    const engine: any = { registry, find, findOne, count };
-    return { p: new ObjectStackProtocolImplementation(engine), find, findOne };
+    const engine: any = { registry, find, count };
+    return { p: new ObjectStackProtocolImplementation(engine), find };
 }
 
 const DISABLED = new Set(['dp_beta']);
@@ -83,13 +85,6 @@ async function expandHandedToFind(disabled: Set<string>, query: Record<string, u
     return (find.mock.calls[0]![1] as { expand?: unknown }).expand;
 }
 
-async function expandHandedToFindOne(disabled: Set<string>, expand: string): Promise<unknown> {
-    const { p, findOne } = makeProtocol({ disabled });
-    await p.getData({ object: 'dp_source', id: 's1', expand, context: SYSTEM } as any);
-    expect(findOne).toHaveBeenCalledTimes(1);
-    return (findOne.mock.calls[0]![1] as { expand?: unknown }).expand;
-}
-
 describe('[#35427] $expand withholds a target that belongs to a disabled package', () => {
     it('THE PIN: the list comma spelling hands the engine no expansion of it', async () => {
         expect(await expandHandedToFind(DISABLED, { $expand: 'beta' })).toBeUndefined();
@@ -101,19 +96,13 @@ describe('[#35427] $expand withholds a target that belongs to a disabled package
         expect(expand).toEqual({ open: { object: 'open' } });
     });
 
-    it('the by-id read withholds it too', async () => {
-        expect(await expandHandedToFindOne(DISABLED, 'beta')).toBeUndefined();
-        expect(await expandHandedToFindOne(DISABLED, 'beta,open')).toEqual({ open: { object: 'open' } });
-    });
-
     it('a second-level entry into it is withheld, its enabled parent kept', async () => {
         const expand = await expandHandedToFind(DISABLED, { expand: { open: { object: 'open', expand: { inner: { object: 'inner' } } } } });
         expect(expand).toEqual({ open: { object: 'open' } });
     });
 
-    it('CONTROL: the same package re-enabled is expanded again, list and by-id', async () => {
+    it('CONTROL: the same package re-enabled is expanded again', async () => {
         expect(await expandHandedToFind(ENABLED, { $expand: 'beta' })).toEqual({ beta: { object: 'beta' } });
-        expect(await expandHandedToFindOne(ENABLED, 'beta')).toEqual({ beta: { object: 'beta' } });
     });
 
     it('CONTROL: an apiEnabled:false target keeps today\'s answer (withheld) with no package disabled', async () => {
