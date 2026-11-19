@@ -638,3 +638,84 @@ describe('#30281 — the install paths seed for the organization\'s locale', () 
         expect(JSON.stringify(res.payload)).toContain('settings backend down');
     });
 });
+
+/**
+ * #35109 — an upgrade in a running process REPLACES the package's datasets on
+ * the shared list. The list was append-only: after an upgrade it kept the
+ * superseded version's datasets beside the new ones until a restart, and every
+ * organization founded in between replayed both versions. The install door now
+ * merges under the package id, so the list holds the installed version only.
+ *
+ * Driven on the inline fallback (`helpersPresent = false`) for the end-to-end
+ * legs, because that is this package's own merge; the helper's semantics are
+ * pinned in `packages/runtime/src/seed-datasets.test.ts`, and the helper leg
+ * here pins only that the door hands it the package id.
+ */
+describe('#35109 — an upgrade replaces the package\'s datasets on the shared list', () => {
+    // The locale is not this block's subject; the block above leaves a throwing answer behind.
+    beforeEach(() => { localeAnswer = async () => undefined; });
+
+    const V2 = {
+        ...MANIFEST,
+        version: '2.0.0',
+        objects: [...MANIFEST.objects, { name: 'crm_y', fields: { name: { type: 'text' } } }],
+        data: [
+            { object: 'crm_x', records: [{ id: 'a2', name: 'a2' }] },
+            { object: 'crm_y', records: [{ id: 'y2', name: 'y2' }] },
+        ],
+    };
+
+    it('install v1, upgrade to v2, then create an organization: only v2\'s sets are replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const upgraded = await installOn(harness, rawApp, V2, plugin);
+        expect(upgraded.res.payload?.success, JSON.stringify(upgraded.res.payload)).toBe(true);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        await replayer('org_after_upgrade');
+
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].seeds).toEqual(V2.data);
+    });
+
+    it('CONTROL: two different packages are both kept through an upgrade of one of them', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        await installOn(harness, rawApp, MANIFEST_2, plugin);
+        await installOn(harness, rawApp, V2, plugin);
+
+        expect(harness.peek('seed-datasets')).toEqual([...V2.data, ...MANIFEST_2.data]);
+    });
+
+    it('CONTROL: installing the same version again adds no duplicate', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const again = await installOn(harness, rawApp, MANIFEST, plugin);
+        expect(again.res.payload?.success, JSON.stringify(again.res.payload)).toBe(true);
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('a version that ships no seed data takes its predecessor\'s datasets off the list', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const { data: _dropped, ...noData } = { ...MANIFEST, version: '2.0.0' };
+        const upgraded = await installOn(harness, rawApp, noData, plugin);
+        expect(upgraded.res.payload?.success, JSON.stringify(upgraded.res.payload)).toBe(true);
+
+        expect(harness.peek('seed-datasets')).toEqual([]);
+    });
+
+    it('hands the runtime helper the package id as the owner', async () => {
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+
+        expect(helperMerge).toHaveBeenCalledTimes(1);
+        expect(helperMerge.mock.calls[0][0]).toBe(harness.ctx);
+        expect(helperMerge.mock.calls[0][2]).toBe(MANIFEST.id);
+    });
+});

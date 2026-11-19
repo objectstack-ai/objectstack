@@ -362,6 +362,11 @@ describe('owner-keyed merge: an upgrade replaces the package\'s entries (#35109)
         mergeSeedDatasets(ctx, [ds('crm_x', 'v1')], PKG);
         const live = mergeSeedDatasets(ctx, [], PKG);
         expect(live).toEqual([host]);
+
+        // A package with no datasets on a host with no list registers nothing.
+        const bare = makeKernelCtx();
+        mergeSeedDatasets(bare, [], PKG);
+        expect(bare.services.has('seed-datasets')).toBe(false);
     });
 
     it('an owned replace removes only what that owner merged, never an un-owned copy of the same object', () => {

@@ -127,7 +127,10 @@ export function mergeSeedDatasets(ctx: unknown, datasets: readonly unknown[], ow
     const c = ctx as SeedDatasetHost | null | undefined;
     const current = readSeedDatasets(ctx);
     const list: unknown[] = Array.isArray(current) ? current : [];
-    if (typeof owner === 'string' && owner !== '') replaceOwnedSeedDatasets(list, owner, datasets);
+    const owned = typeof owner === 'string' && owner !== '';
+    // An owner with nothing to add and no list to take entries off: register nothing.
+    if (owned && datasets.length === 0 && !Array.isArray(current)) return list;
+    if (owned) replaceOwnedSeedDatasets(list, owner, datasets);
     else if (datasets.length > 0) list.push(...datasets);
 
     // Only the first source registers; every later one mutated the shared list
