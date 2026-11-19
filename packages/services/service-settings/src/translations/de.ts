@@ -414,13 +414,26 @@ export const de: PlatformTranslationData = {
         multi_factor: { title: 'Multi-Faktor', description: 'Wer in dieser Organisation sein Konto mit einer Authenticator-App (TOTP) schützen muss.' },
       },
       keys: {
-        allowed_ip_ranges: { label: 'Erlaubte IP-Bereiche' },
-        session_idle_timeout_minutes: { label: 'Leerlauf-Zeitlimit (Minuten)' },
-        session_absolute_max_hours: { label: 'Maximale Sitzungsdauer (Stunden)' },
-        max_concurrent_sessions_per_user: { label: 'Max. gleichzeitige Sitzungen pro Benutzer' },
+        allowed_ip_ranges: {
+          label: 'Erlaubte IP-Bereiche',
+          help: 'CIDR-Bereiche oder exakte IPs (eine pro Zeile oder durch Kommas getrennt), z. B. 203.0.113.0/24. Wenn gesetzt, wird die Sitzung eines Mitglieds für diese Organisation von außerhalb dieser Bereiche nicht geöffnet, und eine Sitzung, die später von außerhalb kommt, wird abgemeldet; ebenso jede Anfrage, deren Client-Adresse der Server nicht ermitteln kann. Jeder Bereich muss innerhalb der erlaubten IP-Bereiche der Bereitstellung liegen, sofern diese welche festlegt, und die Liste muss die Adresse enthalten, von der aus Sie speichern. Leer = nur die Bereiche der Bereitstellung gelten. Für Plattformadministratoren gelten nur die Bereiche der Bereitstellung.',
+        },
+        session_idle_timeout_minutes: {
+          label: 'Leerlauf-Zeitlimit (Minuten)',
+          help: 'Meldet ein Mitglied nach so vielen Minuten Inaktivität ab. Nicht länger als das Leerlauf-Zeitlimit der Bereitstellung, sofern sie eines festlegt. 0 = das Leerlauf-Zeitlimit der Bereitstellung.',
+        },
+        session_absolute_max_hours: {
+          label: 'Maximale Sitzungsdauer (Stunden)',
+          help: 'Erzwingt so viele Stunden nach der Anmeldung eine erneute Authentifizierung, unabhängig von der Aktivität. Nicht länger als die Sitzungsdauer der Bereitstellung, sofern sie eine festlegt. 0 = die Sitzungsdauer der Bereitstellung.',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'Max. gleichzeitige Sitzungen pro Benutzer',
+          help: 'Begrenzt die gleichzeitig angemeldeten Sitzungen eines Mitglieds in dieser Organisation; oberhalb des Limits werden die ältesten davon abgemeldet, und Sitzungen in anderen Organisationen werden weder gezählt noch abgemeldet. Geprüft bei der Anmeldung und wenn ein Mitglied in diese Organisation wechselt. Nicht höher als das Limit der Bereitstellung, sofern sie eines festlegt; dieses zählt weiterhin alle Sitzungen eines Mitglieds. 0 = nur das Limit der Bereitstellung.',
+        },
         mfa_required: {
           label: 'Multi-Faktor-Authentifizierung verlangen',
           options: { off: 'Aus', administrators: 'Administratoren', everyone: 'Alle' },
+          help: 'Wer eine Authenticator-App verwenden muss: Administratoren (Plattform-, Organisations- und delegierte Administratoren) oder alle. Betroffene, die sich nicht registriert haben, verlieren nach Ablauf der Schonfrist der Bereitstellung den Zugriff auf Daten. Eine schwächere Stufe als die der Bereitstellung wird abgelehnt; Aus = die Anforderung der Bereitstellung. Erfordert, dass die Zwei-Faktor-Authentifizierung für diese Bereitstellung aktiviert ist; solange sie aus ist, wird das Speichern einer Anforderung abgelehnt.',
         },
       },
     },

@@ -14,7 +14,7 @@
  *
  * ## When a seat may run it
  *
- * pm-dispatch `references/platform-readings.md` carries the rule. A seat may
+ * pm-dispatch `references/readings-ci.md` carries the rule. A seat may
  * re-run a PR's failed jobs of a listed workflow ONCE through this tool. It may
  * do so only after it has read the log and written down, on the PR or the card,
  * why it judges the failure a flake (a check whose log says it measured nothing),
