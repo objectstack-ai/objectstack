@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 ---
 
 feat(spec): declare `SharedRecordIds`, the share-grant semi-join leaf, with its fixed inner read, the comparand door's `admitFixedReadLeaves` option and a conformance case-set (ADR-0155 step 1)
