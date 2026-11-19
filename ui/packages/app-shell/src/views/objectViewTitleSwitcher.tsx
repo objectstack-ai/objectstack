@@ -217,6 +217,14 @@ export function ObjectViewTitleSwitcher({
     );
 }
 
+/** The field names an open view's columns list (a name, or `{ field }`). */
+function shownFieldsOf(view: Record<string, any> | undefined): string[] {
+    const columns = Array.isArray(view?.columns) ? view.columns : [];
+    return columns
+        .map((column: unknown) => (typeof column === 'string' ? column : (column as { field?: unknown })?.field))
+        .filter((name: unknown): name is string => typeof name === 'string' && name.length > 0);
+}
+
 // The doors of a host that offers no in-place create: never called, since no
 // card is drawn without `create`.
 const NO_LIST_STATE = () => ({ url: {} });
@@ -303,6 +311,7 @@ export function useObjectViewTitleSwitcher({
             canCreatePersonal: create.canCreatePersonal,
             canCreateShared: create.canCreateShared,
             hasUnsavedConditions: create.hasUnsavedConditions,
+            shownFields: shownFieldsOf(create.activeView),
             onCreate: createInPlace,
         }
         : undefined;

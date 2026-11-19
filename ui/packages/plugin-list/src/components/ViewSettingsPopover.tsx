@@ -1160,6 +1160,12 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
         className="w-[calc(100vw-2rem)] sm:w-72 p-0"
         data-testid="view-settings-content"
         data-page={page}
+        // The menu opens on itself, not in the view name's field: a key
+        // pressed after opening must not start renaming the view.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus?.();
+        }}
       >
         <div className="max-h-[min(70vh,560px)] overflow-y-auto">{body}</div>
 

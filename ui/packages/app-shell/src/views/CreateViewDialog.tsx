@@ -496,11 +496,18 @@ function useRequiredPicks({
   objectDef,
   types,
   selectedType,
+  shownFields,
 }: {
   enabled: boolean;
   objectDef?: CreateViewDialogProps['objectDef'];
   types: readonly ViewTypeMeta[];
   selectedType: string;
+  /**
+   * The fields the list on screen shows. A field pick's default is taken
+   * among them first (the same preferred names, then their order), and from
+   * the whole object only when none of them is eligible.
+   */
+  shownFields?: readonly string[];
 }) {
   const { t } = useObjectTranslation();
   const fieldOptions = useMemo(() => (objectDef ? deriveFieldOptions(objectDef) : []), [objectDef]);
@@ -643,7 +650,9 @@ function useRequiredPicks({
         return;
       }
       if (rf.kind && rf.kind !== 'field') return; // `preferred` names object fields only
-      const picked = pickPreferredField(eligibleFields(rf), rf.preferred ?? []);
+      const eligibleObjectFields = eligibleFields(rf);
+      const shown = eligibleObjectFields.filter((o) => shownFields?.includes(o.value));
+      const picked = pickPreferredField(shown.length > 0 ? shown : eligibleObjectFields, rf.preferred ?? []);
       if (picked) setRequiredValue(rf.key, picked);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1084,6 +1093,12 @@ export interface CreateViewCardProps {
   existingKeys?: string[];
   /** Restrict the view types. Defaults to every type the dialog offers. */
   availableTypes?: string[];
+  /**
+   * The fields the list on screen shows (the open view's columns): the one
+   * pick the type needs defaults to one of them (kanban: a status-like field
+   * the list shows, so 阶段 over a hidden 审批状态).
+   */
+  shownFields?: readonly string[];
   /** The reader may create one of their own views. */
   canCreatePersonal: boolean;
   /** The reader may create a shared view: the card then offers the switch. */
@@ -1120,6 +1135,7 @@ export function CreateViewCard({
   canCreatePersonal,
   canCreateShared,
   hasUnsavedConditions,
+  shownFields,
   onCreate,
   onBack,
 }: CreateViewCardProps) {
@@ -1159,7 +1175,7 @@ export function CreateViewCard({
     catalog,
     boundDataset,
     semantics,
-  } = useRequiredPicks({ enabled: true, objectDef, types, selectedType });
+  } = useRequiredPicks({ enabled: true, objectDef, types, selectedType, shownFields });
 
   const meta = types.find((v) => v.type === selectedType);
   useEffect(() => {

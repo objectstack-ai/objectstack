@@ -187,6 +187,14 @@ describe('Options menu — the view name', () => {
     expect(onRename).toHaveBeenCalledWith('My open deals');
   });
 
+  it('opening the menu does not put the cursor in the name: a key pressed then renames nothing', () => {
+    const onRename = vi.fn();
+    openMenu({ viewName: { label: 'Hot deals', onRename } });
+    const input = screen.getByTestId('options-view-name-input');
+    expect(document.activeElement).not.toBe(input);
+    expect(screen.getByTestId('view-settings-content').contains(document.activeElement)).toBe(true);
+  });
+
   it('a refused rename shows the name it had; Escape puts it back too', async () => {
     const onRename = vi.fn().mockResolvedValue(false);
     openMenu({ viewName: { label: 'Open deals', onRename } });

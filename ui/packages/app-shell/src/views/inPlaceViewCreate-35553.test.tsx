@@ -289,6 +289,29 @@ describe('the in-place create card', () => {
     });
   });
 
+  it('kanban defaults its group field to a status-like field the list shows, before one it hides', async () => {
+    const withApproval = {
+      ...DEAL,
+      fields: { approval_status: { type: 'select', label: 'Approval status', options: [{ value: 'ok', label: 'OK' }] }, ...DEAL.fields },
+    };
+    const { onCreate } = mountCard({ objectDef: withApproval, shownFields: ['name', 'stage', 'amount'] });
+    await chooseType('kanban');
+    expect(screen.getByTestId('create-view-card-pick-groupByField')).toHaveTextContent('Stage');
+    fireEvent.click(submit());
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(onCreate.mock.calls[0][0].config.kanban).toEqual({ groupByField: 'stage' });
+  });
+
+  it('CONTROL: without the shown fields it is the first status-like field of the object', async () => {
+    const withApproval = {
+      ...DEAL,
+      fields: { approval_status: { type: 'select', label: 'Approval status', options: [{ value: 'ok', label: 'OK' }] }, ...DEAL.fields },
+    };
+    mountCard({ objectDef: withApproval });
+    await chooseType('kanban');
+    expect(screen.getByTestId('create-view-card-pick-groupByField')).toHaveTextContent('Approval status');
+  });
+
   it('calendar asks for its date field alone; a type that needs none shows no pick', async () => {
     mountCard();
     await chooseType('calendar');
