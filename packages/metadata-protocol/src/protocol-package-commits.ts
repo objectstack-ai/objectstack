@@ -330,6 +330,8 @@ export class ProtocolPackageCommitsFacet {
                 return { type: row?.type, name: row?.name, body };
             }),
             retryVerb: 'duplicate',
+            // [#35157] The source base stays installed beside its duplicate.
+            sourceStaysInstalled: true,
         });
 
         // [ADR-0146 D10, #28564] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE

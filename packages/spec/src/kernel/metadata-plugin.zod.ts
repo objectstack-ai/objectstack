@@ -259,7 +259,7 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
    * that never glob: the CLI derives every scaffolded file name from them
    * (commit 50fb191dc, pinned by `cli/test/generate-file-name-registry-parity.test.ts`),
    * and `codeOnlySourceHint` reads `filePatterns[0]` back as the prescription
-   * in a 403 `not_creatable` refusal — which the `capability` and `api`
+   * in a 403 `not_creatable` refusal — which the `job` and `api`
    * entries of `DEFAULT_METADATA_TYPE_REGISTRY` below already lean on.
    *
    * @example ["**\/*.object.ts", "**\/*.object.yml"]
@@ -1147,7 +1147,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //     servable destination to be judged toward.
   //
   // `allowRuntimeCreate: false` + `allowEnvironmentOverlay: false` therefore makes
-  // `api` CODE-ONLY (the `job` / `agent` / `capability` shape): the #5086 inlet
+  // `api` CODE-ONLY (the `job` / `agent` shape): the #5086 inlet
   // refuses `PUT /api/v1/meta/api/:name` before persistence, on every kernel,
   // in draft mode as well as active, with `code: 'NOT_CREATABLE'`, `status: 403`
   // and a prescription naming this entry's own `filePatterns[0]`
@@ -1234,28 +1234,39 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
   // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
   //
-  // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
-  // packages DEFINE capabilities — `defineCapability` on a stack's
-  // `capabilities[]`, or a `*.capability.ts` file the loader globs — while
-  // permission sets GRANT them and resources REQUIRE them. An administrator
-  // minting a brand-new capability at runtime has no counterpart in that
-  // three-way separation: nothing in code would ever require the name, so the
-  // row would be an unreferenced grant target sitting in the SAME namespace
-  // `systemPermissions` / `requiredPermissions` resolve by string. Hence
-  // `allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`, which together
-  // are #5086's code-only declaration — `saveMetaItem` refuses
-  // `PUT /api/v1/meta/capability/:name` with 403 `not_creatable` on EVERY
-  // kernel, and `codeOnlySourceHint` reads `filePatterns[0]` back to tell the
-  // author where to declare it instead. `job` (#4509) and `agent` (ADR-0063 §2)
-  // carry the same pair for the same reason.
+  // RUNTIME-CREATABLE, OVERLAY-CLOSED (#35157). ADR-0066 D1 says a package
+  // DEFINES a capability, a permission set GRANTS it and a resource REQUIRES
+  // it. The entry was first code-only on the reading that an administrator
+  // minting a capability at runtime has no counterpart in that separation —
+  // "nothing in code would ever require the name". That stopped being true
+  // once environment metadata could carry the other two edges: an action, a
+  // flow or an object authored in the environment declares
+  // `requiredPermissions`, and a permission set authored there grants it. The
+  // case that forced the reading is an `unmanaged` install (ADR-0131 D6),
+  // which copies a package into environment rows through this save door: an
+  // app that gates its actions on its own capabilities had nowhere to put the
+  // declarations, so it could not be copied at all, and dropping them would
+  // have kept the gate (the runtime matches names) while losing what only a
+  // declaration carries — its label, its `org` scope (ADR-0090 D12 (c)) and
+  // the exemption that lets a set granting it bind to `everyone` (ADR-0090
+  // D5 revision).
+  //
+  // What stays closed, and where:
+  //  - `allowEnvironmentOverlay: false` — a capability a package ships is not
+  //    an environment author's to re-declare: the save door's package door
+  //    refuses a write onto it, so a tenant cannot re-scope it.
+  //  - A platform capability name (`PLATFORM_CAPABILITY_NAMES`) and a name
+  //    another holder already declares are refused at save, before anything
+  //    is stored (`@objectstack/metadata-protocol`'s security-catalog name
+  //    refusal): one name, one holder, and the platform floor is absolute
+  //    (ADR-0090 D5 revision, boundary 1).
+  //  - The body is judged by `CapabilityDeclarationSchema` (422), as it was
+  //    behind the `OS_METADATA_WRITABLE` hatch.
   //
   // The package-declaration channel is untouched: `AppPlugin` registers stack
   // `capabilities[]` through `registerInMemory`, and the filesystem loader
   // globs `filePatterns` — neither goes through `saveMetaItem`, so a package's
   // declarations still reach the registry, their one home (ADR-0131 D3).
-  // `OS_METADATA_WRITABLE=capability` remains the ONE documented
-  // operator escape hatch (ADR-0005), and behind it the write is now judged by
-  // `CapabilityDeclarationSchema` (422) instead of being stored unvalidated.
   //
   // `supportsOverlay: false` — a capability is a name, label and scope; there
   // is no merge semantic, and letting a tenant overlay a package-shipped
@@ -1266,10 +1277,10 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // `description` is admin-facing copy in plain words. In ADR terms this is the
   // DEFINITION side of ADR-0066 D1: grants live on permission sets,
   // requirements on resources.
-  { type: 'capability', label: 'Capability', description: 'A permission a package defines; you grant it through permission sets', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
+  { type: 'capability', label: 'Capability', description: 'A permission a package defines; you grant it through permission sets', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
   // [ADR-0131 D6, regime C] Declared sharing rules.
   //
-  // ⛔ CODE-ONLY, the `capability` pair, for a regime-C reason: a sharing rule
+  // ⛔ CODE-ONLY, the `job` pair, for a regime-C reason: a sharing rule
   // has exactly two sources — a package declares it (the stack's `sharingRules`,
   // served from the registry, switched off through the activation ledger) and an
   // organization authors its own (`sys_sharing_rule`, `POST /api/v1/sharing/rules`,
