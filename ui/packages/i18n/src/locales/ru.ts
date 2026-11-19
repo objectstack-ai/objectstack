@@ -989,8 +989,6 @@ const ru = {
     recordOpen: "Открытие записей",
     recordOpenDrawer: "Боковая панель",
     recordOpenPage: "Вся страница",
-    recordOpenNote: "Ваша личная настройка, не входит в объявление объекта. ↗ у записи всегда открывает её на всю страницу.",
-    recordOpenDeclaredPage: "Этот объект объявлен для открытия на всю страницу",
     addGroup: "Добавить поле группировки",
     collapsedByDefault: "Свёрнуто по умолчанию",
     removeGroup: "Удалить",
@@ -1267,13 +1265,11 @@ const ru = {
       label: "Представления",
       pinned: "Закреплено",
       recent: "Недавние",
-      all: "Все представления",
       pin: "Закрепить: открывать это представление по умолчанию",
       unpin: "Открепить: список снова открывает представление по умолчанию",
       inMenu: "Уже в меню",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Мои представления",
-      saveAsMyView: "Сохранить как моё представление",
       myViewName: "Название представления",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Общие представления',

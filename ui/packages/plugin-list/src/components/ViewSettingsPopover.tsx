@@ -58,6 +58,7 @@ import {
   Download,
   Loader2,
   Undo2,
+  Save,
 } from 'lucide-react';
 import { TOOLBAR_TEXT_TRIGGER } from '../listToolbarRow';
 import { ViewSwitcherFaceContext } from '../ViewSwitcher';
@@ -282,6 +283,18 @@ export interface ViewSettingsPopoverProps {
   changedCount?: number;
   /** Hand every changed setting back to the view's own. Drawn when wired. */
   onReset?: () => void;
+  /**
+   * Whether 恢复默认 is disabled. Defaults to "nothing counted"
+   * (`changedCount === 0`); a host that owns the reset and wires it only
+   * while the list differs from the view passes `false`.
+   */
+  resetDisabled?: boolean;
+  /**
+   * 保存: the list on screen becomes the open view's stored body. A host
+   * wires it only for a view the reader owns and may update, and only while
+   * the list differs from it (objectstack#30073). Drawn beside 恢复默认.
+   */
+  onSave?: () => void;
 
   /** Footer: re-fetch the list. Drawn when wired. */
   onRefresh?: () => void;
@@ -831,6 +844,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     setInlineEdit,
     changedCount = 0,
     onReset,
+    resetDisabled,
+    onSave,
     onRefresh,
     refreshing,
     exportFormats,
@@ -854,7 +869,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   // The trigger is named 「Options」 on the view bar (objectstack#35548).
   const triggerLabel = t('list.options', { defaultValue: 'Options' });
   const hasExport = !!onExport && !!exportFormats && exportFormats.length > 0;
-  const hasFooter = !!onReset || !!onRefresh || hasExport;
+  const hasFooter = !!onSave || !!onReset || !!onRefresh || hasExport;
 
   const fieldLabel = (name: string) => allFields.find((f) => f.name === name)?.label || name;
   const none = t('list.none', { defaultValue: 'None' });
@@ -1150,12 +1165,27 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
 
         {page === 'root' && hasFooter && (
           <div className="flex flex-wrap items-center gap-1 border-t px-1 py-1" data-testid="display-footer">
+            {onSave && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs max-sm:h-11"
+                onClick={() => {
+                  closeMenu();
+                  onSave();
+                }}
+                data-testid="display-save-button"
+              >
+                <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                {t('common.save', { defaultValue: 'Save' })}
+              </Button>
+            )}
             {onReset && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-xs max-sm:h-11"
-                disabled={changedCount === 0}
+                disabled={resetDisabled ?? changedCount === 0}
                 onClick={onReset}
                 data-testid="display-reset-button"
               >

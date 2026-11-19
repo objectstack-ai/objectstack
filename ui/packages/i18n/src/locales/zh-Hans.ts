@@ -960,8 +960,6 @@ const zh = {
     recordOpen: '打开记录',
     recordOpenDrawer: '抽屉',
     recordOpenPage: '整页',
-    recordOpenNote: '个人偏好，不进对象声明；记录的 ↗ 总能打开整页',
-    recordOpenDeclaredPage: '此对象声明为整页打开',
     addGroup: '添加分组字段',
     collapsedByDefault: '默认折叠',
     removeGroup: '删除',
@@ -1230,13 +1228,11 @@ const zh = {
       label: '视图',
       pinned: '固定',
       recent: '最近',
-      all: '全部',
       pin: '固定：默认打开此视图',
       unpin: '取消固定：列表恢复打开默认视图',
       inMenu: '已在菜单中',
       // objectstack#29635 — the reader's own views (My views).
       myViews: '我的视图',
-      saveAsMyView: '另存为我的视图',
       myViewName: '视图名称',
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: '共享视图',

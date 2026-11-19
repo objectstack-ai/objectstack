@@ -19,6 +19,8 @@
  *   - dragging (and the arrow keys on the handle) reorders the SHOWN fields
  *     and writes the whole order, a hidden field keeping its slot;
  *   - Row height lists three heights when the host can set one;
+ *   - 保存 sits beside 恢复默认 when the host hands a save over, and the host
+ *     may say when 恢复默认 is live (`resetDisabled`);
  *   - no control of the menu is an icon without a name, and no line speaks
  *     the developer wording the menu dropped (asserted against the zh pack).
  */
@@ -138,6 +140,39 @@ describe('Options menu — the first level', () => {
     expect(radios[1].getAttribute('aria-checked')).toBe('true');
     fireEvent.click(radios[0]);
     expect(setMode).toHaveBeenCalledWith('compact');
+  });
+});
+
+describe('Options menu — 保存 and 恢复默认', () => {
+  it('a host with a save gets 保存 beside 恢复默认; it closes the menu and saves', () => {
+    const onSave = vi.fn();
+    const onReset = vi.fn();
+    openMenu({ onSave, onReset, resetDisabled: false }, 'zh');
+    const save = screen.getByTestId('display-save-button');
+    const reset = screen.getByTestId('display-reset-button');
+    expect(save).toHaveTextContent('保存');
+    expect(reset).toHaveTextContent('恢复默认');
+    // Side by side, 保存 first.
+    expect(save.parentElement).toBe(reset.parentElement);
+    expect(save.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onReset).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+  });
+
+  it('no save, no 保存; the host decides when 恢复默认 is live', () => {
+    openMenu({ onReset: () => {}, resetDisabled: true });
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+    expect(screen.getByTestId('display-reset-button')).toBeDisabled();
+    cleanup();
+    openMenu({ onReset: () => {}, resetDisabled: false });
+    expect(screen.getByTestId('display-reset-button')).toBeEnabled();
+  });
+
+  it('without `resetDisabled`, 恢复默认 is live only once a setting changed', () => {
+    openMenu({ onReset: () => {} });
+    expect(screen.getByTestId('display-reset-button')).toBeDisabled();
   });
 });
 

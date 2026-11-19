@@ -58,8 +58,10 @@ export interface ObjectViewSwitcherMenuProps {
     onManageViews?: () => void;
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
-    /** 「Add view」 and its card. Absent ⇒ not offered. */
+    /** 「Add view」 and its card. Absent ⇒ `onAddView`, if any. */
     create?: SwitcherCreateOptions;
+    /** 「Add view」 for a host with no card to offer: the dropdown closes and this runs (the Create View dialog). */
+    onAddView?: () => void;
     t: TFn;
 }
 
@@ -97,6 +99,7 @@ export function ObjectViewSwitcherMenu({
     onRenamePersonalView,
     onDeletePersonalView,
     create,
+    onAddView,
     t,
 }: ObjectViewSwitcherMenuProps) {
     const [mode, setMode] = useState<'list' | 'create'>('list');
@@ -171,11 +174,11 @@ export function ObjectViewSwitcherMenu({
                         active ? 'font-medium text-foreground' : 'text-foreground/90',
                     )}
                 >
-                    <span className="flex h-[1.25rem] w-4 shrink-0 items-center justify-center text-muted-foreground" data-testid="view-switcher-row-icon">
+                    <span className="flex h-[1.25rem] w-4 shrink-0 items-center justify-center text-muted-foreground" data-testid="view-switcher-type-icon">
                         {Icon ? <Icon className="h-4 w-4" /> : null}
                     </span>
                     {/* The whole name, wrapped: a cut name hides what tells two views apart. */}
-                    <span className="min-w-0 break-words [overflow-wrap:anywhere]" data-testid="view-switcher-row-label">{view.label}</span>
+                    <span className="min-w-0 break-words [overflow-wrap:anywhere]" data-testid="view-switcher-name">{view.label}</span>
                     {active && <Check className="ml-auto mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                 </button>
                 {favorites && (
@@ -291,13 +294,16 @@ export function ObjectViewSwitcherMenu({
                     </>
                 )}
             </div>
-            {(create || onManageViews) && (
+            {(create || onAddView || onManageViews) && (
                 <div className="border-t p-1">
-                    {create && (
+                    {(create || onAddView) && (
                         <button
                             type="button"
                             data-testid="list-view-switcher-new"
-                            onClick={() => setMode('create')}
+                            onClick={() => {
+                                if (create) setMode('create');
+                                else { onClose(); onAddView?.(); }
+                            }}
                             className={FOOTER_ITEM}
                         >
                             <Plus className="h-4 w-4 text-muted-foreground" aria-hidden="true" />

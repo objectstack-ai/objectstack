@@ -585,6 +585,31 @@ export interface ListViewProps {
    */
   onPersonalizationChange?: (parts: ReadonlyArray<ListPersonalizationPart>) => void;
   /**
+   * Rename the open view from the options menu's first row, its name
+   * (`schema.label`, objectstack#35551). Wired only for a reader who may
+   * rename the view: the owner of one of their own views, or someone who may
+   * edit a shared one; without it the name row is read-only. Resolve `false`
+   * on a refused rename and the field reverts. A HOST prop, never a schema
+   * key. The name row is drawn for a host that wires this or
+   * `onPersonalizationChange` (a host that shows views), and a label.
+   */
+  onRenameView?: (label: string) => boolean | Promise<boolean>;
+  /**
+   * 保存 in the options menu (objectstack#35551, the 「已个性化」 marker's
+   * save, objectstack#30073): the list on screen becomes the open view's
+   * stored body. A host wires it only for a view the reader owns and may
+   * update, and only while the list differs from the view. Absent ⇒ none.
+   */
+  onSaveView?: () => void;
+  /**
+   * The host's full reset (the 「已个性化」 marker's), drawn as the options
+   * menu's 恢复默认 in place of the list's own reset. A host that reports
+   * `onPersonalizationChange` and wires this only while the list differs
+   * from the view gives the reset its home in the menu. Absent ⇒ the list's
+   * own reset, or, under `onPersonalizationChange`, 恢复默认 dimmed.
+   */
+  onResetView?: () => void;
+  /**
    * Draw the COMPACT posture (objectui#12703): a header with the list's title
    * and record count over two-line rows (the view's first visible column, its
    * second muted below), and none of the toolbar, view tabs, row-number column,
@@ -1482,8 +1507,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
   'list.recordOpenPage': 'Full page',
-  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
-  'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // The draft preview's note on a sort or filter it left out (objectstack#34807).
   'list.draftOnlyQueryDropped': 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
   // The note on view fields a disabled package withholds (objectstack#34901).
@@ -2102,6 +2125,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   viewDefaults,
   onRestoreViewDefaults,
   onPersonalizationChange,
+  onRenameView,
+  onSaveView,
+  onResetView,
   recordOpen,
   page,
   onPageChange,
@@ -3325,6 +3351,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       try { window.localStorage.setItem(galleryDensityKey, next); } catch { /* ignore */ }
       return next;
     });
+  }, [galleryDensityKey]);
+  // The options menu's Row height level picks a gallery card size by name.
+  const setGalleryDensityMode = React.useCallback((mode: 'compact' | 'comfortable' | 'spacious') => {
+    const next: GalleryCardSize = mode === 'compact' ? 'small' : mode === 'comfortable' ? 'medium' : 'large';
+    try { window.localStorage.setItem(galleryDensityKey, next); } catch { /* ignore */ }
+    setGalleryCardSize(next);
   }, [galleryDensityKey]);
 
   const handlePullRefresh = React.useCallback(async () => {
@@ -7368,6 +7400,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 ? {
                     mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
                     cycle: cycleGalleryDensity,
+                    setMode: setGalleryDensityMode,
                   }
                 : density as any}
               showHideFields={toolbarFlags.showHideFields}
@@ -7387,9 +7420,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               inlineEdit={inlineEdit}
               setInlineEdit={updateInlineEdit}
               changedCount={displayChangedCount}
+              // objectstack#35551 — the view's name and its rename head the
+              // menu; the field order is the grid's column order, the state
+              // the header's column drag writes.
+              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
+                ? { label: schema.label, onRename: onRenameView }
+                : undefined}
+              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
+                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
+                : undefined}
               // objectstack#28950 — a host that marks a personalized list owns
-              // the one reset; the Display control then offers none of its own.
-              onReset={onPersonalizationChange ? undefined : resetDisplayToViewDefault}
+              // the one reset. It hands it over while there is something to
+              // restore, and the menu draws it as 恢复默认, dimmed between
+              // times (objectstack#35551); the list offers none of its own.
+              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
+              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
+              onSave={onSaveView}
               onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
               refreshing={loading}
               exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}

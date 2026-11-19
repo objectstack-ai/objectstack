@@ -3542,7 +3542,7 @@
       ],
       "steps": [
         "open showcase_task grid; screenshot",
-        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery keeps one card-size button that steps to the next mode on each click) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
+        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
         "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
         "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
@@ -3642,7 +3642,7 @@
         {
           "revision": 8,
           "date": "2026-11-19",
-          "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the grid's cycling density button; a gallery keeps its card-size button. Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
+          "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the cycling density button, on a grid and on a gallery (its card size). Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
           "ref": "#35551"
         }
       ]
@@ -3678,14 +3678,14 @@
         "delete"
       ],
       "steps": [
-        "as admin, open showcase_task; open the Create View dialog; choose kanban; set groupByField = status; create — capture PUT /api/v1/meta/view/<name>?mode=draft (the console's create handler → createRuntimeMetadata → metadataClient.save(…, {mode:'draft'}): ADR-0034 stages every runtime-created view as an invisible per-item draft under the qualified name showcase_task.<key>) carrying {type:'kanban', kanban:{groupByField:'status'}}; the console lands on view/<name>?preview=draft",
+        "as admin, open showcase_task; open the Create View dialog (the view dropdown's 管理视图 / Manage views, then its Add new view: the dropdown's own 添加视图 creates in place since #35553, steps[6]); choose kanban; set groupByField = status; create — capture PUT /api/v1/meta/view/<name>?mode=draft (the console's create handler → createRuntimeMetadata → metadataClient.save(…, {mode:'draft'}): ADR-0034 stages every runtime-created view as an invisible per-item draft under the qualified name showcase_task.<key>) carrying {type:'kanban', kanban:{groupByField:'status'}}; the console lands on view/<name>?preview=draft",
         "click Publish on the draft-preview bar — capture POST /api/v1/meta/view/<name>/publish (meta.publishItem); then reload WITHOUT ?preview=draft and confirm the new kanban view is live and groups by status. Before the publish, a plain (published-only) read does not serve it — the draft isolation itself is studio-authoring.view-authoring-live's to score",
         "rename the view via Manage Views; capture the PUT; reload confirms the new label",
         "set the view as default (unsets the prior default); capture the PUT(s). Where the prior default is a packaged view, its unset goes through the customization pair, POST /api/v1/packages/BASE/ensure-customization (BASE the view's package, com.example.showcase) then a PUT with ?package=com.example.showcase.custom, so the PUTs come in two shapes (QA run #33861); reload confirms the default moved",
         "pin the view; capture the PUT (isPinned); reload confirms it pinned",
         "delete the view; capture DELETE /api/v1/meta/view/<name>; reload confirms it is gone",
         "as the admin, open the view dropdown (the view bar's switcher) and use 添加视图 / Add view at its foot: the dropdown turns into the create card (name, view type with icons, the one field the type needs — kanban: the group field — 包含当前的筛选和排序 while the list holds unsaved filters or sort, on by default, and a personal / shared switch for a reader who may create shared views). Create a kanban grouped by status with the switch left on personal: capture the write — one of the reader's own views, a sys_personal_view row whose config carries {type:'kanban', kanban:{groupByField:'status', columns:[…]}} — and confirm the list opens on it and it is listed under 我的视图 / My views in the dropdown. Repeat once with the switch on shared: the same draft PUT …?mode=draft and ?preview=draft landing as steps[0], under a machine key generated from the name (no key field is asked for). Count the clicks from the dropdown to the open new view",
-        "as the non-admin, open the same object; confirm the create-view and manage-views (rename/default/pin/delete) affordances are ABSENT",
+        "as the non-admin, open the same object; confirm the shared-view create (the Create View dialog, and the create card's personal / shared switch — the dropdown's 添加视图 stays where the reader may save views of their own, and creates only those) and the manage-views (rename/default/pin/delete) affordances are ABSENT",
         "as the non-admin, forge a direct PUT /api/v1/meta/view/<name>; capture the refusal"
       ],
       "acceptance": [
@@ -3708,7 +3708,7 @@
           "evidence": "the two create traces + the dropdown screenshot + the click count"
         },
         {
-          "clause": "the non-admin lacks the mutation affordances: the create-view control and the Manage Views rename/default/pin/delete actions are ABSENT (ManageViewsDialog suppresses mutation affordances for system/read-only)",
+          "clause": "the non-admin lacks the mutation affordances: the shared-view create (the Create View dialog and the create card's shared switch; 添加视图 itself stays, for the reader's own views only) and the Manage Views rename/default/pin/delete actions are ABSENT (ManageViewsDialog suppresses mutation affordances for system/read-only)",
           "oracle": "dom",
           "verify": "after a screenshot confirms the object opened, the DOM shows no create-view / manage mutation controls for the non-admin",
           "evidence": "the non-admin screenshot"
@@ -3757,7 +3757,7 @@
         {
           "revision": 4,
           "date": "2026-11-19",
-          "change": "added the create-in-place variant, a step before the non-admin steps and an acceptance clause before the non-admin clause: the view dropdown's Add view turns into a create card that makes one of the reader's own views by default (sys_personal_view, opened at once) or, through the shared switch for a reader allowed to, the same draft-first create as acceptance[0] under a generated machine key. The existing clauses are unchanged.",
+          "change": "added the create-in-place variant, a step before the non-admin steps and an acceptance clause before the non-admin clause: the view dropdown's Add view turns into a create card that makes one of the reader's own views by default (sys_personal_view, opened at once) or, through the shared switch for a reader allowed to, the same draft-first create as acceptance[0] under a generated machine key. The non-admin clause (acceptance[3]) and steps[7] now name the SHARED-view create as the absent affordance, since 添加视图 stays for a reader who may save views of their own and creates only those (the separate Save as my view entry folded into the card); steps[0] says the Create View dialog opens from Manage views. The other clauses are unchanged.",
           "ref": "#35553"
         }
       ]

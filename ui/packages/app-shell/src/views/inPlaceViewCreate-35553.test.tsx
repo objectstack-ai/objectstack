@@ -390,13 +390,13 @@ describe('the view dropdown body', () => {
     const rows = (group: HTMLElement) => Array.from(group.querySelectorAll<HTMLElement>('[data-section]')).map((r) => r.dataset.testid);
     expect(rows(mine)).toEqual(['view-switcher-row-pv_1']);
     expect(rows(shared)).toEqual(['view-switcher-row-crm_deal.all', 'view-switcher-row-crm_deal.board']);
-    for (const icon of screen.getAllByTestId('view-switcher-row-icon')) expect(icon.querySelector('svg')).not.toBeNull();
+    for (const icon of screen.getAllByTestId('view-switcher-type-icon')) expect(icon.querySelector('svg')).not.toBeNull();
   });
 
   it('a long name is kept whole: it wraps, and the row names it in full', () => {
     mountMenu();
     const row = screen.getByTestId('view-switcher-row-pv_1');
-    const label = within(row).getByTestId('view-switcher-row-label');
+    const label = within(row).getByTestId('view-switcher-name');
     expect(label).toHaveTextContent(VIEWS[2].label);
     expect(label.className).not.toMatch(/\btruncate\b/);
     expect(label.className).toMatch(/break-words/);

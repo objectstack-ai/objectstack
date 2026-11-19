@@ -933,8 +933,6 @@ const de = {
     recordOpen: "Datensätze öffnen",
     recordOpenDrawer: "Seitenleiste",
     recordOpenPage: "Ganze Seite",
-    recordOpenNote: "Ihre persönliche Einstellung, nicht Teil der Objektdeklaration. Das ↗ eines Datensatzes öffnet immer die ganze Seite.",
-    recordOpenDeclaredPage: "Dieses Objekt ist so deklariert, dass es als ganze Seite geöffnet wird",
     addGroup: "Gruppenfeld hinzufügen",
     collapsedByDefault: "Standardmäßig eingeklappt",
     removeGroup: "Entfernen",
@@ -1203,13 +1201,11 @@ const de = {
       label: "Ansichten",
       pinned: "Angeheftet",
       recent: "Zuletzt",
-      all: "Alle Ansichten",
       pin: "Anheften: diese Ansicht standardmäßig öffnen",
       unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
       inMenu: "Bereits im Menü",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Meine Ansichten",
-      saveAsMyView: "Als meine Ansicht speichern",
       myViewName: "Name der Ansicht",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Geteilte Ansichten',

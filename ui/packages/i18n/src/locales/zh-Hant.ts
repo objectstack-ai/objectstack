@@ -960,8 +960,6 @@ const zhHant = {
     recordOpen: '開啟記錄',
     recordOpenDrawer: '抽屜',
     recordOpenPage: '整頁',
-    recordOpenNote: '個人偏好，不進物件宣告；記錄的 ↗ 總能開啟整頁',
-    recordOpenDeclaredPage: '此物件宣告為整頁開啟',
     addGroup: '新增分組欄位',
     collapsedByDefault: '預設摺疊',
     removeGroup: '刪除',
@@ -1230,13 +1228,11 @@ const zhHant = {
       label: '檢視',
       pinned: '固定',
       recent: '最近',
-      all: '全部',
       pin: '固定：預設開啟此檢視',
       unpin: '取消固定：列表恢復開啟預設檢視',
       inMenu: '已在選單中',
       // objectstack#29635 — the reader's own views (My views).
       myViews: '我的檢視',
-      saveAsMyView: '另存為我的檢視',
       myViewName: '檢視名稱',
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: '共享檢視',

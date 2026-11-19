@@ -958,8 +958,6 @@ const pt = {
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Painel lateral",
     recordOpenPage: "Página inteira",
-    recordOpenNote: "Sua preferência pessoal, não faz parte da declaração do objeto. O ↗ de um registro sempre abre a página inteira.",
-    recordOpenDeclaredPage: "Este objeto está declarado para abrir como página inteira",
     addGroup: "Adicionar campo de grupo",
     collapsedByDefault: "Recolhido por padrão",
     removeGroup: "Remover",
@@ -1232,13 +1230,11 @@ const pt = {
       label: "Exibições",
       pinned: "Fixada",
       recent: "Recentes",
-      all: "Todas as exibições",
       pin: "Fixar: abrir esta exibição por padrão",
       unpin: "Desafixar: a lista volta a abrir a exibição padrão",
       inMenu: "Já está no menu",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Minhas visualizações",
-      saveAsMyView: "Salvar como minha visualização",
       myViewName: "Nome da visualização",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Visualizações compartilhadas',

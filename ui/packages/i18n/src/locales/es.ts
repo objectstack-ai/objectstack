@@ -963,8 +963,6 @@ const es = {
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Panel lateral",
     recordOpenPage: "Página completa",
-    recordOpenNote: "Tu preferencia personal, no forma parte de la declaración del objeto. El ↗ de un registro siempre abre la página completa.",
-    recordOpenDeclaredPage: "Este objeto está declarado para abrirse como página completa",
     addGroup: "Agregar campo de grupo",
     collapsedByDefault: "Contraído por defecto",
     removeGroup: "Eliminar",
@@ -1237,13 +1235,11 @@ const es = {
       label: "Vistas",
       pinned: "Fijada",
       recent: "Recientes",
-      all: "Todas las vistas",
       pin: "Fijar: abrir esta vista de forma predeterminada",
       unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
       inMenu: "Ya está en el menú",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Mis vistas",
-      saveAsMyView: "Guardar como mi vista",
       myViewName: "Nombre de la vista",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Vistas compartidas',

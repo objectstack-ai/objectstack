@@ -1042,8 +1042,6 @@ const ar = {
     recordOpen: "فتح السجلات",
     recordOpenDrawer: "درج جانبي",
     recordOpenPage: "صفحة كاملة",
-    recordOpenNote: "تفضيلك الشخصي، وليس جزءًا من تعريف الكائن. يفتح ↗ الخاص بالسجل الصفحة الكاملة دائمًا.",
-    recordOpenDeclaredPage: "هذا الكائن مُعرَّف ليُفتح كصفحة كاملة",
     addGroup: "إضافة حقل مجموعة",
     collapsedByDefault: "مطوي افتراضياً",
     removeGroup: "إزالة",
@@ -1328,13 +1326,11 @@ const ar = {
       label: "العروض",
       pinned: "مثبّت",
       recent: "الأخيرة",
-      all: "كل العروض",
       pin: "تثبيت: فتح هذا العرض افتراضيًا",
       unpin: "إلغاء التثبيت: تفتح القائمة عرضها الافتراضي مجددًا",
       inMenu: "موجود بالفعل في القائمة",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "طرق العرض الخاصة بي",
-      saveAsMyView: "حفظ كطريقة عرض خاصة بي",
       myViewName: "اسم طريقة العرض",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'العروض المشتركة',

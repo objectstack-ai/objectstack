@@ -958,8 +958,6 @@ const fr = {
     recordOpen: "Ouvrir les enregistrements",
     recordOpenDrawer: "Panneau latéral",
     recordOpenPage: "Pleine page",
-    recordOpenNote: "Votre préférence personnelle, hors de la déclaration de l’objet. Le ↗ d’un enregistrement ouvre toujours la pleine page.",
-    recordOpenDeclaredPage: "Cet objet est déclaré pour s’ouvrir en pleine page",
     addGroup: "Ajouter un champ de groupe",
     collapsedByDefault: "Réduit par défaut",
     removeGroup: "Supprimer",
@@ -1232,13 +1230,11 @@ const fr = {
       label: "Vues",
       pinned: "Épinglée",
       recent: "Récentes",
-      all: "Toutes les vues",
       pin: "Épingler : ouvrir cette vue par défaut",
       unpin: "Désépingler : la liste rouvre sa vue par défaut",
       inMenu: "Déjà dans le menu",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Mes vues",
-      saveAsMyView: "Enregistrer comme ma vue",
       myViewName: "Nom de la vue",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Vues partagées',

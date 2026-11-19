@@ -933,8 +933,6 @@ const ko = {
     recordOpen: "레코드 열기",
     recordOpenDrawer: "서랍",
     recordOpenPage: "전체 페이지",
-    recordOpenNote: "개인 설정이며 객체 선언에 포함되지 않습니다. 레코드의 ↗는 항상 전체 페이지를 엽니다.",
-    recordOpenDeclaredPage: "이 객체는 전체 페이지로 열리도록 선언되어 있습니다",
     addGroup: "그룹 필드 추가",
     collapsedByDefault: "기본적으로 접힘",
     removeGroup: "제거",
@@ -1203,13 +1201,11 @@ const ko = {
       label: "보기",
       pinned: "고정됨",
       recent: "최근",
-      all: "모든 보기",
       pin: "고정: 이 보기를 기본으로 열기",
       unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
       inMenu: "이미 메뉴에 있음",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "내 뷰",
-      saveAsMyView: "내 뷰로 저장",
       myViewName: "뷰 이름",
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: '공유 보기',

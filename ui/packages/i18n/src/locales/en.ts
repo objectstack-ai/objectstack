@@ -1222,8 +1222,6 @@ const en = {
     recordOpen: 'Open records',
     recordOpenDrawer: 'Drawer',
     recordOpenPage: 'Full page',
-    recordOpenNote: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
-    recordOpenDeclaredPage: 'This object is declared to open as a full page',
     addGroup: 'Add group field',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
@@ -1498,13 +1496,11 @@ const en = {
       label: 'Views',
       pinned: 'Pinned',
       recent: 'Recent',
-      all: 'All views',
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
       // objectstack#29635 — the reader's own views (My views).
       myViews: 'My views',
-      saveAsMyView: 'Save as my view',
       myViewName: 'View name',
       // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
       sharedViews: 'Shared views',

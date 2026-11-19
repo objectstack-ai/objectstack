@@ -450,6 +450,7 @@ export function useCreateViewInPlace({
     savePersonal,
     openPersonal,
     createShared,
+    clearSourceListState,
     t,
 }: {
     objectName: string;
@@ -463,6 +464,12 @@ export function useCreateViewInPlace({
     openPersonal: (id: string) => void;
     /** The add-view door for a shared view (`handleViewCreate`). */
     createShared: (config: Record<string, any>) => Promise<boolean>;
+    /**
+     * Clear the reader's temporary list state on the view the new one came
+     * from, once a personal view took it over (as Save as my view does,
+     * objectstack#30073): that view then opens as its own again.
+     */
+    clearSourceListState?: (viewId: string) => void;
     t: ReturnType<typeof useObjectTranslation>['t'];
 }) {
     return useCallback(async ({ config, scope, includeCurrent }: InPlaceViewRequest): Promise<boolean> => {
@@ -488,6 +495,7 @@ export function useCreateViewInPlace({
         }
         try {
             const id = await savePersonal(label, built.config);
+            if (includeCurrent && activeView?.id) clearSourceListState?.(String(activeView.id));
             openPersonal(id);
             return true;
         } catch (err) {
@@ -498,5 +506,5 @@ export function useCreateViewInPlace({
             });
             return false;
         }
-    }, [objectName, activeView, readListState, savePersonal, openPersonal, createShared, t]);
+    }, [objectName, activeView, readListState, savePersonal, openPersonal, createShared, clearSourceListState, t]);
 }
