@@ -41,7 +41,8 @@
 // in memory and dies with the kernel. A managed datasource whose engine has no
 // faithful stand-in (`mongodb`, or a driver a plugin supplies) keeps its real
 // driver, and every derived write family leaves its objects out and names
-// them, as for an external one. Only the local flow run refuses a write to any
+// them, as for an external one; the app's seed, hooks and flows still write to
+// that real store. Only the local flow run refuses a write to any
 // object routed away from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
 // `verify.managed-datasource-stand-in.test.ts` the managed one.
