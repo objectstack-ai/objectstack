@@ -13,12 +13,12 @@
 
 ## Summary
 
-157 records under `docs/adr/` (152 numbers), 11 under `ui/docs/adr/` (listed separately below).
+158 records under `docs/adr/` (153 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 136 |
-| Proposed | 7 |
+| Proposed | 8 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **157** |
+| **Total** | **158** |
 
 ## Shared numbers
 
@@ -205,7 +205,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0133](./0133-org-management-open-basics.md) | Organization management — the open basics; a mirror of cloud ADR-0081 D1/D3/D4 in the repository whose code e… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` (#1… | 2026-09-07 | — | — |
 | [ADR-0134](./0134-env-side-scim-provisioning.md) | Env-side SCIM provisioning — `@better-auth/scim` is the mechanism, and this platform writes the deactivation | Proposed — 2026-09-07. This file is a MIRROR of the open, mechanism half of | 2026-09-07 | — | — |
 | [ADR-0135](./0135-identity-and-access-architecture.md) | Identity and access architecture — the open half, mirrored from cloud ADR-0024 | Accepted — The DECISION is — it is `objectstack-ai/cloud` ADR-0024, accept… | 2026-06-25 | — | — |
-| [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18 — this record declares; it implements nothing. D1's… | 2026-09-18 | — | — |
+| [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18; amended 2026-11-17 (a server row for a `required` f… | 2026-09-18 | — | — |
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | ADR-0146 |
@@ -224,6 +224,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
 | [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
+| [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Proposed — 2026-11-19. This record declares; it implements nothing — no sc… | 2026-11-19 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
