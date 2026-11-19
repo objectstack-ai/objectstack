@@ -83,6 +83,32 @@ export function splitRowIssues<T extends { path: string }>(
   return { handDown, kept };
 }
 
+/**
+ * objectstack#35628 — whether a row the editor reports drawing (`drawn`, the
+ * inline register) draws an issue at `path`: some registered prefix IS the
+ * path or a segment-wise prefix of it (`config.columns` draws
+ * `config.columns.0`, never `config.columnsX`). A form over the whole draft
+ * registers its row keys, one-segment prefixes, so there this is #35499's
+ * head test; a form over a slice registers its keys under the slice's path
+ * (`config.filter`), so it never claims a sibling key's issue.
+ */
+export function issuePathDrawnBy(drawn: ReadonlySet<string>, path: string): boolean {
+  for (let p = path; p !== ''; p = p.slice(0, Math.max(0, p.lastIndexOf('.')))) {
+    if (drawn.has(p)) return true;
+  }
+  return false;
+}
+
+/**
+ * The issues under `prefix`, the prefix trimmed (`config.filter.0` →
+ * `filter.0` for `config`): what a form mounted over that slice of the draft
+ * is handed. The slice's own exact issues are not among them.
+ */
+export function issuesUnderPrefix<T extends { path: string }>(issues: readonly T[], prefix: string): T[] {
+  const lead = `${prefix}.`;
+  return issues.filter((i) => i.path.startsWith(lead)).map((i) => ({ ...i, path: i.path.slice(lead.length) }));
+}
+
 /** Best-effort stable identity of an array item, resolving an I18nLabel object
  *  ({ key, defaultValue }) to its string. Returns undefined when none usable. */
 function itemIdentity(item: unknown): string | undefined {
