@@ -34,6 +34,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The header stub below reads `@object-ui/components` inside its mock factory;
+// pay that load at collection, not inside a clocked case.
+import '@object-ui/components';
 
 const authFetchSpy = vi.fn(async () =>
   new Response(JSON.stringify({ data: {} }), {

@@ -95,7 +95,7 @@ const CLS = {
   barButton: g('header', /barFace && '(h-11 min-w-0 flex-1)'/, ['h-11', 'flex-1']),
   barMore: g('header', /barFace \? '(h-11 w-11 shrink-0 px-0)'/, ['h-11', 'w-11']),
   back: g('page', /const phoneBackClass =\s*'([^']+)'/, ['min-h-[44px]']),
-  topBar: g('topBar', /'(flex min-h-11 sm:h-10 [^']*)'/, ['min-h-11', 'sm:h-10']),
+  topBar: g('topBar', /'(flex min-h-11 sm:h-11 [^']*)'/, ['min-h-11', 'sm:h-11']),
   topBarButton: g('topBar', /const RECORD_TOP_BAR_BUTTON_CLASS =\s*'([^']+)'/, ['h-11', 'w-11', 'sm:h-7']),
   dialog: (() => {
     const block = S.dialog.slice(S.dialog.indexOf('// Mobile-first: full-screen'), S.dialog.indexOf('// Animations'));

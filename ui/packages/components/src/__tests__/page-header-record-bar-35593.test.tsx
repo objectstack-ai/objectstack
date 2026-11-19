@@ -22,6 +22,9 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import '../renderers';
+// `page` reaches the react runtime through a dynamic import: pay that load at
+// collection, not inside a clocked case.
+import '@object-ui/react-runtime';
 import {
   RecordHeaderBarContext,
   RecordHeaderStateContext,
