@@ -20,6 +20,12 @@
  *                     the README, the run record, the scorecard and the
  *                     transcript (JSON and Markdown each), and a `source/` tree
  *                     holding `objectstack.config.ts`.
+ *   app-sample-data   an entry's package arrives with no sample data: its
+ *                     `source/` holds no {@link SAMPLE_DATA_FILE}, the file is
+ *                     not a non-empty list of stack `data:` datasets (each
+ *                     valid against the spec's `SeedSchema`, each with at
+ *                     least one record), or `source/objectstack.config.ts`
+ *                     does not import it ({@link SAMPLE_DATA_SPECIFIER}).
  *   app-screenshots   an entry lists no screenshot, a listed screenshot is not
  *                     on disk, or `screenshots/` holds a file the entry does
  *                     not list.
@@ -49,13 +55,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { APP_LAYOUT, FRAMEWORK_PACKAGE, STABLE_VERSION } from './contract.js';
+import { SeedSchema } from '@objectstack/spec/data';
+
+import { APP_LAYOUT, FRAMEWORK_PACKAGE, SAMPLE_DATA_FILE, SAMPLE_DATA_SPECIFIER, STABLE_VERSION } from './contract.js';
 import { GalleryIndexSchema, type GalleryApp } from './manifest.js';
 
 export const FINDING_CODES = [
   'index-json',
   'app-missing',
   'app-incomplete',
+  'app-sample-data',
   'app-screenshots',
   'app-unlisted',
   'framework-version',
@@ -162,6 +171,7 @@ export function checkGallery(dir: string, opts: CheckOptions): GalleryFinding[] 
         if (!isFile(join(root, APP_LAYOUT.source, SOURCE_REQUIRED))) {
           add('app-incomplete', `${rel}/${APP_LAYOUT.source}`, `a complete app directory holds its metadata source, ${APP_LAYOUT.source}/${SOURCE_REQUIRED} at least, and this one does not`);
         }
+        checkSampleData(dir, app, add);
         checkScreenshots(dir, app, add);
       }
       const v = app.framework.version;
@@ -179,6 +189,40 @@ export function checkGallery(dir: string, opts: CheckOptions): GalleryFinding[] 
   // ── the whole tree: stray files and local paths ──────────────────────────
   scanTree(dir, '', add);
   return findings;
+}
+
+/** The sample data a trial package arrives with: present, a valid non-empty dataset list, and read by the config. */
+function checkSampleData(dir: string, app: GalleryApp, add: AddFinding): void {
+  const source = `apps/${app.id}/${APP_LAYOUT.source}`;
+  const rel = `${source}/${SAMPLE_DATA_FILE}`;
+  const file = join(dir, rel);
+  if (!isFile(file)) {
+    add('app-sample-data', rel, `a gallery app is a package a customer installs to try, and it arrives with the card's seed rows as its sample data in ${APP_LAYOUT.source}/${SAMPLE_DATA_FILE}; this one has none`);
+    return;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    add('app-sample-data', rel, `not JSON: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
+  if (!Array.isArray(raw) || raw.length === 0) {
+    add('app-sample-data', rel, 'the sample data is a non-empty list of stack `data:` datasets, and this is not one');
+    return;
+  }
+  raw.forEach((dataset, i) => {
+    const parsed = SeedSchema.safeParse(dataset);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) add('app-sample-data', rel, `[${i}]${issue.path.length ? `.${issue.path.join('.')}` : ''}: ${issue.message}`);
+    } else if (parsed.data.records.length === 0) {
+      add('app-sample-data', rel, `[${i}] (\`${parsed.data.object}\`) holds no record`);
+    }
+  });
+  const config = join(dir, source, SOURCE_REQUIRED);
+  if (isFile(config) && !readFileSync(config, 'utf8').includes(`'${SAMPLE_DATA_SPECIFIER}'`)) {
+    add('app-sample-data', `${source}/${SOURCE_REQUIRED}`, `does not import '${SAMPLE_DATA_SPECIFIER}' into its \`data:\`, so the package installs without its sample data`);
+  }
 }
 
 function checkScreenshots(dir: string, app: GalleryApp, add: AddFinding): void {
