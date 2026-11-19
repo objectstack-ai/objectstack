@@ -47,6 +47,10 @@
  * | `empty_query` | `dashboard`, `widget`, `dataset`, `object` | all four by label |
  * | `widget_query_failed` | `dashboard`, `widget`, `dataset`, `object`, `cause` (`access` · `field-access` · `unavailable` · `query`) | dashboard, widget and dataset by label; `object` by label for `query`, and by the API name the refusal names for `access` · `field-access` · `unavailable` (the caller was not admitted to it, so nothing of it is read); empty when there is none |
  * | `probes_unavailable` | `count` | no name: one finding covers every dashboard of the publish |
+ * | `widget_empty_result` | `dashboard`, `widget`, `dataset` | all three by label |
+ * | `rollup_never_computed` | `object`, `field`, `child`, `cause` (`fills` · `named`) | the parent object, the roll-up field and the child object by label |
+ * | `seed_reference_unresolved` | `object`, `field`, `target`, `count` | the seeded object, its reference field and the target object by label |
+ * | `flow_connector_action_unresolved` | `flow`, `step`, `connector`, `cause` (`refused` · `no-action` · `degraded`) | flow and step by label; the connector by its name (the step names it so) |
  *
  * A label is the published body's own (`label`, a widget's `title`), read
  * through the probe's item reader and resolved for the sentence's locale. An
@@ -842,6 +846,249 @@ const PROBES_UNAVAILABLE: UserTextEntry = {
     `게시된 각 대시보드를 열어 위젯이 로드되는지 확인하세요.`,
 };
 
+/** `widget_empty_result`: the widget's real query answered only zeros, so the card shows an empty "0" tile. */
+const WIDGET_EMPTY_RESULT: UserTextEntry = {
+  en: (p) =>
+    `${WIDGET_ON_DASHBOARD.en(p)} shows only zeros: its data source "${p.dataset}" has nothing to count right now. ` +
+    `If that is not expected, check the records it reads (their dates and values), then publish again.`,
+  'zh-Hans': (p) =>
+    `${WIDGET_ON_DASHBOARD['zh-Hans'](p)}只显示 0：它的数据源“${p.dataset}”目前没有可统计的内容。` +
+    `如果这不符合预期，请检查它读取的记录（日期和数值），然后重新发布。`,
+  'zh-Hant': (p) =>
+    `${WIDGET_ON_DASHBOARD['zh-Hant'](p)}只顯示 0：它的資料來源「${p.dataset}」目前沒有可統計的內容。` +
+    `如果這不符合預期，請檢查它讀取的記錄（日期和數值），然後重新發布。`,
+  es: (p) =>
+    `${WIDGET_ON_DASHBOARD.es(p)} solo muestra ceros: su origen de datos "${p.dataset}" no tiene nada que contar ` +
+    `por ahora. Si no es lo esperado, revise los registros que lee (sus fechas y valores) y vuelva a publicar.`,
+  ar: (p) =>
+    `${WIDGET_ON_DASHBOARD.ar(p)} لا يعرض سوى أصفار: مصدر بياناته "${p.dataset}" لا يحتوي حاليًا على ما يمكن ` +
+    `احتسابه. إذا لم يكن ذلك متوقعًا، فراجع السجلات التي يقرؤها (تواريخها وقيمها) ثم أعد النشر.`,
+  fr: (p) =>
+    `${WIDGET_ON_DASHBOARD.fr(p)} n’affiche que des zéros : sa source de données « ${p.dataset} » n’a rien à ` +
+    `compter pour l’instant. Si ce n’est pas attendu, vérifiez les enregistrements qu’il lit (leurs dates et ` +
+    `valeurs), puis publiez à nouveau.`,
+  'pt-BR': (p) =>
+    `${WIDGET_ON_DASHBOARD['pt-BR'](p)} mostra apenas zeros: sua fonte de dados "${p.dataset}" não tem nada a ` +
+    `contar no momento. Se isso não for o esperado, verifique os registros que ele lê (datas e valores) e publique novamente.`,
+  ru: (p) =>
+    `${WIDGET_ON_DASHBOARD.ru(p)} показывает только нули: в его источнике данных «${p.dataset}» сейчас нечего ` +
+    `считать. Если это неожиданно, проверьте записи, которые он читает (их даты и значения), и опубликуйте снова.`,
+  de: (p) =>
+    `${WIDGET_ON_DASHBOARD.de(p)} zeigt nur Nullen: Seine Datenquelle „${p.dataset}“ hat derzeit nichts zu zählen. ` +
+    `Wenn das nicht erwartet ist, prüfen Sie die Datensätze, die es liest (Datumswerte und Werte), und ` +
+    `veröffentlichen Sie dann erneut.`,
+  ja: (p) =>
+    `${WIDGET_ON_DASHBOARD.ja(p)}は 0 しか表示していません。データソース「${p.dataset}」には現在集計する内容がありません。` +
+    `想定外の場合は、読み取るレコード（日付と値）を確認してから、もう一度公開してください。`,
+  ko: (p) =>
+    `${WIDGET_ON_DASHBOARD.ko(p)}에 0만 표시됩니다. 데이터 소스 "${p.dataset}"에 현재 집계할 내용이 없습니다. ` +
+    `예상과 다르다면 읽어 오는 레코드(날짜와 값)를 확인한 후 다시 게시하세요.`,
+};
+
+/** `rollup_never_computed`: a roll-up field reads blank on every record that has related records; `cause` `named` is a min, max or avg roll-up, which the plain run does not fill. */
+const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
+  en: (p) =>
+    `The roll-up field "${p.field}" on "${p.object}" is blank on every record that has related "${p.child}" ` +
+    `records: its stored value was never calculated for them. ` +
+    (p.cause === 'named'
+      ? `Ask whoever runs this environment to recalculate it by name (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, naming this field): a minimum, ` +
+        `maximum or average roll-up is not filled by the plain recalculation.`
+      : `Ask whoever runs this environment to recalculate the roll-ups (\`os migrate summary-nulls --apply\`).`),
+  'zh-Hans': (p) =>
+    `“${p.object}”的汇总字段“${p.field}”在每条有相关“${p.child}”记录的记录上都是空的：它的存储值从未为这些记录计算过。` +
+    (p.cause === 'named'
+      ? `请让负责此环境的人按名称重新计算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，并指明此字段）：最小值、最大值或平均值汇总不会被普通的重新计算填充。`
+      : `请让负责此环境的人重新计算汇总字段（\`os migrate summary-nulls --apply\`）。`),
+  'zh-Hant': (p) =>
+    `「${p.object}」的匯總欄位「${p.field}」在每筆有相關「${p.child}」記錄的記錄上都是空的：它的儲存值從未為這些記錄計算過。` +
+    (p.cause === 'named'
+      ? `請讓負責此環境的人按名稱重新計算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，並指明此欄位）：最小值、最大值或平均值匯總不會被一般的重新計算填入。`
+      : `請讓負責此環境的人重新計算匯總欄位（\`os migrate summary-nulls --apply\`）。`),
+  es: (p) =>
+    `El campo de resumen "${p.field}" de "${p.object}" está vacío en todos los registros que tienen registros ` +
+    `relacionados de "${p.child}": su valor almacenado nunca se calculó para ellos. ` +
+    (p.cause === 'named'
+      ? `Pida a quien administra este entorno que lo recalcule por nombre (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
+        `un resumen de mínimo, máximo o promedio no se rellena con el recálculo normal.`
+      : `Pida a quien administra este entorno que recalcule los resúmenes (\`os migrate summary-nulls --apply\`).`),
+  ar: (p) =>
+    `حقل التجميع "${p.field}" في "${p.object}" فارغ في كل سجل له سجلات "${p.child}" مرتبطة: لم تُحسب قيمته المخزنة لها قط. ` +
+    (p.cause === 'named'
+      ? `اطلب من مسؤول هذه البيئة إعادة حسابه بالاسم (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` مع تسمية هذا الحقل): ` +
+        `حقل تجميع الحد الأدنى أو الأقصى أو المتوسط لا تملؤه إعادة الحساب العادية.`
+      : `اطلب من مسؤول هذه البيئة إعادة حساب حقول التجميع (\`os migrate summary-nulls --apply\`).`),
+  fr: (p) =>
+    `Le champ de synthèse « ${p.field} » de « ${p.object} » est vide sur chaque enregistrement qui a des ` +
+    `enregistrements « ${p.child} » liés : sa valeur stockée n’a jamais été calculée pour eux. ` +
+    (p.cause === 'named'
+      ? `Demandez à la personne qui gère cet environnement de le recalculer nommément (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, en nommant ce ` +
+        `champ) : une synthèse minimum, maximum ou moyenne n’est pas remplie par le recalcul ordinaire.`
+      : `Demandez à la personne qui gère cet environnement de recalculer les synthèses (\`os migrate summary-nulls --apply\`).`),
+  'pt-BR': (p) =>
+    `O campo de resumo "${p.field}" de "${p.object}" está vazio em todos os registros que têm registros ` +
+    `relacionados de "${p.child}": seu valor armazenado nunca foi calculado para eles. ` +
+    (p.cause === 'named'
+      ? `Peça a quem administra este ambiente que o recalcule pelo nome (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
+        `um resumo de mínimo, máximo ou média não é preenchido pelo recálculo comum.`
+      : `Peça a quem administra este ambiente que recalcule os resumos (\`os migrate summary-nulls --apply\`).`),
+  ru: (p) =>
+    `Сводное поле «${p.field}» объекта «${p.object}» пустое во всех записях, у которых есть связанные записи ` +
+    `«${p.child}»: его сохранённое значение для них ни разу не рассчитывалось. ` +
+    (p.cause === 'named'
+      ? `Попросите администратора этой среды пересчитать его по имени (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` с указанием этого поля): ` +
+        `сводное поле минимума, максимума или среднего обычный пересчёт не заполняет.`
+      : `Попросите администратора этой среды пересчитать сводные поля (\`os migrate summary-nulls --apply\`).`),
+  de: (p) =>
+    `Das Rollup-Feld „${p.field}“ in „${p.object}“ ist bei jedem Datensatz mit verknüpften „${p.child}“-Datensätzen ` +
+    `leer: Sein gespeicherter Wert wurde für sie nie berechnet. ` +
+    (p.cause === 'named'
+      ? `Bitten Sie die Person, die diese Umgebung betreibt, es namentlich neu zu berechnen (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` mit diesem ` +
+        `Feld): Ein Minimum-, Maximum- oder Durchschnitts-Rollup füllt die normale Neuberechnung nicht.`
+      : `Bitten Sie die Person, die diese Umgebung betreibt, die Rollups neu zu berechnen (\`os migrate summary-nulls --apply\`).`),
+  ja: (p) =>
+    `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つすべてのレコードで空です。` +
+    `保存値がこれらのレコードについて一度も計算されていません。` +
+    (p.cause === 'named'
+      ? `この環境の管理者に、この項目を指定した再計算（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`）を依頼してください。` +
+        `最小・最大・平均の集計は通常の再計算では埋まりません。`
+      : `この環境の管理者に集計の再計算（\`os migrate summary-nulls --apply\`）を依頼してください。`),
+  ko: (p) =>
+    `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는 모든 레코드에서 비어 있습니다. ` +
+    `저장된 값이 이 레코드들에 대해 한 번도 계산되지 않았습니다. ` +
+    (p.cause === 'named'
+      ? `이 환경의 관리자에게 이 필드를 지정한 재계산(\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`)을 요청하세요. ` +
+        `최소·최대·평균 롤업은 일반 재계산으로 채워지지 않습니다.`
+      : `이 환경의 관리자에게 롤업 재계산(\`os migrate summary-nulls --apply\`)을 요청하세요.`),
+};
+
+/** `seed_reference_unresolved`: sample records point at records that do not exist. */
+const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
+  en: (p) =>
+    `Some sample "${p.object}" records (${p.count} value(s) in "${p.field}") point to "${p.target}" records that ` +
+    `do not exist, so on those records "${p.field}" leads nowhere. Fix or clear "${p.field}" in the sample data, ` +
+    `then publish again.`,
+  'zh-Hans': (p) =>
+    `部分“${p.object}”示例记录（“${p.field}”中有 ${p.count} 个值）指向不存在的“${p.target}”记录，因此这些记录上的“${p.field}”指向空处。` +
+    `请在示例数据中修正或清空“${p.field}”，然后重新发布。`,
+  'zh-Hant': (p) =>
+    `部分「${p.object}」示例記錄（「${p.field}」中有 ${p.count} 個值）指向不存在的「${p.target}」記錄，因此這些記錄上的「${p.field}」指向空處。` +
+    `請在示例資料中修正或清空「${p.field}」，然後重新發布。`,
+  es: (p) =>
+    `Algunos registros de ejemplo de "${p.object}" (${p.count} valor(es) en "${p.field}") apuntan a registros de ` +
+    `"${p.target}" que no existen, así que en esos registros "${p.field}" no lleva a ninguna parte. Corrija o vacíe ` +
+    `"${p.field}" en los datos de ejemplo y vuelva a publicar.`,
+  ar: (p) =>
+    `بعض سجلات "${p.object}" التجريبية (${p.count} قيمة في "${p.field}") تشير إلى سجلات "${p.target}" غير موجودة، ` +
+    `لذلك لا يؤدي "${p.field}" في هذه السجلات إلى أي مكان. صحّح "${p.field}" في البيانات التجريبية أو أفرغه، ثم أعد النشر.`,
+  fr: (p) =>
+    `Certains enregistrements d’exemple « ${p.object} » (${p.count} valeur(s) dans « ${p.field} ») pointent vers ` +
+    `des enregistrements « ${p.target} » inexistants : sur ces enregistrements, « ${p.field} » ne mène nulle part. ` +
+    `Corrigez ou videz « ${p.field} » dans les données d’exemple, puis publiez à nouveau.`,
+  'pt-BR': (p) =>
+    `Alguns registros de exemplo de "${p.object}" (${p.count} valor(es) em "${p.field}") apontam para registros de ` +
+    `"${p.target}" que não existem, então nesses registros "${p.field}" não leva a lugar nenhum. Corrija ou limpe ` +
+    `"${p.field}" nos dados de exemplo e publique novamente.`,
+  ru: (p) =>
+    `Некоторые примеры записей «${p.object}» (значений в поле «${p.field}»: ${p.count}) ссылаются на ` +
+    `несуществующие записи «${p.target}», поэтому в этих записях «${p.field}» никуда не ведёт. Исправьте или ` +
+    `очистите «${p.field}» в примерах данных и опубликуйте снова.`,
+  de: (p) =>
+    `Einige Beispieldatensätze von „${p.object}“ (${p.count} Wert(e) in „${p.field}“) verweisen auf „${p.target}“-` +
+    `Datensätze, die nicht existieren, sodass „${p.field}“ bei diesen Datensätzen ins Leere führt. Korrigieren oder ` +
+    `leeren Sie „${p.field}“ in den Beispieldaten und veröffentlichen Sie dann erneut.`,
+  ja: (p) =>
+    `「${p.object}」のサンプルレコードの一部（「${p.field}」の値 ${p.count} 件）が存在しない「${p.target}」レコードを参照しているため、` +
+    `それらのレコードの「${p.field}」はどこにもつながりません。サンプルデータの「${p.field}」を修正するか空にしてから、もう一度公開してください。`,
+  ko: (p) =>
+    `일부 "${p.object}" 샘플 레코드("${p.field}"의 값 ${p.count}개)가 존재하지 않는 "${p.target}" 레코드를 가리키므로 ` +
+    `해당 레코드의 "${p.field}"는 아무 곳으로도 연결되지 않습니다. 샘플 데이터에서 "${p.field}"를 수정하거나 비운 후 다시 게시하세요.`,
+};
+
+/**
+ * `flow_connector_action_unresolved`: a flow step calls a connector this
+ * environment cannot use — two candidates or none in reach (`refused`), no such
+ * connector or action (`no-action`), or the connector is down (`degraded`).
+ */
+const FLOW_CONNECTOR_ACTION_UNRESOLVED: UserTextEntry = {
+  en: (p) =>
+    `The step "${p.step}" in automation "${p.flow}" calls the connector "${p.connector}", ` +
+    (p.cause === 'degraded'
+      ? `which is not working right now, so the automation stops at that step until the connector is fixed.`
+      : p.cause === 'refused'
+      ? `but more than one connector, or none this app may use, has that name, so the automation stops at that step every time.`
+      : `which this environment does not have, so the automation stops at that step every time. Install the connector, or change the step.`),
+  'zh-Hans': (p) =>
+    `自动化“${p.flow}”中的步骤“${p.step}”调用了连接器“${p.connector}”，` +
+    (p.cause === 'degraded'
+      ? `但该连接器目前无法工作，所以在修复之前自动化会停在这一步。`
+      : p.cause === 'refused'
+      ? `但有多个同名连接器，或者没有本应用可用的同名连接器，所以自动化每次都会停在这一步。`
+      : `但当前环境没有这个连接器，所以自动化每次都会停在这一步。请安装该连接器，或修改这一步。`),
+  'zh-Hant': (p) =>
+    `自動化「${p.flow}」中的步驟「${p.step}」呼叫了連接器「${p.connector}」，` +
+    (p.cause === 'degraded'
+      ? `但該連接器目前無法運作，所以在修復之前自動化會停在這一步。`
+      : p.cause === 'refused'
+      ? `但有多個同名連接器，或沒有本應用可用的同名連接器，所以自動化每次都會停在這一步。`
+      : `但目前環境沒有這個連接器，所以自動化每次都會停在這一步。請安裝該連接器，或修改這一步。`),
+  es: (p) =>
+    `El paso "${p.step}" de la automatización "${p.flow}" llama al conector "${p.connector}", ` +
+    (p.cause === 'degraded'
+      ? `que ahora no funciona, así que la automatización se detiene en ese paso hasta que se repare.`
+      : p.cause === 'refused'
+      ? `pero hay más de un conector con ese nombre, o ninguno que esta aplicación pueda usar, así que la automatización se detiene en ese paso cada vez.`
+      : `que este entorno no tiene, así que la automatización se detiene en ese paso cada vez. Instale el conector o cambie el paso.`),
+  ar: (p) =>
+    `الخطوة "${p.step}" في الأتمتة "${p.flow}" تستدعي الموصل "${p.connector}"، ` +
+    (p.cause === 'degraded'
+      ? `وهو لا يعمل حاليًا، لذلك تتوقف الأتمتة عند هذه الخطوة حتى يتم إصلاحه.`
+      : p.cause === 'refused'
+      ? `لكن هناك أكثر من موصل بهذا الاسم، أو لا يوجد موصل يمكن لهذا التطبيق استخدامه، لذلك تتوقف الأتمتة عند هذه الخطوة في كل مرة.`
+      : `وهو غير موجود في هذه البيئة، لذلك تتوقف الأتمتة عند هذه الخطوة في كل مرة. ثبّت الموصل أو غيّر الخطوة.`),
+  fr: (p) =>
+    `L’étape « ${p.step} » de l’automatisation « ${p.flow} » appelle le connecteur « ${p.connector} », ` +
+    (p.cause === 'degraded'
+      ? `qui ne fonctionne pas pour le moment : l’automatisation s’arrête à cette étape jusqu’à sa réparation.`
+      : p.cause === 'refused'
+      ? `mais plusieurs connecteurs portent ce nom, ou aucun que cette application peut utiliser : l’automatisation s’arrête à cette étape à chaque fois.`
+      : `que cet environnement n’a pas : l’automatisation s’arrête à cette étape à chaque fois. Installez le connecteur ou modifiez l’étape.`),
+  'pt-BR': (p) =>
+    `A etapa "${p.step}" da automação "${p.flow}" chama o conector "${p.connector}", ` +
+    (p.cause === 'degraded'
+      ? `que não está funcionando agora, então a automação para nessa etapa até que ele seja corrigido.`
+      : p.cause === 'refused'
+      ? `mas há mais de um conector com esse nome, ou nenhum que este aplicativo possa usar, então a automação para nessa etapa toda vez.`
+      : `que este ambiente não tem, então a automação para nessa etapa toda vez. Instale o conector ou altere a etapa.`),
+  ru: (p) =>
+    `Шаг «${p.step}» автоматизации «${p.flow}» вызывает коннектор «${p.connector}», ` +
+    (p.cause === 'degraded'
+      ? `который сейчас не работает, поэтому автоматизация останавливается на этом шаге, пока его не исправят.`
+      : p.cause === 'refused'
+      ? `но коннекторов с таким именем несколько или нет ни одного, доступного этому приложению, поэтому автоматизация каждый раз останавливается на этом шаге.`
+      : `которого нет в этой среде, поэтому автоматизация каждый раз останавливается на этом шаге. Установите коннектор или измените шаг.`),
+  de: (p) =>
+    `Der Schritt „${p.step}“ in der Automatisierung „${p.flow}“ ruft den Connector „${p.connector}“ auf, ` +
+    (p.cause === 'degraded'
+      ? `der gerade nicht funktioniert, daher hält die Automatisierung an diesem Schritt an, bis er behoben ist.`
+      : p.cause === 'refused'
+      ? `aber es gibt mehrere Connectoren mit diesem Namen oder keinen, den diese App verwenden darf, daher hält die Automatisierung jedes Mal an diesem Schritt an.`
+      : `den diese Umgebung nicht hat, daher hält die Automatisierung jedes Mal an diesem Schritt an. Installieren Sie den Connector oder ändern Sie den Schritt.`),
+  ja: (p) =>
+    `自動化「${p.flow}」のステップ「${p.step}」はコネクタ「${p.connector}」を呼び出しますが、` +
+    (p.cause === 'degraded'
+      ? `このコネクタは現在動作していないため、修正されるまで自動化はこのステップで止まります。`
+      : p.cause === 'refused'
+      ? `この名前のコネクタが複数あるか、このアプリで使えるものがないため、自動化は毎回このステップで止まります。`
+      : `この環境にはこのコネクタがないため、自動化は毎回このステップで止まります。コネクタをインストールするか、ステップを変更してください。`),
+  ko: (p) =>
+    `자동화 "${p.flow}"의 단계 "${p.step}"가 커넥터 "${p.connector}"를 호출하지만, ` +
+    (p.cause === 'degraded'
+      ? `이 커넥터가 현재 작동하지 않아 수정될 때까지 자동화가 이 단계에서 멈춥니다.`
+      : p.cause === 'refused'
+      ? `같은 이름의 커넥터가 여러 개이거나 이 앱에서 사용할 수 있는 것이 없어 자동화가 매번 이 단계에서 멈춥니다.`
+      : `이 환경에는 해당 커넥터가 없어 자동화가 매번 이 단계에서 멈춥니다. 커넥터를 설치하거나 단계를 변경하세요.`),
+};
+
 /**
  * Every probe code's sentences. Typed by the probe's own code union, so a
  * code added to `RuntimeBuildIssueCode` without sentences does not compile.
@@ -855,6 +1102,10 @@ export const BUILD_PROBE_USER_TEXT: Readonly<Record<RuntimeBuildIssueCode, UserT
   empty_query: EMPTY_QUERY,
   widget_query_failed: WIDGET_QUERY_FAILED,
   probes_unavailable: PROBES_UNAVAILABLE,
+  widget_empty_result: WIDGET_EMPTY_RESULT,
+  rollup_never_computed: ROLLUP_NEVER_COMPUTED,
+  seed_reference_unresolved: SEED_REFERENCE_UNRESOLVED,
+  flow_connector_action_unresolved: FLOW_CONNECTOR_ACTION_UNRESOLVED,
 });
 
 /**

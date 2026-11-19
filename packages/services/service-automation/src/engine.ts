@@ -10738,6 +10738,21 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * The CLOSED node-type vocabulary — every type this engine can run — or
+     * `undefined` while {@link sealNodeTypeVocabulary} has not been called.
+     *
+     * Read by the metadata publish gate, which refuses a flow naming a type no
+     * executor serves (`flow-node-type-no-executor`, `@objectstack/lint`).
+     * `undefined` before the seal is the whole point: until the host declares
+     * the vocabulary closed, "not registered" is still "not registered YET"
+     * (AGENTS.md "Startup registry reads"), so the gate judges nothing rather
+     * than record a refusal the boot can contradict. Read-only; it never seals.
+     */
+    getSealedNodeTypeVocabulary(): string[] | undefined {
+        return this.nodeTypeVocabularySealed ? [...this.knownNodeTypes()].sort() : undefined;
+    }
+
+    /**
      * Report — once per engine — that a flow ran on an engine whose node-type
      * vocabulary was never sealed, so the ADR-0018 §M1 check never ran (#4792).
      *
