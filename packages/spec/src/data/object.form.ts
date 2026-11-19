@@ -381,7 +381,7 @@ export const objectForm = defineForm({
             // engine computes and stores it on write (`planStoredExpressions`),
             // so a formula-only row hid a live key on a stored field.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
-            // The five members are what `FieldSchema.returnType` declares, and
+            // The six members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
             // in `field.form.ts` (#19677). This grid additionally offered
             // `datetime` and `currency`, so an author who added a formula field
@@ -389,11 +389,12 @@ export const objectForm = defineForm({
             // refusal arriving from the save door, naming a key they never
             // typed. Declared-vs-enforced, one seam before that door.
             // `currency` is declared since #22727 and offered again, in the
+            // same change as the enum; `percent` joined with #35047, in the
             // same change as the enum; `datetime` is still refused.
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' },
               { label: 'Boolean', value: 'boolean' }, { label: 'Date', value: 'date' },
-              { label: 'Currency', value: 'currency' },
+              { label: 'Currency', value: 'currency' }, { label: 'Percent', value: 'percent' },
             ] },
             // A roll-up is ONE key — `summaryOperations` {object, field, function}.
             // The flat `summaryType` / `summaryField` pair named neither of them

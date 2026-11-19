@@ -815,7 +815,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Return Type",
-        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset)."
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%."
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -992,6 +992,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "refusals.params": {
         label: "Params",
         helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
+      },
+      texts: {
+        label: "Texts",
+        helpText: "Sentences the hook writes into records, keyed by the snake_case key its code asks for with ctx.text (e.g. follow_up_subject). The hook gets the declared message in the organization's language, translated, with the declared message as the fallback. For a JavaScript (L2) body or a handler; refused on an expression body"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "The sentence the hook writes when its code asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "texts.params": {
+        label: "Params",
+        helpText: "Names the sentence may fill (e.g. lead): the code asks for ctx.text(key, { lead }), and a {{ lead }} hole renders it. Absent: the sentence is plain text"
       },
       handler: {
         label: "Handler",

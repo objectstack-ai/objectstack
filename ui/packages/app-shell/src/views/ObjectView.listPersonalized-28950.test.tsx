@@ -24,6 +24,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, act, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
@@ -85,7 +88,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
   ListView: (props: any) => {
     listProps = props;
-    return null;
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
   },
 }));
 

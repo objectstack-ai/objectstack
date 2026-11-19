@@ -1,24 +1,27 @@
 /**
- * The page header of the Console `ObjectView` (`./ObjectView.tsx`): the
- * title (the object's plural ahead of the view switcher, or the plural alone),
- * managed-by badge, description and icon, with the
- * header's actions (the create button, Import, the schema-driven toolbar and
- * the overflow menu with favorites) and their folded face, the 「Personalized」
- * marker beside the title (objectstack#28950),
- * moved out of `ObjectViewInner`'s JSX verbatim (objectstack#25992, slice 10).
- * Every value is passed in as a prop.
+ * The page bar of the Console `ObjectView` (`./ObjectView.tsx`), 44px tall
+ * (objectstack#35548, `PageHeader`'s list posture): the object's icon in one
+ * colour and its plural name with the managed-by badge on the left; on the
+ * right the schema-driven toolbar, the ⋮ menu and the create button, or their
+ * folded face. The view switcher is not here: it leads the list's view bar.
+ * The ⋮ menu holds what is not used every time: the object's description,
+ * Import and the favorites entry (objectui#12427).
+ * Moved out of `ObjectViewInner`'s JSX (objectstack#25992, slice 10). Every
+ * value is passed in as a prop.
  */
 
 import { createElement } from 'react';
-import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import { Link } from 'react-router-dom';
+import type { Dispatch, SetStateAction } from 'react';
 import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { Upload, MoreHorizontal } from 'lucide-react';
+import { Upload, MoreVertical } from 'lucide-react';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -34,55 +37,17 @@ import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 /**
  * objectstack#35446 — the list header's width under which it takes
- * `PageHeader`'s compact form: no description, and the folded actions (New
- * labelled, Import and the rest in the 「⋯」 menu). The `md` breakpoint, read
- * against the header's own width, so a main area narrowed by the AI panel, a
- * small window or the record drawer gets it, and a full-width list does not.
+ * `PageHeader`'s compact form: the folded actions (New labelled, Import and
+ * the rest in the 「⋯」 menu). The `md` breakpoint, read against the header's
+ * own width, so a main area narrowed by the AI panel, a small window or the
+ * record drawer gets it, and a full-width list does not. (Since
+ * objectstack#35548 the list bar draws no description at any width: it waits
+ * in the ⋮.)
  */
 const LIST_HEADER_COMPACT_WIDTH = 768;
 
-/**
- * The list title 「OBJECT / VIEW ▾」 (objectstack#27950): the page
- * header is the one place a page is named (objectui#12461), and with the view
- * switcher as the title (objectstack#27594) it names the object too, with the
- * sidebar collapsed or the list opened from a link alike. The object's plural
- * links to its default list. It never shrinks: when the row is short the view
- * label truncates first, inside the switcher.
- */
-function ObjectListTitle({
-    objectLabel,
-    objectListHref,
-    titleSwitcher,
-}: {
-    objectLabel: string;
-    objectListHref: string | undefined;
-    titleSwitcher: ReactNode;
-}) {
-    const crumbClass = 'shrink-0 whitespace-nowrap text-muted-foreground';
-    return (
-        <span className="flex min-w-0 max-w-full items-baseline gap-1.5" data-testid="object-list-title">
-            {objectListHref ? (
-                <Link
-                    to={objectListHref}
-                    className={`${crumbClass} rounded-sm hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
-                    data-testid="object-list-crumb"
-                >
-                    {objectLabel}
-                </Link>
-            ) : (
-                <span className={crumbClass} data-testid="object-list-crumb">{objectLabel}</span>
-            )}
-            <span aria-hidden="true" className="shrink-0 font-normal text-muted-foreground/60">/</span>
-            {titleSwitcher}
-        </span>
-    );
-}
-
 export function ObjectViewPageHeader({
     objectDef,
-    titleSwitcher,
-    titleLabel,
-    objectListHref,
     objectPluralLabel,
     objectDesc,
     createButton,
@@ -96,16 +61,9 @@ export function ObjectViewPageHeader({
     environmentEntitlements,
     toolbarBar,
     listFavorite,
-    personalizedMarker,
     foldedHeaderActions,
 }: {
     objectDef: ConsoleObjectViewProps['objects'][number];
-    /** The list's view switcher (`./objectViewTitleSwitcher.tsx`), or `null` with no view to switch. */
-    titleSwitcher: ReactNode;
-    /** The switcher's text: the open view's label, or the plural for a view with none. */
-    titleLabel: string;
-    /** The object's default list (`/apps/APP/OBJECT`), or `undefined` off an app route. */
-    objectListHref: string | undefined;
     objectPluralLabel: ReturnType<typeof useObjectLabel>['objectPluralLabel'];
     objectDesc: ReturnType<typeof useObjectLabel>['objectDescription'];
     createButton: ReturnType<typeof useObjectViewHeaderChrome>['createButton'];
@@ -119,75 +77,29 @@ export function ObjectViewPageHeader({
     environmentEntitlements: ReturnType<typeof useObjectViewToolbarAffordances>['environmentEntitlements'];
     toolbarBar: ReturnType<typeof useObjectViewHeaderToolbar>['toolbarBar'];
     listFavorite: ReturnType<typeof useObjectListFavorite>;
-    /**
-     * objectstack#28950 — the 「Personalized」 marker (`./ListPersonalizedMarker.tsx`),
-     * or `null` while the reader's list is the view's own. Drawn in the
-     * header's badge slot, beside the title, in both of the header's faces.
-     */
-    personalizedMarker: ReactNode;
     foldedHeaderActions: ReturnType<typeof useObjectViewHeaderChrome>['foldedHeaderActions'];
 }) {
     const pluralLabel = objectPluralLabel(objectDef);
-    // A view with no label is already called by the plural (objectui#12774):
-    // the switcher names the object, and a crumb would say it twice.
-    const title = titleSwitcher == null
-        ? pluralLabel
-        : titleLabel === pluralLabel
-            ? titleSwitcher
-            : <ObjectListTitle objectLabel={pluralLabel} objectListHref={objectListHref} titleSwitcher={titleSwitcher} />;
+    const description = objectDef.description ? objectDesc(objectDef) : undefined;
+    // The ⋮ menu: the description (no longer a resident subtitle), Import and
+    // the favorites entry — the page's once-in-a-while acts.
+    const moreShown = !!description || importShown || !!listFavorite;
     return (
              <div className="hidden sm:block">
              <PageHeader
-                 // The title is the object's plural ahead of the view switcher,
-                 // 「OBJECT / VIEW ▾」 (objectstack#27594,
-                 // objectstack#27950). A view with no label is called by the
-                 // plural (objectui#12774); with no view to switch, the page
-                 // lists the object's records and is titled with the plural, as
-                 // the nav entry that opens it is (objectui#11696); the record
-                 // page keeps the singular.
-                 title={title}
+                 posture="list"
+                 // The object's plural: the page lists its records (objectui#11696).
+                 // The view is named in the view bar below, by its switcher.
+                 title={pluralLabel}
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
-                 // objectstack#28950 — and, before it, the 「Personalized」
-                 // marker while the reader's list differs from the view.
-                 badge={<>{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
-                 subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
+                 badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
                  // `createElement`, not a JSX tag: the looked-up icon is a value,
                  // which react-hooks/static-components refuses in tag position
                  // (the convention ObjectDataPage set).
                  icon={createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
                  actions={
                    <>
-                    {/* No favorite star here since objectui#12423: the one-row
-                        header is icon, title, description and these actions.
-                        The favorites entry is in the overflow menu at the end
-                        of this row (objectui#12427). */}
-
-                    {/* Primary action (see `createButton`). */}
-                    {createButton}
-
-                    {/* Data import — desktop only on phones. CSV imports
-                        are inherently a desk/laptop workflow; the button
-                        was eating header space on mobile next to the
-                        primary "+" action. */}
-                    {/* [#5142] `objectCanImport && importVisible` — the object-level
-                        verdict, then the toolbar-scope `visibleWhen` layer on top of
-                        it. Greyed, not gone, is the `disabledWhen` case below. */}
-                    {importShown && (
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShowImport(true)}
-                        disabled={importDisabled}
-                        className="hidden sm:inline-flex shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
-                        title={t('console.objectView.importTitle')}
-                        data-testid="object-view-import-button"
-                    >
-                        <Upload className="h-4 w-4" />
-                        <span className="hidden sm:inline">{t('console.objectView.import')}</span>
-                    </Button>
-                    )}
-
                     {/* Schema-driven toolbar actions */}
                     {listActions?.some((a: any) => a.locations?.includes('list_toolbar')) && (
                       isEnvironmentList ? (
@@ -200,42 +112,58 @@ export function ObjectViewPageHeader({
                       )
                     )}
 
-                    {/* The page's overflow menu (objectui#12427), last in the
-                        row: the favorites entry that replaced the header star.
-                        Favorites is a once-and-forget act, so it lives behind
-                        the ⋯ rather than in the header's most prominent slot.
-                        The list's way back to its view is the 「Personalized」
-                        marker beside the title (objectstack#28950), not an
-                        entry here. */}
-                    {listFavorite && (
+                    {moreShown && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="shadow-none h-8 sm:h-9 px-2"
+                            className="shadow-none h-7 w-7 px-0"
                             aria-label={t('detail.moreActions', { defaultValue: 'More actions' })}
                             data-testid="object-view-more-actions"
                           >
-                            <MoreHorizontal className="h-4 w-4" />
+                            <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <FavoriteMenuItem
-                            isFavorite={listFavorite.isFavorite}
-                            onToggle={listFavorite.toggle}
-                            testId="object-view-favorite"
-                          />
+                        <DropdownMenuContent align="end" className="w-64">
+                          {description && (
+                            <>
+                              <DropdownMenuLabel
+                                className="text-[13px] font-normal leading-5 text-muted-foreground whitespace-normal"
+                                data-testid="object-view-description"
+                              >
+                                {description}
+                              </DropdownMenuLabel>
+                              {(importShown || listFavorite) && <DropdownMenuSeparator />}
+                            </>
+                          )}
+                          {/* [#5142] `objectCanImport && importVisible` — the object-level
+                              verdict, then the toolbar-scope `visibleWhen` layer on top of
+                              it. Greyed, not gone, is the `disabledWhen` case. */}
+                          {importShown && (
+                            <DropdownMenuItem
+                              onSelect={() => setShowImport(true)}
+                              disabled={importDisabled}
+                              title={t('console.objectView.importTitle')}
+                              data-testid="object-view-import-button"
+                            >
+                              <Upload className="h-4 w-4" />
+                              <span>{t('console.objectView.import')}</span>
+                            </DropdownMenuItem>
+                          )}
+                          {listFavorite && (
+                            <FavoriteMenuItem
+                              isFavorite={listFavorite.isFavorite}
+                              onToggle={listFavorite.toggle}
+                              testId="object-view-favorite"
+                            />
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
 
-                    {/*
-                       Design Tools dropdown removed — its items were redundant:
-                       - "Edit view"  → use chevron menu's "Edit view config"
-                       - "Add view"   → use the `+` button on the tab bar or the "Add new view" footer in Manage Views
-                       - "Metadata inspector" → still toggleable via the `?__debug` URL flag (see useMetadataInspector)
-                    */}
+                    {/* Primary action (see `createButton`), last in the bar. */}
+                    {createButton}
                    </>
                  }
                  foldedActions={foldedHeaderActions}
