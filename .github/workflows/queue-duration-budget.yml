@@ -179,8 +179,11 @@ jobs:
     name: File or refresh the speed-up card
     needs: measure
     # OVER only; ⛔ never on a pull_request run, never from a ref but main.
+    # `!cancelled()`, written down: `verdict` is `over` only when the reading
+    # completed, so a later measure step failing (the artifact upload) still
+    # files, and then reds this job at the download if the reading is missing.
     if: >-
-      needs.measure.outputs.verdict == 'over'
+      !cancelled() && needs.measure.outputs.verdict == 'over'
       && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
