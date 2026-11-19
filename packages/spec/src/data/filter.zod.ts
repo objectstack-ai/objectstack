@@ -2222,10 +2222,11 @@ function checkFilterConditionComparands(
  *    `$or` of `$contains` per id, on a multi-valued one). Up to three
  *    relationships deep (ADR-0071's 3-hop limit, `RELATION_CONDITION_MAX_HOPS`
  *    in `packages/objectql/src/relation-filter-lowering.ts`): every key must be
- *    a field the related object declares, a relation key may hold a condition
- *    of its own, and a condition past the third relationship, or a dotted key,
- *    is refused (`INVALID_FILTER` / 400). A condition matching more related
- *    records than the engine's cap is refused rather than truncated; filter the
+ *    a field the related object declares (or `id`, `created_at`, `updated_at`),
+ *    a relation key may hold a condition of its own, and a condition past the
+ *    third relationship, or a dotted key, is refused (`INVALID_FILTER` / 400).
+ *    A condition matching more related records than the engine's cap is
+ *    refused rather than truncated; filter the
  *    related object yourself then, and match its ids the same way. An
  *    aggregation's own `filter` and `having` do not serve the form. The same
  *    object beneath a JSON-valued field (a whole-value match) and beneath a
