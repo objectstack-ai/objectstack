@@ -1205,7 +1205,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
-  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 39,
+  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 40,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3230,6 +3230,15 @@ export function ruleChangeRecordStagePending(matched) {
   const list = Array.isArray(matched) ? matched : [];
   const pending = (s) => s?.ruleChangeVerdict?.recordStage === LOW_RISK_RECORD_STAGE.pending;
   return list.some(pending) && list.every((s) => pending(s) || s?.tier === GOVERNED_TIER_S);
+}
+
+/**
+ * Does any path sit under a row that splits by declaration — the register's own test, for the record
+ * template and the brief (`record-recognisers.mjs`), which print the `Rule-change-verified:` line on it. Pure.
+ */
+export function ruleChangeRowHit(paths) {
+  const list = Array.isArray(paths) ? paths : [];
+  return GOVERNED_SURFACES.some((s) => s.ruleChange && list.some((p) => typeof p === 'string' && p.startsWith(s.prefix)));
 }
 
 /** The split's words under a verdict, once per split row hit, or '' when none was. Pure. */
@@ -8238,6 +8247,8 @@ async function selfTest() {
       (() => { const m = governedPathsIn(['AGENTS.md', 'skills/x/SKILL.md'], REPO); return applyRuleChangeSplit(m, REPO, RULE_NONE).every((s, i) => s === m[i]); })() &&
         landingTierOf(governedPathsIn([WORDING], REPO)) === GOVERNED_TIER_S && GOVERNED_SURFACES.find((s) => s.id === 'claude-tree').ruleChange.repos.join() === REPO && GOVERNED_SURFACES.filter((s) => s.ruleChange).length === 1);
     assert('--test-on-a-claude-path-exits-3-as-before-and-prints-Tier-H-until-the-PR-is-read', runTestModeExitFor([WORDING], REPO) === EXIT_TEST_GOVERNED && testVerdict([WORDING], { repo: REPO }).tier === GOVERNED_TIER_H);
+    assert('ruleChangeRowHit-is-the-registers-own-test-for-where-the-record-template-prints-the-verified-line',
+      ruleChangeRowHit([WORDING]) && ruleChangeRowHit(['AGENTS.md', '.claude/hooks/x.sh']) && !ruleChangeRowHit(['AGENTS.md', 'skills/x/SKILL.md', 'ui/.claude/x.md']) && !ruleChangeRowHit([]) && !ruleChangeRowHit(null));
   }
 
   // ── --since parsing ───────────────────────────────────────────────────────
