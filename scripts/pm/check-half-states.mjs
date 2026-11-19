@@ -668,9 +668,11 @@
  *       platform release is a DIFFERENT state, and the row names all three.
  *   H78 a BLOCKER graded BELOW a card it blocks. A blocker takes the highest
  *       grade among its own and the open cards it blocks. The row sits on
- *       the blocker and names the read that decides who acts: a grade the
- *       fleet wrote is raised by triage, a grade a person set by hand is
- *       ⛔ not moved and is reported to the maintainer.
+ *       the blocker and names the reads that decide who acts: a grade the
+ *       fleet wrote is raised by triage, unless its same-stroke comment
+ *       opens `Ruling-ref: priority:pN` (set on the maintainer's word); that
+ *       grade and one a person set by hand are ⛔ not moved and are reported
+ *       to the maintainer.
  *   H79 a HOLD MISMATCH: a blocker is `pm:on-hold` while a card it blocks is
  *       not, or the reverse. By default the blocked card follows its blocker
  *       onto hold, unless the maintainer said otherwise on the card; the
@@ -4147,10 +4149,16 @@ const INDEX_SCOPE_NOTE =
  * A grade the maintainer set by hand is not moved; the scan reports it to him
  * instead. Which kind the current grade is lives in that label's last
  * `labeled` event (written through a GitHub App or by a bot actor ⇒ the
- * fleet's; anything else ⇒ a person's), and that is a per-card event read this
- * sweep does not buy for any row. So the sentence names the read and BOTH
- * outcomes rather than guessing one — the row is correct whichever the grade
- * turns out to be, and nothing here moves a grade either way.
+ * fleet's; anything else ⇒ a person's) AND, for a fleet-written grade, in the
+ * fleet comment of the same stroke: one whose line opens
+ * `Ruling-ref: priority:pN` marks a grade the fleet wrote on the maintainer's
+ * word, which is hand-set too (`references/filing-gate.md`; `label-write.mjs`
+ * refuses to move it). Those are a per-card event read and a comments read
+ * this sweep does not buy for any row, so it detects none of this. The
+ * sentence names both reads and all THREE outcomes rather than guessing one —
+ * the fleet's own grade is raised by triage, a grade on his word and a grade a
+ * person set are ⛔ not moved and go to his report — so the row is correct
+ * whichever the grade turns out to be, and nothing here moves a grade.
  *
  * An UNGRADED blocker is reported too (it sits below every rung), except the
  * kinds `GRADELESS_CARD_LABELS` names. A dependent whose grade cannot be read
@@ -4185,10 +4193,12 @@ export function h78BlockerBelowBlockedGrade(issue, index, openByNumber) {
     `${carried} on a card that ${dependents.length} open card(s) name in a \`Blocked-by:\` line, ` +
     `graded BELOW ${above.length} of them: ${named}${more}. A blocker takes the highest grade among ` +
     `its own and the open cards it blocks, a Feature included, so this card's grade is \`${top}\`. ` +
-    'Report-only, and the grade is not this script\'s to move: read the last `labeled` event of the ' +
-    'current grade label first. Written through a GitHub App or by a bot actor, it is the fleet\'s — ' +
-    'triage raises it and leaves one comment. Set by a person, it is the maintainer\'s hand-set grade: ' +
-    '⛔ not moved, and this row is what the daily scan reports to him.' +
+    'Report-only, and the grade is not this script\'s to move, nor read here: read the last `labeled` ' +
+    'event of the current grade label first. Written through a GitHub App or by a bot actor, it is the ' +
+    'fleet\'s — triage raises it and leaves one comment — unless the fleet comment of the same stroke ' +
+    'opens `Ruling-ref: priority:pN` with that grade (a comments read): then the fleet wrote it on the ' +
+    'maintainer\'s word, and it is hand-set too. Set by a person or on his word, it is the maintainer\'s ' +
+    'hand-set grade: ⛔ not moved, and this row is what the daily scan reports to him, not triage\'s to raise.' +
     INDEX_SCOPE_NOTE
   );
 }
@@ -26241,13 +26251,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // beside its positive twin, the threshold boundary, the governing stamp, the
   // re-entry line, the owing seat, the live record shapes, the text, the band.
   'H73 ruled card in the decision box': 25,
-  // Registered with the blocking-relation rows, pin just under the count: for
+  // Registered with the blocking-relation rows, pin AT the count: for
   // each of H77–H81 the firing case beside the control that silences it, the
   // stand-down for the neighbouring row (H4/H19 for H77, H73 for H81), the
   // unreadable inputs, the text, the band and the wiring; H19's full-discharge
   // sentence both ways; the grade ladder; the cycle finder over rings, chains
   // and a 4000-card ring; and the retirement of H14/H15 read off the registry.
-  'H77-H81 blocking relation read from the lines': 97,
+  'H77-H81 blocking relation read from the lines': 102,
   // Registered with the first-touch audit row, pin just under the count: the
   // firing case with both record shapes as its positive controls, the body
   // channel, every exemption beside a non-exempt twin, the population edges,
@@ -29569,6 +29579,7 @@ async function selfTest() {
   b(BATTERY_REL, 'H78 fires: a p3 blocker under a p1 card it blocks', typeof h78(cards78[0]), 'string');
   b(BATTERY_REL, 'H78 row: its own grade, the higher dependents highest first, and the grade it takes', ['`priority:p3` on a card that 2 open card(s) name', 'graded BELOW 2 of them: #10 (`priority:p1`), #11 (`priority:p2`)', "this card's grade is `priority:p1`"].every((x) => row78(cards78[0]).includes(x)), true);
   b(BATTERY_REL, 'H78 row: names the read that decides who acts — the fleet\'s grade is raised, a hand-set one ⛔ not moved', ['last `labeled` event', 'triage raises it', 'hand-set grade', '⛔ not moved', 'reports to him'].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, 'H78 row: a fleet-written grade whose same-stroke comment opens `Ruling-ref: priority:pN` is hand-set too — routed to his report, not raised — and the row names the comments read it does not make', ['the fleet comment of the same stroke', 'opens `Ruling-ref: priority:pN` with that grade (a comments read)', 'hand-set too', 'Set by a person or on his word', 'not triage\'s to raise', 'nor read here'].every((x) => row78(cards78[0]).includes(x)), true);
   b(BATTERY_REL, '⛔ H78 control: the same blocker graded p1 is silent', h78(graded(5, 'p1'), [graded(5, 'p1'), cards78[1], cards78[2]]), null);
   b(BATTERY_REL, '⛔ H78: a blocker graded ABOVE everything it blocks is silent', h78(graded(5, 'p0'), [graded(5, 'p0'), cards78[1], cards78[2]]), null);
   b(BATTERY_REL, 'H78: only the dependents graded ABOVE are named', `${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('graded BELOW 1 of them: #10 (`priority:p1`).')}/${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('#11 (')}`, 'true/false');
