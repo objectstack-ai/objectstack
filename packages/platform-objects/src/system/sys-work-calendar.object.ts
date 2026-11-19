@@ -154,7 +154,7 @@ export const SysWorkCalendar = ObjectSchema.create({
       label: 'Needs Maintenance',
       data: { provider: 'object', object: 'sys_work_calendar' },
       columns: ['name', 'code', 'maintained_through'],
-      filter: [{ field: 'maintained_through', operator: 'lte', value: `{${WORK_CALENDAR_MAINTENANCE_LEAD_DAYS}_days_from_now}` }],
+      filter: [{ field: 'maintained_through', operator: 'less_than_or_equal', value: `{${WORK_CALENDAR_MAINTENANCE_LEAD_DAYS}_days_from_now}` }],
       sort: [{ field: 'maintained_through', order: 'asc' }],
       pagination: { pageSize: 50 },
       emptyState: {
