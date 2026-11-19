@@ -9,6 +9,13 @@
 /**
  * objectstack#27950 — an object list's title names the object.
  *
+ * ⚠️ REDRAWN by objectstack#35548 (epic #35547): the page bar's heading is the
+ * object's plural alone (no link, no switcher), and the one view switcher
+ * leads the view bar under it, at every width. The ruling-B heading
+ * 「OBJECT / VIEW ▾」 described below is retired; the pins that follow read
+ * the new frame. What is unchanged: the object is named once, the view once,
+ * with the sidebar either way and with a record open beside the list.
+ *
  * Since objectstack#27594 the list title is the view switcher, and the app bar
  * draws no object crumb (objectui#12461: the page header is the one place a
  * page is named). The maintainer's ruling B puts the object's plural ahead of
@@ -41,7 +48,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { SidebarProvider, useSidebar } from '@object-ui/components';
@@ -168,8 +175,9 @@ const listToolbar = () =>
   waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
 
 const heading = () => screen.getByRole('heading', { level: 1 });
-const crumb = () => within(heading()).getByTestId('object-list-crumb');
-const switcher = () => within(heading()).getByTestId('list-view-switcher');
+/** The view bar's leading slot: the one view switcher (objectstack#35548). */
+const viewBarLead = () => screen.getByTestId('list-toolbar-leading');
+const switcher = () => within(viewBarLead()).getByTestId('list-view-switcher');
 
 beforeEach(() => {
   localStorage.clear();
@@ -182,76 +190,62 @@ afterEach(() => {
   Object.defineProperty(window, 'innerWidth', { value: DESKTOP_WIDTH, configurable: true, writable: true });
 });
 
-describe('objectstack#27950 — the list title names the object ahead of the view switcher', () => {
+describe('objectstack#27950, as redrawn by objectstack#35548 — the page bar names the object, the view bar names the view', () => {
   it.each([
     ['the object\'s address', '/apps/crm/crm_lead', 'All Leads'],
     ['a view\'s address', '/apps/crm/crm_lead/view/mine', 'My Leads'],
-  ])('on %s the heading reads 「Leads / VIEW ▾」, the plural linking to the default list', async (_where, entry, view) => {
+  ])('on %s the heading reads 「Leads」 and the view bar\'s switcher reads the view', async (_where, entry, view) => {
     mount(entry);
     await listToolbar();
-    expect(crumb()).toHaveTextContent(/^Leads$/);
-    expect(crumb().tagName).toBe('A');
-    expect(crumb()).toHaveAttribute('href', '/apps/crm/crm_lead');
-    expect(switcher()).toHaveTextContent(view);
-    // The plural comes first, the switcher after it.
-    expect(crumb().compareDocumentPosition(switcher()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(heading().textContent).toMatch(new RegExp(`^Leads/${view}`));
-  });
-
-  it('following the object label opens the object\'s default list', async () => {
-    mount('/apps/crm/crm_lead/view/mine');
-    await listToolbar();
-    fireEvent.click(crumb());
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/apps\/crm\/crm_lead$/));
-    await waitFor(() => expect(switcher()).toHaveTextContent('All Leads'));
-    expect(crumb()).toHaveTextContent(/^Leads$/);
+    expect(heading()).toHaveTextContent(/^Leads$/);
+    expect(within(heading()).queryByTestId('list-view-switcher')).toBeNull();
+    expect(within(switcher()).getByTestId('list-view-switcher-label')).toHaveTextContent(view);
+    // The page bar comes first, the view bar under it.
+    expect(heading().compareDocumentPosition(switcher()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it.each([
     ['expanded', true],
     ['collapsed', false],
-  ])('with the sidebar %s the heading names the object once', async (state, open) => {
+  ])('with the sidebar %s the object is named once and the view once', async (state, open) => {
     mount('/apps/crm/crm_lead/view/mine', { sidebarOpen: open });
     await listToolbar();
     expect(screen.getByTestId('sidebar-state')).toHaveTextContent(state);
-    expect(screen.getAllByTestId('object-list-crumb')).toHaveLength(1);
-    expect(crumb()).toHaveTextContent(/^Leads$/);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(heading()).toHaveTextContent(/^Leads$/);
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
   });
 
   it('a record open in the drawer over the list leaves one object label and one switcher', async () => {
     localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mount('/apps/crm/crm_lead/view/mine?recordId=lead_1');
     await listToolbar();
-    expect(screen.getAllByTestId('object-list-crumb')).toHaveLength(1);
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
-    expect(crumb()).toHaveTextContent(/^Leads$/);
+    expect(screen.getAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(1);
   });
 
-  it('a view with no label is the plural already: the heading names the object once', async () => {
+  it('a view with no label reads the plural in the switcher', async () => {
     mount('/apps/crm/crm_note');
     await listToolbar();
-    expect(within(heading()).queryByTestId('object-list-crumb')).toBeNull();
-    expect(switcher()).toHaveTextContent('Notes');
+    expect(heading()).toHaveTextContent(/^Notes$/);
+    expect(within(switcher()).getByTestId('list-view-switcher-label')).toHaveTextContent('Notes');
   });
 
-  it('a short row keeps the object label whole: it never shrinks, the view label truncates', async () => {
+  it('a short row keeps the switcher in one line: the view label truncates', async () => {
     mount('/apps/crm/crm_lead/view/mine');
     await listToolbar();
-    expect(crumb()).toHaveClass('shrink-0', 'whitespace-nowrap');
     const viewLabel = within(switcher()).getByText('My Leads');
     expect(viewLabel).toHaveClass('truncate');
     expect(switcher()).toHaveClass('min-w-0');
-    expect(within(heading()).getByTestId('object-list-title')).toHaveClass('min-w-0');
+    expect(heading()).toHaveClass('truncate');
   });
 
-  it('on a phone the one switcher leads the list\'s toolbar row, and the hidden header holds none', async () => {
+  it('on a phone the one switcher leads the list\'s toolbar row', async () => {
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true, writable: true });
     mount('/apps/crm/crm_lead/view/mine');
     await listToolbar();
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
-    const phoneTitle = within(screen.getByTestId('list-toolbar-leading')).getByTestId('list-phone-title');
+    const phoneTitle = within(viewBarLead()).getByTestId('list-phone-title');
     expect(within(phoneTitle).getByTestId('list-view-switcher')).toHaveTextContent('My Leads');
-    // The app bar names the object on a phone; the row names the view.
-    expect(screen.queryByTestId('object-list-crumb')).toBeNull();
   });
 });

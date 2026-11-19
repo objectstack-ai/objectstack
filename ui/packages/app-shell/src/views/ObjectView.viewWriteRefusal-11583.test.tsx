@@ -128,7 +128,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
   ListView: (props: any) => {
     listSchema = props.schema;
-    return null;
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
   },
 }));
 

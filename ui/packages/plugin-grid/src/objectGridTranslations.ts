@@ -100,6 +100,8 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // package's own tests) never reaches the locale packs.
   'detail.recordDetail': 'Record Detail',
   'detail.recordDetailWithLabel': '{{label}} Detail',
+  // objectstack#35548 — the summary row's lead, under the first column.
+  'grid.summary.countLead': 'Count {{value}}',
 };
 
 /**

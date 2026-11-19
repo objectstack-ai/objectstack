@@ -100,14 +100,16 @@ describe('row 7: a filter row with no value is not a filter', () => {
   it('the badge counts the finished rows only', async () => {
     mount({}, { initialFilters: group(COMPLETE, NO_VALUE) });
     await waitFor(() => expect(filterTrigger()).toHaveAccessibleName('Filter, 1 active'));
-    expect(filterTrigger().textContent).toBe('1');
+    // The trigger reads its label, then the badge (objectstack#35548).
+    expect(filterTrigger().textContent).toBe('Filter1');
   });
 
   it('a group of unfinished rows only draws no badge and keeps the first-run copy', async () => {
     const { container } = mount({}, { initialFilters: group(NO_VALUE), onAddRecord: () => {} });
     const panel = await emptyState(container);
     expect(filterTrigger()).toHaveAccessibleName('Filter');
-    expect(filterTrigger().textContent).toBe('');
+    // The label alone: no badge (objectstack#35548 draws the label from `sm` up).
+    expect(filterTrigger().textContent).toBe('Filter');
     expect(panel.textContent).toMatch(/Nothing here yet/);
     expect(panel.textContent).not.toMatch(/No matching records/);
   });
