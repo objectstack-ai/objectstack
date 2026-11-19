@@ -4,7 +4,7 @@
 
 fix(core): a relationship-path dashboard drill is sent as one nested-relation condition, so the server joins it in the database instead of the app reading related ids first
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `convertFiltersToAST` now lowers the nested-relation form the spec declares on `FilterCondition` (`{ account: { owner: 'u1' } }`, a plain object with no `$` key beneath a field) to one equality node, `['account', '=', { owner: 'u1' }]`, which the spec's `parseFilterAST` reads back as the same nested condition. It used to refuse that shape as an unknown operator. The condition travels as written, deeper relations included; whether the field is a relationship is judged by the server, which refuses anything else with `INVALID_FILTER` / 400. A map that mixes `$` operators with plain keys is still refused.
