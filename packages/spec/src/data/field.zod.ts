@@ -716,11 +716,13 @@ function refuseSummaryWithoutField(
  * amount resolves the roll-up the same way and no key is added. Whether the
  * child amount it rolls up follows that very code through that very
  * `master_detail` is a question about two objects, answered where both are
- * held, never by this one-config shape. A roll-up of a stored home amount (a
- * child field some `homeAmount.field` names) declares `currencyMode: 'dynamic'`
- * with no `defaultCurrency`: the home field is a `dynamic` field in the
- * organization's home currency (ADR-0144 D8 rule 5), so its total is too, and
- * the Console draws it in that currency without metadata naming it (#33659).
+ * held, never by this one-config shape. A roll-up of an amount in the home
+ * currency (a child `currency` field in `dynamic` mode, a stored home amount
+ * included) declares `currencyMode: 'dynamic'` with no `defaultCurrency`: a
+ * `dynamic` amount is in the organization's home currency (ADR-0144 D8 rule 5,
+ * `localization.currency`), so its total is too, and the Console draws it in
+ * that currency without metadata naming it (#33659; widened to every `dynamic`
+ * child amount by seat ruling record 7000258793).
  * Outside those two roll-ups a `summary` may declare only `fixed` (read by the
  * analytics layer); a `count` roll-up, every other `dynamic` config and every
  * other `record` roll-up are refused at the object door
@@ -2444,7 +2446,7 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up a stored home amount (a child field some `homeAmount.field` names) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up an amount in the home currency (a child `currency` field in `dynamic` mode, a stored home amount included) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in

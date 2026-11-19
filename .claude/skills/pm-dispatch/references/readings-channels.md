@@ -26,25 +26,20 @@
 - REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
 - 403 与传输失败要试过另一侧才说得出我没手段;限流先比身份,同 ID 的他侧不是手段。
-- 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
 - job 日志只有 MCP 取得回,REST 侧转 blob 存储 `http=000`;同分钟 MCP 限流而 REST core 满 15000。
 - ⇒ MCP 限流先 `GET /user` 比 ID:同 ID 的 REST 满额不是退路,写排队到重置;异 ID 才是。
 - MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
-- 容器 curl 的 REST 通道令牌两类:installation(`claude[bot]`)与 user-to-server(用户),core 均 15,000/时。
-- 类按 Claude Code 账号定,⛔ 不按会话定:一会话内两次写之间可无席位动作地翻转。
-- 两次实测:分诊席 2026-09-15 `claude[bot]`→`os-sam`;技能席 2026-09-15→16 `claude[bot]`→`os-zhuang`。
-- 类只认每次写回读的 `user.login`/`user.type`,⛔ 不从开轮标记沿用:标记读数带日期、不站住。
-- `performed_via_github_app`、`GET /user` 与 core 限流头对两类同答 ⇒ 三者都不是判别式。
+- 容器 curl 直写(`rest-channel.md` 的退路)署席位自己的账号;常规写经中继署车队机器人。
+- 署名只认每次写回读的 `user.login`/`user.type`,⛔ 不从开轮标记沿用。
 - 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
-- ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
 - GraphQL 池 5000/时只留给 `rest-channel.md`〈不可迁移〉三件;draft 翻转与挂载走中继 op。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
 - `gh` CLI 的动词按传输分两桶,池枯竭时只死一半。
 - porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
-- 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
+- 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器有 `gh`,porcelain 一律 403。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
 - 走队列的仓落地仍必经 auto-merge,红窗里照样走中继 op 挂载;直合仓合并本身有 REST 端点。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
@@ -60,7 +55,7 @@
 - ②:是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep。
 - ③:squash 验证 `git rev-list --parents -n1` 数父提交。④:`git ls-remote origin 'refs/heads/*<key>*'`。
 - 开轮先读配额:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,免费。
-- graphql remaining < 1000 ⇒ 本轮走 git 加 REST;⛔ 满余额不放行 undraft:同分钟满额而 ccr 路 429。
+- graphql remaining < 1000 ⇒ 本轮走 git 加 REST。
 - 中途撞限流的 dev 完不成强制查重,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。
 - 打满时待执行写排成有序清单挂进巡逻词,不靠记忆;恢复窗口按序连清。
 - 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。

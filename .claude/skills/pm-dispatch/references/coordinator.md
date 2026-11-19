@@ -34,9 +34,9 @@
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
 - 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` L2 审核。
 
-## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
+## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位请裁时读)
 
-- 规则一处:`lanes/director.md` 与 `dispatch-runbook.md` 卡线程节;本文只指不抄。
+- 席位请裁 ⇒ 开天花板档决策线程(effort `xhigh`),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
 - 等裁的卡线程不占槽(见第三节);裁决记录 = 卡上裁决评论,⛔ 不落项目文件或记忆。
 
 ## 六、额度压力(coordinator 每次开线程前读)
