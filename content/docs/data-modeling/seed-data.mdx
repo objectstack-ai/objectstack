@@ -841,7 +841,7 @@ export a single aggregate array.
 ```
 src/
   data/
-    index.ts              ← exports SeedData array in dependency order
+    index.ts              ← exports the SeedData array (the loader orders it)
     accounts.seed.ts
     contacts.seed.ts
     leads.seed.ts
@@ -920,7 +920,8 @@ company names, email addresses, and values — not `foo`, `bar`, or `test123`.
 ### One file per object
 
 Split large seed payloads into `{object}.seed.ts` files. A single `index.ts` that
-re-exports and orders them keeps the entry point clean.
+re-exports them keeps the entry point clean; lookups and `dependsOn` order the
+load, and array position only breaks ties.
 
 ---
 
