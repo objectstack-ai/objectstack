@@ -426,7 +426,8 @@ export interface McpDataBridge {
    * `doc` items) whose title, a heading or text contains one of
    * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
    * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
-   * gate, so a page the caller may not read is never searched.
+   * gate, so a page the caller may not read is never searched. On an OAuth
+   * grant the principal is the agent envelope, judged on the token's grant.
    *
    * OPTIONAL: a host that cannot read docs for the caller omits both doc
    * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
@@ -3322,13 +3323,19 @@ export function packageDocToolsServed(
  * - **No second gate.** Neither tool judges what the caller may read: the
  *   host's members read the `doc` items through the `/meta/doc` docs-audience
  *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
- *   is neither found nor read, and reads as not found.
+ *   is neither found nor read, and reads as not found. On an OAuth grant the
+ *   principal is the agent envelope, so the docs audience is judged on the
+ *   token's grant, not the person's own permission sets; both descriptions
+ *   say so.
  * - **The search is a substring match**, stated in the description: no
  *   server-side doc search exists, so the honest search is a term found in a
- *   page's title, a heading or its text (case aside), ranked in that order and
- *   capped at {@link PACKAGE_DOC_SEARCH_MAX_RESULTS}.
- * - **Each answer carries the page's console address**, so the client can
- *   cite a source the user can open.
+ *   page's title, a heading or its text (case aside). Pages that contain more
+ *   of the terms come first, then by the sum of where each is found (title
+ *   over heading over text), then by title, capped at
+ *   {@link PACKAGE_DOC_SEARCH_MAX_RESULTS}.
+ * - **An answer carries the page's console address** where the page has one
+ *   (a page with no package has none), so the client can cite a source the
+ *   user can open.
  */
 export function registerPackageDocTools(
   server: McpServer,
@@ -3346,9 +3353,11 @@ export function registerPackageDocTools(
         'Find pages in the manuals of the apps installed here that contain business words, before you answer what '
         + 'a term means or how a process works. Send each term as the user wrote it, without question words '
         + '("回款", not "什么是回款"). A page matches when its title, a heading or its text contains a term, case '
-        + `aside; results are ranked title, then heading, then text, at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each `
-        + 'with an excerpt and the page\'s url to cite. Only pages you may read are searched. Read a page with '
-        + `${READ_PACKAGE_DOC_TOOL_NAME}.`,
+        + 'aside. Pages that contain more of the terms come first, then pages where the terms sit higher (title, '
+        + `then heading, then text), then by title; at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each with an excerpt `
+        + 'and, where the page has one, the url to cite. Only pages this connection may read are searched; on an '
+        + 'OAuth connection that is judged on the connection\'s grant, not on the person\'s own permission sets. '
+        + `Read a page with ${READ_PACKAGE_DOC_TOOL_NAME}.`,
       inputSchema: strictToolInput(
         {
           surface: `this ${SEARCH_PACKAGE_DOCS_TOOL_NAME} call`,
@@ -3379,8 +3388,9 @@ export function registerPackageDocTools(
     {
       description:
         'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
-        + 'title, its manual, its url to cite and its Markdown content. Send package when two apps ship a page '
-        + 'of that name. A page you may not read answers as not found.',
+        + 'title, its manual, its Markdown content and, where the page has one, its url to cite. Send package when '
+        + 'two apps ship a page of that name. A page this connection may not read answers as not found; on an OAuth '
+        + 'connection that is judged on the connection\'s grant, not on the person\'s own permission sets.',
       inputSchema: strictToolInput(
         {
           surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,

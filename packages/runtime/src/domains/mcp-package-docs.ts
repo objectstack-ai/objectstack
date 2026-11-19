@@ -13,19 +13,33 @@
  * as its caller: the `doc` arm drops a page no book that admits the caller
  * claims, and the `book` arm drops a book the caller may not open, so a page
  * is never addressed through a manual the caller cannot read. ⛔ No second
- * rule: this module hands the gate I/O only, as `mcp-authoring.ts` does for
- * the open draft door's reads, and every verdict is the gate's. A page the
- * caller may not read is neither found nor read, and reads as not found.
+ * rule: this module hands the gate I/O only, and every verdict is the gate's.
+ * A page the caller may not read is neither found nor read, and reads as not
+ * found.
+ *
+ * The caller is the request's execution context as the door received it. On
+ * an OAuth grant that is the agent envelope (ADR-0090 D10): the security
+ * service resolves its permission sets from the token's grant, the
+ * scope-derived ceiling, and not from the person's own sets, so a manual whose
+ * audience is a permission set the person holds stays hidden on that
+ * connection unless the grant carries the set. That fails closed, and it is
+ * stricter than the `/meta` doors a signed-in person reads through the
+ * Console, which judge the person's own sets.
  *
  * ## The search
  *
  * No server-side doc search exists, so the search is the smallest honest one:
  * a term is found when a page's title, one of its headings or its text
  * contains it, case aside, in the page's base text or one of its
- * translations. Pages rank by how many terms they contain, then by where (the
- * title over a heading over the text), then by title; the answer carries at
- * most `maxResults` and says when more matched. The match rule and the cap
- * are stated in the tool's description (`registerPackageDocTools`).
+ * translations. Pages rank by how many of the terms they contain first, then
+ * by the sum of where each contained term is found (title 3, heading 2,
+ * text 1), then by title; the answer carries at most `maxResults` and says
+ * when more matched. The match rule, the order and the cap are stated in the
+ * tool's description (`registerPackageDocTools`). The heading parse is
+ * line-based and linear.
+ *
+ * A page with no package carries no address (`url`), since the Console
+ * route needs one.
  *
  * ## The address
  *
@@ -135,11 +149,53 @@ function homeBookOf(doc: any, books: readonly any[], corpus: ResolverDoc[]): Boo
         ?? deriveImplicitPackageBook(pkg);
 }
 
+/** One Markdown heading of a page: its text and the span of its line. */
+interface Heading {
+    text: string;
+    index: number;
+    length: number;
+}
+
+/**
+ * The heading text of one line, or `undefined`: one to six `#`, then a space
+ * or tab on the same line, then the text, with a closing run of `#` (one a
+ * space precedes) dropped.
+ */
+function headingTextOf(line: string): string | undefined {
+    const trimmed = line.trim();
+    let level = 0;
+    while (level < trimmed.length && trimmed[level] === '#') level++;
+    if (level < 1 || level > 6) return undefined;
+    const gap = trimmed[level];
+    if (gap !== ' ' && gap !== '\t') return undefined;
+    let text = trimmed.slice(level + 1).trim();
+    let end = text.length;
+    while (end > 0 && text[end - 1] === '#') end--;
+    if (end === 0) return undefined;
+    if (end < text.length) {
+        const before = text[end - 1];
+        if (before === ' ' || before === '\t') text = text.slice(0, end).trim();
+    }
+    return text || undefined;
+}
+
+/** A page's headings, in order: one pass over its lines. */
+function headingsOf(content: string): Heading[] {
+    const out: Heading[] = [];
+    for (let index = 0; index <= content.length;) {
+        const newline = content.indexOf('\n', index);
+        const end = newline < 0 ? content.length : newline;
+        const text = headingTextOf(content.slice(index, end));
+        if (text !== undefined) out.push({ text, index, length: end - index });
+        index = end + 1;
+    }
+    return out;
+}
+
 /** A page's title: its label, else its first heading, else its name. */
-function titleOf(label: unknown, content: unknown, name: string): string {
+function titleOf(label: unknown, headings: readonly Heading[], name: string): string {
     if (typeof label === 'string' && label.trim()) return label.trim();
-    const heading = typeof content === 'string' ? /^#{1,6}\s+(.+?)\s*#*\s*$/m.exec(content)?.[1] : undefined;
-    return heading?.trim() || name;
+    return headings[0]?.text || name;
 }
 
 /** Where a page lives, for this caller. */
@@ -163,23 +219,29 @@ interface PageVariant {
     title: string;
     description?: string;
     content: string;
+    headings: Heading[];
 }
 
 function variantsOf(doc: any): PageVariant[] {
+    const content = typeof doc.content === 'string' ? doc.content : '';
+    const headings = headingsOf(content);
     const base: PageVariant = {
-        title: titleOf(doc.label, doc.content, doc.name),
+        title: titleOf(doc.label, headings, doc.name),
         ...(typeof doc.description === 'string' ? { description: doc.description } : {}),
-        content: typeof doc.content === 'string' ? doc.content : '',
+        content,
+        headings,
     };
     const out = [base];
     const translations = doc.translations && typeof doc.translations === 'object' ? doc.translations : {};
     for (const [locale, t] of Object.entries<any>(translations)) {
         if (!t || typeof t.content !== 'string') continue;
+        const translated = headingsOf(t.content);
         out.push({
             locale,
-            title: titleOf(t.label ?? doc.label, t.content, doc.name),
+            title: titleOf(t.label ?? doc.label, translated, doc.name),
             ...(typeof (t.description ?? doc.description) === 'string' ? { description: t.description ?? doc.description } : {}),
             content: t.content,
+            headings: translated,
         });
     }
     return out;
@@ -193,11 +255,13 @@ function excerptAround(text: string, at: number, length: number): string {
     return `${start > 0 ? '…' : ''}${line}${start + EXCERPT_CHARS < text.length ? '…' : ''}`;
 }
 
-/** The heading a position in `content` sits under, if any. */
-function headingAbove(content: string, at: number): string | undefined {
+/** The heading a position sits under, if any. */
+function headingAbove(headings: readonly Heading[], at: number): string | undefined {
     let heading: string | undefined;
-    const re = /^#{1,6}\s+(.+?)\s*#*\s*$/gm;
-    for (let m = re.exec(content); m && m.index <= at; m = re.exec(content)) heading = m[1].trim();
+    for (const h of headings) {
+        if (h.index > at) break;
+        heading = h.text;
+    }
     return heading;
 }
 
@@ -218,15 +282,14 @@ function matchIn(variant: PageVariant, term: string): TermMatch | undefined {
         return { on: 'title', excerpt: excerptAround(lead, 0, 0) };
     }
     const lower = variant.content.toLowerCase();
-    const re = /^#{1,6}\s+(.+?)\s*#*\s*$/gm;
-    for (let m = re.exec(variant.content); m; m = re.exec(variant.content)) {
-        if (m[1].toLowerCase().includes(needle)) {
-            return { on: 'heading', heading: m[1].trim(), excerpt: excerptAround(variant.content, m.index, m[0].length) };
+    for (const h of variant.headings) {
+        if (h.text.toLowerCase().includes(needle)) {
+            return { on: 'heading', heading: h.text, excerpt: excerptAround(variant.content, h.index, h.length) };
         }
     }
     const at = lower.indexOf(needle);
     if (at >= 0) {
-        const heading = headingAbove(variant.content, at);
+        const heading = headingAbove(variant.headings, at);
         return { on: 'text', ...(heading ? { heading } : {}), excerpt: excerptAround(variant.content, at, needle.length) };
     }
     const description = variant.description ?? '';
@@ -324,7 +387,7 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
             const servedLocale = locale && doc.translations
                 ? [locale, locale.split('-')[0]].find((key) => typeof doc.translations[key]?.content === 'string')
                 : undefined;
-            const title = titleOf(served.label, served.content, doc.name);
+            const title = titleOf(served.label, typeof served.content === 'string' ? headingsOf(served.content) : [], doc.name);
             return {
                 ...addressOf(doc, books, corpusOf(docs), title),
                 ...(typeof served.description === 'string' ? { description: served.description } : {}),

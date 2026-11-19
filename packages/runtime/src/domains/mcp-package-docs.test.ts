@@ -12,7 +12,9 @@
  * - One visibility rule, the `/meta/doc` docs-audience gate (ADR-0046 §6.7):
  *   a page only a `{ permissionSet }` manual claims is neither found nor read
  *   by a caller without that set, and is both for a holder — the control that
- *   it is a match at all.
+ *   it is a match at all. On an OAuth grant the caller is the agent envelope,
+ *   whose sets are the token's grant, so the page stays hidden there even when
+ *   the delegating person holds the set.
  * - The address follows the Console's home-manual pick: the manual that claims
  *   the page, else the package's implicit manual (ADR-0046 §6.4).
  * - The door's twin for the tool layer is `packages/mcp/src/mcp-package-doc-tools-35442.test.ts`.
@@ -80,7 +82,13 @@ const DOCS = [
     },
 ];
 
-/** A kernel over a protocol serving `items`, a security service granting `crm_admin` to `admin`, and an `mcp` service that hands back the bridge. */
+/**
+ * A kernel over a protocol serving `items`, a security service granting
+ * `crm_admin` to the person `admin`, and an `mcp` service that hands back the
+ * bridge. The security fake keeps the real resolver's agent arm (ADR-0090
+ * D10): an agent principal's sets are its own `permissions`, the token's
+ * scope-derived ceiling, never its delegator's.
+ */
 function kernelOver(items: { doc: any[]; book: any[] } | null) {
     const mcp: any = {
         lastOpts: undefined,
@@ -93,14 +101,17 @@ function kernelOver(items: { doc: any[]; book: any[] } | null) {
         ? { getMetaItems: async ({ type }: { type: string }) => ({ type, items: (items as any)[type] ?? [] }) }
         : {};
     const security = {
-        resolvePermissionSetNames: async (ctx: any) => (ctx?.userId === 'admin' ? ['crm_admin'] : []),
+        resolvePermissionSetNames: async (ctx: any) => {
+            if (ctx?.principalKind === 'agent') return [...(ctx.permissions ?? [])];
+            return ctx?.userId === 'admin' ? ['crm_admin'] : [];
+        },
     };
     const all: Record<string, any> = { protocol, security, mcp };
     const get = (n: string) => all[n] ?? null;
     return { getService: get, getServiceAsync: async (n: string) => get(n), context: { getService: get } } as any;
 }
 
-async function bridgeFor(userId: string, items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS }) {
+async function bridgeFor(caller: string | Record<string, unknown>, items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS }) {
     const kernel = kernelOver(items);
     const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
     const res = await dispatcher.handleMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {
@@ -111,7 +122,7 @@ async function bridgeFor(userId: string, items: { doc: any[]; book: any[] } | nu
         }),
         response: {},
         environmentId: undefined,
-        executionContext: { userId, isSystem: false },
+        executionContext: typeof caller === 'string' ? { userId: caller, isSystem: false } : caller,
     } as any);
     expect(res.response?.status, 'precondition: the MCP route must have been served').toBe(200);
     return kernel.getService('mcp').lastOpts.bridge;
@@ -169,6 +180,26 @@ describe('[#35442] one visibility rule: the /meta/doc docs-audience gate', () =>
         const page = await bridge.readPackageDoc({ name: 'crm_commission_rules' });
         expect(page.url).toBe(`/_console/apps/${CRM}/docs/admin/crm_commission_rules`);
     });
+
+    it('on an OAuth grant the caller is the agent: the page is neither found nor read though the delegator holds the set', async () => {
+        // The agent envelope `assembleExecutionContext` builds for an OAuth token:
+        // the person stays `userId` and `onBehalfOf`, and `permissions` are the
+        // token's scope-derived ceiling.
+        const bridge = await bridgeFor({
+            userId: 'admin',
+            isSystem: false,
+            principalKind: 'agent',
+            onBehalfOf: { userId: 'admin', principalKind: 'human' },
+            positions: [],
+            permissions: ['mcp_agent_read'],
+        });
+        const names = (await bridge.searchPackageDocs({ terms: ['回款'] }, MAX)).results.map((r: any) => r.name);
+        expect(names).toEqual(['crm_order_payment']);
+        await expect(bridge.readPackageDoc({ name: 'crm_commission_rules' })).rejects.toMatchObject({
+            code: 'RESOURCE_NOT_FOUND',
+            status: 404,
+        });
+    });
 });
 
 describe('[#35442] search and read details', () => {
@@ -208,6 +239,29 @@ describe('[#35442] search and read details', () => {
         const bridge = await bridgeFor('u1', { doc: [...DOCS, twin], book: BOOKS });
         await expect(bridge.readPackageDoc({ name: 'hr_leave' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
         expect((await bridge.readPackageDoc({ name: 'hr_leave', package: HR })).package).toBe(HR);
+    });
+
+    it('a long-whitespace heading parses fast', async () => {
+        const WIKI = 'com.example.wiki';
+        const doc = { name: 'wiki_wide', _packageId: WIKI, content: `# a${' '.repeat(20_000)}b\n\nBody text.\n` };
+        const bridge = await bridgeFor('u1', { doc: [doc], book: [] });
+        const started = Date.now();
+        const answer = await bridge.searchPackageDocs({ terms: ['body'] }, MAX);
+        expect(Date.now() - started).toBeLessThan(1_000);
+        expect(answer.results).toHaveLength(1);
+        expect(answer.results[0].title.startsWith('a ')).toBe(true);
+        expect(answer.results[0].title.endsWith(' b')).toBe(true);
+        expect(answer.results[0].matchedOn).toBe('text');
+    });
+
+    it('a bare \'#\' line followed by text is not a heading', async () => {
+        const WIKI = 'com.example.wiki';
+        const doc = { name: 'wiki_bare', _packageId: WIKI, content: '#\nPlain words under no heading.\n' };
+        const bridge = await bridgeFor('u1', { doc: [doc], book: [] });
+        const answer = await bridge.searchPackageDocs({ terms: ['plain words'] }, MAX);
+        expect(answer.results[0]).toMatchObject({ name: 'wiki_bare', title: 'wiki_bare', matchedOn: 'text' });
+        expect(answer.results[0].heading).toBeUndefined();
+        expect((await bridge.readPackageDoc({ name: 'wiki_bare' })).title).toBe('wiki_bare');
     });
 
     it('a host whose protocol has no list read carries neither member', async () => {

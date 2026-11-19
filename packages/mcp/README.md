@@ -167,8 +167,8 @@ apply):
 'query_dataset'        // Compute a governed metric; the answer carries its provenance
 
 // App manuals (the installed packages' docs)
-'search_package_docs'  // Pages whose title, a heading or text contains a term; ≤10, with excerpt and console url
-'read_package_doc'     // One page by name: title, manual, console url and Markdown content
+'search_package_docs'  // Pages whose title, a heading or text contains a term; ≤10, more terms first, with excerpt and console url where the page has one
+'read_package_doc'     // One page by name: title, manual, Markdown content, console url where the page has one
 ```
 
 `aggregate_records` is registered only when the bridge implements `aggregate`,
@@ -180,7 +180,8 @@ analytics service serves its dataset executor), and `search_package_docs` /
 `readPackageDoc` (the runtime's HTTP bridge does where the protocol serves the
 `/meta` list read; it reads every page through the `/meta/doc` docs-audience
 gate as the caller, so a page the caller may not read is neither found nor
-read; the stdio bridge carries neither); a bridge without those seams
+read; on an OAuth grant the caller is the agent, judged on the token's grant
+rather than the person's own permission sets; the stdio bridge carries neither); a bridge without those seams
 serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
