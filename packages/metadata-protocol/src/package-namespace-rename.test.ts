@@ -13,6 +13,7 @@ import {
     METADATA_ITEM_NAME_STORAGE_LIMIT,
     OBJECT_TABLE_IDENTIFIER_LIMIT,
     planNamespaceRename,
+    type NamespaceRenameItem,
 } from './package-namespace-rename.js';
 
 const items = [
@@ -97,7 +98,7 @@ describe('planNamespaceRename — the one rename engine (#30794)', () => {
 describe('planNamespaceRename — a copied capability, and every grant and requirement of it (#35157)', () => {
     // The shape an AI-built app writes: the package DECLARES its capability,
     // a set GRANTS it, an action and an object REQUIRE it (ADR-0066 D1).
-    const app = [
+    const app: NamespaceRenameItem[] = [
         { type: 'object', name: 'demoasset_asset', body: {
             name: 'demoasset_asset',
             requiredPermissions: { delete: ['demoasset.manage_assets'], read: ['view_reports'] },

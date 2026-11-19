@@ -107,7 +107,7 @@ function makeStubEngine(
             // Every scalar condition is an equality on that column; an operator
             // object is not modelled by this double and does not narrow.
             const matched = [...rows.values()].filter((row) => Object.entries(where).every(([key, value]) =>
-                value === undefined || (typeof value === 'object' && value !== null) || (row as Record<string, unknown>)[key] === value));
+                value === undefined || (typeof value === 'object' && value !== null) || (row as unknown as Record<string, unknown>)[key] === value));
             return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(_t: string, data: Record<string, unknown>) {
