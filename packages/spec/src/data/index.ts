@@ -58,6 +58,19 @@ export * from './readable-ids';
 // [ADR-0139 D3] Canonical conformance cases for the composed `ReadableIds` leaf
 // — the per-driver case-set a driver compiles (measured) or refuses (recorded).
 export * from './readable-ids-conformance';
+// [ADR-0155 D1] `SharedRecordIds` — the branded comparand value meaning "the
+// ids of object X's records that sys_record_share grants to user U", every
+// level (the read form) or the levels it names (the write form). Its own brand
+// on ADR-0139 D1's device; no operator, so no request can spell it. Nothing
+// writes it until plugin-sharing's switch (ADR-0155 plan step 6).
+export * from './shared-record-ids';
+// [ADR-0155 D4] What `SharedRecordIds` shares with ADR-0147's leaf, built once in
+// the two-leaf shape: the fixed inner read's description, and the brand
+// dispatch the comparand door's `admitFixedReadLeaves` option reads.
+export * from './fixed-read-leaf';
+// [ADR-0155 D4] One conformance case-set for the fixed-read leaves, a set of
+// cases per leaf: what an evaluator answers, and what the engine seam admits.
+export * from './fixed-read-leaf-conformance';
 // [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
 // consumed by both doors (metadata-protocol's ingress gate and objectql's
 // engine seam), so the two cannot drift into answering one spelling two ways.

@@ -425,7 +425,7 @@
  *
  * ## Admitted BY DECLARATION (ADR-0139 D1): a branded `ReadableIds` as `$in`'s comparand
  *
- * The one non-list a list slot may hold. `ReadableIds.of('cpz_doc')`
+ * The first of the two non-lists a list slot may hold. `ReadableIds.of('cpz_doc')`
  * (`./readable-ids.ts`) stands for "the ids of `cpz_doc` this caller may read",
  * a set the engine composes from the caller's read access before any driver
  * sees the filter. This door admits it only when its caller passes
@@ -448,6 +448,31 @@
  *   door is also the authoring lowering's ({@link parseFilterAST}), the save
  *   door's, the analytics raw-SQL compiler's and the RLS compiler's, and none
  *   of those composes the leaf; they pass no option and keep refusing it.
+ *
+ * ## Admitted BY DECLARATION (ADR-0155 D4): a fixed-read leaf as `$in`'s comparand
+ *
+ * The second non-list a list slot may hold, under a second option of its own:
+ * a fixed-read leaf (`./fixed-read-leaf.ts`), today `SharedRecordIds`
+ * (`./shared-record-ids.ts`), a leaf that ARRIVES composed and compiles to a
+ * fixed inner read of one platform table. The engine composes nothing for it;
+ * its executor seam checks its position, verb and recipient and passes it
+ * through (ADR-0155 D4). This door admits it only when its caller names its
+ * brand in `admitFixedReadLeaves` ({@link ListComparandShapeOptions}): ONE
+ * option that names the brands it admits, not one flag per brand, so ADR-0147's
+ * leaf joins by adding its brand, never a third option. Only as the comparand
+ * of `$in`, and only while it carries its brand:
+ *
+ * - **No request can spell it**, for the reason above: a JSON copy, a
+ *   structured clone or a spread arrives unbranded, and is refused here as a
+ *   non-list, ⛔ never dropped and never read as an empty list.
+ * - **Two callers may name a brand** (ADR-0155 D4, the door's admission): the
+ *   engine's comparand door, and the analytics engine-bound merges, which hand
+ *   the scope on to the engine (② ruled: they admit the brand). ⛔ No other
+ *   caller admits it. Neither names it until its own card lands (ADR-0155 plan
+ *   steps 2 and 5), so until then every caller refuses it as a non-list.
+ * - **It is independent of `admitReadableIds`.** Naming a fixed-read brand
+ *   admits no `ReadableIds` leaf, and `admitReadableIds` admits no fixed-read
+ *   leaf.
  *
  * ## Refusal envelope
  *
@@ -476,11 +501,13 @@ import {
 } from './filter-comparand-refusal-text';
 import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 import { isReadableIds } from './readable-ids';
+import { isFixedReadLeaf, type FixedReadLeafBrand } from './fixed-read-leaf';
 import { REFUSAL_HEAD_MAX, headFieldName } from '../shared/refusal-head';
 
 /**
- * [ADR-0139 D1] What a caller of {@link assertListComparandShapes} declares
- * about the filter it hands the door.
+ * [ADR-0139 D1, ADR-0155 D4] What a caller of {@link assertListComparandShapes}
+ * declares about the filter it hands the door: which engine-internal leaves it
+ * admits as a `$in` comparand. Absent, the door admits none of them.
  */
 export interface ListComparandShapeOptions {
   /**
@@ -501,6 +528,26 @@ export interface ListComparandShapeOptions {
    * object in a list slot, and is refused exactly as before.
    */
   readonly admitReadableIds?: boolean;
+  /**
+   * [ADR-0155 D4] Admit a branded fixed-read leaf (`./fixed-read-leaf.ts`) of
+   * one of the named brands as a `$in` comparand instead of refusing it as a
+   * non-list. Today the one brand is `SHARED_RECORD_IDS_BRAND`
+   * (`./shared-record-ids.ts`); ADR-0147's leaf adds its own to the same list.
+   *
+   * Pass it only where the engine's executor seam stands behind the door: the
+   * leaf arrives composed, and that seam checks its position, verb and
+   * recipient before it hands it to a driver. Two callers may name a brand, the
+   * engine's comparand door and the analytics engine-bound merges, each from
+   * its own card (ADR-0155 plan steps 2 and 5); ⛔ no other caller admits it.
+   *
+   * Only the `$in` comparand is admitted, and only a value
+   * {@link isFixedReadLeaf} recognises under one of the named brands. An
+   * unbranded copy (what the leaf becomes after JSON or a structured clone) is
+   * still a plain object in a list slot, and is refused exactly as before. An
+   * empty list names no brand and admits nothing. Independent of
+   * {@link admitReadableIds}.
+   */
+  readonly admitFixedReadLeaves?: readonly FixedReadLeafBrand[];
 }
 
 /**
@@ -1001,7 +1048,9 @@ function arrayScalarComparandError(
  * @param options [ADR-0139 D1] `admitReadableIds` admits a branded
  *                `ReadableIds` leaf as a `$in` comparand — see
  *                {@link ListComparandShapeOptions} for the one caller that may
- *                pass it.
+ *                pass it. [ADR-0155 D4] `admitFixedReadLeaves` admits a
+ *                fixed-read leaf of a named brand the same way, for the two
+ *                callers that option names.
  *
  * [#5685] This paragraph used to carry a second reason: that
  * `FieldOperatorsSchema` was "stricter than the runtime in ways the runtime
@@ -1039,8 +1088,21 @@ export function assertListComparandShapes(
     // Any other `$` key at node level is a logical operator this gate does not
     // judge — an unknown one is already refused downstream, by name.
     if (key.startsWith('$')) continue;
-    assertFieldListComparands(context, key, value, here, options?.admitReadableIds === true);
+    assertFieldListComparands(context, key, value, here, options);
   }
+}
+
+/**
+ * Is `comparand` an engine-internal leaf this caller admits as `$in`'s
+ * comparand? A branded `ReadableIds` leaf under `admitReadableIds` (ADR-0139
+ * D1), or a fixed-read leaf of a brand named in `admitFixedReadLeaves`
+ * (ADR-0155 D4). Without options, nothing.
+ */
+function admitsEngineLeaf(comparand: unknown, options: ListComparandShapeOptions | undefined): boolean {
+  if (options === undefined) return false;
+  if (options.admitReadableIds === true && isReadableIds(comparand)) return true;
+  const brands = options.admitFixedReadLeaves;
+  return brands !== undefined && isFixedReadLeaf(comparand, brands);
 }
 
 /** One field constraint: `{ field: <spec> }`. */
@@ -1049,7 +1111,7 @@ function assertFieldListComparands(
   field: string,
   spec: unknown,
   path: string,
-  admitReadableIds: boolean,
+  options: ListComparandShapeOptions | undefined,
 ): void {
   // A spec that is not a plain object is a comparand (implicit equality) and
   // carries no operator to check — unless it is a LIST, which the equality
@@ -1140,13 +1202,15 @@ function assertFieldListComparands(
       continue;
     }
     if (!Array.isArray(comparand)) {
-      // [ADR-0139 D1] The one non-list a `$in` may hold: a BRANDED `ReadableIds`
-      // leaf, and only for a caller that composes it (`admitReadableIds`). The
-      // brand cannot survive JSON or a structured clone, so a request's
-      // `{ "$in": { "object": "x" } }` — and the leaf after any copy — still
-      // reaches the refusal below, unchanged. `$nin` admits nothing: the leaf
-      // is declared as `$in`'s comparand only.
-      if (op === '$in' && admitReadableIds && isReadableIds(comparand)) continue;
+      // [ADR-0139 D1] The non-lists a `$in` may hold: a BRANDED `ReadableIds`
+      // leaf, and only for a caller that composes it (`admitReadableIds`);
+      // [ADR-0155 D4] a branded fixed-read leaf, and only for a caller that
+      // names its brand (`admitFixedReadLeaves`). No brand survives JSON or a
+      // structured clone, so a request's `{ "$in": { "object": "x" } }` — and
+      // either leaf after any copy — still reaches the refusal below,
+      // unchanged. `$nin` admits nothing: both are declared as `$in`'s
+      // comparand only.
+      if (op === '$in' && admitsEngineLeaf(comparand, options)) continue;
       throw nonListComparandError(context, op, field, comparand, `${path}.${op}`);
     }
     // The null-member carve-out (2026-08-31 ruling, #13357). `indexOf` is the
