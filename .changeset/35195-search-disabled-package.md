@@ -1,11 +1,11 @@
 ---
-'@objectstack/metadata-protocol': minor
+'@objectstack/metadata-protocol': patch
 ---
 
 fix(metadata-protocol)!: global search leaves out the objects of a disabled package, the answer every data route already gives
 
 Clause-②: yes (narrowing: global search stops returning a disabled package's records, the answer every data route already gives)
-Metadata-protocol: semantic
+Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is which objects GET /api/v1/search sweeps once a package is disabled. A caller that needs those records re-enables the package. -->
 
