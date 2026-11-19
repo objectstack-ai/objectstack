@@ -712,7 +712,7 @@ export function withoutItems(artifact: Record<string, unknown[]>, baseline: Reco
  * removed, and the unmanaged install door refuses a flow that carries one
  * (`unrecognized_keys: _diagnostics`, measured on a blank 18.6.0 host).
  */
-export function iteratedManifest(installed: Record<string, unknown>, served: Record<string, unknown[]>): Record<string, unknown> {
+function iteratedManifest(installed: Record<string, unknown>, served: Record<string, unknown[]>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...installed };
   for (const [key, items] of Object.entries(served)) {
     if (items.length) out[key] = items.map(stripReadDecorations);
