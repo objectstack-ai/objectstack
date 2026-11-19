@@ -201,6 +201,26 @@ describe('planNamespaceRename — a copied capability, and every grant and requi
         expect(action.objectName).toBe('shop_invoice');
     });
 
+    it('a token the package does NOT declare still follows a renamed object, in grant, requirement and predicate alike', () => {
+        const items: NamespaceRenameItem[] = [
+            { type: 'object', name: 'crm_invoice', body: { name: 'crm_invoice', fields: {} } },
+            { type: 'permission', name: 'crm_billing', body: { name: 'crm_billing', systemPermissions: ['crm_invoice.void', 'manage_users'] } },
+            { type: 'action', name: 'crm_void', body: {
+                name: 'crm_void', objectName: 'crm_invoice', requiredPermissions: ['crm_invoice.void'],
+                visible: "current_user.hasCapability('crm_invoice.void')",
+            } },
+        ];
+        const rename = planNamespaceRename({
+            sourcePackageId: 'com.demo.crm', sourceNamespace: 'crm', targetNamespace: 'shop', items,
+            retryVerb: 'duplicate', sourceStaysInstalled: true,
+        });
+        const set = (rename.rewrite('permission', 'crm_billing', items[1]!.body) as { item: any }).item;
+        expect(set.systemPermissions).toEqual(['shop_invoice.void', 'manage_users']);
+        const action = (rename.rewrite('action', 'crm_void', items[2]!.body) as { item: any }).item;
+        expect(action.requiredPermissions).toEqual(['shop_invoice.void']);
+        expect(action.visible).toBe("current_user.hasCapability('shop_invoice.void')");
+    });
+
     describe('when the source stays installed beside the copy (duplicatePackage)', () => {
         const duplicate = (items = app) => planNamespaceRename({
             sourcePackageId: 'com.demo.asset', sourceNamespace: 'demoasset', targetNamespace: 'trial1', items,

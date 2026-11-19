@@ -364,10 +364,11 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
     //
     // The name is rewritten in the three places a body names a capability —
     // the two keys above, and a `hasCapability('<name>')` predicate
-    // ({@link HAS_CAPABILITY_CALL}) — and in those places the object-name
-    // pass below never runs, so a capability named after a renamed object
-    // (`crm.crm_invoice.void`) is ONE name in the copy, the declaration's,
-    // never a second one the object pass would invent.
+    // ({@link HAS_CAPABILITY_CALL}) — and there the object-name pass below
+    // never touches a name the package declares, so a capability named after
+    // a renamed object (`crm.crm_invoice.void`) is ONE name in the copy, the
+    // declaration's, never a second one the object pass would invent. A name
+    // the package does not declare still takes the object-name pass there.
     //
     // ⛔ A SHARED GATE IS REFUSED (`sourceStaysInstalled`). When the source
     // stays installed beside the copy (`duplicatePackage`), a declared
@@ -421,9 +422,16 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
     }
     // The capability names one `rewrite` call met, for the shared-gate refusal.
     let capabilitiesNamed: Set<string> | undefined;
+    // A name the package DECLARES takes the capability rename alone, never the
+    // object-name pass, so its declaration and every reference agree. Any
+    // other name is the object-name pass's, as it was before #35157: an
+    // undeclared token spelled with a renamed object's name
+    // (`crm_invoice.void`) follows the object in the grant, the requirement
+    // and the predicate alike, so each copy keeps a gate of its own.
     const renameCapability = (name: string): string => {
         capabilitiesNamed?.add(name);
-        return capabilityRenames.get(name) ?? name;
+        if (capabilityNames.has(name)) return capabilityRenames.get(name) ?? name;
+        return re ? name.replace(re, (m) => renameMap.get(m) ?? m) : name;
     };
     const renameCapabilityList = (list: unknown): unknown =>
         Array.isArray(list)

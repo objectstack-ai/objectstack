@@ -100,10 +100,13 @@ export async function readDeclaredCapabilityContext(
   // once, by a `manage_metadata` holder, inside a writable package.
   // Dropping a declaration errs toward refusing a binding, never toward
   // granting one.
-  const withPackage = (list: any[]): any[] => list.filter(
-    (c) => typeof (c as { _packageId?: unknown } | null)?._packageId === 'string'
-      && (c as { _packageId: string })._packageId.length > 0,
-  );
+  // The registry stamps `_packageId`; the metadata service may name the
+  // package under `packageId` or `package` too.
+  const packageOf = (c: any): unknown => c?._packageId ?? c?.packageId ?? c?.package;
+  const withPackage = (list: any[]): any[] => list.filter((c) => {
+    const pkg = packageOf(c);
+    return typeof pkg === 'string' && pkg.length > 0;
+  });
   const registered: any[] = readDeclared(ql, 'capability');
   let caps: any[] = withPackage(registered);
   if (registered.length === 0) {
