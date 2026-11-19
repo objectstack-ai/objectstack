@@ -33,7 +33,7 @@
  *
  * ## The harness cannot read as a refusal
  *
- * Each detail render first finds the ungated `Title` value, and each form
+ * Each detail render first finds the ungated `Region` value, and each form
  * render the ungated `Stage` control. Both throw a textually distinct
  * `HARNESS DEAD` first, so a body that rendered nothing at all can never pass
  * a "hidden" leg.
@@ -73,7 +73,7 @@ const objectSchemaWith = (visibleWhen: unknown, withGroups = true) => ({
   name: OBJECT_NAME,
   fields: {
     name: { type: 'text', label: 'Name' },
-    title: { type: 'text', label: 'Title', group: 'basics' },
+    region: { type: 'text', label: 'Region', group: 'basics' },
     stage: { type: 'text', label: 'Stage', group: 'basics' },
     // Declared, and carried by NO row: the null-seed case.
     tier: { type: 'text', label: 'Tier', group: 'basics' },
@@ -96,7 +96,7 @@ const objectSchemaWith = (visibleWhen: unknown, withGroups = true) => ({
 type Row = Record<string, any>;
 const LOST: Row = {
   id: 'R1',
-  title: 'title-of-lost',
+  region: 'region-of-lost',
   stage: 'closed_lost',
   owner: { id: 'u1', name: 'Kim' },
   loss_reason: 'loss-of-lost',
@@ -106,7 +106,7 @@ const LOST: Row = {
 };
 const WON: Row = {
   id: 'R2',
-  title: 'title-of-won',
+  region: 'region-of-won',
   stage: 'closed_won',
   owner: { id: 'u2', name: 'Lee' },
   loss_reason: 'loss-of-won',
@@ -157,7 +157,7 @@ const runtimeDefaultPageUngrouped: SchemaFor = (objectSchema) => ({
   sections: [
     {
       showBorder: false,
-      fields: ['title', 'stage', 'owner', 'loss_reason', 'win_reason', 'next_step', 'memo'].map((n) =>
+      fields: ['region', 'stage', 'owner', 'loss_reason', 'win_reason', 'next_step', 'memo'].map((n) =>
         descriptor(objectSchema, n),
       ),
     },
@@ -167,14 +167,14 @@ const runtimeDefaultPageUngrouped: SchemaFor = (objectSchema) => ({
 /** An authored page: enumerated sections of bare names, the spec's spelling. */
 const authoredSections: SchemaFor = () => ({
   sections: [
-    { name: 'basics', label: 'Basics', fields: ['title', 'stage', 'owner'] },
+    { name: 'basics', label: 'Basics', fields: ['region', 'stage', 'owner'] },
     { name: 'outcome', label: 'Outcome', fields: ['loss_reason', 'win_reason', 'next_step', 'memo'] },
   ],
 });
 
 /** An authored page: a flat `fields` list. */
 const authoredFields: SchemaFor = () => ({
-  fields: ['title', 'stage', 'loss_reason', 'win_reason', 'next_step', 'memo'],
+  fields: ['region', 'stage', 'loss_reason', 'win_reason', 'next_step', 'memo'],
 });
 
 function renderDetails(schema: Record<string, unknown>, row: Row, objectSchema: Record<string, unknown>, scope: Record<string, unknown>) {
@@ -203,10 +203,10 @@ function detailShows(
 ): boolean {
   const objectSchema = objectSchemaWith(visibleWhen, withGroups);
   renderDetails(schemaFor(objectSchema), row, objectSchema, scope);
-  const anchor = textCount(row.title);
+  const anchor = textCount(row.region);
   if (anchor !== 1) {
     cleanup();
-    throw new Error(`HARNESS DEAD: expected the ungated Title value once, found ${anchor}`);
+    throw new Error(`HARNESS DEAD: expected the ungated Region value once, found ${anchor}`);
   }
   const label = textCount(which === 'win_reason' ? WIN_LABEL : MEMO_LABEL);
   const value = textCount(row[which]);
@@ -354,7 +354,7 @@ describe('every record:details body draws a field only where its visibleWhen adm
   it('CONTROL — a field whose predicate holds and a field with none are drawn on the default page', () => {
     const objectSchema = objectSchemaWith(gate);
     renderDetails(synthesizedDefaultPage(objectSchema), LOST, objectSchema, {});
-    expect(textCount(LOST.title)).toBe(1);
+    expect(textCount(LOST.region)).toBe(1);
     // `loss_reason`'s own predicate holds on LOST.
     expect([textCount('Loss Reason'), textCount(LOST.loss_reason)]).toEqual([1, 1]);
     // `next_step` declares none.
@@ -371,7 +371,7 @@ describe('every record:details body draws a field only where its visibleWhen adm
       },
     };
     renderDetails(synthesizedDefaultPage(objectSchema), LOST, objectSchema, {});
-    expect(textCount(LOST.title)).toBe(1);
+    expect(textCount(LOST.region)).toBe(1);
     expect(textCount('Outcome')).toBe(0);
     cleanup();
     renderDetails(synthesizedDefaultPage(objectSchema), WON, objectSchema, {});
