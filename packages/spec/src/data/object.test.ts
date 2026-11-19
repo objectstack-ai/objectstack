@@ -1259,12 +1259,12 @@ describe('ObjectSchema.create()', () => {
       expect(message).toContain('ADR-0032 "no silent failure"');
     });
 
-    // #4990 note 1 asked whether this file's own `suggestKey` shares the
-    // camelCase weakness that `findClosestMatches` had. It does NOT: it already
-    // lowercases BOTH sides (`editDistance(unknown.toLowerCase(),
-    // key.toLowerCase())`), so a declared key's capitals were never charged to
-    // the author here. Pinning it means the two suggesters cannot drift apart
-    // again — this is the property #4990 fixed in the other one.
+    // #4990 note 1 asked whether this file's own suggester shares the
+    // camelCase weakness that `findClosestMatches` had. It did not, and it no
+    // longer has a suggester of its own: `create()` answers with the shared
+    // `suggestRename` (`shared/rename-guess.ts`), which folds case on BOTH
+    // sides, so a declared key's capitals are never charged to the author.
+    // Pinning it keeps the property #4990 fixed at this door too.
     it('suggestKey judges a typo identically in either case', () => {
       const bullet = (key: string): string => {
         try {
@@ -3107,5 +3107,37 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     expect(census.dropped.map((site) => site.path)).not.toContain('fields.out.keyType');
     const site = census.projected.find((s) => s.path === 'fields.out');
     expect(site?.declaredPatterns).toEqual(['banned-keys', 'banned-keys']);
+  });
+});
+
+/**
+ * `ObjectSchema.create()` answers an unknown key with the package's ONE rename
+ * rule (`shared/rename-guess.ts`). It used to carry its own copy of the
+ * `max(2, len/3)` budget, without the short-key screen the strict refusal
+ * gained, so a four-letter key was offered any declared key two unrelated
+ * edits away.
+ */
+describe('ObjectSchema.create — a short unknown key gets the shared rename rule', () => {
+  const bulletFor = (key: string): string => {
+    try {
+      ObjectSchema.create({
+        name: 'demo',
+        fields: {},
+        [key]: 1,
+      } as Record<string, unknown> as Parameters<typeof ObjectSchema.create>[0]);
+    } catch (e) {
+      return ((e as Error).message.split('\n').find((l) => l.trim().startsWith('•')) ?? '').trim();
+    }
+    throw new Error(`expected ObjectSchema.create to reject \`${key}\``);
+  };
+
+  it('a short key two unrelated edits from a declared key is offered nothing', () => {
+    // `page` → `name` is two substitutions, inside the old budget of 2.
+    expect(bulletFor('page')).toBe('• `page` is not an ObjectSchema field.');
+  });
+
+  it('a genuine one-edit slip on a short key is still answered', () => {
+    expect(bulletFor('nmae')).toContain('did you mean `name`');
+    expect(bulletFor('labl')).toContain('did you mean `label`');
   });
 });

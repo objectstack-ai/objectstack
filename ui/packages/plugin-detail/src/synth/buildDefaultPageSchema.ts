@@ -24,6 +24,7 @@
  */
 
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import type { SelectOptionKind, ServiceObject } from '@objectstack/spec/data';
 import { detectStatusField } from '@object-ui/types';
 import { resolveNameField } from '@object-ui/core';
@@ -446,8 +447,12 @@ export function resolveTitleField(def: ObjectDefLike | undefined): string | null
  * How many highlights the record header shows (objectstack#27055, the v3
  * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
  * A declared `highlightFields` list longer than this is cut here.
+ *
+ * Declared once in `@objectstack/spec/ui` and re-exported here: the
+ * `field-group-shadowed` lint judges which field groups this strip empties
+ * with the same constant, so its verdict matches the page.
  */
-export const RECORD_HIGHLIGHTS_MAX = 6;
+export { RECORD_HIGHLIGHTS_MAX };
 
 /**
  * The record's highlight strip: the object's DECLARED `highlightFields`

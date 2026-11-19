@@ -34,6 +34,9 @@ export function PageDefaultInspector({
   readOnly,
   serverSchema,
   locale,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const { schema, form } = React.useMemo(
     () =>
@@ -62,6 +65,9 @@ export function PageDefaultInspector({
       value={draft}
       hiddenFields={[...PAGE_FIELDS_OWNED_ELSEWHERE]}
       readOnly={readOnly}
+      issues={issues}
+      revealIssues={revealIssues}
+      onInlineIssueFieldsChange={onInlineIssueFieldsChange}
       onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
     />
   );
