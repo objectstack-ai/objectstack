@@ -1088,10 +1088,6 @@ export function useObjectViewListRenderer({
                 // a personal view's panel opens on the view's own conditions.
                 initialFilters={listSeed?.filters ?? viewPanelFilters}
                 initialSearchTerm={listSeed?.search}
-                // objectui#12606 — Setup's list opens without row numbers in
-                // the leading cell. A host prop, not a view key: a console
-                // posture, never metadata.
-                defaultRowNumbers={!inSetup}
                 // objectui#13330 — on a managed environment, the Users list
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.

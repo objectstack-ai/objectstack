@@ -463,9 +463,9 @@ export interface ListViewProps {
   /**
    * Whether the grid opens with row numbers in its leading cell — the opening
    * state of the Display control's session-only switch, and what its "Reset to
-   * view default" returns to. Default `true`. A HOST prop, never a schema key:
-   * the console's Setup app opens its lists without them (objectui#12606), a
-   * posture of the console, not of the view.
+   * view default" returns to. Default `false` (objectstack#35663: the list's
+   * leading cell is the checkbox, always shown). A HOST prop, never a schema
+   * key: a posture of the host, not of the view.
    */
   defaultRowNumbers?: boolean;
   /**
@@ -2092,7 +2092,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
-  defaultRowNumbers = true,
+  defaultRowNumbers = false,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -3018,7 +3018,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // Row numbers on the grid's leading cell — the Display control's switch
   // (objectui#12423). Session-only and in memory: nothing stores it, and it
-  // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
+  // opens on the host's `defaultRowNumbers` (off unless a host says otherwise)
   // with every list.
   const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
 

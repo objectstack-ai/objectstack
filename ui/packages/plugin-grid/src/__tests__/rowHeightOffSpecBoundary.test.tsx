@@ -53,7 +53,9 @@ function makeSchema(opts?: Record<string, any>) {
 function renderGrid(opts?: Record<string, any>) {
   return render(
     <ActionProvider>
-      <ObjectGrid schema={makeSchema(opts)} />
+      {/* The row-number cell is where the table-level copy is observable; row
+          numbers are a host opt-in since objectstack#35663, so this host opts in. */}
+      <ObjectGrid schema={makeSchema(opts)} showRowNumbers />
     </ActionProvider>,
   );
 }
@@ -102,8 +104,9 @@ function cellsOf(container: HTMLElement) {
   const row = container.querySelector('tbody tr');
   expect(row, 'expected a rendered body row').toBeTruthy();
   const tds = Array.from(row!.querySelectorAll('td'));
-  const dataCell = tds.find((td) => !td.classList.contains('w-10'));
-  const plainCell = tds.find((td) => td.classList.contains('w-10'));
+  // The leading (row-number) cell is the one held at the 40px floor.
+  const dataCell = tds.find((td) => !td.classList.contains('min-w-10'));
+  const plainCell = tds.find((td) => td.classList.contains('min-w-10'));
   expect(dataCell, 'expected a data column cell (column-level cellClassName)').toBeTruthy();
   expect(plainCell, 'expected a row-number cell (table-level cellClassName)').toBeTruthy();
   return { dataCell: dataCell!, plainCell: plainCell! };
