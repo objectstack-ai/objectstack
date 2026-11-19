@@ -968,7 +968,16 @@ export const CEILINGS = new Map([
   // letter B): 9128 bytes (9108 priced) -> 9133 (9113 priced) -> 2279 tokens, pinned AT
   // the measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9113 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2279],
+  // 2279 -> 2272 (#35284): the Actions row's In column names the suffix the registry
+  // declares and `os generate action` writes (`**/*.action.ts`, metadata-plugin.zod.ts;
+  // `metadataFileName`), then `*.actions.ts`, which loads too when the actions barrel
+  // imports it (+15 bytes). PAID DOWN FIRST by one restatement cut from this file: Trap
+  // 3's "before writing any widget, dataset or chart" restates the subjects the routing
+  // table's dashboards row sends to the same rule file, so the pointer reads "first"
+  // (-41 bytes). Net shrink, so no raise: the ceiling follows the file down to the
+  // measurement, 9133 bytes (9113 priced) -> 9107 (9087 priced) -> 2272 tokens.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
+  ['skills/objectstack-ui/SKILL.md', 2272],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
