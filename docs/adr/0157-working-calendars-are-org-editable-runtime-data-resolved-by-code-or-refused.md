@@ -150,7 +150,7 @@ Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/iss
 Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086), Q5 letter A. It is the approved Scope of #35357: "recompute each sweep rather than storing it".
 
 - **The `working_time` due time is recomputed from `created_at` on every sweep and never stored.** A holiday entered after a request opened moves that request's deadline. The displayed due time and the sweep use one function, as the wall-clock due time does today (`packages/plugins/plugin-approvals/src/approval-service.ts#slaDueAt`).
-- Escalation stays single-shot: a request already escalated is not escalated again, or recalled, when its calendar changes.
+- Current behaviour, not a ruling: escalation stays single-shot, as today. A request already escalated is not escalated again, or recalled, when its calendar changes: the sweep skips any request that already carries an `escalate` action (`packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService.runEscalations`).
 
 ### D13 — Calendar seed rows follow the existing seed contract (Q6)
 
