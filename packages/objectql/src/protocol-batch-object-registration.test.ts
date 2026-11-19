@@ -603,10 +603,12 @@ describe('[#33593] an extension\'s record-mode amount on a single save and in th
 
 // ── [#33713, ADR-0144 D6 and D8 rule 5] A `dynamic` roll-up on a metadata-API save ──
 //
-// `defineStack` admits a `dynamic` summary only over a stored home amount
-// (case (d)); a published save through the metadata API answers the same,
-// with the same sentence, through the registry's follow door.
-describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field that is not a stored home amount', () => {
+// `defineStack` admits a `dynamic` summary only over an amount in the home
+// currency, a `dynamic` `currency` field (case (d); seat ruling record
+// 7000258793 widened it from a stored home amount alone); a published save
+// through the metadata API answers the same, with the same sentence, through
+// the registry's follow door.
+describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field that is not an amount in the home currency', () => {
     const P = 'com.qa.homeroll';
     /** The #33659 probe's child: an amount converted at write into `amount_home`, beside amounts that are not home amounts. */
     const expense = {
@@ -624,6 +626,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
             eur_amount: { name: 'eur_amount', type: 'currency', label: 'EUR', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
             plain: { name: 'plain', type: 'number', label: 'Plain' },
             doubled: { name: 'doubled', type: 'formula', label: 'Doubled', expression: 'record.plain * 2', returnType: 'number' },
+            cost: { name: 'cost', type: 'currency', label: 'Cost' },
         },
     };
     const total = (field: string, extra: Record<string, unknown> = { currencyConfig: { currencyMode: 'dynamic' } }, fn = 'sum') => ({
@@ -645,7 +648,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
         }
         return undefined;
     };
-    const DYNAMIC_HEAD = "Object 'homeroll_project' field 'total' currencyConfig: `currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of a stored home amount";
+    const DYNAMIC_HEAD = "Object 'homeroll_project' field 'total' currencyConfig: `currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of an amount in the organization's home currency";
     async function bootWithExpense(): Promise<Harness> {
         const h = await boot();
         vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -655,7 +658,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
     }
 
     it('refuses one over a fixed EUR amount, a plain number and a formula 422 INVALID_METADATA, with case (d)\'s sentence, and stores nothing', async () => {
-        for (const [field, says] of [['eur_amount', 'is fixed to EUR'], ['plain', 'is not a stored home amount'], ['doubled', 'is not a stored home amount']] as const) {
+        for (const [field, says] of [['eur_amount', 'is fixed to EUR'], ['plain', "is a 'number' field"], ['doubled', "is a 'formula' field"]] as const) {
             const h = await bootWithExpense();
             const err = await caught(() => publish(h, 'object', project({ total: total(field) })));
             expect(err, field).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError' });
@@ -666,6 +669,13 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
             expect(registered(h, 'homeroll_project'), field).toBeUndefined();
             await h.kernel.shutdown();
         }
+    });
+
+    it('a `dynamic` roll-up over a plain `dynamic` amount no `homeAmount` names saves and is served (seat ruling record 7000258793)', async () => {
+        const h = await bootWithExpense();
+        await publish(h, 'object', project({ total: total('cost') }));
+        expect(registered(h, 'homeroll_project')?.fields?.total?.currencyConfig).toEqual({ currencyMode: 'dynamic' });
+        expect(bodyOf(activeRow(h, 'object', 'homeroll_project', P))?.fields?.total?.summaryOperations?.field).toBe('cost');
     });
 
     it('CONTROL: the #33659 probe shape, a `dynamic` roll-up over the stored home amount, saves and is served', async () => {

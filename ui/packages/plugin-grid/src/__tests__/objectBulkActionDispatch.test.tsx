@@ -674,3 +674,91 @@ describe('a per-record failed row shows the refusal\'s userMessage (objectstack#
     expect(screen.queryByText(USER_TEXT, { exact: false })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * An aggregate action that RESOLVES with a per-row answer: the handler's own
+ * return value, read as a `BulkActionResult` (`{ succeeded, failed }`,
+ * `@objectstack/spec/ui`) against the dispatched selection. Driven through
+ * the console's real `script` dispatch and the `/actions` door's success
+ * envelope, so the pins see the value the grid's dispatcher hands the
+ * executor, not a value injected below it.
+ */
+describe('an aggregate run reports its BulkActionResult per row', () => {
+  const MOVE = { name: 'mass_update_stage', label: 'Update Stage', type: 'script' };
+  const AGGREGATE = { bulkActionDefs: [{ name: 'mass_update_stage', operation: 'custom', execution: 'aggregate' }] };
+  const resolving = (data?: unknown) => vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => (data === undefined ? { success: true } : { success: true, data }),
+  }));
+
+  async function runAndClose(actionsFetch: ReturnType<typeof vi.fn>) {
+    const script = createServerActionHandler({ fetch: actionsFetch as any, baseUrl: '' });
+    const ds = await renderAndSelectAll({ objectActions: [MOVE], schema: AGGREGATE, handlers: { script } });
+    fireEvent.click(await screen.findByTestId('bulk-action-mass_update_stage'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await screen.findByRole('button', { name: 'Done' });
+    expect(actionsFetch).toHaveBeenCalledTimes(1);
+    return ds;
+  }
+
+  async function refreshesOnClose(ds: any): Promise<number> {
+    const before = ds.find.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(before));
+    await new Promise(r => setTimeout(r, 50));
+    return ds.find.mock.calls.length - before;
+  }
+
+  it('lists the moved count and each failed row with the handler\'s message, with no Retry', async () => {
+    await runAndClose(resolving({
+      succeeded: ['r1'],
+      failed: [{ id: 'r2', message: 'Plan B is Closed Won and was not moved.' }],
+    }));
+
+    expect(screen.getByText(/Succeeded 1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Failed 1/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent('Plan B is Closed Won and was not moved.');
+    expect(screen.queryByTestId('bulk-error-row-r1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-r2')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-aggregate-rejection')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-unconfirmed-records')).not.toBeInTheDocument();
+  });
+
+  it('reports a selected row the result names in neither list as not confirmed, never as succeeded', async () => {
+    await runAndClose(resolving({ succeeded: ['r1'], failed: [] }));
+
+    expect(screen.getByText(/Succeeded 1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Not confirmed 1/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-unconfirmed-records')).toHaveTextContent('Plan B');
+    expect(screen.getByTestId('bulk-succeeded-records')).toHaveTextContent('Plan A');
+    expect(screen.getByTestId('bulk-succeeded-records')).not.toHaveTextContent('Plan B');
+  });
+
+  it('re-reads the grid once when the dialog closes after a run that left every row unconfirmed', async () => {
+    const ds = await runAndClose(resolving({ succeeded: [], failed: [] }));
+    expect(screen.getByText(/Succeeded 0 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Not confirmed 2/)).toBeInTheDocument();
+    expect(await refreshesOnClose(ds)).toBe(1);
+  });
+
+  it('reports a succeeded/failed value that does not parse as unreadable, never as full success', async () => {
+    const ds = await runAndClose(resolving({ succeeded: 2, failed: 0 }));
+
+    expect(screen.getByTestId('bulk-aggregate-unreadable')).toHaveTextContent(
+      'The action finished, but its result could not be read',
+    );
+    expect(screen.queryByText(/Succeeded/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-testid^="bulk-error-row-"]')).toHaveLength(0);
+    expect(await refreshesOnClose(ds)).toBe(1);
+  });
+
+  it('CONTROL: a handler that returns nothing keeps today\'s report', async () => {
+    await runAndClose(resolving());
+
+    expect(screen.getByText(/Succeeded 2 \/ 2/)).toBeInTheDocument();
+    expect(screen.queryByText(/Failed/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-unconfirmed-records')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-aggregate-unreadable')).not.toBeInTheDocument();
+  });
+});
