@@ -261,7 +261,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "완료",
           fields: {
             "summary.added": "추가됨",
-            "summary.alreadyPending": "이미 대기 중, 다시 알림",
+            "summary.alreadyPending": "이미 대기 중",
             "summary.failed": "추가되지 않음",
             rows: "행별 결과"
           },
@@ -270,7 +270,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
               row: "행",
               email: "이메일",
               ok: "성공",
-              alreadyPending: "이미 대기 중, 다시 알림",
+              alreadyPending: "이미 대기 중",
               "host.notified": "호스팅 조직에 알림",
               "host.reason": "알리지 않은 이유",
               "error.message": "추가되지 않은 이유",

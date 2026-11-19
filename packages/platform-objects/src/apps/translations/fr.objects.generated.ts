@@ -261,7 +261,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Terminé",
           fields: {
             "summary.added": "Ajoutés",
-            "summary.alreadyPending": "Déjà en attente, prévenus à nouveau",
+            "summary.alreadyPending": "Déjà en attente",
             "summary.failed": "Non ajoutés",
             rows: "Résultat par ligne"
           },
@@ -270,7 +270,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
               row: "Ligne",
               email: "E-mail",
               ok: "Réussi",
-              alreadyPending: "Déjà en attente, prévenu à nouveau",
+              alreadyPending: "Déjà en attente",
               "host.notified": "Organisation d’hébergement prévenue",
               "host.reason": "Pourquoi non prévenue",
               "error.message": "Non ajouté car",

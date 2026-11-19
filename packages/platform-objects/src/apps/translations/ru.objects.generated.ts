@@ -261,7 +261,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Готово",
           fields: {
             "summary.added": "Добавлено",
-            "summary.alreadyPending": "Уже ожидают, уведомлены повторно",
+            "summary.alreadyPending": "Уже ожидают",
             "summary.failed": "Не добавлено",
             rows: "Результат по строкам"
           },
@@ -270,7 +270,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
               row: "Строка",
               email: "Эл. почта",
               ok: "Успешно",
-              alreadyPending: "Уже ожидает, уведомлён повторно",
+              alreadyPending: "Уже ожидает",
               "host.notified": "Хостинг-организация уведомлена",
               "host.reason": "Почему не уведомлена",
               "error.message": "Не добавлен, потому что",

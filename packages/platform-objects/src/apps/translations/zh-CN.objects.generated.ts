@@ -261,7 +261,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             "summary.added": "已添加",
-            "summary.alreadyPending": "已在待激活中，已再次通知",
+            "summary.alreadyPending": "已在待激活中",
             "summary.failed": "未添加",
             rows: "逐行结果"
           },
@@ -270,7 +270,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               row: "行",
               email: "邮箱",
               ok: "成功",
-              alreadyPending: "已在待激活中，已再次通知",
+              alreadyPending: "已在待激活中",
               "host.notified": "已通知托管组织",
               "host.reason": "未通知的原因",
               "error.message": "未添加的原因",

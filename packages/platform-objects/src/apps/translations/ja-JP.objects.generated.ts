@@ -261,7 +261,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             "summary.added": "追加済み",
-            "summary.alreadyPending": "保留中のため再通知",
+            "summary.alreadyPending": "既に保留中",
             "summary.failed": "未追加",
             rows: "行ごとの結果"
           },
@@ -270,7 +270,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
               row: "行",
               email: "メール",
               ok: "成功",
-              alreadyPending: "保留中のため再通知",
+              alreadyPending: "既に保留中",
               "host.notified": "ホスティング組織に通知済み",
               "host.reason": "通知しなかった理由",
               "error.message": "追加されなかった理由",

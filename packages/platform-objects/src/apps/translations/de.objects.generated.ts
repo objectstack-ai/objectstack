@@ -261,7 +261,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             "summary.added": "Hinzugefügt",
-            "summary.alreadyPending": "Bereits ausstehend, erneut benachrichtigt",
+            "summary.alreadyPending": "Bereits ausstehend",
             "summary.failed": "Nicht hinzugefügt",
             rows: "Ergebnis pro Zeile"
           },
@@ -270,7 +270,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
               row: "Zeile",
               email: "E-Mail",
               ok: "Erfolgreich",
-              alreadyPending: "Bereits ausstehend, erneut benachrichtigt",
+              alreadyPending: "Bereits ausstehend",
               "host.notified": "Hosting-Organisation benachrichtigt",
               "host.reason": "Warum nicht benachrichtigt",
               "error.message": "Nicht hinzugefügt, weil",

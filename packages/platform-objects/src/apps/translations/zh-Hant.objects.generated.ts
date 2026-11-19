@@ -261,7 +261,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             "summary.added": "已新增",
-            "summary.alreadyPending": "已在待啟用中，已再次通知",
+            "summary.alreadyPending": "已在待啟用中",
             "summary.failed": "未新增",
             rows: "逐列結果"
           },
@@ -270,7 +270,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
               row: "列",
               email: "電子郵件",
               ok: "成功",
-              alreadyPending: "已在待啟用中，已再次通知",
+              alreadyPending: "已在待啟用中",
               "host.notified": "已通知託管組織",
               "host.reason": "未通知的原因",
               "error.message": "未新增的原因",

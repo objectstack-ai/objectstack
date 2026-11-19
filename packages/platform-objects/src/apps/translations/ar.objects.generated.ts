@@ -261,7 +261,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             "summary.added": "تمت الإضافة",
-            "summary.alreadyPending": "معلّق بالفعل، أُبلغ مجددًا",
+            "summary.alreadyPending": "معلّق بالفعل",
             "summary.failed": "لم تتم الإضافة",
             rows: "النتيجة لكل صف"
           },
@@ -270,7 +270,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
               row: "الصف",
               email: "البريد الإلكتروني",
               ok: "نجح",
-              alreadyPending: "معلّق بالفعل، أُبلغ مجددًا",
+              alreadyPending: "معلّق بالفعل",
               "host.notified": "أُبلغت المؤسسة المستضيفة",
               "host.reason": "سبب عدم الإبلاغ",
               "error.message": "لم تتم الإضافة بسبب",

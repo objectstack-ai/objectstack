@@ -261,7 +261,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Hecho",
           fields: {
             "summary.added": "Añadidos",
-            "summary.alreadyPending": "Ya pendientes, avisados de nuevo",
+            "summary.alreadyPending": "Ya pendientes",
             "summary.failed": "No añadidos",
             rows: "Resultado por fila"
           },
@@ -270,7 +270,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               row: "Fila",
               email: "Correo electrónico",
               ok: "Correcto",
-              alreadyPending: "Ya pendiente, avisado de nuevo",
+              alreadyPending: "Ya pendiente",
               "host.notified": "Organización de alojamiento avisada",
               "host.reason": "Por qué no se avisó",
               "error.message": "No añadido porque",

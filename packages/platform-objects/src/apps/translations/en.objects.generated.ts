@@ -261,7 +261,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             "summary.added": "Added",
-            "summary.alreadyPending": "Already pending, told again",
+            "summary.alreadyPending": "Already pending",
             "summary.failed": "Not added",
             rows: "Result per row"
           },
@@ -270,7 +270,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               row: "Row",
               email: "Email",
               ok: "Succeeded",
-              alreadyPending: "Already pending, told again",
+              alreadyPending: "Already pending",
               "host.notified": "Hosting organization told",
               "host.reason": "Why not told",
               "error.message": "Not added because",
