@@ -24,6 +24,7 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   SSO_DISCOVERY_COMPANION_ORIGINS,
   explainUntrustedDiscoveryEndpoint,
+  refuseSsoDiscoveryHostNotPublic,
   ssoDiscoveryCompanionOrigins,
   trustingBodyNamedOrigins,
 } from './sso-discovery-companion-origins';
@@ -718,5 +719,87 @@ describe('SSO discovery reads only hosts that resolve to public addresses', () =
     expect(io.asked).toEqual([]);
     expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
     expect(storedRows(rp)).toEqual([]);
+  });
+});
+
+describe('the host a registration\'s discovery reads is the one host resolved', () => {
+  /** A resolver answering a private address for every name, recording each name asked. */
+  function privateResolver() {
+    const asked: string[] = [];
+    const resolve = async (hostname: string) => {
+      asked.push(hostname);
+      return [{ address: '10.0.0.5' }];
+    };
+    return { asked, resolve };
+  }
+  const configured = (url: string) => url.startsWith(BASE);
+  const oidc = (extra: Record<string, unknown> = {}) => ({ clientId: 'client-id', clientSecret: 'client-secret', ...extra });
+
+  it('the issuer\'s well-known URL is resolved when the registration names no discovery endpoint, and refused on issuer', async () => {
+    const r = privateResolver();
+    const refusal = await refuseSsoDiscoveryHostNotPublic({
+      body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
+      isConfiguredTrusted: configured,
+      resolve: r.resolve,
+    });
+    expect(refusal).toMatchObject({ status: 'BAD_REQUEST', code: 'VALIDATION_FAILED', field: 'issuer' });
+    expect(r.asked).toEqual([RESOLVED_HOST]);
+  });
+
+  it('an explicit discovery endpoint is the host resolved, not the issuer\'s, and the refusal names that member', async () => {
+    const r = privateResolver();
+    const refusal = await refuseSsoDiscoveryHostNotPublic({
+      body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc({ discoveryEndpoint: `${DISCOVERY_ORIGIN}/.well-known/openid-configuration` }) },
+      isConfiguredTrusted: configured,
+      resolve: r.resolve,
+    });
+    expect(refusal).toMatchObject({ code: 'VALIDATION_FAILED', field: 'oidcConfig.discoveryEndpoint' });
+    expect(r.asked).toEqual([DISCOVERY_HOST]);
+  });
+
+  it('a registration that reads no discovery document resolves nothing: a SAML registration, and skipDiscovery', async () => {
+    for (const body of [
+      { issuer: RESOLVED_ISSUER, samlConfig: { entryPoint: `${RESOLVED_ISSUER}/sso` } },
+      { issuer: RESOLVED_ISSUER, oidcConfig: oidc({ skipDiscovery: true, tokenEndpoint: `${RESOLVED_ISSUER}/token` }) },
+      {},
+      undefined,
+    ]) {
+      const r = privateResolver();
+      expect(await refuseSsoDiscoveryHostNotPublic({ body, isConfiguredTrusted: configured, resolve: r.resolve }), JSON.stringify(body)).toBeUndefined();
+      expect(r.asked, JSON.stringify(body)).toEqual([]);
+    }
+  });
+
+  it('a discovery URL the deployment trusts, an address literal and a non-public name are not resolved here', async () => {
+    for (const issuer of [RESOLVED_ISSUER, 'https://10.0.0.5', 'https://[fd00::1]', 'http://localhost:9000', 'https://metadata.google.internal']) {
+      const r = privateResolver();
+      const refusal = await refuseSsoDiscoveryHostNotPublic({
+        body: { issuer, oidcConfig: oidc() },
+        isConfiguredTrusted: (url) => url.startsWith(RESOLVED_ISSUER),
+        resolve: r.resolve,
+      });
+      expect(refusal, issuer).toBeUndefined();
+      expect(r.asked, issuer).toEqual([]);
+    }
+  });
+
+  it('a name that does not resolve is left to the read, as the vendor\'s own check leaves it', async () => {
+    const refusal = await refuseSsoDiscoveryHostNotPublic({
+      body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
+      isConfiguredTrusted: configured,
+      resolve: async (hostname) => {
+        throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+      },
+    });
+    expect(refusal).toBeUndefined();
+  });
+
+  it('a name whose every address is public is not refused', async () => {
+    const refusal = await refuseSsoDiscoveryHostNotPublic({
+      body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
+      isConfiguredTrusted: configured,
+      resolve: async () => [{ address: PUBLIC_ADDRESS }, { address: '2606:2800:21f:cb07:6820:80da:af6b:8b2c' }],
+    });
+    expect(refusal).toBeUndefined();
   });
 });
