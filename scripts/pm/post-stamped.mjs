@@ -572,9 +572,9 @@
  * is measured, and the readings agree with one another:
  *
  *   the governed fact table  `.claude/skills/pm-dispatch/references/`
- *                            `platform-readings.md` :410 — a card created
+ *                            `readings-write-shapes.md` :67 — a card created
  *                            through REST with no footer gets exactly one
- *                            synthesised (+58) — and :411 — on
+ *                            synthesised (+58) — and :68 — on
  *                            `PATCH /issues/{n}`, the act `--body` performs,
  *                            a body sending the whole block and a body
  *                            sending no footer BOTH store back exactly one.
@@ -729,7 +729,7 @@
  *
  * The proxy in front of a cloud seat container rewrites what a REST read
  * returns: a body read there intermittently comes back with a bare `#N`
- * spelled `owner/repo#N` (`platform-readings.md`, 配额段, recorded by PR
+ * spelled `owner/repo#N` (`readings-write-shapes.md`, recorded by PR
  * #24744). The card records the director post on objectstack#12708 stored at
  * 14,657 bytes and read back with 117 expansions at 17,699 — 17,699 − 117 × 26
  * = 14,657, the 26 being `objectstack-ai/objectstack`. The stored bytes never
@@ -4996,7 +4996,7 @@ export function selfTest() {
 
   // The READ path's expansion (#24747): a cloud seat container's proxied REST
   // read intermittently spells a bare `#N` as `owner/repo#N` — recorded by PR
-  // #24744 in the platform-readings fact table, partial on the read it records
+  // #24744 in the readings fact table, partial on the read it records
   // (bare references right after `(` were left alone). The stored bytes are
   // the sent ones; only the read differs. The fixtures carry that shape, and
   // the controls pin that nothing else was forgiven on the way.
