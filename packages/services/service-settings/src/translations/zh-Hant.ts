@@ -289,13 +289,26 @@ export const zhHant: PlatformTranslationData = {
         multi_factor: { title: '多因素驗證', description: '本組織中哪些人必須以驗證器應用程式(TOTP)保護帳戶。' },
       },
       keys: {
-        allowed_ip_ranges: { label: '允許的 IP 範圍' },
-        session_idle_timeout_minutes: { label: '閒置逾時(分鐘)' },
-        session_absolute_max_hours: { label: '工作階段最長有效期(小時)' },
-        max_concurrent_sessions_per_user: { label: '每位使用者的最大同時工作階段數' },
+        allowed_ip_ranges: {
+          label: '允許的 IP 範圍',
+          help: 'CIDR 範圍或精確 IP（每行一個，或以逗號分隔），例如 203.0.113.0/24。設定後，成員從這些範圍以外無法開啟本組織的工作階段，之後來自範圍以外的工作階段會被登出；伺服器無法確定用戶端位址的請求也一樣。部署有設定允許的 IP 範圍時，每個範圍都必須落在其內，且清單必須包含你儲存時所用的位址。留空 = 只適用部署的範圍。平台管理員只受部署範圍的約束。',
+        },
+        session_idle_timeout_minutes: {
+          label: '閒置逾時(分鐘)',
+          help: '成員閒置這麼多分鐘後將其登出。部署有設定閒置逾時時，不得長於部署的值。0 = 沿用部署的閒置逾時。',
+        },
+        session_absolute_max_hours: {
+          label: '工作階段最長有效期(小時)',
+          help: '登入後經過這麼多小時強制重新驗證，不論是否有活動。部署有設定有效期時，不得長於部署的值。0 = 沿用部署的有效期。',
+        },
+        max_concurrent_sessions_per_user: {
+          label: '每位使用者的最大同時工作階段數',
+          help: '限制成員在本組織中同時登入的工作階段數；超過上限時其中最舊的會被登出，其他組織中的工作階段既不計入也不會被登出。在登入時以及成員切換到本組織時檢查。部署有設定上限時，不得高於部署的上限，而部署的上限仍會計算該成員的所有工作階段。0 = 只適用部署的上限。',
+        },
         mfa_required: {
           label: '要求多因素驗證',
           options: { off: '不強制', administrators: '管理員', everyone: '所有人' },
+          help: '哪些人必須使用驗證器應用程式：管理員（平台管理員、組織管理員與委派管理員）或所有人。被要求但尚未註冊的人，在部署的寬限期結束後將無法存取資料。弱於部署要求的層級會被拒絕；「不強制」= 沿用部署的要求。需要本部署已開啟雙重驗證；關閉期間，儲存任何要求都會被拒絕。',
         },
       },
     },
