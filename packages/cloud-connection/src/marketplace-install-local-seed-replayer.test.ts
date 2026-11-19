@@ -72,7 +72,7 @@ const helperRegisterOnce = vi.fn((ctx: any, replayer: unknown): boolean => {
     try { if (ctx.getService('seed-replayer') !== undefined) return false; } catch { /* absent */ }
     try { ctx.registerService('seed-replayer', replayer); return true; } catch { return false; }
 });
-const helperMerge = vi.fn((ctx: any, datasets: readonly unknown[]): unknown[] => {
+const helperMerge = vi.fn((ctx: any, datasets: readonly unknown[], _owner?: string): unknown[] => {
     let current: any[] | undefined;
     try { const v = ctx.getService('seed-datasets'); if (Array.isArray(v)) current = v; } catch { /* absent */ }
     const list: any[] = current ?? [];
