@@ -1491,9 +1491,9 @@ export function useSliceFormIssueRows(
  * The issue lines a curated inspector row draws for one path prefix, the way a
  * {@link SchemaForm} row draws its own: an issue AT `prefix` as its message, a
  * deeper one led by the trail of the rest of its path. The row registers
- * `prefix` while it draws, so the host's banner and refusal line leave those
- * issues out (objectstack#27865); deferred under a create form's deferral like
- * a form row, and registering nothing while it is.
+ * `prefix` while mounted, so the host's banner and refusal line leave those
+ * issues out (objectstack#27865). Never deferred: no host hands a curated
+ * inspector a create form's show-on-touch deferral, so mounted is drawn.
  */
 export function IssuePrefixLines({
   issues,
@@ -1501,7 +1501,6 @@ export function IssuePrefixLines({
   label,
   value,
   register,
-  revealIssues,
 }: {
   /** The host's issues, paths relative to the draft. */
   issues: readonly SchemaFormIssue[] | undefined;
@@ -1512,12 +1511,9 @@ export function IssuePrefixLines({
   /** The draft value AT `prefix`, which a trail's indices resolve against. */
   value: unknown;
   register: (prefix: string) => () => void;
-  revealIssues?: boolean;
 }) {
   const locale = useMetadataLocale();
-  const deferred = React.useContext(DeferIssueDisplayContext);
-  const shows = revealIssues === true || !deferred;
-  React.useEffect(() => (shows ? register(prefix) : undefined), [shows, register, prefix]);
+  React.useEffect(() => register(prefix), [register, prefix]);
   const lead = prefix.slice(prefix.lastIndexOf('.') + 1);
   const lines = (issues ?? [])
     .filter((i) => i.path === prefix || i.path.startsWith(`${prefix}.`))
@@ -1526,7 +1522,7 @@ export function IssuePrefixLines({
       const rest = i.path.slice(prefix.length);
       return rest ? `${describeIssuePath(label, `${lead}${rest}`, { [lead]: value })}: ${message}` : message;
     });
-  if (!shows || lines.length === 0) return null;
+  if (lines.length === 0) return null;
   return (
     <>
       {lines.map((m, i) => (

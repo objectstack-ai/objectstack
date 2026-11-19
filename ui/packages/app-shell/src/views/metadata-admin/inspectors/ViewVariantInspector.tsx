@@ -458,7 +458,6 @@ export function ViewVariantInspector({
         label={t('engine.inspector.view.label', locale)}
         value={draft.label}
         register={registerIssuePrefix}
-        revealIssues={revealIssues}
       />
       <InspectorSelectField
         label={t('engine.inspector.view.type', locale)}
@@ -528,7 +527,6 @@ export function ViewVariantInspector({
             label={t('engine.fieldsListEditor.columns', locale)}
             value={variant.columns}
             register={registerIssuePrefix}
-            revealIssues={revealIssues}
           />
         </div>
       )}

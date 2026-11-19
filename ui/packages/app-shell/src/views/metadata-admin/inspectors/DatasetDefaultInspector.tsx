@@ -385,7 +385,6 @@ export function DatasetDefaultInspector({
   locale,
   onBlockingIssuesChange,
   issues,
-  revealIssues,
   onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   // The designer's chrome language, handed in by the host like every other
@@ -402,7 +401,6 @@ export function DatasetDefaultInspector({
       label={rowLabel}
       value={draft[key]}
       register={registerIssuePrefix}
-      revealIssues={revealIssues}
     />
   );
   const label = typeof draft.label === 'string' ? draft.label : '';

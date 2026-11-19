@@ -38,7 +38,6 @@ export function ObjectDefaultInspector({
   readOnly,
   locale,
   issues,
-  revealIssues,
   onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
@@ -53,7 +52,6 @@ export function ObjectDefaultInspector({
       label={rowLabel}
       value={draft[key]}
       register={registerIssuePrefix}
-      revealIssues={revealIssues}
     />
   );
   // The host passes an empty `name` only while creating a new object.
