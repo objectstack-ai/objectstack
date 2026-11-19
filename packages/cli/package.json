@@ -53,7 +53,8 @@
       "glob": "**/*.js"
     },
     "hooks": {
-      "preparse": "./dist/hooks/preparse/strip-arg-separator.js"
+      "preparse": "./dist/hooks/preparse/strip-arg-separator.js",
+      "command_not_found": "./dist/hooks/command-not-found/point-at-help.js"
     },
     "topicSeparator": " ",
     "topics": {
