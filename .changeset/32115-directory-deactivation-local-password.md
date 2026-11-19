@@ -1,0 +1,19 @@
+---
+'@objectstack/plugin-auth': patch
+---
+
+fix(plugin-auth)!: a directory deactivation removes the user's local password; a re-activation restores access through SSO only
+
+Clause-②: yes (narrowing) — narrowed: a SCIM `active: false`, a SCIM `DELETE /Users/{id}`, a SCIM create with `active: false`, a connection decommission that leaves the user with no active source, and any later SCIM write that leaves the user inactive now also delete the user's local password (every `sys_account` row of the user with `provider_id = 'credential'`), where they left it in place, so the identity-source mark then reads the user `idp_provisioned` where the password had kept it `env_native`; and a SCIM `active: true` that lifts the directory's ban now first deletes any such row the user holds at that moment, where it lifted the ban alone, and fails (SCIM 500, the user staying deactivated) when that deletion cannot be completed. A re-activation by the directory restores no credential from before it, so a password sign-in by that user answers the ordinary `401 INVALID_EMAIL_OR_PASSWORD` until a password is set again on purpose after it.
+Metadata-protocol: none
+Skills-docs: none — no skill under `skills/**` teaches the SCIM deactivation lifecycle; `content/docs/permissions/authentication.mdx` gains the rule in this change.
+
+<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The change is a runtime write on the SCIM deprovision and re-activation paths (rows of the better-auth account table), so there is nothing stored in metadata for a migration to rewrite and no tombstone. -->
+
+**BREAKING** for a deployment that provisions users through a SCIM directory: deactivating or deleting a user through SCIM, or decommissioning the last SCIM connection that holds the user active, now removes that user's local password, alongside the ban, the API key revocation and the AI service account suspension it already performed. A re-activation by the directory restores access through the identity provider's sign-in only: it removes any local password the user holds at that moment, one set while the user was deactivated included, before it lifts the ban, so it restores no credential from before it; when that removal cannot be completed the re-activation fails and the user stays deactivated until the directory retries. The user's other account links (SSO / OAuth) and the user row are kept. With the password gone, the user reads as directory-managed (`sys_user.source = 'idp_provisioned'`, ADR-0135 D4) where the password had kept it `env_native`, so every rule keyed on that mark applies to the user, the SSO-only mode refusals to set a local password among them.
+
+Unchanged: an administrator's ban and unban (`admin/ban-user`, `admin/unban-user`) leave the local password alone; an `active: true` over an administrator's ban, and an active SCIM write for a user who is not banned, remove nothing; a deactivation the break-glass last-administrator guard refuses removes nothing.
+
+A ban whose reason reads `Deactivated via SCIM`, the reason the directory's ban records, is the directory's whoever wrote it: the directory's next active write lifts it and removes the local password.
+
+What to do: nothing. No migration or backfill runs: a user deactivated before this version keeps their local credential until the directory next writes that user. An administrator's unban removes nothing. A re-activation by the directory also removes a password set while the user was deactivated. A person who needs a local password after a re-activation sets one again on purpose after it (`set-initial-password`, or an administrator's Set Password where the deployment allows it; with SSO-only mode on, these doors refuse a directory-managed user other than a platform administrator setting their own).

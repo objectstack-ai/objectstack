@@ -1534,7 +1534,10 @@ like any banned account's, with one field added:
 - `scim_deactivated` marks exactly the bans the identity provider lifts when it
   sends `active: true` again. An administrator's ban that a deactivation
   arrived on top of keeps the administrator's reason, and answers as an
-  administrator's ban.
+  administrator's ban. A ban whose reason reads `Deactivated via SCIM`, the
+  reason the directory's ban records, is the directory's whoever wrote it: the
+  directory's next active write lifts it and removes the user's local
+  password.
 - A deactivation, or a `DELETE /Users/{id}`, also revokes every API key the
   user owns (`revoked_reason: scim_deactivated`). A re-activation re-arms none
   of them, and no one can restore them: the owner's Restore and a platform
@@ -1547,6 +1550,22 @@ like any banned account's, with one field added:
   resume it, and `resume` refuses while the owner is still deactivated; once the
   owner is re-activated, or a new owner is named, an administrator resumes it
   (see [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp)).
+- It also removes the user's local password. So does a connection
+  decommission that leaves the user with no active source: that is a
+  deactivation too. With the password gone the user reads as
+  directory-managed (`sys_user.source` is `idp_provisioned`), so the rules for
+  IdP-provisioned users apply, the
+  [SSO-only mode](#sso-only-mode-idp-provisioned-users-get-no-local-password)
+  refusals included. A re-activation by the identity provider restores access
+  through its sign-in only: the `active: true` that
+  lifts the deactivation removes any local password the user holds at that
+  moment, one set while the user was deactivated included, so a re-activation
+  restores no credential from before it. If that removal cannot be completed,
+  the re-activation fails and the user stays deactivated until the identity
+  provider retries. The user holds a local password again only once one is set
+  on purpose after the re-activation. No migration or backfill runs: a user
+  deactivated before this rule shipped keeps their local credential until the
+  directory next writes that user. An administrator's unban removes nothing.
 - The cause is told only after the password verified: a wrong password is the
   ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
   names no connection, provider or other account.

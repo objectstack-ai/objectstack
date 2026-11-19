@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, last-administrator and sign-in sequence its subject; 1.8 s in a local run; slowest CI reading 10.3 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, re-activation, last-administrator and sign-in sequence its subject; a LOCAL reading, taken because no CI reading of the 53-case file could be read where it was measured (the Test Core shard log of a PR run holds it past the readable tail): 8.55 s, the slowest of four local runs of this file alone (vitest tests time, shared box), x 1.25, rounded up; the last CI reading, 10.3 s at 38 cases (scheduled run 41237094739), gives the same budget
 
 /**
  * [#14360] SCIM `active: false` disables the account again — end to end,
@@ -40,7 +40,10 @@
  *
  *  (a) `active: false` ⇒ `sys_user.banned`, sessions revoked, sign-in refused
  *      with the vendor's `BANNED_USER` (status AND code, never a bare throw).
- *  (b) `active: true` ⇒ unbanned, sign-in accepted again.
+ *  (b) `active: true` ⇒ unbanned, and the re-activation restores no local
+ *      password from before it, one set while the user was deactivated
+ *      included (access returns through SSO only); a password set after the
+ *      re-activation signs in.
  *  (c) the last administrator: refused THROUGH SCIM as a 403 SCIM error, the
  *      account stays active — plus the positive control (a second
  *      administrator makes the same request succeed) that proves the guard
@@ -71,6 +74,23 @@
  *      And, under (d): a deactivation makes an administrator's EXPIRING ban
  *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
  *      principal.
+ *  (k) a deactivation, a DELETE and any later inactive write remove the
+ *      user's local password (`scim-deactivation-password-removal.ts`) and
+ *      nothing else; the re-activation that lifts the directory's ban
+ *      removes any local password left before it lifts the ban, so it
+ *      restores no credential from before it, whatever the deactivation left
+ *      in place (seeded directly); an administrator's ban and unban, an
+ *      `active: true` over an administrator's ban, an active write for a user
+ *      who is not banned and a user with no password are controls that remove
+ *      nothing; a refused last-administrator deactivation attempts no
+ *      removal; a removal rolls back with a failed deactivation, one that
+ *      cannot be written on a deactivation is reported once at `error`, and
+ *      one that cannot be written on a re-activation fails it, the user
+ *      staying deactivated; a removal is complete only on a re-read that
+ *      finds no local password, a row read without an id counting as not
+ *      removed; and each delete is the SCIM connection's write. Since the removal, the faces above that drive
+ *      the vendor's ban refusal through a password sign-in set the password
+ *      again after the deactivation, as an administrator would.
  */
 
 import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
@@ -432,6 +452,28 @@ async function expectSignInBanned(h: Harness, email: string): Promise<void> {
   expect(body.code).toBe('BANNED_USER');
 }
 
+/** The user's local-password rows (`sys_account.provider_id = 'credential'`). */
+async function localPasswordRows(h: Harness, userId: string): Promise<number> {
+  const rows = await h.engine.find(
+    'sys_account',
+    { where: { user_id: userId, provider_id: 'credential' }, fields: ['id'] },
+    SYSTEM,
+  );
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
+ * A password sign-in by an account that holds no local password: the vendor's
+ * ordinary `401 INVALID_EMAIL_OR_PASSWORD`, status AND code — the same answer
+ * as a wrong password, so it tells nothing about the account's state.
+ */
+async function expectSignInNoPassword(h: Harness, email: string): Promise<void> {
+  const res = await signIn(h, email);
+  const body = (await res.json()) as { code?: string; message?: string };
+  expect(res.status, `expected INVALID_EMAIL_OR_PASSWORD, got ${res.status} ${JSON.stringify(body)}`).toBe(401);
+  expect(body.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+}
+
 /**
  * Give `userId` the Default Organization's `admin_full_access` grant — a
  * platform administrator, the row the `single` first-user promotion writes
@@ -489,17 +531,25 @@ describe('[#14360] SCIM active:false disables the account through the platform b
     expect(row?.ban_expires ?? null).toBeNull();
     // The vendor's own revocation, after the callback returned.
     expect(await sessionCount(h, dana.userId)).toBe(0);
-    // And the enforcement: the vendor's session hook reads `banned`.
+    // And the enforcement: the vendor's session hook reads `banned`. The
+    // deactivation removed the local password (pinned in the local-password
+    // describe below), so the hook is reached through a password an
+    // administrator sets while the user is deactivated.
+    await attachPassword(h, dana);
     await expectSignInBanned(h, dana.email);
   }, 60_000);
 
-  it('(b) active:true ⇒ the SCIM ban is lifted and sign-in is accepted again', async () => {
+  it('(b) active:true ⇒ the SCIM ban is lifted, and the re-activation restores no local password from before it', async () => {
     const h = await boot();
     const dana = await provision(h, 'dana');
     await attachPassword(h, dana);
 
     expect((await setActive(h, dana.scimId, false)).status).toBe(200);
-    await expectSignInBanned(h, dana.email);
+    expect(await localPasswordRows(h, dana.userId)).toBe(0);
+    // A password an administrator sets while the directory holds the user
+    // deactivated is a credential from before the re-activation too.
+    await attachPassword(h, dana);
+    expect(await localPasswordRows(h, dana.userId)).toBe(1);
 
     const res = await setActive(h, dana.scimId, true);
     expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
@@ -508,6 +558,14 @@ describe('[#14360] SCIM active:false disables the account through the platform b
     expect(isBanned(row)).toBe(false);
     expect(row?.ban_reason ?? null).toBeNull();
     expect(row?.ban_expires ?? null).toBeNull();
+    // The re-activation lifts the ban and restores no local password: access
+    // returns through the directory's own sign-in.
+    expect(await localPasswordRows(h, dana.userId)).toBe(0);
+    expect(await sourceOf(h, dana.userId)).toBe('idp_provisioned');
+    await expectSignInNoPassword(h, dana.email);
+    // The ban really is lifted: a password set after the re-activation, on
+    // purpose, signs in.
+    await attachPassword(h, dana);
     await expectSignInAccepted(h, dana.email);
   }, 60_000);
 
@@ -571,9 +629,11 @@ describe('a sign-in refused for a SCIM deactivation names that cause; an adminis
   it('SCIM active:false ⇒ 403 BANNED_USER with details.cause scim_deactivated, under any spelling of the address', async () => {
     const h = await boot();
     const dana = await provision(h, 'dana');
-    await attachPassword(h, dana);
     expect((await setActive(h, dana.scimId, false)).status).toBe(200);
     expect((await userRow(h, dana.email))?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+    // A password an administrator sets while the user is deactivated: the
+    // deactivation itself leaves none.
+    await attachPassword(h, dana);
 
     for (const spelling of [dana.email, dana.email.toUpperCase()]) {
       const { status, body } = await signInAnswer(h, spelling);
@@ -587,8 +647,8 @@ describe('a sign-in refused for a SCIM deactivation names that cause; an adminis
   it('SCIM DELETE /Users/{id} ⇒ the same cause', async () => {
     const h = await boot();
     const gus = await provision(h, 'gus');
-    await attachPassword(h, gus);
     expect((await h.send(scimRequest(h, 'DELETE', `/Users/${gus.scimId}`))).status).toBe(204);
+    await attachPassword(h, gus);
 
     const { status, body } = await signInAnswer(h, gus.email);
     expect(status, JSON.stringify(body)).toBe(403);
@@ -620,6 +680,8 @@ describe('a sign-in refused for a SCIM deactivation names that cause; an adminis
     expect((await setActive(h, dana.scimId, true)).status).toBe(200); // the IdP cannot lift an administrator's ban
     await h.engine.update('sys_user', { id: dana.userId, banned: false, ban_reason: null }, SYSTEM);
     expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    // The deactivation removed dana's password; one set again reaches the refusal.
+    await attachPassword(h, dana);
     const deactivated = await signInAnswer(h, dana.email);
     expect(deactivated.body.details).toEqual({ cause: 'scim_deactivated' });
     const { details: _cause, ...rest } = deactivated.body;
@@ -635,6 +697,8 @@ describe('a sign-in refused for a SCIM deactivation names that cause; an adminis
     await adminBan(h, frank.userId, 'Policy violation');
     expect((await setActive(h, frank.scimId, false)).status).toBe(200);
     expect((await userRow(h, frank.email))?.ban_reason).toBe('Policy violation');
+    // The deactivation removed frank's password; one set again reaches the refusal.
+    await attachPassword(h, frank);
 
     const { status, body } = await signInAnswer(h, frank.email);
     expect(status, JSON.stringify(body)).toBe(403);
@@ -645,8 +709,9 @@ describe('a sign-in refused for a SCIM deactivation names that cause; an adminis
   it('a wrong password for a deactivated account is the ordinary credential refusal: the cause is told only to the password holder', async () => {
     const h = await boot();
     const dana = await provision(h, 'dana');
-    await attachPassword(h, dana);
     expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    // A password holder (set while deactivated), so the wrong password is the subject.
+    await attachPassword(h, dana);
 
     const { status, body } = await signInAnswer(h, dana.email, 'not-the-password-14360');
     expect(status, JSON.stringify(body)).toBe(401);
@@ -874,6 +939,9 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     expect(row?.ban_reason).toBe('Policy violation');
     // …and only the expiry is gone.
     expect(row?.ban_expires ?? null).toBeNull();
+    // The deactivation removed the local password; one set again is what lets
+    // the sign-in below reach the vendor's expiry check at all.
+    await attachPassword(h, hana);
 
     // Let the administrator's expiry pass, then prove the refusal still holds
     // (status AND code): without the clearing above the vendor would have
@@ -980,6 +1048,8 @@ describe('[#14360] DELETE /Users/{id} leaves the tombstoned account disabled', (
     expect(isBanned(row)).toBe(true);
     expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
     expect(await sessionCount(h, gus.userId)).toBe(0);
+    // The DELETE removed the local password; one set again reaches the ban.
+    await attachPassword(h, gus);
     await expectSignInBanned(h, gus.email);
   }, 60_000);
 });
@@ -1363,6 +1433,549 @@ describe('a directory deactivation suspends the AI service accounts the person i
     vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
     expect((await setDisplayName(h, uma.scimId, 'uma Renamed')).status).toBe(200);
     expect(await accountBan(h, 'usr_agent_uma')).toEqual(DIRECTORY_SUSPENDED);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (k) — a directory deactivation removes the user's local password
+// ---------------------------------------------------------------------------
+
+/** An SSO account link, as a federated sign-in writes it (a provider other than the local credential). */
+async function attachSsoLink(h: Harness, user: Provisioned): Promise<void> {
+  const ctx = await h.manager.getAuthContext();
+  await ctx.internalAdapter.createAccount({
+    userId: user.userId,
+    providerId: 'okta-sso-14360',
+    accountId: `ext-${user.userId}`,
+  });
+}
+
+async function accountRows(h: Harness, userId: string): Promise<string[]> {
+  const rows = (await h.engine.find(
+    'sys_account',
+    { where: { user_id: userId }, fields: ['id', 'provider_id'] },
+    SYSTEM,
+  )) as Array<{ provider_id?: unknown }>;
+  return rows.map((r) => String(r.provider_id)).sort();
+}
+
+/**
+ * Count the `sys_account` deletes the engine is handed, through the real
+ * engine. The engine is pooled, so the spy is taken off by the caller.
+ */
+function countAccountDeletes(h: Harness): { count: () => number; restore: () => void } {
+  let count = 0;
+  const real = h.engine.delete.bind(h.engine);
+  const spy = vi.spyOn(h.engine, 'delete').mockImplementation(((object: string, options?: unknown) => {
+    if (object === 'sys_account') count += 1;
+    return real(object, options as never);
+  }) as never);
+  return { count: () => count, restore: () => spy.mockRestore() };
+}
+
+/**
+ * The context each `sys_account` delete is handed, through the real engine:
+ * whom the removal attributes its write to. The spy is taken off by the caller.
+ */
+function recordAccountDeleteContexts(h: Harness): { contexts: () => Array<Record<string, unknown>>; restore: () => void } {
+  const contexts: Array<Record<string, unknown>> = [];
+  const real = h.engine.delete.bind(h.engine);
+  const spy = vi.spyOn(h.engine, 'delete').mockImplementation(((object: string, options?: unknown) => {
+    if (object === 'sys_account') contexts.push({ ...((options as { context?: Record<string, unknown> })?.context ?? {}) });
+    return real(object, options as never);
+  }) as never);
+  return { contexts: () => contexts, restore: () => spy.mockRestore() };
+}
+
+/** The SCIM connection of this file's harness, as the service principal its writes are attributed to. */
+const SCIM_CONNECTION_ACTOR = 'svc:scim:okta-14360';
+
+const REMOVAL_INCOMPLETE = 'local password removal INCOMPLETE';
+const REACTIVATION_REMOVAL_INCOMPLETE = 'SCIM re-activation of user';
+
+describe('a directory deactivation removes the user\'s local password, and a re-activation restores access through SSO only', () => {
+  it('(k) active:false removes the local password and keeps every other link; active:true lifts the ban and restores no password', async () => {
+    const h = await boot();
+    const kim = await provision(h, 'kim');
+    await attachPassword(h, kim);
+    await attachSsoLink(h, kim);
+    // Control: before the directory deactivates, the password signs in.
+    await expectSignInAccepted(h, kim.email);
+    expect(await accountRows(h, kim.userId)).toEqual(['credential', 'okta-sso-14360']);
+    expect(await sourceOf(h, kim.userId)).toBe('env_native');
+
+    const recorded = recordAccountDeleteContexts(h);
+    let res: Response;
+    try {
+      res = await setActive(h, kim.scimId, false);
+    } finally {
+      recorded.restore();
+    }
+    expect(res.status, `SCIM PATCH active:false failed: ${await res.clone().text()}`).toBe(200);
+    expect(await accountRows(h, kim.userId)).toEqual(['okta-sso-14360']);
+    // The removal is the SCIM connection's write, as a service principal: no
+    // user is credited with it.
+    expect(recorded.contexts()).toHaveLength(1);
+    expect(recorded.contexts()[0]).toMatchObject({ isSystem: true, actor: SCIM_CONNECTION_ACTOR });
+    expect(recorded.contexts()[0]).not.toHaveProperty('attributedUserId');
+    expect(await sessionCount(h, kim.userId)).toBe(0);
+    // [ADR-0135 D4] With no local password left, the mark after the
+    // deprovision reads the user as the directory's.
+    expect(await sourceOf(h, kim.userId)).toBe('idp_provisioned');
+    await expectSignInNoPassword(h, kim.email);
+
+    const back = await setActive(h, kim.scimId, true);
+    expect(back.status, `SCIM PATCH active:true failed: ${await back.clone().text()}`).toBe(200);
+    const row = await userRow(h, kim.email);
+    expect(isBanned(row)).toBe(false);
+    expect(row?.ban_reason ?? null).toBeNull();
+    expect(await accountRows(h, kim.userId)).toEqual(['okta-sso-14360']);
+    await expectSignInNoPassword(h, kim.email);
+  }, 60_000);
+
+  it('(k) DELETE /Users/{id} removes it the same way; a re-link through the tombstone restores none', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'lou@example.com',
+      externalId: 'ext-lou',
+      name: { givenName: 'lou', familyName: 'Example' },
+      displayName: 'lou Example',
+      emails: [{ value: 'lou@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const created = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(created.status, `SCIM POST /Users failed: ${await created.clone().text()}`).toBe(201);
+    const scimId = ((await created.json()) as { id: string }).id;
+    const lou: Provisioned = { scimId, userId: String((await userRow(h, 'lou@example.com'))!.id), email: 'lou@example.com' };
+    await attachPassword(h, lou);
+    await expectSignInAccepted(h, lou.email);
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    expect(await localPasswordRows(h, lou.userId)).toBe(0);
+    expect(await userRow(h, lou.email), 'the user row survives the tombstone').toBeTruthy();
+    await expectSignInNoPassword(h, lou.email);
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(String((await userRow(h, lou.email))!.id), 'the tombstone re-links the same user').toBe(lou.userId);
+    expect(isBanned(await userRow(h, lou.email))).toBe(false);
+    expect(await localPasswordRows(h, lou.userId)).toBe(0);
+    await expectSignInNoPassword(h, lou.email);
+  }, 60_000);
+
+  it('(k) a repeated inactive write finds nothing to remove and writes nothing', async () => {
+    const h = await boot();
+    const max = await provision(h, 'max');
+    await attachPassword(h, max);
+    expect((await setActive(h, max.scimId, false)).status).toBe(200);
+    expect(await localPasswordRows(h, max.userId)).toBe(0);
+
+    const deletes = countAccountDeletes(h);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await setActive(h, max.scimId, false)).status).toBe(200);
+      expect((await setDisplayName(h, max.scimId, 'max Renamed')).status).toBe(200);
+      expect(deletes.count()).toBe(0);
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(REMOVAL_INCOMPLETE))).toEqual([]);
+      expect(isBanned(await userRow(h, max.email))).toBe(true);
+    } finally {
+      deletes.restore();
+      errors.mockRestore();
+    }
+  }, 60_000);
+
+  it('(k) a deactivation of a user an administrator already banned removes the password too, and keeps the administrator\'s reason', async () => {
+    const h = await boot();
+    const ida = await provision(h, 'ida');
+    await attachPassword(h, ida);
+    // A second local-password holder, so the ban mount's last-credential guard lets the ban through.
+    const other = await provision(h, 'other');
+    await attachPassword(h, other);
+    await adminBan(h, ida.userId, 'Policy violation');
+    expect(await localPasswordRows(h, ida.userId)).toBe(1);
+
+    expect((await setActive(h, ida.scimId, false)).status).toBe(200);
+    expect(await localPasswordRows(h, ida.userId)).toBe(0);
+    expect((await userRow(h, ida.email))?.ban_reason).toBe('Policy violation');
+    expect(await localPasswordRows(h, other.userId)).toBe(1);
+  }, 60_000);
+
+  it('(k) CONTROL: an administrator\'s ban and unban leave the local password alone, and it signs in after the unban', async () => {
+    const h = await boot();
+    const ned = await provision(h, 'ned');
+    await attachPassword(h, ned);
+    const other = await provision(h, 'other');
+    await attachPassword(h, other);
+
+    await adminBan(h, ned.userId, 'Policy violation');
+    expect(await localPasswordRows(h, ned.userId)).toBe(1);
+    await expectSignInBanned(h, ned.email);
+
+    const unban = await runAdminUnbanUser(
+      { getAuthContext: () => h.manager.getAuthContext() },
+      { id: 'usr_platform_admin' } as never,
+      new Request(`${AUTH}/admin/unban-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: ned.userId }),
+      }),
+    );
+    expect(unban.status, `admin unban failed: ${JSON.stringify(unban.body)}`).toBe(200);
+    expect(await localPasswordRows(h, ned.userId)).toBe(1);
+    await expectSignInAccepted(h, ned.email);
+  }, 60_000);
+
+  it('(k) CONTROL: an attribute sync or an active:true for a user who is not banned removes nothing; only lifting the directory\'s ban does', async () => {
+    const h = await boot();
+    const pat = await provision(h, 'pat');
+    await attachPassword(h, pat);
+    // The positive leg, in the same harness: a user the directory deactivated
+    // who was given a password while deactivated.
+    const quinn = await provision(h, 'quinn');
+    expect((await setActive(h, quinn.scimId, false)).status).toBe(200);
+    await attachPassword(h, quinn);
+
+    const deletes = countAccountDeletes(h);
+    try {
+      expect((await setActive(h, pat.scimId, true)).status).toBe(200);
+      expect((await setDisplayName(h, pat.scimId, 'pat Renamed')).status).toBe(200);
+      expect(deletes.count()).toBe(0);
+      expect((await setActive(h, quinn.scimId, true)).status).toBe(200);
+      expect(deletes.count()).toBe(1);
+    } finally {
+      deletes.restore();
+    }
+    expect(await localPasswordRows(h, pat.userId)).toBe(1);
+    await expectSignInAccepted(h, pat.email);
+    expect(await localPasswordRows(h, quinn.userId)).toBe(0);
+    expect(isBanned(await userRow(h, quinn.email))).toBe(false);
+  }, 60_000);
+
+  it('(k) a re-activation after a directory deactivation restores no credential from before it, whatever the deactivation left in place', async () => {
+    const h = await boot();
+    const vic = await provision(h, 'vic');
+    await attachPassword(h, vic);
+    await attachSsoLink(h, vic);
+    // A directory deactivation's state, written directly and not through the
+    // removal: the SCIM source inactive, the user banned with the directory's
+    // reason, and a local password in place.
+    await h.engine.update(
+      'sys_user',
+      { id: vic.userId, banned: true, ban_reason: SCIM_DEACTIVATION_BAN_REASON, ban_expires: null },
+      SYSTEM,
+    );
+    await h.engine.update('sys_scim_user', { id: vic.scimId, active: false }, SYSTEM);
+    expect(await scimActive(h, vic.scimId)).toBe(false);
+    expect(await accountRows(h, vic.userId)).toEqual(['credential', 'okta-sso-14360']);
+    expect(await sourceOf(h, vic.userId)).toBe('env_native');
+    await expectSignInBanned(h, vic.email);
+
+    const recorded = recordAccountDeleteContexts(h);
+    let res: Response;
+    try {
+      res = await setActive(h, vic.scimId, true);
+    } finally {
+      recorded.restore();
+    }
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    expect(recorded.contexts()).toHaveLength(1);
+    expect(recorded.contexts()[0]).toMatchObject({ isSystem: true, actor: SCIM_CONNECTION_ACTOR });
+    expect(recorded.contexts()[0]).not.toHaveProperty('attributedUserId');
+    expect(await scimActive(h, vic.scimId)).toBe(true);
+    const row = await userRow(h, vic.email);
+    expect(isBanned(row)).toBe(false);
+    expect(row?.ban_reason ?? null).toBeNull();
+    // The local password is gone, every other link and the user row stay, and
+    // [ADR-0135 D4] the mark after the removal reads the user as the directory's.
+    expect(await accountRows(h, vic.userId)).toEqual(['okta-sso-14360']);
+    expect(await sourceOf(h, vic.userId)).toBe('idp_provisioned');
+    await expectSignInNoPassword(h, vic.email);
+  }, 60_000);
+
+  it('(k) CONTROL: active:true over an administrator\'s ban lifts nothing and removes nothing', async () => {
+    const h = await boot();
+    const ned = await provision(h, 'ned');
+    await attachPassword(h, ned);
+    // A second local-password holder, so the ban mount's last-credential guard lets the ban through.
+    const other = await provision(h, 'other');
+    await attachPassword(h, other);
+    await adminBan(h, ned.userId, 'Policy violation');
+
+    const deletes = countAccountDeletes(h);
+    try {
+      expect((await setActive(h, ned.scimId, true)).status).toBe(200);
+      expect(deletes.count()).toBe(0);
+    } finally {
+      deletes.restore();
+    }
+    const row = await userRow(h, ned.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe('Policy violation');
+    expect(await localPasswordRows(h, ned.userId)).toBe(1);
+    await expectSignInBanned(h, ned.email);
+  }, 60_000);
+
+  it('(k) CONTROL: a user with no local password is a no-op — no delete, no notice', async () => {
+    const h = await boot();
+    const rex = await provision(h, 'rex');
+    const deletes = countAccountDeletes(h);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await setActive(h, rex.scimId, false)).status).toBe(200);
+      expect(deletes.count()).toBe(0);
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(REMOVAL_INCOMPLETE))).toEqual([]);
+    } finally {
+      deletes.restore();
+      errors.mockRestore();
+    }
+    const row = await userRow(h, rex.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+  }, 60_000);
+
+  it('(k) a refused deactivation of the last administrator removes nothing: the refusal comes before the removal', async () => {
+    const h = await boot();
+    const owner = await provision(h, 'owner');
+    await attachPassword(h, owner);
+    await makePlatformAdmin(h, owner.userId);
+
+    const deletes = countAccountDeletes(h);
+    try {
+      const patched = await setActive(h, owner.scimId, false);
+      expect(patched.status, await patched.clone().text()).toBe(403);
+      const deleted = await h.send(scimRequest(h, 'DELETE', `/Users/${owner.scimId}`));
+      expect(deleted.status, await deleted.clone().text()).toBe(403);
+      // Not a delete rolled back: none was attempted.
+      expect(deletes.count()).toBe(0);
+    } finally {
+      deletes.restore();
+    }
+    expect(await localPasswordRows(h, owner.userId)).toBe(1);
+    expect(isBanned(await userRow(h, owner.email))).toBe(false);
+    await expectSignInAccepted(h, owner.email);
+  }, 60_000);
+
+  it('(k) a deactivation that fails after the removal rolls the removal back with it', async () => {
+    const h = await boot();
+    const sam = await provision(h, 'sam');
+    await attachPassword(h, sam);
+    // A session, so the vendor's revocation after the callback has a row to delete.
+    await expectSignInAccepted(h, sam.email);
+    expect(await sessionCount(h, sam.userId)).toBeGreaterThan(0);
+
+    let accountDeletes = 0;
+    const real = h.engine.delete.bind(h.engine);
+    const spy = vi.spyOn(h.engine, 'delete').mockImplementation(((object: string, options?: unknown) => {
+      if (object === 'sys_account') accountDeletes += 1;
+      if (object === 'sys_session') throw new Error('session revocation refused (test)');
+      return real(object, options as never);
+    }) as never);
+    try {
+      const res = await setActive(h, sam.scimId, false);
+      expect(res.status, await res.clone().text()).toBeGreaterThanOrEqual(500);
+      // The removal ran inside the request …
+      expect(accountDeletes).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    // … and rolled back with it, together with the ban.
+    expect(await localPasswordRows(h, sam.userId)).toBe(1);
+    expect(isBanned(await userRow(h, sam.email))).toBe(false);
+    expect(await scimActive(h, sam.scimId)).toBe(true);
+  }, 60_000);
+
+  it('(k) a removal that cannot be written still bans the account, says so once at error, and the next inactive write removes it', async () => {
+    const h = await boot();
+    const tess = await provision(h, 'tess');
+    await attachPassword(h, tess);
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'delete') {
+          return (object: string, options?: unknown) => {
+            if (object === 'sys_account') {
+              refused += 1;
+              throw new Error('local password removal refused (test)');
+            }
+            return target.delete(object, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, tess.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused).toBe(1);
+      const row = await userRow(h, tess.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      expect(await localPasswordRows(h, tess.userId)).toBe(1);
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(REMOVAL_INCOMPLETE))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+
+    // The next directory write that leaves the person inactive (here an
+    // attribute sync) removes it.
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setDisplayName(h, tess.scimId, 'tess Renamed')).status).toBe(200);
+    expect(await localPasswordRows(h, tess.userId)).toBe(0);
+    expect(await sourceOf(h, tess.userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(k) a re-activation whose removal cannot be written fails, says so once at error, and the user stays deactivated until it lands', async () => {
+    const h = await boot();
+    const uri = await provision(h, 'uri');
+    expect((await setActive(h, uri.scimId, false)).status).toBe(200);
+    // A password set while the directory holds the user deactivated.
+    await attachPassword(h, uri);
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'delete') {
+          return (object: string, options?: unknown) => {
+            if (object === 'sys_account') {
+              refused += 1;
+              throw new Error('local password removal refused (test)');
+            }
+            return target.delete(object, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, uri.scimId, true);
+      expect(res.status, `expected the re-activation to fail: ${await res.clone().text()}`).toBeGreaterThanOrEqual(500);
+      expect(refused).toBe(1);
+      expect(
+        errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(REACTIVATION_REMOVAL_INCOMPLETE)),
+      ).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+    // Nothing the request wrote is kept: still banned with the directory's
+    // reason, still inactive at the directory, the password row in place.
+    let row = await userRow(h, uri.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+    expect(await scimActive(h, uri.scimId)).toBe(false);
+    expect(await localPasswordRows(h, uri.userId)).toBe(1);
+    await expectSignInBanned(h, uri.email);
+
+    // The directory's retry, once the removal can land, re-activates.
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setActive(h, uri.scimId, true)).status).toBe(200);
+    row = await userRow(h, uri.email);
+    expect(isBanned(row)).toBe(false);
+    expect(await localPasswordRows(h, uri.userId)).toBe(0);
+    await expectSignInNoPassword(h, uri.email);
+  }, 60_000);
+
+  it('(k) a removal is complete only when a re-read finds no local password: a delete that answers without removing is reported, and the re-activation waits for it', async () => {
+    const h = await boot();
+    const wes = await provision(h, 'wes');
+    await attachPassword(h, wes);
+    let answered = 0;
+    const real = h.engine;
+    // A delete that answers without an error and removes nothing.
+    const silent = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'delete') {
+          return (object: string, options?: unknown) => {
+            if (object === 'sys_account') {
+              answered += 1;
+              return Promise.resolve(undefined);
+            }
+            return target.delete(object, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(silent as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // The deactivation still lands, and says the removal is not complete.
+      expect((await setActive(h, wes.scimId, false)).status).toBe(200);
+      expect(isBanned(await userRow(h, wes.email))).toBe(true);
+      expect(await localPasswordRows(h, wes.userId)).toBe(1);
+      // The re-activation refuses to lift the ban over the row still there.
+      const back = await setActive(h, wes.scimId, true);
+      expect(back.status, `expected the re-activation to fail: ${await back.clone().text()}`).toBeGreaterThanOrEqual(500);
+      expect(answered).toBe(2);
+      const lines = errors.mock.calls.map((c) => String(c[0]));
+      expect(lines.filter((m) => m.includes(REMOVAL_INCOMPLETE) && !m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+      expect(lines.filter((m) => m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+    const row = await userRow(h, wes.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+    expect(await localPasswordRows(h, wes.userId)).toBe(1);
+
+    // With deletes that remove, the directory's retry re-activates.
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setActive(h, wes.scimId, true)).status).toBe(200);
+    expect(isBanned(await userRow(h, wes.email))).toBe(false);
+    expect(await localPasswordRows(h, wes.userId)).toBe(0);
+  }, 60_000);
+
+  it('(k) a local-password row read without an id counts as not removed: the deactivation reports it, and the re-activation waits for it', async () => {
+    const h = await boot();
+    const ida = await provision(h, 'ida');
+    await attachPassword(h, ida);
+    const real = h.engine;
+    // Reads of the account table answer their rows without the id column.
+    const idless = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'find') {
+          return async (object: string, query?: unknown, options?: unknown) => {
+            const rows = await target.find(object, query as never, options as never);
+            if (object !== 'sys_account' || !Array.isArray(rows)) return rows;
+            return rows.map((row) => {
+              const { id: _id, ...rest } = row as Record<string, unknown>;
+              return rest;
+            });
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(idless as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await setActive(h, ida.scimId, false)).status).toBe(200);
+      expect(isBanned(await userRow(h, ida.email))).toBe(true);
+      const back = await setActive(h, ida.scimId, true);
+      expect(back.status, `expected the re-activation to fail: ${await back.clone().text()}`).toBeGreaterThanOrEqual(500);
+      const lines = errors.mock.calls.map((c) => String(c[0]));
+      expect(lines.filter((m) => m.includes(REMOVAL_INCOMPLETE) && !m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+      expect(lines.filter((m) => m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(isBanned(await userRow(h, ida.email))).toBe(true);
+    expect(await localPasswordRows(h, ida.userId)).toBe(1);
+
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setActive(h, ida.scimId, true)).status).toBe(200);
+    expect(isBanned(await userRow(h, ida.email))).toBe(false);
+    expect(await localPasswordRows(h, ida.userId)).toBe(0);
   }, 60_000);
 });
 
