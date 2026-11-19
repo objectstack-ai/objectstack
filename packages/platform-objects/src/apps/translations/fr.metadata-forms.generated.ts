@@ -449,6 +449,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Exporter en CSV",
         helpText: "L’entrée d’export CSV. Non défini : affichée, puisque chaque catégorie managedBy propose l’export."
       },
+      "userActions.transfer": {
+        label: "Changer de propriétaire",
+        helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
+      },
       editMode: {
         label: "Mode de modification",
         helpText: "Intention d’interaction de modification pour les enregistrements de cet objet. En l’absence de valeur, le moteur de rendu choisit sa propre valeur par défaut. Intention commune à tous les moteurs de rendu, et non un style."

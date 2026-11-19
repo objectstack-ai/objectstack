@@ -63,6 +63,10 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 // registry injects is judged by its type as a declared one is. The same cycle
 // as above, one module further: nothing here is called while a module evaluates.
 import { injectedSystemColumnDefs } from './injected-system-column-provenance';
+// [ruling 7000907189 point 1] Change Owner's structural test, read by the
+// `userActions.transfer` refusal. The same cycle as above, one module further
+// (it reads `resolveInjectedSystemColumns`): called only at parse time.
+import { transferIneligibilityReason } from './user-action-transfer';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -3448,6 +3452,47 @@ function refuseWriteLockedUserActions(
 }
 
 /**
+ * [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` may open the
+ * Change Owner action only on an object that is structurally eligible for it
+ * (`transferIneligibilityReason`, `user-action-transfer.ts`): the platform
+ * injects its reassignable `owner_id`, and the object does not declare that
+ * field read-only. One located issue at `['userActions', 'transfer']` for a bare
+ * `true`, or the object form with `enabled: true`, on any other object — the
+ * structure keeps the action off there whatever the switch says, so the entry
+ * would be a key nothing honours. Closing it (`false`) restates the structure
+ * and is accepted, as is a predicate-only object form, which opens nothing.
+ *
+ * Refused at parse on every door, not only at `create()`: the key is new, so no
+ * stored object carries it. Kept in the existing callback beside
+ * {@link refuseWriteLockedUserActions} so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleUserActionTransfer(
+  object: { name?: unknown; userActions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const userActions = object.userActions;
+  if (userActions === null || typeof userActions !== 'object') return;
+  const flag = (userActions as Record<string, unknown>).transfer;
+  const opens = flag === true
+    || (flag !== null && typeof flag === 'object' && (flag as { enabled?: unknown }).enabled === true);
+  if (!opens) return;
+  const reason = transferIneligibilityReason(object);
+  if (reason === undefined) return;
+  const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['userActions', 'transfer'],
+    message:
+      `Object '${name}' cannot offer the Change Owner action: ${reason}. ` +
+      'userActions.transfer may only narrow an object whose records have a reassignable owner (the injected ' +
+      'owner_id, on an object with ownership user or omitted, no managedBy and not a sys_ name, whose owner_id ' +
+      'is not declared readonly), so true here is a switch nothing honours. Remove the entry, or make the ' +
+      'object owner-bearing.',
+  });
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -3742,6 +3787,8 @@ const ObjectSchemaBase = strictObject(
       update: 'edit',
       remove: 'delete',
       destroy: 'delete',
+      changeOwner: 'transfer',
+      reassign: 'transfer',
     },
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
@@ -3800,7 +3847,10 @@ const ObjectSchemaBase = strictObject(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
     exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
-  }).optional().describe('Per-object override of the resolved CRUD affordance matrix.'),
+    transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is not declared readonly (ownership user or omitted, no managedBy, not a sys_ object); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
+    ),
+  }).optional().describe('Per-object override of the resolved CRUD affordance matrix, plus the Change Owner switch (transfer).'),
 
   /**
    * System-field auto-injection control.
@@ -4778,6 +4828,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
   // the helper's docblock.
   refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
+  // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
+  // Owner only on a structurally eligible object. See the helper's docblock.
+  refuseIneligibleUserActionTransfer(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);

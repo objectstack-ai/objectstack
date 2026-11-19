@@ -229,7 +229,7 @@
     },
     "userActions": {
       "status": "live",
-      "note": "objectui ObjectGrid per-object CRUD."
+      "note": "objectui ObjectGrid per-object CRUD. 2026-11-19 (ruling 7000907189 point 1): child `transfer`, the Change Owner switch, is PLANNED — this container stays RECORDED in undrilled-containers.baseline.json, so the verdict lives here, not in a child row. Its REFUSAL is live at parse: ObjectSchema refuses `transfer: true` / `{ enabled: true }` on an object that is not structurally eligible (packages/spec/src/data/object.zod.ts#refuseIneligibleUserActionTransfer). Its one reading is packages/spec/src/data/user-action-transfer.ts#resolveUserActionTransfer (eligibility via isTransferEligible, then the switch, then the sharingModel default), which no runtime reads yet: it turns live when the Change Owner endpoint (server card #35402) and the console action (#35403) land, both Blocked-by the spec card #35401."
     },
     "systemFields": {
       "status": "live",

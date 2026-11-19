@@ -449,6 +449,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "导出 CSV",
         helpText: "CSV 导出入口。未设置：显示，因为每个 managedBy 类别默认都提供导出。"
       },
+      "userActions.transfer": {
+        label: "更改负责人",
+        helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
+      },
       editMode: {
         label: "编辑方式",
         helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。"

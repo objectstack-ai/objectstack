@@ -449,6 +449,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "CSV エクスポート",
         helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
       },
+      "userActions.transfer": {
+        label: "所有者の変更",
+        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でない）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
+      },
       editMode: {
         label: "編集の開き方",
         helpText: "このオブジェクトのレコードを編集するときの操作意図。未設定ならレンダラー側の既定に従います。スタイルではなく、レンダラー横断の意図表明です。"

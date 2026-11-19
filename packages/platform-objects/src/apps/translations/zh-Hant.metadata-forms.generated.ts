@@ -449,6 +449,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "匯出 CSV",
         helpText: "CSV 匯出入口。未設定：顯示，因為每個 managedBy 類別預設都提供匯出。"
       },
+      "userActions.transfer": {
+        label: "變更負責人",
+        helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
+      },
       editMode: {
         label: "編輯方式",
         helpText: "該物件記錄的編輯互動意圖。留空則由呈現端自行選擇預設方式。這是跨呈現端的意圖宣告，不是樣式。"

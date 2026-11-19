@@ -449,6 +449,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "CSV exportieren",
         helpText: "Der Eintrag für den CSV-Export. Nicht gesetzt: angezeigt, da jede managedBy-Gruppe den Export anbietet."
       },
+      "userActions.transfer": {
+        label: "Inhaber ändern",
+        helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
+      },
       editMode: {
         label: "Bearbeitungsmodus",
         helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung."
