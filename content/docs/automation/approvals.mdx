@@ -580,8 +580,12 @@ and an administrator can reassign it to them.
 To name the person who should decide instead, declare
 `onEmptyApprovers: 'fallback'` with `fallbackApprovers`. Only an organization
 with no administrator, or a request with no organization, still opens on the
-slate that names no one: the server logs a warning, no one is told, and only the
-admin override decides it.
+slate that names no one, and so does a request whose organization's only
+administrator is its submitter on a step that sets `excludeSubmitter`. The
+server logs a warning, and the request's timeline and a notice to its submitter
+say that no one else can approve it yet and that an organization administrator
+must add a member who can (one who holds the unstaffed position, when the slate
+names one). Only the admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 
