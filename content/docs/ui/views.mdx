@@ -254,11 +254,21 @@ bulkActionDefs: [
 ```
 
 An aggregate dispatch delivers the selection to the handler as
-`params._selectedIds: string[]` — read that, **not** `recordId`. Results are
-all-or-nothing: a handler that cannot cover the whole selection must reject,
-and per-row retry is replaced by re-running the action. `batchSize` does not
-apply (the call is never chunked); set `maxRecords` when the server work is
-expensive.
+`params._selectedIds: string[]` — read that, **not** `recordId`. Per-row retry
+is replaced by re-running the action. `batchSize` does not apply (the call is
+never chunked); set `maxRecords` when the server work is expensive.
+
+A handler that moved some rows and refused others resolves with a
+`BulkActionResult` (`@objectstack/spec/ui`) as its whole return value:
+`{ succeeded: string[], failed: { id, message }[] }`. The result dialog then
+counts the moved rows, lists each refused row under its record with its
+`message`, and lists every selected row named in neither list as **not
+confirmed** — never as succeeded. Ids are read against `_selectedIds`: one
+outside the selection is dropped, a duplicate counts once, an id in both lists
+counts as failed. A return value with neither member (nothing, a summary, a
+download link) counts as covering the whole selection; one that carries
+`succeeded` or `failed` in any other form (counts, only one list) is reported
+as an unreadable result, never as full success.
 
 A rejection is reported as **one outcome for the whole selection**: the result
 dialog says the action did not complete for the selected records and shows the

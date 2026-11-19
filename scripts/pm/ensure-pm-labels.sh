@@ -282,17 +282,15 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # empty description — the same drift the priority:p0 comment above
   # records for objectui.
   gh label create tracking            -R "$R" -c cfd3d7 -d "Generated anchor/tracker issue — not dispatchable; exempt from the half-state sweep's findings" 2>/dev/null || true
-  # pm:blocking is a derived CACHE, never hand state (maintainer opinion
-  # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
-  # the triage sweep writes/removes it from the Blocked-by: reverse index, and
-  # it comes off when every dependent closes. Since 2026-11-18 it is NOT a rank
-  # of the pull order and raises no grade (「有人在等」 is not a grading
-  # criterion): a card carries it only when the card it blocks is in an area
-  # being dispatched. Named consumers: the seat pulling inside that area, which
-  # reads it as "this card unblocks dispatched work" (execution-duties.md
-  # 取卡全序 orders by `Blocked-by:`), and list-page scans. A hand-set instance
-  # is mislabeling — the sweep corrects it against the index.
-  gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
+  # ⛔ RETIRED, on the header's terms — row absent, label OBJECT left exactly as
+  # it is: pm:blocking, the derived cache of the Blocked-by: reverse index that
+  # used to have a row here. The blocking relation has ONE
+  # source, the line-start `Blocked-by:` lines, and scripts read it from there
+  # (scripts/pm/check-half-states.mjs: the reverse index and its relation
+  # rows), so nobody types a label for it and no script reads one. Being absent
+  # from this file, `--reconcile` can neither recreate nor re-describe it.
+  # Stripping it from cards that still carry it, or deleting the object, is a
+  # separate, deliberate PM act — never a side effect of this file.
   # pm:retriage is a QUESTION put to the triage seat (a re-grade, a lane for a
   # cross-domain PR, a re-route, a split, a disposition fork a dev report left
   # open); it COEXISTS with the standing pm:* label and ⛔ never replaces it
@@ -509,9 +507,10 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 # ⛔ Two acts this record deliberately does NOT perform. Stripping the label off
 # those 4 live carriers is a BOARD act for the PM at the landing window —
 # nothing in this file ever hangs or clears a label on a card. And the
-# `repo:*` predicate in `scripts/pm/check-half-states.mjs` H14 stays LITERAL:
-# narrowing it is a predicate change ruled on #13992, never a side effect of a
-# vocabulary record. SKILL.md names no `repo:objectstack` (checked 2026-09-01),
+# `repo:*` predicate that `scripts/pm/check-half-states.mjs` kept LITERAL for
+# its blocking-cache row was left alone by this record (#13992); that row has
+# since retired with its label, and the predicate went with it.
+# SKILL.md names no `repo:objectstack` (checked 2026-09-01),
 # so the BY-PR prose sync the domain-lane block below requires has, here,
 # nothing to carry.
 

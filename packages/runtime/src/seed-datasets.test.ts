@@ -303,3 +303,120 @@ describe('AppPlugin inline boot seed sets no mode of its own (#30081)', () => {
         expect(loadCalls[0].config).not.toHaveProperty('organizationId');
     });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+/**
+ * #35109 — an upgrade REPLACES the package's entries on the shared list.
+ *
+ * The list was append-only, so a package upgraded in a running process left
+ * its previous version's datasets beside the new ones until a restart, and
+ * every organization founded in between replayed both versions. A merge that
+ * names its owner (the install door passes the package id) now takes that
+ * owner's earlier entries off the SAME array — the replayer reads it live —
+ * and puts the new ones where they stood. Other owners and un-owned sources
+ * (config apps) are untouched; an un-owned merge still appends.
+ */
+describe('owner-keyed merge: an upgrade replaces the package\'s entries (#35109)', () => {
+    const PKG = 'app.test.crm';
+
+    it('v1 then v2 of one package: the same array holds v2 only, where v1 stood', () => {
+        const ctx = makeKernelCtx();
+        const host = ds('crm_account', 'host');
+        const later = ds('hd_ticket', 'other');
+        const v1 = [ds('crm_x', 'v1-a'), ds('crm_x', 'v1-b')];
+        const v2 = [ds('crm_x', 'v2-a'), ds('crm_y', 'v2-new')];
+
+        const live = mergeSeedDatasets(ctx, [host]);
+        mergeSeedDatasets(ctx, v1, PKG);
+        mergeSeedDatasets(ctx, [later], 'app.test.helpdesk');
+        const after = mergeSeedDatasets(ctx, v2, PKG);
+
+        expect(after).toBe(live); // replaced in place: a reference captured earlier sees it
+        expect(readSeedDatasets(ctx)).toBe(live);
+        expect(live).toEqual([host, ...v2, later]);
+    });
+
+    it('CONTROL: two different packages are both kept', () => {
+        const ctx = makeKernelCtx();
+        const a = [ds('crm_x', 'a')];
+        const b = [ds('hd_ticket', 'b')];
+        mergeSeedDatasets(ctx, a, 'app.test.crm');
+        const live = mergeSeedDatasets(ctx, b, 'app.test.helpdesk');
+        expect(live).toEqual([...a, ...b]);
+    });
+
+    it('CONTROL: merging the same version again (reinstall, reseed, rehydrate) adds no duplicate', () => {
+        const ctx = makeKernelCtx();
+        const v1 = [ds('crm_x', 'a'), ds('crm_y', 'b')];
+        mergeSeedDatasets(ctx, v1, PKG);
+        mergeSeedDatasets(ctx, v1, PKG);
+        const live = mergeSeedDatasets(ctx, v1.map((d) => ({ ...d })), PKG);
+        expect(live).toEqual(v1);
+        expect(live).toHaveLength(2);
+    });
+
+    it('a version that ships no datasets takes its predecessor\'s off the list', () => {
+        const ctx = makeKernelCtx();
+        const host = ds('crm_account', 'host');
+        mergeSeedDatasets(ctx, [host]);
+        mergeSeedDatasets(ctx, [ds('crm_x', 'v1')], PKG);
+        const live = mergeSeedDatasets(ctx, [], PKG);
+        expect(live).toEqual([host]);
+
+        // A package with no datasets on a host with no list registers nothing.
+        const bare = makeKernelCtx();
+        mergeSeedDatasets(bare, [], PKG);
+        expect(bare.services.has('seed-datasets')).toBe(false);
+    });
+
+    it('an owned replace removes only what that owner merged, never an un-owned copy of the same object', () => {
+        const ctx = makeKernelCtx();
+        const shared = ds('crm_x', 'same-ref');
+        mergeSeedDatasets(ctx, [shared]); // un-owned source
+        mergeSeedDatasets(ctx, [shared], PKG); // the package merges the very same object
+        const live = mergeSeedDatasets(ctx, [ds('crm_x', 'v2')], PKG);
+        expect(live).toEqual([shared, ds('crm_x', 'v2')]);
+    });
+
+    it('install v1, upgrade to v2, then create an organization: the replayer replays v2\'s sets only', async () => {
+        const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+        process.env.OS_MULTI_ORG_ENABLED = 'true';
+        loadCalls = [];
+        seedResult = loaderResult({ totalInserted: 2, totalUpdated: 0, totalSkipped: 0 });
+        try {
+            const services = new Map<string, any>();
+            services.set('objectql', { insert: vi.fn(async () => undefined) });
+            services.set('metadata', {});
+            const ctx: any = {
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+                getService: (n: string) => (services.has(n) ? services.get(n) : undefined),
+                registerService: (n: string, v: any) => {
+                    if (services.has(n)) throw new Error(`[Kernel] Service '${n}' already registered`);
+                    services.set(n, v);
+                },
+                getServices: () => new Map(services),
+                hook: vi.fn(),
+                trigger: vi.fn(),
+            };
+            // The host's own config app registers the replayer.
+            await new AppPlugin(appBundle('config-app-host', ds('crm_account', 'host'))).start(ctx);
+            const replayer = services.get('seed-replayer');
+            expect(typeof replayer).toBe('function');
+
+            // The install door, as cloud-connection calls it: owner = the package id.
+            mergeSeedDatasets(ctx, [ds('crm_x', 'v1')], PKG);
+            mergeSeedDatasets(ctx, [ds('crm_x', 'v2'), ds('crm_y', 'v2')], PKG);
+
+            await replayer('org_after_upgrade');
+            expect(loadCalls).toHaveLength(1);
+            expect(loadCalls[0].seeds.map((s: any) => `${s.object}:${s.records[0].id}`)).toEqual([
+                'crm_account:host',
+                'crm_x:v2',
+                'crm_y:v2',
+            ]);
+        } finally {
+            if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+            else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+        }
+    });
+});

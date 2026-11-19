@@ -347,6 +347,7 @@
     "LoggingConfig (type)",
     "LoggingConfigParsed (type)",
     "LoggingConfigSchema (const)",
+    "MCP_DOOR_TOOL_NAMES (const)",
     "MCP_FILE_TOOL_NAMES (const)",
     "METADATA_FORM_REGISTRY (const)",
     "MIGRATION_JOURNAL_KINDS (const)",

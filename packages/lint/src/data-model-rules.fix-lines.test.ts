@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
   lintDataModel,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
@@ -40,6 +41,7 @@ const IDS = [
   SELECT_MISSING_OPTIONS,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
 ];
 
 const LONG_OBJECT = 'acme_customer_purchase_order_header';
@@ -192,6 +194,15 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
     }
   });
 
+  it('field/missing-value-domain: one line naming the domain to add', () => {
+    for (const [name, domain] of [['currency_code', 'iso_4217_currency'], ['country', 'iso_3166_alpha2'], ['tz', 'iana_time_zone']]) {
+      const objects = [{ name: LONG_OBJECT, nameField: 'name', fields: { name: { type: 'text' }, [name]: { type: 'text' } } }];
+      expect(fixOf(record(lintDataModel(objects)), FIELD_MISSING_VALUE_DOMAIN), name).toBe(
+        `Add \`valueDomain: '${domain}'\` if the field holds values of that domain; until then \`os lint --strict\` fails on this warning.`,
+      );
+    }
+  });
+
   it('rollup/non-numeric-aggregand: one line naming the child type, not the parent', () => {
     expect(fixOf(record(lintSummaryRollups(rollup('datetime', LONG_OBJECT))), ROLLUP_NON_NUMERIC_AGGREGAND)).toBe(
       "Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot store a " +
@@ -204,7 +215,7 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
   });
 
   it('every fix the cases above fired is one line of at most 200 characters', () => {
-    // The coverage control first: all seven ids fired.
+    // The coverage control first: all eight ids fired.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
     for (const f of fired) {
       expect(f.fix, f.rule).toBeTruthy();

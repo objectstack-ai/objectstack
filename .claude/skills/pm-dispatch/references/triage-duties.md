@@ -35,8 +35,7 @@
 - 分诊每轮读上轮以来新贴的自分诊记录,逐条回复确认或改判;复审前席位定级有效。
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
-- 日对账 fire 读 `check-half-states` H14,在飞卡亦然:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
-- stale/UNJUDGED 行手核跨仓依赖后 `--remove pm:blocking`,留则写明理由;增删卡号进轮次记录。
+- 日对账 fire 读 `check-half-states` 阻塞与决策诸行,照 `state-machine.md` 处置;卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
@@ -47,7 +46,7 @@
 - `needs-user-decision` = 设计卡、契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
-- 决策卡速读居四棱块之上、同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
+- 决策卡速读居四棱块之上、同题,至多四行业务话;写法与例见 `decision-analysis.md`。
 - 首行写立卡门类别 ①–④;四类定义、⛔ 清单、四答、理由判据与配额见 `filing-gate.md`。
 - `finding` = 三类内待定级:(a) 可复现缺陷(复现或失败探针);(b) 违背已声明契约(引契约文);
 - (c) AI 写元数据会被运行时拒收或静默丢弃的陷阱;其余进 PR `## Acceptance notes`,⛔ 不立卡。
@@ -64,6 +63,7 @@
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - 首触复核 area、type(中继 `issue_patch` 写)、级与 `Source:`(核不出即 `fleet`),错即改并留原值。
+- type 照北极星第 2 条逐卡定:`pm:epic`/`tracking` 卡不带;运维、验证与维护者动作卡 ⇒ `Task`。
 - 维护者或外部人立卡首触补齐(照 `filing-gate.md`);日对账扫缺 `area:*` 或 type 的公开卡补齐。
 - 预授权 `Feature` 免裁:`Source: topic` 子卡、北极星路行已断言能力、既裁执行、有先例新键。
 - 余 `fleet` 源者 ⛔ 不派发、不立决策卡、不自动关;分诊每周列单,维护者挑、并专题或关。
