@@ -190,12 +190,14 @@ describe('objectui#6515 — every expression mount site binds the shared `curren
   it('finds the mount sites it claims to govern', () => {
     // A scan that silently matches nothing is the failure mode this guards
     // against in itself — it would pass forever. The production sites are
-    // `AppContent` (both kinds), `RecordFormPage` (both kinds), the console's
-    // `InternalFormRoute`, and Home's `HomeLayout` (objectui#12700).
+    // `AppContent` and `RecordFormPage` (the provider kind; their imperative
+    // field-list evaluators retired with objectstack#35249, when the field list
+    // stopped evaluating `visibleWhen`), the console's `InternalFormRoute`, and
+    // Home's `HomeLayout` (objectui#12700).
     const sites = files
       .filter((f) => !EXEMPT.has(path.relative(repoRoot, f)))
       .flatMap((f) => collectSites(f, stripComments(readFileSync(f, 'utf8'))));
-    expect(sites.length).toBeGreaterThanOrEqual(5);
+    expect(sites.length).toBeGreaterThanOrEqual(4);
     expect(new Set(sites.map((s) => path.basename(s.file)))).toEqual(
       new Set(['AppContent.tsx', 'RecordFormPage.tsx', 'InternalFormRoute.tsx', 'HomeLayout.tsx']),
     );

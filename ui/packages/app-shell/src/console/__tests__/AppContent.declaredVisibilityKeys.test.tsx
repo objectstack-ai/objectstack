@@ -40,9 +40,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -175,6 +175,20 @@ const DEAL = {
   },
 };
 const LOST_DEAL = { id: 'd1', title: 'Stark Expansion', stage: 'closed_lost', loss_reason: 'Price', next_step: 'Debrief' };
+
+// The real edit dialog reads the record's approvals (its lock) over `fetch`.
+// Installed once for the whole file, so no read issued after a test body
+// returns can reach a socket; handed back in `afterAll`.
+vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  const url = String(input);
+  const body = url.includes('/approvals/records/')
+    ? { success: true, data: { locked: false } }
+    : url.includes('/approvals/requests')
+      ? { data: [] }
+      : {};
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}));
+afterAll(() => vi.unstubAllGlobals());
 
 const APPS = [{ name: 'crm', label: 'CRM', isDefault: true, navigation: [] }];
 
@@ -329,5 +343,12 @@ describe('objectstack#35249 — the console record-form dialog draws the field a
 
     expect(drawnField('loss_reason'), 'no stage yet: the predicate is false').toBe(false);
     expect(drawnField('next_step')).toBe(true);
+    // The renderer refuses a submit while a field's `visibleWhen` faults
+    // (ADR-0137 D2). The predicate is total, so it answers FALSE without
+    // faulting and the create goes through.
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'New deal' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect((dataSourceStub as any).create).toHaveBeenCalledTimes(1));
+    expect((dataSourceStub as any).create.mock.calls[0][1]).toMatchObject({ title: 'New deal' });
   });
 });

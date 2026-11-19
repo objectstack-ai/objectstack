@@ -75,7 +75,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
@@ -398,5 +398,12 @@ describe('objectstack#35249 — RecordFormPage draws the field a record predicat
 
     expect(drawnField('loss_reason'), 'no stage yet: the predicate is false').toBe(false);
     expect(drawnField('next_step')).toBe(true);
+    // The renderer refuses a submit while a field's `visibleWhen` faults
+    // (ADR-0137 D2). The predicate is total, so it answers FALSE without
+    // faulting and the create goes through.
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'New deal' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(drawn.adapter!.create).toHaveBeenCalledTimes(1));
+    expect(drawn.adapter!.create.mock.calls[0][1]).toMatchObject({ title: 'New deal' });
   });
 });
