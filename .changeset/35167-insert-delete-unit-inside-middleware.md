@@ -14,6 +14,6 @@ What changes for an insert or delete on such an object:
 - On a single-connection store such as SQLite, a writer whose authorization gate or middleware is still running no longer holds the store's only connection, so other writers are no longer queued behind it.
 - What a middleware does after `next()` now runs after the commit, as it already does for an update and for an insert or delete on an object with no such hook. A middleware that throws after `next()` no longer rolls the row back on a hooked object; it never did on any other object.
 
-The answer the loser of two concurrent deletes of one row gets is unchanged by this patch.
+This patch does not address the answer the loser of two concurrent deletes of one row gets.
 
 Nothing to change in an app.
