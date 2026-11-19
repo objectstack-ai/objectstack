@@ -15,7 +15,8 @@
 
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { DelegableScope } from '@object-ui/auth';
 import { normaliseClientError } from '@object-ui/data-objectstack';
 import { AssignedUsersSection } from './AssignedUsersSection';
 
@@ -37,6 +38,22 @@ vi.mock('@object-ui/fields', async (importOriginal) => {
   };
 });
 const pickedUsers = [{ id: 'u_new', name: 'New Nora' }];
+// The caller's delegable-scope report, as `useAuth().describeDelegableScope`
+// answers it: none unless a case sets one, as outside a runtime that serves it.
+let delegableRead: () => Promise<DelegableScope | null> = async () => null;
+// The active organization, which the report is resolved in: none unless a case sets one.
+let organizationFixture: { id: string } | null = null;
+vi.mock('@object-ui/auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/auth')>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      ...actual.useAuth(),
+      activeOrganization: organizationFixture,
+      describeDelegableScope: () => delegableRead(),
+    }),
+  };
+});
 // The section picks its copy by the console locale; English unless a case sets it.
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
 vi.mock('./i18n', async (importOriginal) => ({
@@ -349,5 +366,137 @@ describe('AssignedUsersSection — one holder of a name more than one package ho
     fireEvent.click(await screen.findByText('pick'));
     await waitFor(() => expect(mockAdapter.create).toHaveBeenCalledTimes(1));
     expect(mockAdapter.create).toHaveBeenCalledWith('sys_user_permission_set', { user_id: 'u_new', permission_set: 'sales_rep' });
+  });
+});
+
+/**
+ * objectstack#34741 (ADR-0090 D6/D12) — a set outside a delegated security
+ * administrator's scope offers no Add and no Remove: the server's
+ * delegated-administration gate refuses both (`DELEGATION_SCOPE_VIOLATION`),
+ * and the section reads that from the server's own `my-delegable-scope`
+ * report — the set is in no held scope's `assignablePermissionSets`. Every
+ * other report, and no report, keeps the controls as before.
+ */
+describe('AssignedUsersSection — a set outside a delegated scope offers no Add and no Remove (objectstack#34741)', () => {
+  const scope = (assignablePermissionSets: string[]) => ({
+    setName: 'security_officer',
+    businessUnit: 'hq',
+    includeSubtree: true,
+    manageAssignments: true,
+    assignablePermissionSets,
+    businessUnitIds: ['bu_hq'],
+  });
+  /** A delegate whose two scopes allowlist other sets than the one shown. */
+  const outsideReport: DelegableScope = {
+    isTenantAdmin: false,
+    scopes: [scope(['showcase_auditor']), scope(['member_default'])],
+    placeableBusinessUnitIds: ['bu_hq'],
+    assignablePositions: ['auditor'],
+  };
+
+  /** Render the set under `report`, and settle both the holders read and the report read. */
+  let lastRerender: (ui: React.ReactElement) => void = () => {};
+  async function renderUnder(report: Promise<DelegableScope | null>, permissionSetName = 'showcase_contributor') {
+    delegableRead = () => report;
+    lastRerender = render(<AssignedUsersSection permissionSetName={permissionSetName} />).rerender;
+    await act(async () => {
+      await report.catch(() => undefined);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
+  }
+
+  afterEach(() => {
+    delegableRead = async () => null;
+    organizationFixture = null;
+  });
+
+  it('a delegate whose scopes allowlist the set elsewhere: no Add and no Remove on the direct grant', async () => {
+    await renderUnder(Promise.resolve(outsideReport));
+    // The holders are still listed: the read asks only to read.
+    expect(screen.getByText('Direct Dana')).toBeTruthy();
+    expect(screen.getByText('Held Henry')).toBeTruthy();
+    expect(screen.queryByText('Add user')).toBeNull();
+    expect(screen.queryByLabelText('Remove')).toBeNull();
+  });
+
+  it('a delegate, a set nobody holds: the empty state does not say to click Add', async () => {
+    await renderUnder(Promise.resolve({ ...outsideReport, scopes: [scope(['member_default'])] }), 'showcase_auditor');
+    expect(screen.getByText('No users assigned yet.')).toBeTruthy();
+    expect(screen.queryByText(/Click "Add user"/)).toBeNull();
+    expect(screen.queryByText('Add user')).toBeNull();
+  });
+
+  it('a delegate: an unresolved grant of the set offers no Remove either', async () => {
+    const saved = data.sys_user_permission_set;
+    const savedUsers = data.sys_user;
+    data.sys_user_permission_set = [
+      { id: 'g_bare', permission_set: 'sales_rep', permission_set_package: null, user_id: 'u_bare' },
+    ];
+    data.sys_user = [...savedUsers, { id: 'u_bare', name: 'Bare Bo' }];
+    try {
+      const holding = { packageId: 'com.acme.sales', holders: ['com.acme.crm', 'com.acme.sales'] };
+      delegableRead = () => Promise.resolve(outsideReport);
+      render(<AssignedUsersSection permissionSetName="sales_rep" holding={holding} />);
+      const unresolved = await screen.findByTestId('assigned-users-unresolved');
+      expect(within(unresolved).getByText('Bare Bo')).toBeTruthy();
+      await waitFor(() => expect(screen.queryByTestId('assigned-users-unresolved-remove-u_bare')).toBeNull());
+      expect(screen.queryByText('Add user')).toBeNull();
+    } finally {
+      data.sys_user_permission_set = saved;
+      data.sys_user = savedUsers;
+    }
+  });
+
+  it('a report read in another organization narrows nothing once the active organization changes', async () => {
+    organizationFixture = { id: 'org_a' };
+    await renderUnder(Promise.resolve(outsideReport));
+    expect(screen.queryByText('Add user')).toBeNull();
+
+    // Switched to org_b, whose report is still in flight: org_a's is not answered for it.
+    let settleB: (report: DelegableScope | null) => void = () => {};
+    delegableRead = () => new Promise((resolve) => (settleB = resolve));
+    organizationFixture = { id: 'org_b' };
+    lastRerender(<AssignedUsersSection permissionSetName="showcase_contributor" />);
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+
+    await act(async () => settleB(outsideReport));
+    expect(screen.queryByText('Add user')).toBeNull();
+  });
+
+  it('CONTROL: a delegate one of whose scopes allowlists the set keeps Add and Remove', async () => {
+    await renderUnder(
+      Promise.resolve({ ...outsideReport, scopes: [scope(['showcase_auditor']), scope(['showcase_contributor'])] }),
+    );
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+  });
+
+  it('CONTROL: a tenant-level administrator keeps Add and Remove', async () => {
+    await renderUnder(
+      Promise.resolve({ isTenantAdmin: true, scopes: [], placeableBusinessUnitIds: ['bu_hq'], assignablePositions: ['auditor'] }),
+    );
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+  });
+
+  it('CONTROL: an organization administrator (no delegated scope on the report) keeps Add and Remove', async () => {
+    await renderUnder(
+      Promise.resolve({ isTenantAdmin: false, scopes: [], placeableBusinessUnitIds: ['bu_hq'], assignablePositions: ['auditor'] }),
+    );
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+  });
+
+  it('CONTROL: no report (no runtime serves it) keeps Add and Remove', async () => {
+    await renderUnder(Promise.resolve(null));
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+  });
+
+  it('CONTROL: a failed report read keeps Add and Remove, and the server decides', async () => {
+    await renderUnder(Promise.reject(new Error('my-delegable-scope unreachable')));
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
   });
 });
