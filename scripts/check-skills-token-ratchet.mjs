@@ -1111,7 +1111,11 @@ export const CEILINGS = new Map([
   // headroom, ceiling +204, pinned AT the measurement. Standing ruling (2026-10-27,
   // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
   // ruling record 6513306068.
-  ['skills/objectstack-data/rules/field-types.md', 3553],
+  // 3553 -> 3541 (2026-11-19): the `homeAmount` literal returned to the currency
+  // block and the time-zone / country sentence landed, paid by four same-file
+  // restatement cuts that over-paid by 12 tokens; the row is lowered to the
+  // measurement so the headroom is banked, not spent later. Shrink-only.
+  ['skills/objectstack-data/rules/field-types.md', 3541],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
@@ -2058,7 +2062,25 @@ export const CEILINGS = new Map([
   // 10011). The PR that adds the row is Tier H and lands only on an authorized
   // approval, which is the pricing act the header reserves to the maintainer.
   //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11603 / 4)
-  ['skills/objectstack-project/SKILL.md', 2901],
+  // 2901 -> 2990 (2026-11-19): §0 gains its third question — check the generated
+  // platform catalog before adding an object, a field or a flow; use what the
+  // platform ships; a missing capability a second app would copy is a platform
+  // card, built meanwhile under a `PLATFORM-CANDIDATE` marker — and §5 step 4
+  // sweeps those markers beside the `PLATFORM-GAP` tests. The SCOPE is the
+  // card's — the maintainer graded it 「立卡 p1」 (2026-11-19) after the skills
+  // platform-first analysis; no ruling orders the wording, and none is cited
+  // for it. The AUTHORITY for the raise is the standing path alone, on its own
+  // form: PAID DOWN FIRST by two same-file cuts, 142 bytes — §2's "Unsure
+  // whether a check exists? Inject the defect and run the command: if it fails,
+  // the platform checks it." (its technique survives in §2's retire sentence;
+  // the aside for an author unsure a check exists does not) and §0's "and read
+  // it from there afterwards" (restated by the same sentence's "Record the
+  // answer ... once") — then the measured remainder: `wc -c` = 11978 bytes,
+  // stamp line 20 -> ceil(11958 / 4) = 2990 tokens, zero headroom, ceiling +89,
+  // pinned AT the measurement. Raise path: the standing ruling (2026-10-27,
+  // verbatim and untranslated) 「A:先削重复,余额按实测提高」, recognised per
+  // ruling record 6513306068.
+  ['skills/objectstack-project/SKILL.md', 2990],
 ]);
 
 /**
@@ -2860,6 +2882,7 @@ function selfTest() {
       'skills/objectstack-formula/references/_index.md',
       'skills/objectstack-i18n/references/_index.md',
       'skills/objectstack-platform/references/_index.md',
+      'skills/objectstack-project/references/platform-catalog.md',
       'skills/objectstack-query/references/_index.md',
       'skills/objectstack-ui/references/_index.md',
       'skills/objectstack-ui/references/react-blocks.md',
