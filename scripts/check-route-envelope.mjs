@@ -1112,6 +1112,7 @@ const DISPATCHER_DOMAINS = {
     note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
   },
   'mcp-authoring.ts': { handBuilt: 0 },
+  'mcp-package-docs.ts': { handBuilt: 0 },
   // The "new similar" target rule both clone doors share (ADR-0146 D3/D6):
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },

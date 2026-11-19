@@ -169,6 +169,12 @@ import {
   useShowInputFocus,
 } from './StudioPillarKit.js';
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   GridFieldAuthoringProvider,
   cn,
   useIsMobile,
@@ -316,6 +322,7 @@ import {
   BATCH_ABORTED_CODE,
   causalPublishFailures,
   dashboardHeldEdit,
+  destructiveFindings,
   flowHeldEdit,
   flowSaveRefusal,
   issueRefusal,
@@ -397,7 +404,7 @@ import {
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
 import { useFlowLabelOf, useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
-import type { FlowRegistration } from '@objectstack/spec/api';
+import type { DestructiveChangeIssue, FlowRegistration } from '@objectstack/spec/api';
 import {
   navEntryLabelText,
   navItemLabelText,
@@ -3529,14 +3536,26 @@ export function InterfacesPillar({
     listViewDoorRef.current = { of: listViewDoorOf, objectSurface: objectSurfaceOf, open: openListViewDoor };
   });
   const listViewTargetId = listView.target?.viewId ?? null;
-  const listViewCustomizable = customizing && listViewTargetId !== null;
+  const listViewAsked = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
     client,
-    listViewCustomizable && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
+    listViewAsked && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
     customizeBase,
     customizePair,
     `${servedKey}:${listViewRestoreNonce}`,
   );
+  // objectstack#35600 (ADR-0146 D2, D11) — the object's page lists every view
+  // of the object, the base's and any other. Customize declares an override of
+  // the base's view, so it is offered only on a view the base ships (or one
+  // the pair already overrides); the server refuses that declaration for any
+  // other view. A view no package ships (one created in the app) is
+  // environment metadata, edited where it was created, and the panel says so.
+  const listViewCustomizable =
+    listViewAsked && (listViewServed.declaration !== null || listViewServed.shipped === 'base');
+  const listViewNotShipped =
+    listViewAsked && listViewServed.declaration === null && (listViewServed.shipped === 'environment' || listViewServed.shipped === 'none')
+      ? listViewServed.shipped
+      : null;
   const listViewCustomizeKey =
     listViewTargetId && customizeBase ? customizeItemKey(customizeBase, 'view', listViewTargetId) : '';
   const listViewInPair = listViewCustomizable && listViewServed.declaration !== null;
@@ -4825,6 +4844,21 @@ export function InterfacesPillar({
             listView={listView}
             // objectstack#28562 — a customized view is edited.
             readOnly={listViewReadOnly}
+            // objectstack#35600 — a view the base does not ship: why it is not customized, and where it is edited.
+            readOnlyNote={
+              listViewNotShipped
+                ? {
+                    reason: listViewNotShipped,
+                    text: tFormat(
+                      listViewNotShipped === 'environment'
+                        ? 'engine.studio.inspector.listView.environmentView'
+                        : 'engine.studio.inspector.listView.notShipped',
+                      locale,
+                      { package: customizeBaseLabel },
+                    ),
+                  }
+                : null
+            }
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
@@ -5492,6 +5526,14 @@ export function renderStudioGridList(props: {
       toolbarLeading={<StudioGridAddFieldButton />}
     />
   );
+}
+
+/** One object draft save: the address it writes, the buffer it was taken from, and the body sent. */
+interface ObjDraftSend {
+  name: string;
+  packageId: string;
+  draft: Record<string, unknown>;
+  body: Record<string, unknown>;
 }
 
 // Exported for tests (StudioDesignSurface.emptyPackage.test.tsx) — the empty-
@@ -6187,6 +6229,8 @@ export function DataPillar({
         // keeps its buffer; its save is pinned to the read it was made on.
         if (refreshOnly && objBuffersHeldRef.current) return;
         if (refreshOnly) refreshInstalledRef.current = true;
+        objStoredRef.current = authored.body;
+        setDestructive(null);
         setObjDraft(authored.body);
         setServedOnly(
           servedOnlyFields((draftBody ?? baseline).fields, [
@@ -6597,7 +6641,18 @@ export function DataPillar({
     [objects, client, railPackageId, onDraftSaved, packageReadOnly, newInPair, customization, locale, namespace],
   );
 
-  const doSave = React.useCallback(async (sent: DraftSend) => {
+  // objectstack#34931 — a save the door refused `409 DESTRUCTIVE_CHANGE`, held
+  // for the author's answer: what it would lose, and the save itself. While it
+  // is held the autosave sends nothing.
+  const [destructive, setDestructive] = React.useState<ObjDraftSend & {
+    sent: DraftSend;
+    findings: DestructiveChangeIssue[];
+  } | null>(null);
+  // The object as the server holds it for this buffer (as loaded, or as last
+  // saved): what keeping a field restores it from.
+  const objStoredRef = React.useRef<Record<string, unknown> | null>(null);
+
+  const doSave = React.useCallback(async (sent: DraftSend, forced?: ObjDraftSend) => {
     if (!current) return;
     setSaving('draft');
     setError(null);
@@ -6605,11 +6660,20 @@ export function DataPillar({
     // picklist-bound fields carry the list's resolved `options`; the door
     // refuses them beside `picklist`, so they stay out of the body.
     // objectui#11785 — kept, so a refusal is read against what was sent.
-    const body = dropServedPicklistOptions(objDraft);
+    // objectstack#34931 — ⛔ a forced save is the refused save whole: its
+    // body, to the address it wrote (`packageId` included), never re-derived.
+    const { name, packageId: to, draft, body } =
+      forced ?? { name: current.name, packageId, draft: objDraft, body: dropServedPicklistOptions(objDraft) };
     try {
-      const outcome = await saveObjDraft('object', current.name, body, { mode: 'draft', packageId, surface: 'studio' });
+      const outcome = await saveObjDraft('object', name, body, {
+        mode: 'draft',
+        packageId: to,
+        surface: 'studio',
+        ...(forced ? { force: true } : {}),
+      });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
+      objStoredRef.current = draft;
       setHasDraft(true);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setDirty(false);
@@ -6617,7 +6681,7 @@ export function DataPillar({
       // objectstack#27644 — the draft this save stored carries its own publish
       // verdict on its next read; the one held described the body before it.
       const seq = ++objVerdictSeq.current;
-      void readDraftForSave(client, 'object', current.name, packageId).then((read) => {
+      void readDraftForSave(client, 'object', name, to).then((read) => {
         if (seq !== objVerdictSeq.current) return;
         setObjVerdict(draftEnvelopeDiagnostics(read.answer));
         setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
@@ -6625,17 +6689,43 @@ export function DataPillar({
       // objectstack#28984 — named by the label this save stored; one toast per
       // object however many editing pauses save it (`announceDraftSaved`).
       announceDraftSaved(
-        { type: 'object', name: current.name },
+        { type: 'object', name },
         typeof body.label === 'string' && body.label ? body.label : current.label,
         locale,
       );
-      onDraftSaved?.({ type: 'object', name: current.name });
+      onDraftSaved?.({ type: 'object', name });
     } catch (e) {
-      setError(objectSaveRefusal(e, body, locale));
+      // objectstack#34931 — what the save would lose is asked about, once:
+      // a forced save refused again reads as any other refusal.
+      const findings = forced ? null : destructiveFindings(e);
+      if (findings) setDestructive({ name, packageId: to, draft, body, sent, findings });
+      else setError(objectSaveRefusal(e, body, locale));
     } finally {
       setSaving(false);
     }
   }, [saveObjDraft, client, current, objDraft, onDraftSaved, packageId, locale]);
+
+  // objectstack#34931 — Cancel keeps what the refused save would have lost:
+  // each field a finding names goes back as the server holds it, and nothing
+  // is sent unless the buffer still differs from what is stored.
+  const keepDestructive = React.useCallback(() => {
+    const asked = destructive;
+    const stored = objStoredRef.current;
+    setDestructive(null);
+    if (!asked || !stored) return;
+    const was = readFields(stored.fields);
+    const view = readFields(objDraft.fields);
+    for (const { field } of asked.findings) {
+      const at = was.entries.findIndex((e) => e.name === field);
+      if (at < 0) continue;
+      const i = view.entries.findIndex((e) => e.name === field);
+      if (i < 0) view.entries.splice(Math.min(at, view.entries.length), 0, was.entries[at]);
+      else view.entries[i] = was.entries[at];
+    }
+    const next = { ...objDraft, fields: writeFields(view) };
+    setObjDraft(next);
+    setDirty(JSON.stringify(next) !== JSON.stringify(stored));
+  }, [destructive, objDraft]);
 
   // objectui#11786 — an edit whose body the write guard would refuse (a choice
   // field before its options, a relationship before its target) is held, not
@@ -6654,7 +6744,7 @@ export function DataPillar({
     target: `object:${current?.name ?? ''}`,
     loadedFor: objDraftFor,
     dirty,
-    blocked: !current || !!saving || readOnly || saveBlocking > 0 || objIncomplete !== null,
+    blocked: !current || !!saving || readOnly || saveBlocking > 0 || objIncomplete !== null || destructive !== null,
     snapshot: objDraft,
     save: doSave,
   });
@@ -7014,12 +7104,15 @@ export function DataPillar({
       try {
         const outcome = await saveObjDraft('object', current.name, wire, { mode: 'draft', packageId, surface: 'studio' });
         if (outcome === 'reloaded') return;
+        objStoredRef.current = body;
         setHasDraft(true);
         if (sent.unmoved()) setDirty(false);
         onDraftSaved?.({ type: 'object', name: current.name });
         setGridVer((v) => v + 1); // remount so the grid reflects the new (draft) order
       } catch (e) {
-        setError(objectSaveRefusal(e, wire, locale));
+        const findings = destructiveFindings(e);
+        if (findings) setDestructive({ name: current.name, packageId, draft: body, body: wire, sent, findings });
+        else setError(objectSaveRefusal(e, wire, locale));
       } finally {
         setSaving(false);
       }
@@ -7301,6 +7394,38 @@ export function DataPillar({
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
+      {/* objectstack#34931 — the door's other 409: confirmed, it is sent again forced; else what it would lose is kept. */}
+      <AlertDialog open={destructive !== null} onOpenChange={(open) => !open && keepDestructive()}>
+        <AlertDialogContent data-testid="object-destructive-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('engine.edit.destructiveTitle', locale)}</AlertDialogTitle>
+            <AlertDialogDescription>{t('engine.edit.destructiveDesc', locale)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="max-h-64 space-y-1 overflow-auto text-sm">
+            {destructive?.findings.map((f, i) => (
+              <li key={i} className="border-l-2 border-amber-500 pl-2">
+                {f.message}
+              </li>
+            ))}
+          </ul>
+          <AlertDialogFooter>
+            <Button variant="ghost" data-testid="object-destructive-keep" onClick={keepDestructive}>
+              {t('engine.cancel', locale)}
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="object-destructive-force"
+              onClick={() => {
+                if (!destructive) return;
+                setDestructive(null);
+                void doSave(destructive.sent, destructive);
+              }}
+            >
+              {t('engine.edit.forceSave', locale)}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {extConflictDialog}
       {formView.conflictDialog}
       <div className="relative flex min-h-0 flex-1">

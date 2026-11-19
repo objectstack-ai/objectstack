@@ -553,6 +553,11 @@ export const DataTableSchema = BaseSchema.extend({
   // is `ObjectGrid` (`@object-ui/plugin-grid`) for a grouped view. A React node
   // is no more JSON than a function is, so authored data is refused by name.
   rowGroups: handlerKeyRefusal('rowGroups', 'runtime-slot', 'Host-built group bands of a grouped grid'),
+  // RUNTIME SLOT (objectstack#35548): `data-table` reads `schema.summaryRow`
+  // and draws it as the table's last row, a host-built React node per column;
+  // its supplier is `ObjectGrid` (`@object-ui/plugin-grid`). A React node is
+  // not JSON, so authored data is refused by name.
+  summaryRow: handlerKeyRefusal('summaryRow', 'runtime-slot', 'Host-built per-column summary row'),
   // RUNTIME SLOT (objectstack#27365): `data-table` reads `schema.isRowEditable`
   // and calls it per row before opening a cell editor; its supplier is
   // `ObjectGrid` (`@object-ui/plugin-grid`), answering from the server's

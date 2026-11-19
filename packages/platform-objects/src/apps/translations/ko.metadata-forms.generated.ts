@@ -427,7 +427,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "사용자 작업",
-        helpText: "UI 클라이언트가 이 객체의 레코드에서 제공하는 일반 항목(새로 만들기, 가져오기, 편집, 삭제, 내보내기)으로, managedBy 기본값을 항목별로 재정의합니다. 설정하지 않은 항목은 기본값을 유지합니다. platform은 다섯 가지 모두, config와 system-data는 가져오기를 제외한 모두, engine-owned, append-only, better-auth는 내보내기만 제공합니다. 건드리지 않은 스위치는 아무것도 쓰지 않으므로 기본값이 항목을 제공하는 경우에도 꺼진 것으로 표시됩니다. engine-owned 또는 append-only 객체에서 항목을 켜면 사용자가 데이터 API로도 해당 쓰기를 할 수 있습니다. 사용자에게는 여전히 해당 권한이 필요합니다."
+        helpText: "UI 클라이언트가 이 객체의 레코드에서 제공하는 일반 항목(새로 만들기, 가져오기, 편집, 삭제, 내보내기)으로, managedBy 기본값을 항목별로 재정의합니다. 설정하지 않은 항목은 기본값을 유지합니다. platform은 다섯 가지 모두, config와 system-data는 가져오기를 제외한 모두, engine-owned, append-only, better-auth는 내보내기만 제공합니다. 건드리지 않은 스위치는 아무것도 쓰지 않으므로 기본값이 항목을 제공하는 경우에도 꺼진 것으로 표시됩니다. engine-owned 또는 append-only 객체에서 항목을 켜면 사용자가 데이터 API로도 해당 쓰기를 할 수 있습니다. 사용자에게는 여전히 해당 권한이 필요합니다. 소유자 변경은 이 매트릭스에 포함되지 않습니다. 기본값은 공유 모델을 따릅니다(해당 항목 참조)."
       },
       "userActions.create": {
         label: "만들기",
@@ -448,6 +448,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "CSV 내보내기",
         helpText: "CSV 내보내기 항목입니다. 설정하지 않으면 표시됩니다. 모든 managedBy 버킷이 내보내기를 제공하기 때문입니다."
+      },
+      "userActions.transfer": {
+        label: "소유자 변경",
+        helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
       },
       editMode: {
         label: "편집 모드",
@@ -988,6 +992,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "refusals.params": {
         label: "매개변수",
         helpText: "문장에 채울 수 있는 이름(예: state)입니다. 본문이 { code, params: { state } }를 던지면 {{ state }} 자리 표시자에 그 값이 표시됩니다. 없으면 문장은 일반 텍스트입니다"
+      },
+      texts: {
+        label: "텍스트",
+        helpText: "훅이 레코드에 쓰는 문장으로, 코드가 ctx.text로 요청하는 snake_case 키(예: follow_up_subject)를 키로 합니다. 훅은 선언된 메시지를 조직의 언어로 번역해 받으며, 번역이 없으면 선언된 메시지를 받습니다. JavaScript(L2) 본문 또는 핸들러용이며, expression 본문에서는 거부됩니다"
+      },
+      "texts.message": {
+        label: "메시지",
+        helpText: "코드가 이 키를 요청할 때 훅이 쓰는 문장입니다. 일반 텍스트이며, 항목이 params를 선언하면 {{ name }} 자리 표시자에 선언된 매개변수가 채워집니다"
+      },
+      "texts.params": {
+        label: "매개변수",
+        helpText: "문장에 채울 수 있는 이름(예: lead)입니다. 코드가 ctx.text(key, { lead })를 요청하면 {{ lead }} 자리 표시자에 그 값이 표시됩니다. 없으면 문장은 일반 텍스트입니다"
       },
       handler: {
         label: "핸들러",

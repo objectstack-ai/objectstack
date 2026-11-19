@@ -427,7 +427,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "Ações do usuário",
-        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente."
+        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente. Alterar proprietário não faz parte dessa matriz: seu padrão segue o modelo de compartilhamento (veja sua entrada)."
       },
       "userActions.create": {
         label: "Criar",
@@ -448,6 +448,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "Exportar CSV",
         helpText: "A entrada de exportação CSV. Não definido: exibida, pois todas as categorias do managedBy oferecem exportação."
+      },
+      "userActions.transfer": {
+        label: "Alterar proprietário",
+        helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
       },
       editMode: {
         label: "Modo de edição",
@@ -988,6 +992,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "Parâmetros",
         helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que o hook escreve nos registros, indexadas pela chave snake_case que o código dele pede com ctx.text (por exemplo follow_up_subject). O hook recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para um corpo JavaScript (L2) ou um handler; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que o hook escreve quando o código dele pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo lead): o código pede ctx.text(key, { lead }) e um marcador {{ lead }} mostra o valor. Ausente: a frase é texto simples"
       },
       handler: {
         label: "Handler",

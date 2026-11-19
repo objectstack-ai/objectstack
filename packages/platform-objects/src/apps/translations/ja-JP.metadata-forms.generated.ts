@@ -427,7 +427,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "ユーザー操作",
-        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。所有者の変更はこのマトリクスに含まれません。既定は共有モデルに従います（その項目を参照）。"
       },
       "userActions.create": {
         label: "作成",
@@ -448,6 +448,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "CSV エクスポート",
         helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
+      },
+      "userActions.transfer": {
+        label: "所有者の変更",
+        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
       },
       editMode: {
         label: "編集の開き方",
@@ -988,6 +992,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "パラメーター",
         helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
+      texts: {
+        label: "テキスト",
+        helpText: "フックがレコードに書き込む文。コードが ctx.text で要求する snake_case のキー（例: follow_up_subject）をキーとします。フックには宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。JavaScript（L2）本体またはハンドラーで使用可能。expression 本体では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "コードがこのキーを要求したときにフックが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: lead）。コードが ctx.text(key, { lead }) を要求すると、{{ lead }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
       handler: {
         label: "ハンドラー",
