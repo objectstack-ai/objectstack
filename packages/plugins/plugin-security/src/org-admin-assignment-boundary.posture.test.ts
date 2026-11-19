@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 104 cases that each write and read back the same holder's assignments, so no boot is shared across cases, save the three delegated cases split one `it` per table, whose tables run in order on one boot and write ids of their own, and the twelve three-officer cases, which share one boot per posture and remove every row each wrote; 17.5 s in a local run on a shared 4-core box (18.2 s before the split); slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; the three-officer cases add 39% on one shared box (tests phase 29.0 s against 20.8 s without them), so 10.9 s projects to 15.2 s, 19.0 s with headroom
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 128 cases that each write and read back the same holder's assignments, so no boot is shared across cases, save the three delegated cases split one `it` per table, whose tables run in order on one boot and write ids of their own, and the thirty-six three-officer cases (one per posture, caller and auditor variant, split from twelve so no case carries three variants' writes under vitest's 5 s per-test default), which share one boot per posture and remove every row each wrote; 17.5 s in a local run on a shared 4-core box (18.2 s before the split); slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; the three-officer cases add 39% on one shared box (tests phase 29.0 s against 20.8 s without them), so 10.9 s projects to 15.2 s, 19.0 s with headroom
 
 /**
  * [ADR-0090 D12, amended 2026-10-17] The organization administrator's
@@ -1149,16 +1149,19 @@ describe('[ADR-0090 D12, amended 2026-10-17] the three-officer split: an auditor
           await harness().engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role }, inA);
         }
       });
+      // One case per caller and variant: each does one variant's grant insert,
+      // removal by id, bulk removal and position holding, so no single case
+      // carries three variants' writes under vitest's per-test default.
       for (const caller of Object.keys(OFFICER_CALLERS) as OfficerCaller[]) {
-        it(`${caller}: adding and removing a holder — a grant, its removal by id, its bulk removal, a position holding — answers per variant`, async () => {
-          const h = harness();
-          const context = OFFICER_CALLERS[caller];
-          const door = bulkDoorOver(h.engine);
-          // Holders seated in `a_ops`: one receives each insert, the others hold the seeded rows.
-          const holders = IN_SCOPE_HOLDERS.slice(0, 4);
-          const [inserted, removed, bulkA, bulkB] = holders;
-          try {
-            for (const variant of AUDITOR_VARIANTS) {
+        for (const variant of AUDITOR_VARIANTS) {
+          it(`${caller} · ${variant}: adding and removing a holder — a grant, its removal by id, its bulk removal, a position holding — answers as the variant's verdict says`, async () => {
+            const h = harness();
+            const context = OFFICER_CALLERS[caller];
+            const door = bulkDoorOver(h.engine);
+            // Holders seated in `a_ops`: one receives each insert, the others hold the seeded rows.
+            const holders = IN_SCOPE_HOLDERS.slice(0, 4);
+            const [inserted, removed, bulkA, bulkB] = holders;
+            try {
               const expected = OFFICER_EXPECTED[caller][variant];
               const setName = AUDITOR_SETS[variant].name;
               const cell = `${caller} · ${variant}`;
@@ -1206,13 +1209,13 @@ describe('[ADR-0090 D12, amended 2026-10-17] the three-officer split: an auditor
                   expect((answer.details as any)?.permissionSet, `${cell} · ${what}`).toBe(setName);
                 }
               }
+            } finally {
+              for (const table of TABLE_NAMES) {
+                await h.engine.delete(table, { where: { user_id: { $in: holders } }, multi: true, context: SYS } as any);
+              }
             }
-          } finally {
-            for (const table of TABLE_NAMES) {
-              await h.engine.delete(table, { where: { user_id: { $in: holders } }, multi: true, context: SYS } as any);
-            }
-          }
-        });
+          });
+        }
       }
     });
   }

@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -2232,9 +2232,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     rows: Array<Record<string, unknown>>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<unknown> => {
     const source = def.actionDef as Record<string, any> | undefined;
-    if (!source) return;
+    if (!source) return undefined;
     const rest = stripCollectedActionKeys(source);
     const ids = rows.map((r) => (r.id != null ? String(r.id) : '')).filter(Boolean);
     // Publish the EXPANDED, eligibility-filtered rows the run actually covers
@@ -2256,6 +2256,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // The handler's own return value, one level below the action envelope:
+    // the executor reads a `BulkActionResult` (`{ succeeded, failed }`) in it
+    // per row.
+    return readActionPayload(res.data);
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
     setActiveBulkDef(null);
@@ -2269,11 +2273,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
-    } else if (result?.aggregateRejection) {
-      // A rejected aggregate run (objectstack#34173) is ONE call that may have
-      // written some rows before it stopped, so the grid re-reads them by the
-      // same path. The selection stays: re-running the whole action is the
-      // retry, as for a total failure.
+    } else if (result?.aggregateRejection || result?.aggregateUnreadable || result?.aggregateUnconfirmed?.length) {
+      // A rejected or unreadable aggregate run is ONE call that may have
+      // written rows nobody counted, as may one that left rows unconfirmed,
+      // so the grid re-reads them by the same path. The selection stays:
+      // re-running the whole action is the retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };
