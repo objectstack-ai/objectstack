@@ -435,6 +435,8 @@ U7 is the ruled plan; this table restates it and adds nothing.
   first, and only an organization admin edits a ratio, audited.
 - **A unit row's code and dimension cannot change after create** (L1, settled by the seat). A deleted code can be
   created again with another dimension; what that does to resting rows is [Open item](#open-items) 11.
+  *Note (2026-11-19):* Open item 11 is settled: a deleted code stays retired, and the retired row keeps its code, so it
+  is never created again.
 - **A deleted org unit leaves its rows readable** (L1, settled by the seat): they keep their code and stored
   conversion and show the code without a label, and a new save with that code is refused. Which writes count as such
   a save is [Open item](#open-items) 9.
@@ -469,11 +471,63 @@ amended with each answer, the way ADR-0144's open items were.
 
 1. **U1's membership.** Which Rec 20 common codes the curated subset holds, each one's dimension and ratio, and which
    package codes it lists. U2 fixes one code (`H87`) and refuses two (`C62`, `EA`).
+   *Note (2026-11-19):* settled on the `sys_unit` card
+   ([#35488](https://github.com/objectstack-ai/objectstack/issues/35488)), under the owning seat's contract review; the
+   table is `packages/spec/src/data/standard-units.ts#STANDARD_UNITS`, 41 codes. Seven dimensions, the closed
+   vocabulary `UNIT_DIMENSIONS`; each ratio dimension has a base unit (`UNIT_DIMENSION_BASE_CODES`), whose ratio is
+   `1`. The ratio reads `1 CODE = ratio × BASE`, so a quantity converts to the base unit by multiplying it by the
+   ratio. Every ratio is a decimal string of at most 12 places, exact by definition:
+
+   | Dimension | Base | Members, with ratio |
+   |:--|:--|:--|
+   | `mass` | `KGM` | `GRM` 0.001, `MGM` 0.000001, `TNE` 1000, `LBR` 0.45359237, `ONZ` 0.028349523125 |
+   | `length` | `MTR` | `MMT` 0.001, `CMT` 0.01, `KMT` 1000, `INH` 0.0254, `FOT` 0.3048, `YRD` 0.9144 |
+   | `area` | `MTK` | `CMK` 0.0001, `MMK` 0.000001, `FTK` 0.09290304 |
+   | `volume` | `MTQ` | `LTR` 0.001, `MLT` 0.000001, `GLL` 0.003785411784 |
+   | `time` | `SEC` | `MIN` 60, `HUR` 3600, `DAY` 86400, `WEE` 604800 |
+   | `count` | `H87` | `PR` 2, `DZN` 12 |
+   | `package` | none | `XBG`, `XBE`, `XBO`, `XBX`, `XCT`, `XCS`, `XCR`, `XDR`, `XPK`, `XPX`, `XRO`, `XSA`; no ratio |
+
+   Sources: the SI prefixes (`GRM`, `MGM`, `MMT`, `CMT`, `KMT`, `CMK`, `MMK`, `MLT`) and the units accepted for use with
+   the SI (`TNE`, `LTR`, `MIN`, `HUR`, `DAY`), SI Brochure 9th edition, Tables 7 and 8; the international yard and
+   pound of 1959 (`LBR`, `ONZ` as 1/16 lb, `INH`, `FOT`, `YRD`, `FTK`); the United States gallon of 231 cubic inches
+   (`GLL`); Recommendation 20's own factor (`WEE`, `PR`, `DZN`). Recommendation 20 prints `ONZ` and `GLL` rounded
+   (2.834 952 × 10⁻² kg, 3.785 412 × 10⁻³ m³); the table holds the exact values. Left out: hectare (`HAR`), which
+   Recommendation 20 marks deprecated; month (`MON`) and year (`ANN`), whose Recommendation 20 factors rest on a
+   365.25-day year that no calendar month or year equals; and every affine unit (U7 R2). The dimension is named
+   `count`, not `piece`: a pair and a dozen are counts measured in pieces, as a gram is a mass measured in kilograms.
+   Codes, names, statuses and factors were read from the Recommendation 20 annex (the `datasets/unece-units-of-measure`
+   mirror, data package 17.0) and the package codes from the Peppol BIS Billing 3.0 list `UNECERec20` ("including
+   Recommendation 21 codes - prefixed with X", Revision 11e). The organization namespace of U3 is the same file's
+   `ORGANIZATION_UNIT_CODE_PATTERN`: uppercase letters, digits and underscores, starting with a letter or a digit, at
+   most 32 characters, at least 4 long or containing an underscore. The table widens only by an amendment of this
+   record.
 2. **`sys_unit`'s owning package, its fields and its write grants.** Its fields beyond what U3, U6, U7 R2, L1 and L2
    name, against [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D1, D3 and D6.
    ADR-0144 D3 left `sys_exchange_rate`'s owner to its card the same way. Its write grants: who creates, relabels and
    deletes an org unit. The seat's L1 settlement names only who edits a ratio, and a delete is the act L1 attaches
    refusals to.
+   *Note (2026-11-19):* settled on the `sys_unit` card
+   ([#35488](https://github.com/objectstack-ai/objectstack/issues/35488)), under the owning seat's contract review,
+   answering [#35465](https://github.com/objectstack-ai/objectstack/issues/35465).
+   - **Owner: `@objectstack/platform-objects`**
+     (`packages/platform-objects/src/system/sys-unit.object.ts#SysUnit`), registered in its first manifest beside
+     `sys_exchange_rate`. ADR-0029 D3 asks for one owner per object, and this is the only one. Its readers are the
+     engine's write-time membership check (U5) and the display of a quantity with its unit, present in every
+     composition that can write or read a record, so it has no on/off boundary of its own (D2) and no capability plugin
+     (D1) would own it; it joins the per-organization reference table ADR-0144's Open item 11 settled into the same
+     package. D6's decomposition, when it comes, moves both together.
+   - **Fields:** `code` (text, at most 32, required, unique per organization, in U3's namespace, immutable after
+     create); `label` (text, at most 80, required: L2's one org-written label); `dimension` (select over U1's closed
+     vocabulary, required, immutable after create); `ratio` (number, scale 12, precision 24, at least 10⁻¹², required
+     on every dimension but `package` and refused on `package`, U1's shape; editable, an edit affecting later writes
+     only, L1); `decimal_places` (whole number 0 to 12, optional, the display default of U6, never a storage rule, L4);
+     `retired` (boolean, default false, Open item 11). `organization_id` is injected (U3). Every authored column
+     carries field history.
+   - **Grants:** every member reads (`member_default` names `sys_unit`, read only; the seat's first U3 note). An
+     organization owner or administrator creates, relabels, edits a ratio and retires a unit, through
+     `organization_admin`'s wildcard grant, the way `sys_exchange_rate` is written; no member holds a write bit. No one
+     deletes: retiring is the delete (Open item 11).
 3. **The codes of the new refusals**: U5's membership refusal, U7 R1's aggregate refusal, U7 R2's refusal of a write
    with no ratio and no factor, and the refusal of a new save with a deleted org unit's code (L1, settled by the
    seat). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) sets their codes and envelope.
@@ -539,6 +593,22 @@ amended with each answer, the way ADR-0144's open items were.
     record declines a lock for the ratio only, and L1 rules out scanning for "used", so a use check cannot close it.
     For the `sys_unit` card: either a deleted code stays retired, or re-creation is admitted and its consequence is
     stated. Not settled here.
+    *Note (2026-11-19):* settled on the `sys_unit` card
+    ([#35488](https://github.com/objectstack-ai/objectstack/issues/35488)), under the owning seat's contract review,
+    answering [#35466](https://github.com/objectstack-ai/objectstack/issues/35466): **a deleted code stays retired.**
+    L1's delete is spelled as a one-way `retired` flag on the row. The row is never removed, so it keeps holding the
+    organization-scoped unique key on `code`, and the same code can never be created again with another dimension,
+    ratio or label; the hazard above cannot arise. The mechanism, each part pinned: the data API serves no delete and
+    no bulk write on `sys_unit` (`enable.apiMethods` is `get`, `list`, `create`, `update`), Setup offers no Delete
+    (`userActions.delete: false`), and a rule refuses clearing `retired` once set. Rows resting on a retired unit keep
+    their code and stored conversion, as L1 states for a deleted unit. Two consequences are left to their cards: the
+    membership card (U5, [Open item](#open-items) 9) refuses a new save with a retired code, as L1's delete bullet
+    requires; and the display card says whether a resting row shows the retired unit's label, which stays on file, or
+    the bare code that L1 wrote for a deleted unit. Re-creation was not admitted: no measured reason favoured it, and
+    an organization that needs the code's old meaning back has the retired row's history, while one that needs a new
+    meaning names a new code. Not closed by this mechanism: `apiMethods` governs the data API, so a delete issued to the
+    engine directly, below that door, is not refused by it; no platform path issues one, and whether an automation
+    could is not measured here.
 12. **R1's backfill and its raw aggregates.** The backfill mirrors `os migrate record-currency-codes` loosely. That
     door writes one code, the operator's, into the rows whose code is blank
     (`packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`); the unit door rewrites free
