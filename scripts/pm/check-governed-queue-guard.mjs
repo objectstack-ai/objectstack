@@ -608,7 +608,11 @@
  *     the same act for every landing this file judges;
  *   - the record half — a `## Contract review` record on the current head that
  *     stands at its tier and reads PASS, located on the narrowing face
- *     (`reviewFace` with the declaration texts handed in).
+ *     (`reviewFace` with the declaration texts handed in). The face is HELD
+ *     there once the leg found a declaration, on either line: `reviewFace`
+ *     reads the `Clause-②:` arm alone, so the narrowed kind of the
+ *     `Metadata-protocol:` line is handed to it in the one spelling it reads
+ *     (`NARROWING_FACE_LINE`). A schema or governed path still decides first.
  *
  * ⛔ Fail closed: an unreadable pull, changeset, review list or thread is a
  * refusal on its own code, and a near-arm spelling (`(narrowed)`) counts as
@@ -736,7 +740,7 @@ import {
   repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
-import { METADATA_PROTOCOL_KINDS, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
+import { CLAUSE2_ARMS, CLAUSE2_VALUES, METADATA_PROTOCOL_KINDS, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -804,7 +808,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // own workflow are H; `.claude/**` is S only on the declared body line AND the record's verified line.
   '⚖️ #35321 at the queue: guard instruments are Tier H, `.claude/**` splits by declaration': 26,
   // The narrowed leg (same ruling): a declared narrowing needs BOTH halves; `added`, `semantic`, `none` are untouched.
-  '⚖️ #35321: a declared narrowing lands like Tier H — an authorized approval AND a PASS record': 23,
+  '⚖️ #35321: a declared narrowing lands like Tier H — an authorized approval AND a PASS record': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1239,7 +1243,13 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
   }
   // `declaredOn` (the narrowed leg hands it in): the texts a `Clause-②:` line is read from, which decide the face
   // where the paths decide none. Absent on every governed entry, whose paths already decided — the call is unchanged.
-  const face = Array.isArray(pair.declaredOn) ? recognisers.reviewFace(pair.paths, pair.repo, { declaredOn: pair.declaredOn }) : recognisers.reviewFace(pair.paths, pair.repo);
+  // ⭐ `narrowingDeclared` (the narrowed leg sets it, having FOUND a declaration with its own readers): the face is
+  // held to the narrowing one wherever the paths decide none. `reviewFace` reads the `Clause-②:` arm alone, so a
+  // narrowing declared on the `Metadata-protocol:` line — beside a bare, an absent or a malformed clause line — would
+  // otherwise land on the declaration face's cheaper tier, or on no face at all. It is handed the one spelling it
+  // reads as that arm; a narrowing arm on any text decides before a malformed line is looked at.
+  const declaredOn = Array.isArray(pair.declaredOn) ? (pair.narrowingDeclared === true ? [NARROWING_FACE_LINE, ...pair.declaredOn] : pair.declaredOn) : null;
+  const face = declaredOn === null ? recognisers.reviewFace(pair.paths, pair.repo) : recognisers.reviewFace(pair.paths, pair.repo, { declaredOn });
   const located = recognisers.locate(pair);
   if (located.state === 'unreadable') {
     return {
@@ -3240,6 +3250,13 @@ export const NARROWED_RULING = 'maintainer ruling 2026-11-19 on #35321: a spec c
  * the maintainer's own included. Exactly that menu: a partial one (`narrowed | none`) still counts. Pure.
  */
 export const UNFILLED_PROTOCOL_MENU = METADATA_PROTOCOL_KINDS.join(' | ');
+
+/**
+ * The ONE spelling `reviewFace` reads as the narrowing arm, built from the readers' closed sets. `recordVerdict`
+ * hands it in for a pull request this leg found a declared narrowing on, so the record half is held to the
+ * narrowing face's tier whichever line carried the declaration. ⛔ Never written to a body or a record.
+ */
+export const NARROWING_FACE_LINE = `Clause-②: ${CLAUSE2_VALUES[1]} (${CLAUSE2_ARMS[1]})`;
 export function narrowingDeclarationsIn(text) {
   const unfilled = (value) => String(value ?? '').replace(/[ \t]+/g, ' ').trim() === UNFILLED_PROTOCOL_MENU;
   const out = [];
@@ -3436,9 +3453,10 @@ export async function runNarrowedGuard({ event, repo, rows, namedPull = null, fe
       const row = { number: pr, body: body ?? '', head: { ref: pull?.headRef ?? '' } };
       const card = recognisers.deliveredCard(row);
       const cardNote = card.card === null ? `⚠️ no card thread was searched — ${card.reason}` : `card #${card.card}, ${card.evidence}`;
-      // ⭐ `declaredOn` is what puts a narrowing with no schema and no governed path on the narrowing FACE, so the
-      // record must stand at that face's tier (`reviewFace`), never at the declaration face's cheaper one.
-      const pair = { pr, card: card.card, headSha: pull?.sha ?? null, runGit, baseRef, paths: pathsByPull.get(pr) ?? [], repo, declaredOn: [body ?? '', ...changesets.files.map((f) => f.text)] };
+      // ⭐ `declaredOn` and `narrowingDeclared` are what put a narrowing with no schema and no governed path on the
+      // narrowing FACE, so the record must stand at that face's tier (`reviewFace`), never at the declaration face's
+      // cheaper one — on either declaration line: this point is reached only with a declaration found above.
+      const pair = { pr, card: card.card, headSha: pull?.sha ?? null, runGit, baseRef, paths: pathsByPull.get(pr) ?? [], repo, declaredOn: [body ?? '', ...changesets.files.map((f) => f.text)], narrowingDeclared: true };
       const threads = typeof fetchComments === 'function'
         ? await readRecordThreads({ pair, recognisers, fetchComments })
         : { ignoredAuthors: [], unreadable: 'no comment reader was supplied to the narrowed leg, so no thread was read', apiCalls: 0 };
@@ -7639,6 +7657,37 @@ export async function selfTest() {
         const below = await narrowRun({ ...runtime, comments: [recordComment({ tierLine: 'Served-tier: 75/75 `TIER_DEFAULT`' })] });
         return atTier.exitCode === EXIT_CLEAR && atTier.entries[0].record.face === 'narrowing' && below.exitCode === EXIT_REFUSED_NARROWED && /does not stand \(below-tier\)/.test(below.entries[0].reasons[0]);
       })());
+    // The declaration this leg found holds the face, whatever the `Clause-②:` line reads: the narrowed KIND alone, the
+    // kind beside a bare, an absent or a malformed clause line, the kind on a changeset only, and a near-arm clause
+    // spelling (which no longer reads as a record that does not stand for want of a face).
+    const kindOnly = await (async () => {
+      const DEFAULT_TIER = recordComment({ tierLine: 'Served-tier: 75/75 `TIER_DEFAULT`' });
+      const RUNTIME = ['packages/runtime/src/x.ts'];
+      const shapes = {
+        'kind beside a bare clause line': { body: NARROW },
+        'kind with no clause line': { body: `Fixes #${REF_CARD}\n\nMetadata-protocol: narrowed\n` },
+        'kind on a changeset only': { body: `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`, changesetText: changeset('Metadata-protocol: narrowed') },
+        'near-arm clause spelling': { body: `Fixes #${REF_CARD}\n\nClause-②: no (narrowed)\nMetadata-protocol: none\n` },
+        'kind beside a malformed clause line': { body: `Fixes #${REF_CARD}\n\nClause-②: maybe\nMetadata-protocol: narrowed\n` },
+      };
+      const out = {};
+      for (const [name, shape] of Object.entries(shapes)) {
+        const atTier = await narrowRun({ ...shape, files: RUNTIME, reviews: approval, comments: [recordComment()] });
+        const below = await narrowRun({ ...shape, files: RUNTIME, reviews: approval, comments: [DEFAULT_TIER] });
+        out[name] = { atTier: [atTier.exitCode, atTier.entries[0].state, atTier.entries[0].record?.face ?? null], below: [below.exitCode, below.entries[0].state, below.entries[0].record?.face ?? null, below.entries[0].reasons.join(' | ')] };
+      }
+      // Negative control: with NO declaration found the leg holds nothing and reads no record — the same path and the
+      // same default-tier record under `added` stay clear on one pull read.
+      const control = await narrowRun({ body: ADDED, files: RUNTIME, reviews: approval, comments: [DEFAULT_TIER] });
+      out.control = [control.exitCode, control.entries[0].state, reads.join()];
+      return out;
+    })();
+    assert('⛔ the-narrowed-kind-on-a-runtime-only-path-holds-the-narrowing-faces-tier-a-default-tier-record-is-REFUSED-an-at-tier-one-CLEARS',
+      ['kind beside a bare clause line', 'kind with no clause line', 'kind on a changeset only', 'near-arm clause spelling', 'kind beside a malformed clause line'].every((name) =>
+        kindOnly[name].atTier.join() === `${EXIT_CLEAR},cleared,narrowing` && kindOnly[name].below[0] === EXIT_REFUSED_NARROWED && kindOnly[name].below[1] === 'refused' && kindOnly[name].below[2] === 'narrowing' && /does not stand \(below-tier\)/.test(kindOnly[name].below[3])) &&
+        kindOnly.control.join() === `${EXIT_CLEAR},not-declared,pull 70` &&
+        NARROWING_FACE_LINE === 'Clause-②: no (narrowing)' && readClause2Line(NARROWING_FACE_LINE)?.kind === 'declared' && readClause2Line(NARROWING_FACE_LINE)?.arm === 'narrowing',
+      JSON.stringify(kindOnly));
 
     // "Could not find out" is its own code, and never a pass.
     assert('⛔ an-unreadable-pull-changeset-review-list-or-thread-REFUSES-on-code-11',
