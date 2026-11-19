@@ -17,7 +17,10 @@
  * Pinned: the engine refuses a relation path in `groupBy` at any depth with
  * `INVALID_FIELD` / 400, naming the path at its position, before the driver
  * runs any statement — on both bridge members `aggregate_records` calls (the
- * uncut aggregate and the ordered-and-cut one), in both `groupBy` forms.
+ * uncut aggregate and the ordered-and-cut one), in both `groupBy` forms. The
+ * same arm refuses every other dotted name the object does not declare: a path
+ * into a stored value (`address.city` on a json field) and the object's own
+ * name as a qualifier, each worded without relation hops.
  * CONTROL: grouping by the relation field itself (the supported depth) is
  * served by the database. The tool's rendering of a 4xx refusal (code, status
  * and message kept) is pinned in `@objectstack/mcp`.
@@ -43,7 +46,11 @@ const OBJECTS = [
   {
     name: 'rp_po_line',
     label: 'Purchase order line',
-    fields: { amount: { name: 'amount', label: 'Amount', type: 'number' }, purchase_order: lookup('purchase_order', 'rp_purchase_order') },
+    fields: {
+      amount: { name: 'amount', label: 'Amount', type: 'number' },
+      purchase_order: lookup('purchase_order', 'rp_purchase_order'),
+      address: { name: 'address', label: 'Address', type: 'json' },
+    },
   },
 ];
 const LINE = 'rp_po_line';
@@ -71,9 +78,9 @@ describe('[#34886] aggregate_records grouped by a relation path, over a real SQL
     await driver.create('rp_requisition', { id: 'r1', name: 'R-1', requester: 'u1' });
     await driver.create('rp_purchase_order', { id: 'po1', name: 'PO-1', requisition: 'r1' });
     await driver.create('rp_purchase_order', { id: 'po2', name: 'PO-2', requisition: 'r1' });
-    await driver.create(LINE, { id: 'l1', amount: 10, purchase_order: 'po1' });
-    await driver.create(LINE, { id: 'l2', amount: 5, purchase_order: 'po1' });
-    await driver.create(LINE, { id: 'l3', amount: 7, purchase_order: 'po2' });
+    await driver.create(LINE, { id: 'l1', amount: 10, purchase_order: 'po1', address: { city: 'Oslo' } });
+    await driver.create(LINE, { id: 'l2', amount: 5, purchase_order: 'po1', address: { city: 'Oslo' } });
+    await driver.create(LINE, { id: 'l3', amount: 7, purchase_order: 'po2', address: { city: 'Bergen' } });
     (driver as unknown as { knex: { on: Function } }).knex.on('query', (q: { sql: string }) => { statements.push(q.sql); });
     const deps = {
       resolveService: async (_ctx: unknown, name: string) => (name === 'objectql' ? engine : undefined),
@@ -99,7 +106,22 @@ describe('[#34886] aggregate_records grouped by a relation path, over a real SQL
     expect({ code: err?.code, status: err?.status, field: err?.field, path: err?.path })
       .toEqual({ code: 'INVALID_FIELD', status: 400, field: path, path: 'groupBy.0' });
     expect(String(err.message)).toContain(path);
-    expect(grouped(), statements.join('\n')).toHaveLength(0);
+    expect(statements, statements.join('\n')).toHaveLength(0);
+  });
+
+  // [#34886] The arm refuses ANY dotted name the object does not declare, not
+  // only a relation path; for a head that is no relation the words name no hops.
+  it.each([
+    ['a path into a stored value (a json head)', 'address.city'],
+    ["the object's own name as a qualifier (no field by that name)", `${LINE}.amount`],
+  ])('%s: refused INVALID_FIELD / 400 at groupBy.0, worded without relation hops, and no statement runs', async (_label, path) => {
+    statements.length = 0;
+    const err = await caught(() => bridge.aggregate(LINE, { groupBy: [path], aggregations: SUM }));
+    expect({ code: err?.code, status: err?.status, field: err?.field, path: err?.path })
+      .toEqual({ code: 'INVALID_FIELD', status: 400, field: path, path: 'groupBy.0' });
+    expect(String(err.message)).toContain(path);
+    expect(String(err.message)).not.toMatch(/relation hop/);
+    expect(statements, statements.join('\n')).toHaveLength(0);
   });
 
   it('the object form is refused at its field position, after a plain key it keeps', async () => {
@@ -107,7 +129,7 @@ describe('[#34886] aggregate_records grouped by a relation path, over a real SQL
     const err = await caught(() => bridge.aggregate(LINE, { groupBy: ['purchase_order', { field: FOUR_HOPS }], aggregations: SUM }));
     expect({ code: err?.code, status: err?.status, field: err?.field, path: err?.path })
       .toEqual({ code: 'INVALID_FIELD', status: 400, field: FOUR_HOPS, path: 'groupBy.1.field' });
-    expect(grouped(), statements.join('\n')).toHaveLength(0);
+    expect(statements, statements.join('\n')).toHaveLength(0);
   });
 
   it('the ordered and cut member (an orderBy or a limit) is refused the same way', async () => {
@@ -115,8 +137,9 @@ describe('[#34886] aggregate_records grouped by a relation path, over a real SQL
     const err = await caught(() => bridge.aggregateGroups(LINE, {
       groupBy: [FOUR_HOPS], aggregations: SUM, orderBy: [{ field: 'total', order: 'desc' }], limit: 5,
     }));
-    expect({ code: err?.code, status: err?.status, field: err?.field }).toEqual({ code: 'INVALID_FIELD', status: 400, field: FOUR_HOPS });
-    expect(grouped(), statements.join('\n')).toHaveLength(0);
+    expect({ code: err?.code, status: err?.status, field: err?.field, path: err?.path })
+      .toEqual({ code: 'INVALID_FIELD', status: 400, field: FOUR_HOPS, path: 'groupBy.0' });
+    expect(statements, statements.join('\n')).toHaveLength(0);
   });
 
   it('CONTROL — grouping by the relation field itself is answered by the database', async () => {
