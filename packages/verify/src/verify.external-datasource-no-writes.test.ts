@@ -38,8 +38,9 @@ import { runDeleteBehaviorProofs, formatDeleteBehaviorReport } from './delete-be
 import { runUniqueScopeProofs, formatUniqueScopeReport } from './unique-scope.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
-// Paid at collection: the harness's boot loads it lazily (check:test-source-alias).
+// Paid at collection: the harness's boot loads these lazily (check:test-source-alias).
 import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 
 await warmUpBoot();
 
@@ -147,7 +148,7 @@ const fixtureStack = defineStack({
       tenancy: { enabled: false },
       fields: {
         // In each family's population: a unique field, and a reference with a delete behaviour.
-        code: { type: 'text', label: 'Code', unique: true },
+        serial: { type: 'text', label: 'Serial', unique: true },
         local_ref: { type: 'lookup', reference: LOCAL, label: 'Local', deleteBehavior: 'set_null' },
       },
     },
@@ -210,7 +211,7 @@ describe('os verify writes nothing to an external datasource, even one whose wri
 
   it('CONTROL: a write sent through the REST door reaches the recording driver', async () => {
     const mark = remoteWrites.length;
-    const res = await stack.apiAs(token, 'POST', `/data/${REMOTE}`, { code: 'control' });
+    const res = await stack.apiAs(token, 'POST', `/data/${REMOTE}`, { serial: 'control' });
     expect(remoteWrites.slice(mark), `${res.status} ${await res.text()}`).toEqual([{ method: 'create', object: REMOTE }]);
   });
 });
