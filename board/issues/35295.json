@@ -1,0 +1,33 @@
+{
+  "number": 35295,
+  "kind": "issue",
+  "title": "flow condition date-text: the index spelling record['FIELD'] and mixed bare / record. operand arithmetic still pass where record.FIELD is refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T02:45:34Z",
+  "updated_at": "2026-11-19T03:50:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35295",
+  "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class a, a follow-up named by the contract review of PR #34935 (card #34662; record 6998023700, ③ escalation and nit N5 b), and promised in this seat's hold comment 6963236571. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p3 · two spellings the #34662 pass does not reach; neither regressed, both passed before #34662 too\n\n## 维护者速读\n\n- 现象：#34662 之后，流程条件里 `timestamp(record.borrow_date)` 会像裸字段名一样被拒。但另外两种写法仍然放行：(1) 下标写法 `timestamp(record['borrow_date'])`；(2) 一边裸名、一边 `record.` 的日期相减，如 `due_date - record.borrow_date GT duration('24h')`。两种写法运行时都会出错。\n- 为什么要修：同一个错误换个写法就绕过校验，作者发布时得不到提示。\n- 需要你做的：(2) 需要定一个分支：裸名那一侧类型未证实时，判拒还是放行。见下文。\n\n## What (read off the tree by the reviewer, not run)\n\n- **Index spelling.** `recordRootDateTextIssue` (`packages/formula/src/validate.ts`) types `record.FIELD` / `previous.FIELD` member reads only (`RECORD_ROOT_READ_RE` in `packages/formula/src/cel-engine.ts`). `record['borrow_date']` reaches neither the bare pass nor the root pass.\n- **Mixed-spelling arithmetic.** In `due_date - record.borrow_date GT duration('24h')`, the bare pass leaves the root operand `dyn` and the root pass leaves the bare name `dyn`. A `dyn` operand does not fault the check, so neither pass reports. Both same-spelling forms are refused, and the run faults on text minus text.\n\n## Done when\n\nAt flattened scope (flow conditions), both spellings get the same date-text verdicts as `record.FIELD`, pinned in `packages/formula/src/validate-date-text-arithmetic.test.ts`, with the runtime publish door and `os validate` agreeing. For (2), the arm (refuse or pass when one operand's typing is unproven) is decided first and the decision cited.\n\n## Notes\n\n- Lands after PR #34935 (same files: `validate.ts`, `cel-engine.ts`).\n- Narrows the accept-set: `Clause-②: no (narrowing)`, `Metadata-protocol: narrowed`, an ADR-0087 semantic entry, and the dogfood battery on the final head, as #34662 did.\n- Dedupe: `record['borrow_date']`, `recordRootDateTextIssue`, `index spelling date-text`: only #34662 itself."
+}

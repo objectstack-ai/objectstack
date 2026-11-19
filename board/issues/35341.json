@@ -1,0 +1,33 @@
+{
+  "number": 35341,
+  "kind": "issue",
+  "title": "driver-sql on SQLite: a boolean field retyped from text keeps a TEXT column, so create() stores false as '0.0' and find() and distinct() then read it as true",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "lease:data-1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T05:36:01Z",
+  "updated_at": "2026-11-19T06:24:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35341",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nFiling gate: ② out-of-scope finding (class a, named producer) from the os-dev report on #34974 (comment 7000733773, PR #35332), measured live on SQLite in the driver's own tests.\nReader: `domain:server` (`packages/drivers/driver-sql`). Suggested-grade: p2 · data wrong × rare (a stored `false` reads as `true` on a field whose type was changed from text to boolean).\nDedupe: `TEXT affinity boolean`, `boolean retyped column sqlite`, `presentStoredBoolean` in open issues: only #34974 (the read presenter, which this does not cover) and #35084 (backfill on Turso remote), neither covers this.\n\n## 维护者速读\n\n- 现象：在 SQLite 上，把一个字段的类型从「文本」改成「是/否」后，数据库列仍是 TEXT。之后驱动自己写入 `false` 会存成文本 `'0.0'`、`true` 存成 `'1.0'`，读回来时两者都显示为「是」，去重和分组也都算成「是」。按 `= false` 过滤还会漏掉启动时收敛写入的 `'0'` 行。\n- 影响：改过字段类型的老应用，在 SQLite（本地/单机）上看到错误的是/否值。\n- 修法要先定：是让共用的读取函数也认 `'0.0'` / `'1.0'`（会改变 `find()` 的结果），还是在写入或启动时把这种列的存储收敛成整数。\n- 需要你做的：无（分诊定级）。\n\n## Facts (measured by the #34974 dev on SQLite)\n\n- A field retyped from text to boolean keeps declared column type TEXT after `initObjects` (`pragma_table_info` reads TEXT before and after).\n- `SqlDriver.create(p, { flag: false })` / `{ flag: true }` store the text `'0.0'` / `'1.0'`: better-sqlite3 binds the JS number as REAL and TEXT affinity keeps it as text.\n- `find()` presents both as `true`: `presentStoredBoolean('0.0')` (`packages/drivers/driver-sql/src/sql-driver-sqlite-serialisation.ts`) falls through to `Boolean('0.0')`. `distinct()` answers `[true]` (after PR #35332, which routes distinct / aggregate through the same function).\n- On the same column, a `flag = false` filter misses the text `'0'` rows that the boot convergence (`backfillCanonicalBooleans`, PR #35076) leaves.\n- Not measured at the HTTP door.\n\n## Ask\n\nMeasure at the data door first (create through REST on a retyped field, read back). Then pick one route with a pin: (A) the shared presenter and the filter accept `'0.0'` / `'1.0'`; or (B) the write binds a boolean as an integer the column keeps as `0` / `1`, plus boot convergence of existing `'0.0'` / `'1.0'` text. Pins: a retyped TEXT column, create false and true, `find()` / `distinct()` / `= false` filter all agree; CONTROL: an INTEGER boolean column unchanged. Ablate red.\n\nOrder: after PR #35332 (same files).\n\nRelated: #34974 / PR #35332, #34973 / PR #35076, #34916 / PR #34965, #35084.\n\n⛔ Not a claim."
+}

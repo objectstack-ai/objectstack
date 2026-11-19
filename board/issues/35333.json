@@ -1,0 +1,37 @@
+{
+  "number": 35333,
+  "kind": "issue",
+  "title": "pm-dispatch: open card threads whenever a slot is free, a regrade alone dispatches nothing, and a grade written on the maintainer's word counts as his",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T05:10:08Z",
+  "updated_at": "2026-11-19T07:06:35Z",
+  "closed_at": "2026-11-19T06:55:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35333",
+  "body": "coordinator#1 · os-warren · session_01JQwxbYcNzR2Gtyq79H7GLB\n③ maintainer-directed task · Source: maintainer (project thread \"Make pm-dispatch batch cards by default\", 2026-11-19)\n\n## 维护者速读\n\n- 改什么：协调者有空位就开卡线程，先后只按卡上写明的阻塞排，不再一张等一张；您只说改级时只改级、不借机开工；车队按您原话代落的级也算您亲手定的，以后分诊和各席不能改。\n- 为什么：协调者把一批可以同时做的卡一张接一张串行派发；您同意加规则，并在 fable 评审后选了「加两行，并修代改级漏洞」。\n- 风险：只动规则文本和改标签工具的一个判断；回滚即 revert 对应 PR。\n\n## Ruling of record\n\nVerbatim and untranslated, from the maintainer's project thread on 2026-11-19:\n\n- 04:55:55Z the coordinator proposed three rules (batch by default, sequence only on a real dependency and name the card and reason, a regrade is not a dispatch). 04:56:06Z the maintainer: 「同意」. 04:56:19Z: 「用 fable先评审你这个意见」.\n- The fable review (2026-11-19) found rules 1 and 2 already written in the skill (the coordinator opens a whole batch at once and queues only when the cap is full; independence is judged by disjoint file surfaces) and the coordinator had not followed them; it proposed two lines in the coordinator reference instead, plus an optional third closing a gap: the hand-set grade is read off the `labeled` event's actor, and the fleet always writes as a bot, so a grade the fleet wrote on the maintainer's spoken word reads as the fleet's and triage may change it.\n- 05:05:52Z the maintainer chose, on a decision card asking 「派发规则按 fable 评审怎么改?」, the option 「加两行,并修代改级漏洞」, whose stated effect was: 加「有空位就开、只按写明的阻塞排先后」和「只说改级不开工」两行；您口头定、代落的级也算您亲手定，以后不被改。\n\n## Work items\n\n1. `.claude/skills/pm-dispatch/references/coordinator.md`, section 二: the maintainer only naming a grade ⇒ only the grade is written, its comment carries a `Ruling-ref:` line quoting him, and no card thread is opened on it; the normal pick order applies afterwards (p0 still dispatches the same round, p1 still jumps the order).\n2. Same file, section 三, beside the batch-open line: open whenever a slot is free; order only by the card's `Blocked-by:` and the seat's serial queue; never self-sequence, never wait card by card.\n3. `.claude/skills/pm-dispatch/references/filing-gate.md`, beside the `labeled`-event line: a grade the fleet wrote on the maintainer's word, with its comment carrying `Ruling-ref:` quoting him, reads as his; a bot actor alone does not make it the fleet's.\n4. `scripts/pm/label-write.mjs`: the hand-set grade check also refuses a fleet-set grade whose `labeled` event has a `Ruling-ref:` comment within two minutes of it (one comments read, only when a carried grade reads as the fleet's; an unanswered read refuses). A folded `Ruling-ref:` still passes, so the maintainer can always regrade.\n5. `scripts/pm/check-skill-line-ratchet.mjs`: coordinator.md 49 → 51 and filing-gate.md 82 → 83, ordinary ruled raises citing this card's claim comment.\n\nBusiness reason: the maintainer is the one who benefits — cards that can run together start together instead of waiting hours in a single file, a grade change he asks for does not silently start work, and a grade he sets by word stays set.\nReader: the project coordinator at every wake (section 二 and 三), triage and every seat before a regrade (filing-gate), and `label-write.mjs` on every grade write.\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"coordinator dispatch batch serial\" (57 hits, none on this), \"grade maintainer word Ruling-ref fleet\" (36 hits, none), \"regrade without dispatch\" (99 hits, none), all states.\nGrade: p2 · a fleet-rule Task the maintainer ordered; no user-facing defect."
+}

@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:build",
     "domain:skills",
     "finding",
     "pm:queue",
@@ -18,13 +19,13 @@
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-18T18:18:29Z",
-  "updated_at": "2026-11-18T21:54:20Z",
+  "updated_at": "2026-11-19T06:26:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35245",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35244 (cards #34776 and #35146) adds six authoring rules. They run at the runtime publish gate and in the CLI, and their names are:\n\n- `flow-node-type-no-executor`\n- `flow-approval-decision-unrouted`\n- `flow-http-timeout-missing` (warning)\n- `field-boolean-required`\n- `state-machine-no-initial-states`\n- `action-no-object-binding`\n\n#34776's Scope says that when a rule lands, the matching trap leaves the skills' prose, or is rewritten to point at the check. The rule becomes the check first and the prose second (ruling E1 = A, #34659 comment 6940528935).\n\n## Scope\n\n- In `skills/**`, find the text that teaches each of the six traps. The dev report on #34776 notes that no skill text teaches `field-boolean-required` today.\n- Replace each trap warning with one line naming the publish-time finding and its fix, or drop it where the check makes it redundant.\n- Regenerate any served skill file (`*.generated.ts`).\n- This is a `domain:skills` PR, which is why it is not in the domain:devx/server PR #35244.\n\nBlocked until #35244 merges.\n\n## Origin\n\nThe `Skills-docs: follow-up owed` line of PR #35244. The claim amendment is #34776 comment 6987471285.\n\nRe-check: `git grep -n \"initialStates\\|timeoutMs\\|NO_EXECUTOR\\|approve.*reject\" origin/main -- skills/`"

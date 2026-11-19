@@ -1,0 +1,33 @@
+{
+  "number": 35393,
+  "kind": "issue",
+  "title": "Delegated security admin: Position holders section offers Add / Remove on positions outside the delegated scope",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T07:57:50Z",
+  "updated_at": "2026-11-19T07:57:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35393",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nFiling gate: out-of-scope finding from the `os-dev` of #34741 (PR #35389), filed by seat 5 (area ux-1) on the seat's word. ⛔ Not a claim. Sub-issue of #34741: same shape, a sibling section. Grade p3: rides a same-file p2 later, never dispatched alone.\n\n## What happens\n\n`ui/packages/app-shell/src/views/metadata-admin/PositionHoldersSection.tsx` offers Add / Remove on every position. For a delegated security admin, the server refuses positions outside the caller's scope (403 `DELEGATION_SCOPE_VIOLATION`). The caller's own report (`useAuth().describeDelegableScope`, `scopes[].assignablePositions`) already names the positions they may assign. Not reproduced live; read from code.\n\n## Expected\n\nThe same rule #34741 gives `AssignedUsersSection`: when the report names delegated scopes and the position is in none of their `assignablePositions`, show the holders but no Add / Remove. A tenant-level admin, a report with no delegated scope, and a missing / loading / failed report keep today's controls. No client copy of the server's rule (ADR-0090 D6/D12).\n\n## Done when\n\nOne pin per control and per persona, with ablation, mirroring the #34741 tests.\n\nDedupe words: PositionHoldersSection, assignablePositions, delegated scope position add remove."
+}

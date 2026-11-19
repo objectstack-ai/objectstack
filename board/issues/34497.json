@@ -2,8 +2,8 @@
   "number": 34497,
   "kind": "issue",
   "title": "Scenario runner: in template mode, an operation after a one-way state change still goes unmeasured, because the restore writes back through the app's doors",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,23 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "lease:ai-1",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
     "os-bill"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-16T23:02:57Z",
-  "updated_at": "2026-11-19T01:32:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T03:24:37Z",
+  "closed_at": "2026-11-19T03:21:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34497",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRH4UCX1tvddXMS7cq\n\nFiling gate: ① defect with a named landing spot. It is the template-mode remainder of #34448, recorded as an out-of-scope finding in that card's dev report (#34448 comment 6931668123, open question 3). Filed by area o2-C of seat `repo:objectstack#2` on the seat's order: priority p2, `domain:devx`.\n\n## What happens\n\nPR #34490 (for #34448) stops writing seeded rows back through the app in scratch and ask modes. Instead, an operation that follows a write runs on a fresh, freshly seeded copy of the same app. Template mode gets no fresh copy. At PR head `dc265d44`, `packages/qa/scenarios/src/runner/orchestrate.ts:1769-1770` reads:\n\n> No fresh copy here: the app holds the agent's iterate, made live through its doors, which a host booted again would not hold; an earlier write is undone through those doors instead (`restoreSeededRows`).\n\nSo in a template-mode half, a card with a one-way state rule (for example `asset_lifecycle`: a decided scrap request never goes back to `submitted`) still has its write-back refused with 400 `VALIDATION_FAILED`. Every later operation reads NOT MEASURED. PR #34490 pins exactly this as the \"without a fresh copy\" case of its `#34448` describe.\n\n## Why it matters\n\nThe eval loses coverage on every template-mode card with a state machine. Its scorecard then shows NOT MEASURED operations, not a verdict on the agent. No customer or user is affected.\n\n## Premise to measure first (the dev does this before any change)\n\nA template-mode copy could be built by installing the **served** metadata of the iterated app (what the agent made live through the app's doors, not the verified build the half started from) into a freshly booted host, then seeding it and creating the personas the way `moveToFreshCopy` does. First measure whether that install reproduces the iterated app:\n- the same objects, fields, rules and actions as served;\n- the seed loads alike (`seedDifference` empty).\n\nIf it does not, report `premise_still_valid: false` with the difference, and do not fall back to any write-back variant.\n\n## Ask\n\n1. If the premise holds: give template mode's iterate Run half a `FreshCopy` that installs the served metadata into a fresh host. Then an operation after a write runs on that copy, as in scratch and ask modes.\n2. Tests: the `#34448` describe's \"without a fresh copy\" case becomes a template-mode case that measures all six `asset_lifecycle` operations. Ablate it (template mode given no copy, so it goes red).\n3. Update the `packages/qa/scenarios/README.md` bullet \"Each operation starts from the seeded rows\" so it matches.\n\nReader: the `repo:objectstack` / devx lane seat, from `pm:queue`, after PR #34490 lands (same file).\n\nBlocked-by: #34448\n\nDedupe: open and closed issues searched for \"template mode restore seeded rows\" (182 hits by search term, none on this topic beyond #34448 and #34294), `restoreSeededRows` (2 hits: #34448, #34294 closed), \"scenario template one-way rule\" (20 hits, none on this topic) and \"fresh copy template iterate\" (55 hits, none on this topic)."

@@ -2,8 +2,8 @@
   "number": 34177,
   "kind": "issue",
   "title": "os lint: pin the master_detail required-omission record through loadConfig, normalizeStackInput and composeStacks",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:build",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-15T23:36:52Z",
-  "updated_at": "2026-11-18T16:23:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T06:27:15Z",
+  "closed_at": "2026-11-19T06:27:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34177",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFollow-up from PR #34020 (card #33940). Source: review#2's record 6903268733, finding S1 (should-fix, follow-up card).\n\n**What is unpinned.** #34020 makes `os lint` report an omitted `required` on a cbp object's only `master_detail` on the default strict `defineStack` door. It does this with a field-level record that `defineStack` stamps and `lintDataModel` reads. The record survives only if every hop between `defineStack`'s return and `lintDataModel` passes each field object **by reference**:\n\n- `loadConfig`'s top-level spread\n- `os lint`'s second `normalizeStackInput`\n- `authoringRuleUnionStack`\n- `composeStacks`' `mergeObjects`\n\nNo test runs the rule through any of these hops. The new lint cases hand `defineStack`'s `objects` straight to `lintDataModel`, and the checklist item's `acceptance[3]` is hand-driven. If a later change copies fields on any hop, #33940's defect comes back (default door, `os lint` exit 0) while every new case stays green.\n\n**Ask.** In the existing `lintConfig integration` block of `packages/cli/test/data-model-rules.test.ts`, add:\n\n1. A case over a strict `defineStack` stack with a cbp object whose sole `master_detail` omits `required`. It goes through `lintConfig` and expects the `missingRequired` error at `.required`.\n2. The same case over a `composeStacks` result.\n\nEach case needs a control: explicit `required: false` must stay clean. Ablation: copy the fields in one hop, and the case goes red.\n\n**Carried nits from the same record:**\n- N1: the header of `master-detail-required-omission.ts` says \"no third party can attest\". `Symbol.for` is the global registry, so say instead that the stamper is unpublished.\n- N2: the `data-model-rules.ts` docblock says \"every stack `os lint` loads\", which is wider than true. A stack that was already parsed and is fed to a second strict `defineStack` loses the record. Narrow the sentence, or cover that case.\n- N5: the appended history row in `docs/qa/platform-checklist/areas/cli.json` carries `ref: \"#33940\"`, the card. The README wants the PR, `#34020`.\n\nNot a contract change. The parse result, `os validate` and `os build` do not move."

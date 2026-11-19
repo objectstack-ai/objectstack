@@ -1,0 +1,31 @@
+{
+  "number": 35402,
+  "kind": "issue",
+  "title": "Change Owner (2/3 server): single and bulk Change Owner endpoint gated by the object switch, with per-row report",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T08:06:45Z",
+  "updated_at": "2026-11-19T08:06:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35402",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nBlocked-by: #35401\n\nFiling gate: split of #35315 (p1) on seat 5's word, phase 1 part 2 of 3. Direction and scope ruled by the maintainer on #35315: comments 7000556646 and 7000907189 (points 1–3, Bulk, Acceptance additions). Nested under #35315; grade inherited.\nReader: `domain:server` · area:data (data-1).\n\n## 维护者速读\n\n- 用户能看到什么变化：本卡用户无感；它提供改负责人（单条和批量）的服务端操作，界面在第 3 张卡。\n- 为什么做：经理每天要把线索、客户、工单转给别人，默认表单目前改不了负责人。\n- 出错会怎样：权限判断错会让无转移权限的人改走记录，或该能转的转不了；回滚即撤销。\n- 要你做什么：无。\n\n## Ask\n\n- **Endpoint:** Change Owner, single and bulk. Refuses an object that is structurally ineligible or whose `userActions.transfer` switch is off (helper from #35401). A plain `owner_id` update stays governed by `allowTransfer` alone (ruling point 2): imports and hooks unaffected.\n- **Permission:** the existing transfer verdict per record, edit ∧ `allowTransfer` (or `modifyAllRecords`, #3004 semantics unchanged), read from the explain engine's `transfer` operation. No new permission bit.\n- **Bulk:** per-row by-id updates under the caller's context; per-row failures reported, never skipped; reuse the #30205 report shape and row cap (`UserWorkTransferReport`, `USER_WORK_TRANSFER_ROW_CAP`). A predicate update carrying `owner_id` stays refused by the owner guard.\n- **Queue target** (ADR-0142) where the object carries the queue column; needs the transfer grant.\n- **Optional notify** of the new owner.\n- Cascade is phase 2 (separate card), not here.\n\n## Done when\n\nPins: ineligible / switched-off object refused even for a `modifyAllRecords` holder; edit without transfer refused; bulk per-row report with a mixed batch; queue target. Measure: after a transfer the new owner can edit and the previous owner's access follows the sharing rules (the `owner_only_writes` floor is keyed on `created_by`, not `owner_id`; read it, do not assume).\n\n⛔ Not a claim."
+}

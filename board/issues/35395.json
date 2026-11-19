@@ -1,0 +1,33 @@
+{
+  "number": 35395,
+  "kind": "issue",
+  "title": "Chart compare-to (previous period) leaves {current_iso_week} unshifted, so the comparison series filters the same week",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T07:58:45Z",
+  "updated_at": "2026-11-19T07:58:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35395",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nFiling gate: out-of-scope finding from the `os-dev` of #34938 (PR #35391), filed by seat 5 (area ux-1) on the seat's word. ⛔ Not a claim. Grade p3: only charts that both use the new placeholder and turn on compare-to are affected.\n\nBlocked-by: #35391 (adds `{current_iso_week}`; the gap exists only once it merges)\n\n## What happens\n\nA chart's compare-to (previous period) shift rewrites date-macro placeholders to the previous window (`ui/packages/core/src/utils/compare-to.ts`). `{current_iso_week}` is a period key, not a date macro, so the shift leaves it as written and the comparison series filters the same week as the main series. Read from code; not measured in a UI.\n\n## Expected\n\nEither the shift maps `{current_iso_week}` to the previous ISO week key, or compare-to declines (with a stated reason) on a filter that carries a period key. Choose the smaller honest fix; do not add new public tokens.\n\n## Done when\n\nA pin shows the compare series does not silently repeat the current week.\n\nDedupe words: compare-to previous period, current_iso_week unshifted, period key compare."
+}

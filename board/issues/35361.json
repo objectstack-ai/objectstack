@@ -1,0 +1,37 @@
+{
+  "number": 35361,
+  "kind": "pull_request",
+  "title": "fix(seed): a deferred-key seed row a person deleted stays deleted",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T06:10:19Z",
+  "updated_at": "2026-11-19T07:19:37Z",
+  "closed_at": "2026-11-19T07:19:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T07:19:35Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35361",
+  "body": "Fixes #34856\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:种子行在落地时若其 externalId 中的引用尚为空(如被指派的人还没注册),现在会以其按\"作者原写键\"派生的落地 id 记入落地键账本;此后无论引用仍空还是已解析,删除都能被识别。\n- 为什么改:之前这类行在账本里没有任何记录,用户删掉后下一次种子加载会把它重新插回来,删除不生效。\n- 风险与回滚:仅影响 `landedKeys` 开启的 upsert/ignore 数据集里、键含延迟引用的行;键完整的行、从未落地的行、重新播种行为不变。回滚即 revert 本 PR。\n- 先看:`packages/metadata-protocol/src/seed-loader.ts`(`deferredLandedKey`、`isWithdrawnRow`、撤回分支里丢弃本行 pass-2 延迟),`packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts` 末尾的 #34856 describe。\n- 两分钟验证:`pnpm --filter @objectstack/metadata-protocol exec vitest run src/seed-loader-deferred-key-reference.test.ts`,预期 17 个用例全绿(其中 8 个是 #34856 新增)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nA seed row whose `externalId` includes a reference that is still empty on the load that lands it (the #34800 shape: a person not signed up yet) keyed `''` in the landed-key ledger, and the ledger records only non-empty keys, so a person's delete of that row was undone by the next load.\n\n- `seed-loader.ts`: such a row is now recorded under `deferredLandedKey`, an `id` key over `seedDeferredKeyRowId` of the AUTHORED key (the id the row lands with, #34800 / PR #34854). It is read off the record before any reference resolves, so the next load computes the same key whether the reference is still empty or has resolved since.\n- The honour check (`isWithdrawnRow`) consults that key after the existing natural-key and found-by-id checks, both when the record keys `''` and when it keys complete but that complete key was never recorded.\n- A row withdrawn this way also drops the key-reference deferrals it pushed on the way, so pass 2 does not report a drop for a row that was never meant to land (caught by the `success` assertion before this line existed).\n\nWhy the derived id and not \"the key it will carry\": the resolved key is unknown while the reference stays empty, which is exactly the state the first delete happens in. The derived id is the one identity computable in both states. Its `id` spelling cannot collide with a reference-keyed dataset's natural-key entries, because field names travel with the values in a ledger key.\n\n## Tests\n\nA new top-level `describe` in `packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts`, the #34800 harness (real `SeedLoaderService`, that file's already-pinned engine double, a fresh loader per load). It goes in that file rather than a new one so the pinned double is reused instead of copied into the engine-double ledger:\n\n- `ignore` and `upsert`: deleted while the person is still missing, not inserted again (success, skipped 1, inserted 0).\n- `ignore` and `upsert`: deleted, then the person signs up, still not inserted again.\n- The ledger entry equals `[[\"id\", ROW_ID]]` for the row's landed id.\n- CONTROL: a complete-key row deleted stays deleted, as before.\n- CONTROL: a deferred-key row the seed never landed here still lands, beside the deleted one.\n- A kept deferred-key row found again and filled once the person signs up is the existing pin `with the landed-key record kept, the row is found too…` in the same file, still green.\n- CONTROL: a deliberate re-seed brings the deleted row back.\n\n## Acceptance notes\n\n- Real-engine pin (ObjectQL + SqlDriver) not added: `@objectstack/metadata-protocol` has no objectql/driver dependency, and the real-driver sibling lives in `packages/runtime`, outside this card's file fence. Loader-level pins with the copied engine double cover the behaviour.\n- Edge, not changed: when a dataset authors `organization_id` as a natural-key reference rather than taking the stamped tenant organization, `seedDeferredKeyRowId` is computed over the pre-resolution value at the honour check and the post-resolution value at landing (pre-existing in #34800's `rowLandedWithEmptyKeyReference`). `deferredLandedKey` is computed once, before resolution, so the ledger stays self-consistent across loads either way.\n\n## Verification\n\nAll readings on head `ca2df4fd`.\n\n<details><summary>Red on main, then green</summary>\n\n- Before the fix (pins run against the unchanged loader at 81c09477): `Tests  7 failed | 2 passed (9)`. The four delete cases failed with `expected [ { name: 'Onboard', … } ] to have a length of +0 but got 1`, which reproduces the card.\n- `pnpm --filter @objectstack/metadata-protocol typecheck` exit 0; full package `vitest run`: `Test Files  359 passed | 9 skipped (368)`, `Tests  23227 passed | 45 skipped (23272)` (run on 3bd8c566; ca2df4fd only moves the pins into the harness file).\n- On ca2df4fd: `seed-loader-deferred-key-reference.test.ts` + `seed-loader-landed-ids.test.ts`: `Tests  44 passed (44)`; typecheck exit 0.\n\n</details>\n\n<details><summary>Ablations (each restored, `git diff HEAD` empty and HEAD blob hash matched after)</summary>\n\n- Delete the ledger-record line (`else if (deferredKeyFields.size > 0 …) landedKeyByRecordIndex.set(i, deferredLandedKey)`): 6 failed.\n- Replace the honour branch with `return false`: 5 failed (on ca2df4fd, against the folded pins: `Tests  5 failed | 12 passed (17)`).\n- Delete `deferredUpdates.length = deferredUpdatesBeforeRow`: 2 failed (the `success` assertion on the still-missing cases).\n- Mutations landed through `scripts/ablation-replace.mjs` (anchor 1 to 0, blob moved); no build involved, as the pins import `./seed-loader.js` from source.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `dispatch-gates.mjs --commands` derived 67 families for this diff; all 67 run on ca2df4fd, all exit 0. `--ran` reconciliation: 67 derived, 67 run, 0 NOT-MEASURED, 0 UNRUN.\n- `check-plugin-teardown-shape.mjs --self-test` first exited 3 on a shallow clone (its pinned fixture commit was missing); after fetching that one commit it passed, 48 cases.\n- `check:engine-double-contract`: `OK — 1359 pinned`.\n- `overlap-check.mjs --branch=HEAD`: `VERDICT clean exit 0`, 0 PR heads share a file.\n- `check-nul-bytes.mjs`: OK.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaysxGzF62ACvZ1x9x)_\n"
+}

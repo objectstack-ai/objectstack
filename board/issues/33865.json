@@ -2,8 +2,8 @@
   "number": 33865,
   "kind": "issue",
   "title": "Two console writes give no feedback: Revoke on a granted binding suggestion (Studio Access) and creating a package in Studio",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "lease:ux-1",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-15T12:33:56Z",
-  "updated_at": "2026-11-18T16:37:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T06:10:11Z",
+  "closed_at": "2026-11-19T05:36:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33865",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**Convention.** The `ux-conventions.write-feedback` rule: every write the console performs answers with feedback that names its subject (a toast or equivalent).\n\n**Where** (main `a557fa38`, stock showcase, seeded admin; met by a QA run beside that item's clauses, which all passed on the variants they list):\n\n1. **Revoke on a binding suggestion.**\n   - Steps: in Studio → Access of a writable package, publish an `isDefault: true` permission set, press **Grant** on the suggestion banner, then press **Revoke**.\n   - The write lands: `POST /api/v1/security/suggested-bindings/<id>/dismiss` answers 200, and the suggestion reads `dismissed`.\n   - No toast appears. The only change is the banner's text flipping to `\"…\" is not granted: the suggestion was dismissed or revoked.` with Reconsider.\n   - Grant and Dismiss on the same banner each show a toast.\n2. **Studio package create.**\n   - Creating a new package in Studio succeeds, but no toast names the new package.\n   - The runner saw no inline confirmation either.\n\nA third case was seen and is not filed here: import **Undo** marks its history row `Undone` and shows no toast. The row change may be its intended feedback.\n\n**Expected:** a toast naming the subject, the way Grant (`\"…\" is now granted to everyone.`) and Dismiss (`Suggestion for \"…\" dismissed.`) already do.\n\n**Regression vs 18.4.0:** not measured.\n\nQA-source: #33861 · ux-conventions.write-feedback · observed beside the clauses"

@@ -1,0 +1,33 @@
+{
+  "number": 35329,
+  "kind": "issue",
+  "title": "objectql delete: a by-id delete whose driver answers false still runs afterDelete, summary recompute and data.record.deleted, and answers false or RECORD_NOT_FOUND depending on a hook binding",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "lease:data-1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T05:03:22Z",
+  "updated_at": "2026-11-19T06:24:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35329",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nFiling gate: ② out-of-scope finding (class b, named producer): the decision analysis for #35167 (area data-1 of seat repo:objectstack#5, file `objectstack-seat5/area-ux/data-1/decision-35167-35174-34292.md`), read from code on `origin/main` `de8d5497`. Filed on the seat's word (2026-11-19 05:02Z): one card for the delete-loser answer and the after-effects on the same `false` path.\nReader: `domain:server` (`packages/objectql/src/engine-delete-and-aggregate.ts`). Suggested-grade: p2 · data wrong × rare (a concurrent delete loser fires delete after-effects for a row it did not remove).\nDedupe: `afterDelete false delete loser`, `delete false RECORD_NOT_FOUND afterDelete`, `concurrent delete afterDelete` in open issues: none.\n\n## 维护者速读\n\n- 现象：两个调用同时按主键删同一条记录，输家的驱动返回 `false`（什么也没删）。引擎仍然照跑 `afterDelete` 钩子、重算汇总字段、发 `data.record.deleted` 实时事件，等于为别人删掉的记录再触发一遍「删除后」的全部动作。输家拿到的答复也不一致：没绑 `beforeDelete` 钩子时是 `false`，绑了时是 `RECORD_NOT_FOUND`。\n- 影响：REST 和批量接口已经把 `false` 翻成 404，页面用户看不出差别；受影响的是直接调引擎的自动化代码（钩子 `ctx.api`、动作处理器、流程节点）和那些重复触发的删除后动作。\n- 修法：前镜像已读到、驱动明确回 `false` 时，在派发 `afterDelete` 之前抛 `RECORD_NOT_FOUND`，与 REST 一致，后续动作都不跑。\n- 需要你做的：无（分诊定级）。\n\n## Facts (origin/main de8d5497, read, not run)\n\n- By-id delete reads the pre-image first and throws `RECORD_NOT_FOUND` when it is gone: `engine-delete-and-aggregate.ts:471-472`. The driver call is at `:661`; `false` is handled only for the recycle-bin entry (`:670-671`).\n- On a driver `false`, `afterDelete` still dispatches unconditionally (`:813-829`), `isDeleteResultShape` accepts `false` (`:831-844`), summaries recompute (`:862`) and the realtime `data.record.deleted` event fires (`:889`).\n- The protocol doors already map `false` to 404: `packages/metadata-protocol/src/protocol-data-writes.ts:289`, `protocol-batch-data.ts:592`, `:1112`.\n- The loser's answer depends on the hook binding because the door-level after-abort unit (opened when a metadata `beforeDelete` hook exists) serialises the loser behind the winner on SQLite, so it re-reads the pre-image and throws; without a unit both read the pre-image and the loser's driver call answers `false` (readings from the #35142 rounds, quoted on #35167, not re-measured). #35167's route A (moving the unit inside the middleware) does not remove this, because the pre-image read sits inside the executor either way.\n\n## Ask\n\nWhen a by-id delete has a proven pre-image and the driver answers `false`, throw `RECORD_NOT_FOUND` before `afterDelete`, summary recompute and the realtime event. Measure first: the four cells (metadata `beforeDelete` hook or not × SQLite or PostgreSQL) for the loser's answer and for whether `afterDelete` / the event fire today. Pins: a forced driver `false` after a pre-image throws `RECORD_NOT_FOUND` and fires no `afterDelete`, no summary recompute and no event; CONTROL: a normal delete fires all three once. Ablate red. Predicate (many-row) delete is out of scope unless the same lines carry it.\n\nClause-②: no expected (an engine caller already gets `RECORD_NOT_FOUND` for a missing row; this makes the loser always get it). Measure on the diff.\n\n## Order\n\nAfter #35167 (same file, `engine-delete-and-aggregate.ts`; #35167 awaits the maintainer's ruling). If #35167 is ruled with no code change, this card is free to go.\n\nRelated: #35167, #35142 / PR #35165, #31630 (recycle-bin `false` handling at the same call).\n\n⛔ Not a claim."
+}

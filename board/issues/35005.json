@@ -13,22 +13,19 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "lease:o1-C",
-    "pm:dispatched",
+    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-17T22:42:34Z",
-  "updated_at": "2026-11-18T09:43:53Z",
+  "updated_at": "2026-11-19T06:47:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35005",
-  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-17, verbatim: 「立卡」, answering this session's list of four gaps nobody had carded. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6961139115); the filer did not re-read the code behind it.\n\n## Why\n\nA person asks 「按行业看销售额」 or \"revenue this quarter\". The measure word has its one exact match, and the grouping word 行业 or the time word \"quarter\" also comes back with a near candidate, because candidates are offered by containment in either direction and dimensions count. One row of the rule then says compute and another says ask and compute nothing. An ordinary question gets a clarifying question back.\n\n## Evidence\n\n- Per the report (the dispatching seat's contract review of PR #34977, record 6961115041, section ③): the executor offers candidates by containment either way and counts dimensions; 「按行业」 contains a dimension labelled 行业, \"this quarter\" contains one named `quarter`, 本季度 contains 季度.\n- `LIST_DATASETS_DESCRIPTION`, `DATASET_SELECTION_RULE`, the ADR-0149 D3 note and the skill all state the ask-back without scoping it, so the fix is one rule changed in all four places.\n\n## Scope\n\n- The rule: a candidate asks back only when the term it belongs to has no exact match and no other term supplies the measure; a candidate on a dimension or time word never blocks a matched measure, and is at most offered as a grouping.\n- Decide it once where it is computed: #34919's `nextStep` is the place, so the executor returns the decision and the four texts say \"follow it\" in the same words. If #34919 has landed without it, this card amends it.\n- Eval cases: a matched measure beside a candidate on another word; a dimension-only candidate.\n- File surface: `packages/services/service-analytics/**`, `packages/mcp/**`, `docs/adr/0149-…md` (note), `skills/objectstack-ask/**`.\n\n## Done when\n\n- 「按行业看销售额」 on an app with one 销售额 measure computes, grouped by industry, with no question back; a bare near-miss measure word still asks.\n- The door strings, the ADR note and the skill state the scoped rule in the same words.\n\n## Relations\n\n- Parent: #34659. Related: #34763, #34919, #34868, #34996.\n- Governed surfaces: `docs/adr/**` (Tier H), `skills/**`."
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-17, verbatim: 「立卡」, answering this session's list of four gaps nobody had carded. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6961139115); the filer did not re-read the code behind it.\n\n## Why\n\nA person asks 「按行业看销售额」 or \"revenue this quarter\". The measure word has its one exact match, and the grouping word 行业 or the time word \"quarter\" also comes back with a near candidate, because candidates are offered by containment in either direction and dimensions count. One row of the rule then says compute and another says ask and compute nothing. An ordinary question gets a clarifying question back.\n\n## Evidence\n\n- Per the report (the dispatching seat's contract review of PR #34977, record 6961115041, section ③): the executor offers candidates by containment either way and counts dimensions; 「按行业」 contains a dimension labelled 行业, \"this quarter\" contains one named `quarter`, 本季度 contains 季度.\n- `LIST_DATASETS_DESCRIPTION`, `DATASET_SELECTION_RULE`, the ADR-0149 D3 note and the skill all state the ask-back without scoping it, so the fix is one rule changed in all four places.\n\n## Scope\n\n- The rule: a candidate asks back only when the term it belongs to has no exact match and no other term supplies the measure; a candidate on a dimension or time word never blocks a matched measure, and is at most offered as a grouping.\n- Decide it once where it is computed: #34919's `nextStep` is the place, so the executor returns the decision and the four texts say \"follow it\" in the same words. If #34919 has landed without it, this card amends it.\n- Eval cases: a matched measure beside a candidate on another word; a dimension-only candidate.\n- File surface: `packages/services/service-analytics/**`, `packages/mcp/**`, `docs/adr/0149-…md` (note), `skills/objectstack-ask/**`.\n\n## Done when\n\n- 「按行业看销售额」 on an app with one 销售额 measure computes, grouped by industry, with no question back; a bare near-miss measure word still asks.\n- The door strings, the ADR note and the skill state the scoped rule in the same words.\n\n## Relations\n\n- Parent: #34659. Related: #34763, #34919, #34868, #34996.\n- Governed surfaces: `docs/adr/**` (Tier H), `skills/**`.\n\nBlocked-by: #35158\n"
 }

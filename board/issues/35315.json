@@ -1,0 +1,31 @@
+{
+  "number": 35315,
+  "kind": "issue",
+  "title": "console: the default record form never renders owner_id, and the console has no Change Owner action, so an object without an authored form cannot be reassigned",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T04:27:50Z",
+  "updated_at": "2026-11-19T08:10:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35315",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible gap, measured once.\n\n**Business reason.** Reassigning a lead, account or case to another rep is a daily manager action. HotCRM's audit (objectstack-ai/hotcrm#2665, comment 6988592923, row 39) found that 12 of its 14 authored form views exist partly because they list `owner_id`. Reverting them to the platform default form would remove the only place a user can change the owner. This blocks apps from adopting the default form that record page v4 is built around.\n\n**Reach.** On 18.6.0, the Edit dialog renders the owner input in all 12 authored forms and in none of the 12 default ones. The console bundle has no \"Change Owner\" record action apart from a Studio placeholder.\n\n**Seam.** `renderer:plugin-form` `sanitize.ts` and `autoLayout.ts:274` (system fields filtered on purpose) against the absence of a record-level change-owner action.\n\n**Expected (for the maintainer to rule):** either the default form offers the owner field to people who may change it, or the console ships a standard Change Owner action on records with `owner_id`.\n\n**Dedupe:** `default form owner_id change owner action` returned 120 hits, none on point.\n\n**Reader.** objectstack triage grades it and routes it to the owning lane. Not a claim; awaits triage. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「平台缺口全部立卡」, after an independent fable-tier review of HotCRM's pending decisions surfaced it."
+}

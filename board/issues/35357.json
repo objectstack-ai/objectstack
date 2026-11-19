@@ -1,0 +1,30 @@
+{
+  "number": 35357,
+  "kind": "issue",
+  "title": "Working calendars ④: approval escalation clock key (wall_clock | working_time)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T06:04:06Z",
+  "updated_at": "2026-11-19T06:04:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35357",
+  "body": "③ maintainer-directed task · Source: maintainer ruling on #35340 (comment https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747; sub-cards approved 2026-11-19 06:03Z 「同意」「都是 p1」).\n\n**Blocked by #35354** (ADR) and the calendar service in ②. Ships in the same release as ② and ③.\n\n## 维护者速读\n- **问题：** 审批超时 `timeoutHours` 按自然小时算，夜里、周末、节假日都算进去。\n- **要做：** 给审批升级加一个时钟选项，可以按工作时间算。\n- **不做会怎样：** 周五下午提交的审批周五晚上就升级，客户看到的到期时间不对。\n- **你要做的：** 无。\n\n## Scope\n- `ApprovalEscalationSchema` (`packages/spec/src/automation/approval.zod.ts` ~855-875): add `clock: 'wall_clock' | 'working_time'` (default `wall_clock`) and optional `calendar` (code). Rewrite the `timeoutHours` describe text and the code comment that say the platform ships no calendar.\n- Default stays `wall_clock`: the sweep reads stored node-config snapshots (`packages/plugins/plugin-approvals/src/approval-service.ts` ~8055), so existing requests keep their deadlines.\n- Sweep: with `working_time`, compute the deadline from `created_at` via the calendar service (`addWorkingHours`); recompute each sweep rather than storing it.\n- Calendar resolution per the ADR (explicit code → org default → refuse). A `working_time` escalation with no resolvable calendar is a lint/validation error, not a silent wall-clock fallback.\n- Studio designer field for the clock and calendar; docs and skills teaching text.\n- Only `timeoutHours` gets a clock key; other duration keys are one card each, later.\n\n## Done when\nA `working_time` escalation opened Friday 17:00 with 4 hours fires on the next working day per the calendar, including across a holiday and a 调休 make-up Saturday; `wall_clock` behaviour unchanged.\n\n## Non-goals\nFlipping the default clock; clock keys on other duration keys."
+}

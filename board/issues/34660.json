@@ -2,8 +2,8 @@
   "number": 34660,
   "kind": "issue",
   "title": "flow value envelopes refuse with condition wording: the date-text verdicts say \"when the condition runs … a flow condition\" at an update_record / create_record / assignment value slot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
+    "lease:ux-3",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-17T05:07:23Z",
-  "updated_at": "2026-11-18T16:27:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T07:08:15Z",
+  "closed_at": "2026-11-19T07:07:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34660",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQAXHSQEgnYyx9tstb\n\nFiling gate: ① measured. Found in the #34451 dev round (PR #34654, open question 1). ⛔ Not a claim.\n\nBlocked-by: #34451\nSuggested-grade: p3 — the refusal is right and its fix hint is right; only the sentence names the wrong kind of slot.\n\n## What\n\nPR #34654 lets the date-text verdicts reach a flow value envelope (`assignment` values, `create_record` / `update_record` `fields.*`). It reuses the existing `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail` codes, whose shared sentence reads \"when the condition runs … a flow condition that cannot be evaluated fails the run\". At a value slot there is no condition: the slot computes a value, and the run fails when it is evaluated. The location and the leading value-envelope sentence name the slot, so an author can still act, but the outcome sentence describes another kind of slot.\n\n## Where (after #34654)\n\n- `packages/formula/src/validate.ts`: `flowValueEnvelopeDateTextIssue` maps the family onto the `-run-may-fail` arm.\n- The refusal-code ledger in `packages/formula/src/expression-refusal.ts` (and its catalogue readers): a value-slot arm would be a new code.\n\n## Done when\n\nA value-envelope refusal says the run fails when the value is computed, not when a condition runs; the codes are registered in the ledger; lint and `registerFlow` keep one verdict.\n\nDedupe words: value envelope refusal wording, date-text run-may-fail condition sentence, flowValueEnvelopeDateTextIssue message."

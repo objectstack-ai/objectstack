@@ -1,0 +1,32 @@
+{
+  "number": 35371,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): a grid row's Edit or Delete greyed by disabledWhen says why",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T06:43:19Z",
+  "updated_at": "2026-11-19T07:37:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35371",
+  "body": "Fixes #35334\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：列表网格（plugin-grid ObjectGrid）行菜单里的内置「编辑」「删除」，在对象声明的 `userActions.*.disabledWhen` 成立而变灰时，现在多一行说明「Not available for this record」（已有的 `actions.notAvailableForRecord` 文案，各语言已翻译），并作为该菜单项的无障碍描述；菜单项名称仍是原标签。\n- 为什么改：记录页（#35288）和 data-table 行菜单（#35331）已按裁决 6996106574 的 B 路线给出原因，plugin-grid 行菜单是同一缺口的第三处，用户看到灰掉的按钮却不知道为什么。\n- 风险与回滚：仅改 `RowActionMenu.tsx` 中 `BuiltinRowActionItem` 的渲染，不动协议、不加 i18n 键、不加导出；权限判定仍在加载（`verdictPending`）时只置灰不给原因。回滚即 revert 本 PR。\n- 先看：`ui/packages/plugin-grid/src/components/RowActionMenu.tsx` 的 `BuiltinRowActionItem`（喂给 `useDisabledReason` 的只是 `disabledByPredicate`，不含 `verdictPending`）；其次 `RowActionMenu.test.tsx` 末尾新 describe。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-grid/src/components/__tests__/RowActionMenu.test.tsx`，预期全绿，其中 objectstack#35334 那组 6 个用例通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`BuiltinRowActionItem` (the built-in row Edit / Delete in the plugin-grid \"⋮\" menu) now applies route B per ruling 6996106574, matching the data-table row item:\n\n- `disabledByPredicate = predicates?.disabledWhen != null && isDisabled` — the declared `disabledWhen` verdict alone — is what `useDisabledReason` receives. The item's `disabled` prop stays `verdictPending || disabledByPredicate`, so an item greyed only because its record-grained verdict is still loading earns no reason.\n- `useDisabledReason` is called with the other hooks, ahead of the `!isVisible` early return.\n- When there is a reason: `menuItemReasonAria(reason)` on the item (accessible name stays the label via `aria-labelledby`, the reason is `aria-describedby`), and `DisabledReasonMenuLabel` draws it as a visible second line. No reason: bare label, as before.\n\nThe helpers were already imported by this file (the custom-action item uses them) and are exported from the `@object-ui/components` package entry, so there is no new import surface and no new export. No new i18n key; no `packages/spec` change.\n\n## Tests\n\nA new top-level `describe` in the existing shared harness `RowActionMenu.test.tsx` (objectstack#35334):\n\n- Edit and Delete greyed by `disabledWhen`: `aria-disabled`, `aria-describedby` points at a visible element reading \"Not available for this record\", and `getByRole('menuitem', { name: 'Edit' | 'Delete' })` is the item.\n- CONTROL — no predicate: no `aria-describedby`, no reason text.\n- CONTROL — predicate not holding: enabled, no reason.\n- CONTROL — pending verdict (no predicate, and predicate not holding): `aria-disabled` and `aria-busy` true, yet no `aria-describedby` and no reason text.\n\n## Acceptance notes\n\n- A row whose `disabledWhen` holds AND whose record-grained verdict is pending shows the reason: the reason follows the resolved `disabledWhen` verdict, which is true and evaluated client-side; only the pending leg on its own earns none. Not pinned separately.\n\n## Verification\n\nAll readings at head `823d092a`, worktree on base `e4bfa339`.\n\n<details><summary>Tests — 36/36 in the file, 2495/2495 in the package, type-check green</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-grid/src/components/__tests__/RowActionMenu.test.tsx` → `Test Files 1 passed (1)`, `Tests 36 passed (36)`; lock VERDICT command-exit 0.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-grid/` → `Test Files 289 passed (289)`, `Tests 2495 passed (2495)`; lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-grid run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`) → lock VERDICT command-exit 0.\n- eslint on the two changed files → exit 0, 0 errors (warnings only, pre-existing `no-explicit-any`).\n</details>\n\n<details><summary>Ablation — two one-shot mutations, both red, both restored to the HEAD blob</summary>\n\nThrough `scripts/ablation-replace.mjs` (anchor `useDisabledReason(disabledByPredicate)`, hit x1 -> x0). The subject is imported by relative path from `src/`, so no `dist/` leg.\n\n1. Reason dropped (`useDisabledReason(false)`): blob `6c931f72c65b` -> `9310958693e2`; `Tests 2 failed | 34 passed (36)` — the edit and delete \"greyed by disabledWhen shows the reason\" cases. Restored: blob == HEAD, `git diff HEAD` empty.\n2. Pending verdict earns the reason (`useDisabledReason(verdictPending || disabledByPredicate)`): blob -> `016757a93ced`; `Tests 2 failed | 34 passed (36)` — both \"greyed only by a pending verdict\" controls. Restored: blob == HEAD, `git diff HEAD` empty.\n</details>\n\n<details><summary>Gates — derived families 38/38 run locally, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` (3 paths vs merge base `e4bfa339a`) derived 38 commands; each ran with its exit code captured before any pipe — 38 exit 0 (including `pnpm --dir ui exec vitest run scripts/`: `Tests 5092 passed | 2 skipped`). `--ran` reconciliation: `38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED`. `ui` `check:new-line-citations`: `0 new citation(s)`. Type-check lanes, Test UI and the wide families are CI's.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ)_\n"
+}

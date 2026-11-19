@@ -2,8 +2,8 @@
   "number": 34237,
   "kind": "issue",
   "title": "skills(objectstack-ai): teach `mcpPrompt` where SKILL.md explains which skills MCP offers as prompts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "lease:ai-1",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-16T01:49:31Z",
-  "updated_at": "2026-11-18T16:06:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T05:48:08Z",
+  "closed_at": "2026-11-19T05:39:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34237",
   "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a teaching gap a merged change will open (follow-up of #34167 / PR #34236, Skills-docs owed). ⛔ Not a claim; triage sets the lane (expected `domain:skills`) and grade.\nBusiness reason: an author who writes a skill only for the in-product agents reads `skills/objectstack-ai/SKILL.md` to learn which skills an MCP client is offered. Once PR #34236 lands, that page gives the wrong rule twice. It never names the opt-out, so the author cannot keep an in-product playbook away from Claude Code or Cursor. And it says the stdio transport \"lists every skill\", so the author expects an opted-out skill to show up there too.\n\n## What is stale once PR #34236 merges\n\n`skills/objectstack-ai/SKILL.md` (≈ lines 380–388 on `main`), the paragraph that begins \"`tools` binds nothing there but is read: `registerSkillPrompts` offers a skill on `prompts/list` / `prompts/get` only when …\":\n\n1. It does not name `SkillSchema.mcpPrompt`. `mcpPrompt: false` withholds a skill from `prompts/list` and `prompts/get` on every MCP connection, whatever its `tools` binding.\n2. \"the plugin's own stdio transport lists every skill\" becomes false for `mcpPrompt: false` rows. Stdio withholds them too; the binding filter still does not apply there.\n\n## Done when\n\n- The paragraph names `mcpPrompt` (optional; `false` = in-product only, never offered over MCP; absent or `true` = today's binding rule), and the stdio sentence states the exception.\n- The same wording reaches any mirror the skills gates require.\n- It waits on PR #34236 merging. Until then the key does not exist on `main`.\n\nBlocked-by: #34167\nDedupe words: `mcpPrompt SKILL.md`, `skill prompt opt-out skills doc`, `registerSkillPrompts paragraph`."

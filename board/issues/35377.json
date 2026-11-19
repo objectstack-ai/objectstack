@@ -1,0 +1,33 @@
+{
+  "number": 35377,
+  "kind": "pull_request",
+  "title": "fix(cli): os doctor --verbose no longer ends by telling you to run with --verbose",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T07:06:30Z",
+  "updated_at": "2026-11-19T07:08:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35377",
+  "body": "Fixes #34866\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 改了什么：`os doctor` 以警告结束时，只有在没加 `--verbose` 的情况下才提示“Run with --verbose to see fix suggestions.”；加了 `--verbose` 的运行不再叫用户再加一次这个参数。\n2. 为什么改：开发者第一次接触 CLI 时，`os doctor --verbose` 的结尾让人去传一个已经传过的参数，提示本身是错的。\n3. 风险与回滚：只改了总结行的一个打印分支，不改退出码，也不改任何检查结果；撤回本 PR 即恢复原样。\n4. 先看：`packages/cli/src/commands/doctor.ts`（总结里 `hasWarnings` 分支的 `if (!flags.verbose)`）；`packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts`（新增的 `the warnings summary` 两个用例）。\n5. 两分钟验证：`pnpm --filter @objectstack/cli exec vitest run --project unit src/commands/doctor-deprecation-hint-commands.test.ts`，预期 14 passed。\n6. 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/cli/src/commands/doctor.ts`: in the summary's `hasWarnings` branch, the line \"Run with --verbose to see fix suggestions.\" is printed only when `flags.verbose` is false. Under `--verbose` every fix that doctor's warning paths have is already printed above the summary (`renderHealthCheckResult` prints `fix` when verbose, the dashboard-widget `hint` and the deprecation-scan `replacement` are verbose-gated), so the line pointed at nothing new.\n- Non-verbose output is byte-for-byte unchanged. Exit codes are unchanged.\n- `.changeset/34866-doctor-verbose-hint.md`: patch, `@objectstack/cli`.\n\n## Tests\n\n- `packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts`: a new `describe('the warnings summary')` inside the existing real-`Doctor.run()` harness (same warning-bearing tree as the deprecation-scan cases). Both arms first assert the run reached the warnings branch of the summary, then judge the text after that verdict line by the flag it names: without `--verbose` it names `--verbose`; with `--verbose` it does not, and the per-finding replacement is on screen.\n\n## Acceptance notes\n\n- The mechanism assumption \"under --verbose the fix suggestions are already printed\" holds for every warning path that HAS a fix. Several warning paths have no fix in either mode: missing `*.test.ts` beside a `*.zod.ts`, `@deprecated` usages, circular dependencies, unused objects and orphan views print a bare `printWarning`. When only those warn, the non-verbose hint still promises fix suggestions that `--verbose` does not print. Measured through the built binary (`node packages/cli/bin/run.js doctor`, temp cwd with one `packages/spec/src/a.zod.ts` and no test): the non-verbose run ends with the hint; the `--verbose` run adds detail only to the ok environment rows and nothing to the warning. Not changed here (the dispatch scopes this PR to the verbose arm); reported to the seat.\n\n## Verification\n\nAll readings are against HEAD `081a5101`.\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2 src/commands/doctor-deprecation-hint-commands.test.ts`: Test Files 1 passed (1), Tests 14 passed (14).\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2` (whole unit tier): Test Files 427 passed, 2 failed (429); Tests 6113 passed, 29 skipped. The 2 failures were `test/published-subpath-console.pin.test.ts` and `test/published-subpath-hook-body.pin.test.ts`, both refusing because `packages/cli/dist` was not built yet. After building the CLI they were re-run: Test Files 2 passed (2), Tests 29 passed (29).\n- The `integration` tier is left to CI: the diff touches no integration-tier file and no spawn entry.\n- `pnpm --filter @objectstack/cli run typecheck`: exit 0 (tsc, then `check:test-typecheck` OK). The test file is in the `tsc --noEmit` program (`--listFilesOnly` count 1).\n- Public door: built `os doctor` in a temp cwd with a warning. Without the flag it ends with the hint. With `--verbose` it ends at \"Environment is functional but has some warnings.\" with no hint.\n\n</details>\n\n<details><summary>Red first: ablation (scripts/ablation-replace.mjs, landed on disk and restored)</summary>\n\n- `if (!flags.verbose) {` replaced with `if (true) {`: anchor 1 to 0, blob 5b130dc6 to 3d34462d. Result: 1 failed, 13 passed. Only the case \"drops that advice under --verbose\" failed.\n- Restored: the blob after restore equals HEAD (5b130dc6) and `git diff HEAD` is empty.\n- The subject is imported as relative source (`./doctor.js`), so no dist rebuild was involved.\n\n</details>\n\n<details><summary>Gates (derived set, local)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 69 families. Each was run one by one, with the exit code captured before any pipe.\n- 67 exited 0. `check:i18n`, `check:i18n-coverage` and `check:i18n-walk-parity` first exited 3 (no CLI build). They exited 0 on re-run after the build.\n- 2 are NOT MEASURED, both exit 3 PREREQUISITE NOT MET. `node scripts/check-plugin-teardown-shape.mjs --self-test` needs history that a shallow clone lacks; it is checker-health only. `pnpm check:dual-build-cjs-loads` needs repo-wide dist. CI's Lint & Repo Gates runs both.\n- `--ran` reconciliation: \"69 derived famil(ies) accounted for, 67 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)\".\n- `pnpm check:nul-bytes`: exit 0. `node scripts/pm/overlap-check.mjs`: VERDICT clean (merges cleanly onto origin/main).\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTyMahdAdhXSzgy2nt)_\n"
+}

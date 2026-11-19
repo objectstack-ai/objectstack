@@ -1,0 +1,33 @@
+{
+  "number": 35350,
+  "kind": "issue",
+  "title": "fleet: areas stop using lease:* labels — the area is a line in the Claim comment, plus the assignee and the seat's area table; delete the lease labels",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T05:58:50Z",
+  "updated_at": "2026-11-19T07:01:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35350",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ③ a task the maintainer dispatched. Ruling-ref: Bill, 2026-11-19, seat 5 project thread: 05:56Z 「派发是需要加上 lease 标签吗？仓库中会搞出一堆混乱的标签」; seat 5 proposed: no more `lease:*` labels, the area name goes into the claim comment, with the assignee and the seat's area table, and the old labels are deleted; 05:57Z 「同意，立卡更新skills」. ⛔ Not a claim.\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；仓库里不再出现一堆「lease:区名」标签，已有的 24 个会删掉。\n- 为什么做：你觉得每开一个区就多一个标签，仓库会乱。\n- 出错会怎样：只是派发记账方式变了，别的区仍能从认领评论和指派人看出卡已有人做；可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n1. **Skill text** (one Tier S PR under `.claude/skills/pm-dispatch/**`):\n   - `references/area-lease.md:30`: \"another area's `lease:*`\" ⇒ \"another area's `Area:` line in a live `Claim:`\" (with the other assignee / `Claim:` checks already on that line).\n   - `references/area-lease.md:37`: the claim no longer adds `lease:<area>`; the `Claim:` comment carries `Area: <area>` instead.\n   - `references/area-lease.md:38`: the post-claim read-back checks `pm:dispatched` and the assignee only.\n   - `references/lanes/objectstack.md:23`: area names stay unique and seat-prefixed; drop \"the `lease:` label follows the area name\".\n   - Any other passage or sample that tells a seat to type `lease:*` (grep `lease:` across `.claude/**`, `scripts/pm/**` samples and self-tests).\n   - No script reads `lease:*` today (grep of `scripts/pm/**` and `.github/workflows/**` at 2026-11-19: only `Release:` lines match); confirm at the PR.\n2. **Labels** (relay label ops, after the skill PR merges):\n   - Delete now-stale pilot labels whose areas ended: `lease:A1`–`A5`, `E1`, `E2`, `E2b`, `o1-A`, `o1-B`, `o1-D` (several still sit on open cards; deleting the label removes it from them).\n   - Delete seat 5's nine: `lease:ux-1`, `ux-2`, `ux-3`, `ai-1`, `data-1`, `data-2`, `pkg-1`, `pkg-2`, `fleet-1`.\n   - `lease:o1-C` (seat 1), `o3-H` (seat 3), `o4-A`, `o4-C` (seat 4) are other seats' live areas: notify those seats through their mailboxes and delete each once the seat confirms its area ended or switched to the `Area:` line.\n\n## Done when\n\nThe skill text names no `lease:*` label as a step, every claim since carries an `Area:` line, and no `lease:*` label remains in the repo (or each remaining one names the seat that still owns it)."
+}

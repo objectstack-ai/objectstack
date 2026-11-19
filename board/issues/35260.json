@@ -2,7 +2,7 @@
   "number": 35260,
   "kind": "pull_request",
   "title": "feat(scaffold): new projects run their tests in CI",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T00:37:51Z",
-  "updated_at": "2026-11-19T02:17:40Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-19T02:39:57Z",
+  "closed_at": "2026-11-19T02:39:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-19T02:39:07Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35260",

@@ -1,0 +1,39 @@
+{
+  "number": 35303,
+  "kind": "issue",
+  "title": "console AI chat: the seed warning after publishing drafts shows the seed loader's engine text, or \"[object Object]\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "finding",
+    "lease:ux-1",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T03:20:25Z",
+  "updated_at": "2026-11-19T06:50:09Z",
+  "closed_at": "2026-11-19T06:49:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35303",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: out-of-scope finding from the `os-dev` of #35141 (PR #35301), class a, filed by seat 5. ⛔ Not a claim. Same family as #35141 and #32984 (user-facing text must be a pack sentence), a second producer outside that card's fence. Lease `ux-1`.\n\n## What happens\n\n`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` (around :3212 on main), `onPublishDrafts`: the `console.ai.seedWarn` toast uses `seedApplied.error` (the seed loader's engine text) as its description. When there is no `error`, it uses `String(seedApplied.errors[0])`, which renders `[object Object]` for a structured `{ row, reason }` error row.\n\n## Expected\n\nThe description is a translated pack sentence, the same shape #35141 gives the publish-all toast. Engine text and row objects go to the console log or a details affordance, not to the toast.\n\n## Done when\n\nBoth arms show a pack sentence in en and zh; a test pins the structured-row arm (no `[object Object]`) and the engine-text arm.\n\nDedupe words: console.ai.seedWarn, AiChatPage seedApplied.error, seed toast object Object."
+}

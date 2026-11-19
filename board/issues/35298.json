@@ -1,0 +1,35 @@
+{
+  "number": 35298,
+  "kind": "issue",
+  "title": "Rewrite the 维护者速读 as a four-line business brief (PR bodies and decision cards)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "lease:fleet-1",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T02:57:25Z",
+  "updated_at": "2026-11-19T05:41:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35298",
+  "body": "epic:#35205#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 in the objectstack priorities discussion thread: 02:54Z 「目前的维护者速读，写的其实不是很好，感觉很多废话，应该从业务的角度写。」; the thread proposed the four-line shape below; 02:55Z 「同意」. Order sheet: `pm-orders/objectstack/maintainer-brief-rewrite-2026-11-19.md`.\n\nFiling gate: ③ a task the maintainer dispatched (his words above). Child of epic #35205. Reader: the objectstack seat that takes #35205's skill steps. Dedupe: open cards under #35205 mentioning 维护者速读 / maintainer brief — none; #35259 edits the same skill files, so this card waits for its PR.\n\nGrade: p2 · area:fleet · Task · fleet text, no product surface\n\nBlocked-by: #35259\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；你收到的 PR 和决定卡，最上面改成四句业务话。\n- 为什么做：你说现在的速读废话多，要从业务角度写。\n- 出错会怎样：只是写法变了，评审和 agent 要的细节都还在下面英文部分，可以直接撤回。\n- 要你做什么：规则 PR 出来后批一下。\n\n## What changes\n\nThe `## 维护者速读` block is for the maintainer only: at most four lines, one Chinese sentence each, in words a product owner reads. ⛔ No code names, file paths, commands, ruling letters, or bare card numbers (a card named there carries a short Chinese description).\n\n**PR body `## 维护者速读`** (replaces today's six lines):\n1. 用户能看到什么变化 — who, where, before → after; internal tooling says 「用户无感」.\n2. 为什么做 — the epic it comes from (Chinese name), or whose problem it fixes.\n3. 出错会怎样 — who hits what, and whether it can simply be reverted.\n4. 要你做什么 — exactly one thing, or 「无」.\n\n**Decision card brief** (`needs-user-decision`, the decision box):\n1. 问题 — the symptom a customer sees, who hits it, how often.\n2. One sentence per option — what the customer sees if it is picked, roughly how many PRs.\n3. The recommendation, with one reason.\n4. What happens if nobody decides.\n\n**Moves to the English part** (for reviewers and agents; ⛔ not deleted): files to read first and risky hunks, the two-minute verification command, the four axes, the 四棱 block, the self-check line, confidence gaps, effort precedents.\n\n## Where\n\n- `.claude/agents/os-dev.md` (~L284–287, the six-line definition).\n- `.claude/skills/pm-dispatch/SKILL.md` (~L202 「六行」; ~L106 the Chinese four-channel wording).\n- `.claude/skills/pm-dispatch/references/decision-analysis.md` — 「落卡分析模板」 and 「四棱卡面块」: the brief goes on top in the four lines above; four axes / 四棱 / self-check move to the English analysis section. Add the worked example below.\n- `references/filing-gate.md` (~L18) and `lanes/mobile.md` (~L43): align the 「需要你做的」 wording.\n- Scripts: `scripts/pm/check-half-states.mjs` keys on the `## 维护者速读` heading only (H48 etc.) — heading unchanged, no change needed. If any script counts six lines or parses the 「先看」/「两分钟验证」 lines, change it and its tests. Align the TRIAGE sample in `scripts/pm/post-stamped.mjs` (~L5610).\n\n## Worked example (goes into decision-analysis.md)\n\n#35101 (new app's menu label saved as translated text):\n- 问题：在中文界面下新建或编辑应用，菜单里自动生成的名字被存成中文；换成英文界面，菜单还是中文。\n- 选项：A 存原文，切换语言时菜单名跟着变，一个小 PR；B 维持现状。\n- 推荐 A：应用要给不同语言的人用。\n- 不定会怎样：中文用户建的应用，在其他语言下菜单一直是中文。\n\n(The skill text itself carries no card number or dated quote — ID lint; strip the number from the example when it goes in.)\n\n## Done when\n\n- The four files above state the four-line PR brief and four-line decision brief, with the ⛔ list and what moves to the English part.\n- `decision-analysis.md` carries the worked example.\n- Any script or test that counts or parses the old six lines is updated; self-tests pass.\n- Opened as its own PR after #35259's PR merges (same files, reviewed separately)."
+}

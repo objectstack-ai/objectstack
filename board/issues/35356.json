@@ -1,0 +1,30 @@
+{
+  "number": 35356,
+  "kind": "issue",
+  "title": "Working calendars ③: formula functions addWorkingDays / workingDaysBetween / addWorkingHours",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "area:formula",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T06:03:59Z",
+  "updated_at": "2026-11-19T06:03:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35356",
+  "body": "③ maintainer-directed task · Source: maintainer ruling on #35340 (comment https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747; sub-cards approved 2026-11-19 06:03Z 「同意」「都是 p1」).\n\n**Blocked by #35354** (ADR) and the calendar service in ②. Ships in the same release as ② and ④ (#13655 constraint: no calendar without its formula surface).\n\n## 维护者速读\n- **问题：** 公式里没法算「两个工作日后」或「两个日期之间有几个工作日」。\n- **要做：** 加三个工作日公式函数，按平台日历计算。\n- **不做会怎样：** 日历建好了没人读，按 ADR-0049 是空摆设；各套件继续各算各的。\n- **你要做的：** 无。\n\n## Scope\n- Add `addWorkingDays(date, n, calendar?)`, `workingDaysBetween(a, b, calendar?)`, `addWorkingHours(datetime, h, calendar?)` to the formula stdlib (`packages/formula`). Calendar resolution per the ADR: explicit code → org default → refuse.\n- Synchronous evaluation: the calendar is preloaded into the evaluation bindings, with cache invalidation when calendar rows change.\n- Pushdown refuses these functions (filter/aggregate), with a lint pointing authors to a write-time datetime column compared with `{now}`.\n- Hook/flow access if the sandbox needs a host function (check the sandbox surface; not assumed).\n- Docs and skills teaching text for the three functions.\n\n## Done when\nFunctions evaluate correctly across a weekend, a National Day week and a 调休 make-up Saturday; pushdown refuses them with a clear error; teaching text updated.\n\n## Non-goals\nSQL-side calendar math, date macros in filters (later card)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 35380,
+  "kind": "pull_request",
+  "title": "fix(release): a stable next dist-tag below latest follows it after a stable publish",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T07:23:04Z",
+  "updated_at": "2026-11-19T08:06:09Z",
+  "closed_at": "2026-11-19T08:06:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T08:06:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35380",
+  "body": "Fixes #35183\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化：正式版发布后，用预览通道安装或搭建项目的人拿到的不再比正式版旧；今天已经落后的那批标签由另一张维护者卡单独处理。\n2. 为什么做：发布后的线上冒烟测试发现预览通道停在上一个正式版，修的是发布后自动整理标签这一步。\n3. 出错会怎样：最坏是某个标签被挪错，只影响用预览通道安装的人；这一步本身不阻塞发布，回退本改动即可恢复旧行为。\n4. 要你做什么：无，席位落地。\n\n## 席位核对\n\n### What changes\n\n- `scripts/release-dist-tags.mjs` `planTags`: a tag listed in the new `CHANNEL_TAGS` (exactly `next`) whose value is a STABLE version below the reference now moves to the reference. Before, every stable-valued tag was skipped as a maintenance line, so once the 18.5.0 sweep had moved `next` onto the stable 18.5.0, the 18.6.0 sweep left it there.\n- A stable `next` AT the reference stays (neither moved nor kept); a stable `next` ABOVE it is never moved down; a pre-release `next` ahead of the reference is still a kept cycle in progress; any other stable-valued tag (`v17` = 17.5.0) stays a maintenance line.\n- Header rule list and the `planTags` docblock updated; `CHANNEL_TAGS` is exported and frozen beside `RETIRED_TAGS`.\n- `release.yml` is unchanged (the step already runs this script with `--apply` after the publish). `docs/releases-maintenance.md` is unchanged: it already says the stable publish moves a stale `next` up to `latest`, which this makes true.\n\n### Tests\n\n- New self-test battery 8 (9 cases, floor 9; roster floor 7 to 8): the measured state `next` 18.5.0 under `latest` 18.6.0 moves; CONTROL `v17` 17.5.0 beside it untouched; CONTROL `next` 19.0.0-next.1 kept; CONTROL `next` 18.6.0 at latest no move; CONTROL stable `next` above latest no move; CONTROL empty channel list keeps the old behaviour; two stable sweeps in a row (18.5.0 then 18.6.0) against one mutable registry move `next` both times and log `next: 18.5.0 → 18.6.0`.\n- `node scripts/release-dist-tags.mjs --self-test` at 5a95e31aa: exit 0, `OK release-dist-tags self-test: 63 cases pass across 8 batteries`.\n\n### Acceptance notes\n\n- The registry today still has `next` 18.5.0 under `latest` 18.6.0 for 110 of 111 packages; that one-time move is the maintainer's card #35342, out of scope here. The next stable publish's sweep would also move them on its own.\n- The 18.6.0 sweep's log (run 44242704528, job 134595207859, step 15) printed only `Sweeping the dist-tags of 111 package(s) against the release 18.6.0.` and `0 tag(s) moved, 0 retired tag(s) removed, 0 kept ahead of latest, 0 package(s) skipped, 0 failure(s).` with no skip and no warning: stable-valued tags are left alone without any log line. Noted, not changed here.\n\n### Verification\n\n<details><summary>Ablation (fix committed first, restored from HEAD)</summary>\n\n`node scripts/ablation-replace.mjs` replaced `if (stable && !channels.includes(tag)) continue;` with `if (stable) continue;` (anchor 1 to 0, blob d18677e92f7b to edc67b3d0934), self-test exit 1: `4 of 63 case(s) failed` (the measured-state move, the v17 control's move list, both two-sweep cases). Restored: blob equals HEAD, `git diff HEAD` empty, self-test exit 0 again.\n\n</details>\n\n<details><summary>Dry run against the live registry (plan mode, no --apply, nothing written)</summary>\n\n`node scripts/release-dist-tags.mjs`: exit 0, `Planning (read-only; pass --apply to write) the dist-tags of 111 package(s) against each package's own latest.` then 110 lines all of the form `plan   PACKAGE next: 18.5.0 → 18.6.0` and `110 tag(s) would move, 0 retired tag(s) would be removed, 0 kept ahead of latest, 0 package(s) skipped, 0 failure(s).` The one package with no line, `@object-ui/plugin-timesheet`, has only `latest` 18.6.0 (no `next` tag).\n\n</details>\n\n<details><summary>Local gates at 5a95e31aa</summary>\n\n`dispatch-gates --commands` derived 32 commands for this diff; all 32 ran with exit 0 (including `pnpm check:pm-dispatch-gates`, `pnpm check:nul-bytes`, `node scripts/release-dist-tags.mjs --self-test`). `dispatch-gates --ran`: `32 derived famil(ies) accounted for — 32 run, 0 NOT-MEASURED (a DERIVED zero — all 32 recorded an exit code and none of them is 3)`. `overlap-check --branch=HEAD`: `VERDICT clean exit 0`. No changeset: root scripts are in no package's `files[]` (root package is private), so `skip-changeset`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaysxGzF62ACvZ1x9x)_\n"
+}

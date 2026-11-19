@@ -2,8 +2,8 @@
   "number": 34211,
   "kind": "issue",
   "title": "console Setup overview: meta/object is read twice (package-filtered and full), and session → discovery → permissions → app → bundle → views → data run as 7 serial layers",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,20 +15,23 @@
     "domain:ui",
     "enhancement",
     "lease:ux-2",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
     "os-bill"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-16T00:54:32Z",
-  "updated_at": "2026-11-19T01:44:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T04:41:01Z",
+  "closed_at": "2026-11-19T04:41:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34211",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: ① a measured defect behind objectstack-ai/cloud#4563 (hosted page load, p2). It was measured locally on cloud main `d97754b`, pin `b914e72` (objectstack 18.5.0), with HotCRM 6.4.0 and sample data in a free-plan hosted environment. The readings are in the cloud#4563 os-dev-report (6904212540). The cloud lane files this card; first touch is left to triage.\n\n## Measurement context (shared by the cloud#4563 split)\n\nLocally the same amplification as staging appears: the customer-list request set (31 requests) answered one at a time sums to\n≈ 0.5 s of runtime; the same set at once sums to ≈ 7.2 s (≈ 14×; staging reported ≈ 13×). Under the burst the `db` member stays at\n1–2 ms per request and `meta` stays flat, while the runtime's CPU over the burst (≈ 600–650 ms) is the burst's wall (≈ 510–550 ms):\nthe single Node event loop is saturated and every request queues behind every other request's CPU. Small requests amplify most\n(×30–×60, they have the most awaits per unit of work); the app bundles amplify least (×1.4–×2, they ARE the queue). So the amplifier\nis **event-loop CPU**, not the database connection pool and not metadata reads; the biggest single CPU item is **metadata bundle\ncompile**, recomputed on every request including a 304. Staging's tenant DB is remote Turso, which local SQLite cannot reproduce: an\nowner-run staging reading (no config change) settles how much of staging's per-request time is `db`.\n\n## This card\n\n- Reading (customer list, local, warm): layer 1 `runtime/config`, `auth/get-session` (21→107 ms) · then a ~340 ms client gap · layer 2 `discovery` (443) · layer 3 permissions / organization / i18n / `meta/app` / `sys_user_preference` (515–715) · layer 4 `meta/object?package=…`, `me/apps`, bundle (732–960) · layer 5 view / doc / packages / book / `meta/object/sys_user` / ai/agents (1068–1343) · layer 6 data reads (1490–1630) · layer 7 explain (1725–1811). Setup: `meta/object?package=com.objectstack.setup` (6 ms) then `meta/object` full (47 ms runtime, 93 ms CPU).\n- Ask: (1) start `discovery` with `get-session`, not after it; (2) one `meta/object` read; (3) start the bundle with `meta/app` (it waits for `meta/object` today). Acceptance: list page ≤ 5 serial layers, one `meta/object` on Setup.\n- Related: #33581 (eager closure on first load), objectstack#34097 (Home reads once, landed)."

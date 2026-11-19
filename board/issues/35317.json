@@ -1,0 +1,31 @@
+{
+  "number": 35317,
+  "kind": "issue",
+  "title": "console: the project page's Gantt shows a raw no-permission error to a user who can read the project but not its tasks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T04:29:25Z",
+  "updated_at": "2026-11-19T06:23:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35317",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, measured once.\n\n**Business reason.** A sales manager opening a project (they may read projects but not project tasks) sees a raw permission error where the Gantt chart would be, in both en and zh-CN. A component the viewer cannot read should show a calm empty or no-access state, not an error.\n\n**Reach.** objectstack-ai/hotcrm#2665 (comment 6988592923, row 6), `@objectstack/*` 18.6.0: `sales.manager` on a HotCRM project page.\n\n**Expected:** the Gantt, like other related views, renders a friendly no-access or empty state.\n\n**Seam.** `renderer`: the project Gantt block's error path on a 403 from the task query.\n\n**Dedupe:** `gantt raw permission error project tasks` returned 38 hits, none on point.\n\n**Reader.** objectstack triage grades it and routes it to the owning lane. Not a claim; awaits triage. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「平台缺口全部立卡」, after an independent fable-tier review of HotCRM's pending decisions surfaced it."
+}

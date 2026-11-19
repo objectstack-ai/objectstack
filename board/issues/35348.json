@@ -1,0 +1,36 @@
+{
+  "number": 35348,
+  "kind": "pull_request",
+  "title": "fix(plugin-form): judge the wizard final-submit gate on computed formula values",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T05:50:15Z",
+  "updated_at": "2026-11-19T06:32:38Z",
+  "closed_at": "2026-11-19T06:32:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T06:32:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35348",
+  "body": "Fixes #35189\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:向导表单(以及简单表单的移动端分步模式)最终提交前的必填检查,现在先按对象的公式字段重新计算记录,再判断字段的 `visibleWhen`,与普通表单的做法一致。\n- 为什么改:之前用的是上次读取时的旧公式值。改动让字段移出条件后,向导仍要求填写服务端并不要求的字段;移入条件后,又放过了服务端会拒收的提交。\n- 风险与回滚:只改了 `WizardForm.tsx` 的最终提交检查,不改 spec、服务端和 i18n。回滚就是 revert 这个 PR。\n- 先看:`ui/packages/plugin-form/src/WizardForm.tsx`(`gateFinalSubmit` 中的 `ruleRecord` 与 `formulaPlan`)、`ui/packages/plugin-form/src/__tests__/wizardFormulaGate-35189.test.tsx`、`.changeset/35189-wizard-gate-formula.md`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-form/src/__tests__/wizardFormulaGate-35189.test.tsx`,预期 5 passed;把 `WizardForm.tsx` 换回 main 的版本后再跑,预期 3 failed / 2 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `WizardForm` plans the object's `formula` fields once, from the object schema it already reads (`planObjectFormulas` from `@object-ui/core`, for the acting user of the predicate scope). No second schema read and no new export.\n- `gateFinalSubmit` judges `resolveFieldRuleState` and the view-level `visibleOn` on `formulaPlan.compute(record)`: the value a read of the written record would serve, as `form.tsx` and `FormPage.tsx` do (ADR-0113, formula paragraph). Emptiness is still read off the written record.\n- A `visibleWhen` that reads a formula the form cannot compute (`plan.unservableReadsOf`) is dropped in the gate, the same way the step form's `withoutUnservableVisibleWhen` drops it. The field counts as shown, keeps `required` and raises no fault.\n- Unchanged, as dispatched: if there is no `getObjectSchema`, or the schema read fails, there is no plan, and the gate judges the record as it holds it.\n\n## Tests\n\nNew `wizardFormulaGate-35189.test.tsx`: an edit wizard with a required field on a skipped step, whose `visibleWhen` reads a formula.\n\n- An edit moves the formula out of the condition: the save goes through.\n- An edit moves the formula into the condition: the save is refused, and the wizard marks and opens the step that holds the field.\n- The `visibleWhen` reads an unservable formula (through a lookup): the field counts as shown and required, so the save is refused.\n- Two controls read the same condition straight off a stored column. They pass before and after the fix.\n\n<details><summary>Red on main, green with the fix</summary>\n\n- Fix applied: `VERDICT command-exit 0`, Tests 5 passed (5).\n- `WizardForm.tsx` taken from main (planObjectFormulas count 0): `VERDICT command-exit 1`, Tests 3 failed / 2 passed (5). The three formula legs are red and both controls are green. The fixed file was restored with a matching blob hash.\n</details>\n\n<details><summary>Package suite and type-check (tree f2cc860a)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-form/`: `VERDICT command-exit 0`, Test Files 238 passed (238), Tests 2678 passed / 1 skipped.\n- `pnpm --filter @object-ui/plugin-form type-check`: `VERDICT command-exit 0`. The test program lists the new test file.\n</details>\n\n## Acceptance notes\n\n- Explicit data-source prop with no renderer context (not filed, reach not measured). The step form plans its formulas from the `SchemaRendererProvider` context only (`useObjectFormulaPlan` in `form.tsx`), but `WizardForm` also accepts an explicit `dataSource` prop. A host that passes only the prop now gets a final gate that computes formulas and a step form that judges the stale value. After an edit that moves a required field into its condition, the gate refuses and opens a step whose form hides the field. Before this PR, the server refused that save with a 400 that named the same hidden field. Hosts that mount the renderer context (the Console) do not hit this. I did not reproduce it through a public entry point.\n- The residual where a missing or failed schema read gives no plan is unchanged.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates, 3 paths)</summary>\n\n- 38 derived commands. 37 exited 0 on the first pass. `pnpm --dir ui exec vitest run scripts/` was killed by the container's out-of-memory killer and was re-run under the verify lock with two workers: `VERDICT command-exit 0`, 171 files passed / 2 skipped.\n- `--ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` (merges cleanly with origin/main e4bfa339, 0 PR heads overlap).\n- Every other family is left to this PR's CI check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CajiB6BSQKWowy6YLB)_\n"
+}

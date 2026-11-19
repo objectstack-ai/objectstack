@@ -1,0 +1,35 @@
+{
+  "number": 35336,
+  "kind": "issue",
+  "title": "seed: a single-field externalId record whose key value is missing inserts another row on every load, with no warning (sibling of #34857)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "finding",
+    "lease:pkg-1",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T05:22:34Z",
+  "updated_at": "2026-11-19T07:28:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35336",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): the decision analysis for #34857 (area pkg-1 of seat repo:objectstack#5, file `objectstack-seat5/area-ux/pkg-1/decision-34857.md`), measured on `origin/main` `81c09477`. Filed on the seat's word (2026-11-19T05:19Z): stock count first, file if real. ⛔ Not a claim.\nReader: `domain:server` (`packages/metadata-protocol/src/seed-loader.ts`). Suggested-grade: p2 · same family and grade as #34857 and #34613.\nDedupe: `seed single externalId missing value duplicate`, `externalIdKey empty record inserted every load` in open issues: only #34857 (composite keys, ruled B1).\n\n## 维护者速读\n\n- 现象：种子数据集用单字段 `externalId`（默认 `name`），其中某条记录没填这个字段，其余记录填了。每次加载这条记录都多插一行，没有任何提示。\n- 影响：仓库内 26 个种子数据集都不踩（全部键值已填）；只影响作者自写的种子。文档 `content/docs/data-modeling/seed-data.mdx:313-318` 的示例整组都没有键，那是 #28952 已警告的另一种情况。\n- 修法建议：与 #34857 的裁决 B1 同一条规则，延伸到单字段键：加载时拒收这一条并点名对象、记录序号、字段和修法，其余照常。是否沿用 B1 由维护者确认。\n- 需要你做的：确认单字段键是否沿用 #34857 的 B1（分诊定级之外）。\n\n## What happens\n\nA seed dataset keyed on one field (`externalId: 'code'`, or the default `name`) where one record has no value for that field (undefined, null or `''`) while other records carry it. `externalIdKey` (`seed-loader.ts:5351`) answers `''` for that record, so it matches no stored row and is inserted again on every load. The #28952 warning (`seed-loader.ts` ~:1803-1811) fires only when EVERY record keys empty, so nothing is said.\n\nMeasured with the faithful in-memory engine of `seed-loader-empty-key-warn.test.ts`, three loads of `[{ name: 'A', code: 'a' }, { name: 'B' }]` keyed on `code`: row count 2 → 3 → 4, zero warnings. CONTROL (both records keyed): 2 → 2 → 2.\n\n`seed-loader-empty-key-warn.test.ts:172` (\"a dataset where some record carries the key is not warned about\") pins the silence for one load; a fix flips it.\n\n## Expected\n\nThe same rule Bill ruled for composite keys on #34857 (B1, ruling 7000515976) unless the maintainer says otherwise: at load, the one record with no key value is not written, the load result carries an error naming the object, record index, key field and the fix; other records and datasets load. A deferred reference (authored, resolves empty) is not caught: the check reads the key before references resolve.\n\n## Stock (read 2026-11-19T05:25Z)\n\n26 authored seed datasets (examples/app-showcase 20, app-crm 5, app-todo 1), every one with an explicit `externalId` and every record carrying it: 0 affected. Whitespace-only values are counted as keys (no trim) — not in scope. Hosted / customer stacks not read.\n\nRelated: #34857 (composite, ruled B1), #28952 (all-empty warning), #34613 (unkeyed seeds), #34856."
+}

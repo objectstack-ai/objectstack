@@ -1,0 +1,36 @@
+{
+  "number": 35363,
+  "kind": "pull_request",
+  "title": "docs(skills): area claims carry an Area: line instead of a per-area lease label",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T06:22:27Z",
+  "updated_at": "2026-11-19T07:00:44Z",
+  "closed_at": "2026-11-19T07:00:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T07:00:42Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35363",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgXFRsfSS1tQB1kBxAZ86579)_\n\nPart of #35350\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；派发规则不再让各区给卡挂「lease:区名」标签，区名改写在认领评论的 Area 行里。\n- 为什么做：你说每开一个区就多一个标签，仓库会乱，同意改成写在认领评论里并更新技能文本。\n- 出错会怎样：只是派发记账方式变了，别的区仍能从认领评论和指派人看出卡已有人做；撤回本次改动即恢复旧写法。\n- 要你做什么：无，席位审核后落地；旧标签的删除在本次合并之后另做。\n\n## What changes\n\nRuling-ref: the maintainer, 2026-11-19, seat 5 project thread, verbatim: 「派发是需要加上 lease 标签吗？仓库中会搞出一堆混乱的标签」 (05:56Z); after seat 5 proposed dropping the per-area label in favour of the claim comment, the assignee and the seat's area table: 「同意，立卡更新skills」 (05:57Z). Quoted on the card body.\n\nThis PR is the card's item 1 (skill text) only. Item 2 (deleting the existing per-area labels) runs after this merges and is not in this diff, which is why the card stays open.\n\n1. `.claude/skills/pm-dispatch/references/area-lease.md` (line count unchanged, 71):\n   - Pre-claim re-read: the \"leave it alone\" signal for another area is now another area's `Area:` line (in a `Claim:`), beside the existing other-assignee and other-`Claim:` checks; it no longer names a label.\n   - Claim: the dispatch pair no longer adds a per-area label in the same write; the `Claim:` comment carries an `Area: AREA` line.\n   - Post-claim read-back checks `pm:dispatched` and the assignee only.\n2. `.claude/skills/pm-dispatch/references/lanes/objectstack.md` (line count unchanged, 35): area names stay lane-unique and seat-prefixed; the sentence that the label follows the area name is replaced by \"the area name lives only in the lease table and the claim comment's `Area:` line\".\n\nNo script reads the per-area label family: `git grep` of `lease:` over `scripts/pm/**` and `.github/workflows/**` at base 3819afeca1 matches only `Release:`-family lines, a prose comment in `fleet-token.mjs` about the write lease, and the label seeder in `ensure-pm-labels.sh` (a creator, not a reader; see Acceptance notes).\n\n## Tests\n\nText-only diff under `.claude/**`; no package is touched, so no build or package test is owed. Gates below.\n\n## Acceptance notes\n\n- `scripts/pm/ensure-pm-labels.sh` still seeds eight per-area labels (the server lane's pilot areas A1 to A5, E1, E2, E2b) in a loop, and its header comment still describes an area session hanging the label at claim time. Once card item 2 deletes those labels, any rerun of the vocabulary script (default or reconcile mode) recreates them. That block is left untouched here (outside this PR's skill-text scope); it should be removed together with the item-2 deletions, or in a follow-up on the same card. `check:pm-label-desc-cap` has a floor of 12 descriptions against 52 today, so dropping the loop does not trip it.\n- The SKILL.md `Claim:` template has no `Area:` row; area sessions get the line from `area-lease.md`'s claim rule. Not changed here (the card names only the area-lease and lane lines).\n\n## Verification\n\n<details><summary>Local gates at head 37684a55c1</summary>\n\n- `node scripts/pm/check-skill-line-ratchet.mjs` → exit 0; `area-lease.md is 71 lines (ceiling 71; headroom 0)`, `lanes/objectstack.md is 35 lines (ceiling 35; headroom 0)`. Every edited line is within the 120-byte line budget (120, 114, 116, 107 bytes).\n- `pnpm check:pm-skill-id-lint` → exit 0; `self-test: 23 cases pass`, `120 file(s) clean`.\n- `node scripts/pm/overlap-check.mjs` → `VERDICT clean exit 0`: merges cleanly with origin/main (3819afeca1) and with the one open PR sharing a file, #35337 (`area-lease.md`).\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 19 families from this diff; all 19 run locally, each exit 0; `--ran` reconciliation: `19 run, 0 NOT-MEASURED (a DERIVED zero)`.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaAqjP52wVTzs99H5G\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CaAqjP52wVTzs99H5G -->\n"
+}

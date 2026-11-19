@@ -1,0 +1,33 @@
+{
+  "number": 35344,
+  "kind": "issue",
+  "title": "Offboarding hand-over (#30205) moves owner_id on every business object, so a leaver's timesheets, expense reports and votes are handed to the successor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T05:44:14Z",
+  "updated_at": "2026-11-19T08:04:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35344",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: user-visible wrong data. The maintainer ruled it p1 on 2026-11-19.\n\n**Business reason.** When an administrator offboards a user and hands their work to a successor, the successor becomes the owner of records whose owner is, by rule, the person who did the work:\n- the leaver's timesheets (\"Person\");\n- their expense reports (\"Submitted By\") and expenses (\"Spent By\");\n- their travel requests (\"Traveler\");\n- their forecast snapshots, where the owner is part of the identity key;\n- their knowledge-article votes, unique per (article, owner).\n\nAfter the hand-over the successor appears to have logged the leaver's hours and spent the leaver's money. Approvals and reports then read wrong. This is the same question the maintainer settled for Change Owner on #35315: owner transfer must not be offered on every object.\n\n**Reach (read on `origin/main` 81c09477).** `userAssignedWorkFields` in `packages/core/src/security/user-assigned-work.ts` ~88–110 lists every non-`readonly` field that references `sys_user` on every object that is not `sys_*` and not `managedBy`. #30646 added the injected `owner_id`, so the platform owner column of every user-owned object is in the roster, `controlled_by_parent` details included. On HotCRM all 38 objects carry `owner_id` (none declares `ownership`), including line items, invoices, payments and time entries.\n\n**Expected:**\n- The roster's `owner_id` entries follow the same object-level switch #35315 introduces (`userActions.transfer`, with its derived default: off for `controlled_by_parent` details, on otherwise, author-overridable). An object whose switch is off does not hand its `owner_id` over. The panel can still count those records, so the admin knows they exist.\n- App-authored user fields (assignee, approver) are unchanged.\n- Until the switch exists, `controlled_by_parent` details should at least not be in the hand-over, since their access follows the master.\n\n**Order:** lands with or after #35315's object-level switch; it reads the same predicate.\n\n**Dedupe:** searched `offboarding owner_id`, `userAssignedWorkFields`, `hand-over timesheet`. The nearest is #30646 (closed), which added `owner_id` to the roster, the opposite direction. #30205 is the original feature (closed).\n\n**Reader.** objectstack triage routes it to the owning lane. Not a claim. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「都同意，立卡 p1」, after an independent fable-tier review of which objects should offer Change Owner."
+}

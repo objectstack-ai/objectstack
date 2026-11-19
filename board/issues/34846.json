@@ -2,8 +2,8 @@
   "number": 34846,
   "kind": "issue",
   "title": "install-local dryRun re-install: answerUpgradeDryRun calls planUpgrade unguarded, so a stored copy the resolver refuses throws instead of being answered",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
+    "lease:pkg-1",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-17T13:33:32Z",
-  "updated_at": "2026-11-18T16:29:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T06:42:22Z",
+  "closed_at": "2026-11-19T06:41:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34846",
   "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class a, an out-of-scope finding of the #34583 dev round (PR #34844, report 6949492912), measured by that dev with a throwaway probe. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p2 · the same family as #34583 and #34432 (install-local answers a resolver refusal)\n\n## 维护者速读\n\n- 现象：本地安装接口带 `dryRun: true` 重装一个包时，如果「已经装着的那份」被今天的校验拒收，接口不是回一个说清原因的 422，而是直接抛错。代码库自己的记录(#34574 的测试头注)说，这种抛错到传输层会变成 500。\n- 为什么要修：真装一次走的是 #34583 修好的那条路，会回 422 并点名已装副本；预演却抛错。同一个包，预演和真装的回答不一样。\n- 需要你做的：无(分诊定级)。\n\n## What (reported by the dev, read from code; the 500 not re-measured)\n\n`answerUpgradeDryRun` (private, `packages/cloud-connection/src/marketplace-install-local-plugin.ts`) calls `manifest.planUpgrade(installed, incoming)` without the pre-resolve that step 2c″ does. With a booted ObjectQLPlugin's `planUpgrade` (objectql `planPackageUpgrade` → `sideOf` → `resolveStackCollection`), a stored copy that still carries the retired bare `indexes[].unique: true` made the handler THROW `INVALID_ARTIFACT_PACKAGE_ENTRY` 422 instead of answering. This was measured at the handler at `32bda83ef0`. The transport renders it as 500 according to #34574's real-runtime test header; that part was not re-measured.\n\n## Change (suggested by the dev)\n\nPre-resolve each side the way 2c″ does after PR #34844, and answer with `declaredRefusalAnswer(manifestId, err, side)`. Pin it like PR #34844's pins: installed refused, incoming refused, and a CONTROL.\n\n## Notes\n\n- Open PR #34791 also touches this file. Run the overlap check at claim time.\n- Lands after PR #34844, which adds the `side` argument this reuses.\n\nDedupe: `answerUpgradeDryRun` (4 hits, none open on this), `install-local dry run planUpgrade refused` (6 hits; only #34583 open, the sibling).\n\nBlocked-by: #34583"

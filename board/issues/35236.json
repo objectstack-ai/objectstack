@@ -2,8 +2,8 @@
   "number": 35236,
   "kind": "issue",
   "title": "pm-dispatch: split references/platform-readings.md by subject (step 5)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "area:fleet",
-    "pm:queue",
-    "priority:p2"
+    "lease:fleet-1",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-18T17:29:33Z",
-  "updated_at": "2026-11-19T01:12:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T08:06:49Z",
+  "closed_at": "2026-11-19T08:06:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35236",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\n\n## What to do\n\nStep 5. Split `.claude/skills/pm-dispatch/references/platform-readings.md` into smaller files by subject, so a run reads only the readings it needs. Measured readings keep their content. Readings that no longer describe the platform are listed in the PR for the maintainer, not silently dropped.\n\n## Done when\n\nNo single readings file carries unrelated subjects, every pointer to the old file resolves, and the skill gates pass."

@@ -1,0 +1,33 @@
+{
+  "number": 35339,
+  "kind": "issue",
+  "title": "Units of measure on the platform: a standard unit list, quantity fields that carry their unit, and conversion",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T05:35:09Z",
+  "updated_at": "2026-11-19T08:12:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35339",
+  "body": "③ maintainer-directed task · Source: maintainer — 「先立卡，不需要fable，我会用新的agent账户接着评审」「立 objectstack 卡就可以」 (2026-11-19T05:33Z, planning thread on marketplace suites), answering the proposal that units of measure belong at the platform layer.\n\n## 维护者速读\n- **问题：** 平台有币种，但没有计量单位。CRM、SRM 和以后的生产套件各写各的单位（SRM 现在是随手填的文字，CRM 订单行根本没有单位），数量跨套件、跟 ERP 都对不上，箱和个、千克和吨也没法换算。\n- **要做：** 平台提供一份标准单位表、带单位的数量字段和换算。单位表客户能扩，像箱、托这类各家不同；每个物料自己的包装换算留在套件里。\n- **不做会怎样：** 每个套件各造一套单位，以后想对接，就得先清洗历史数据。\n- **你要做的：** 无。待评审账户给出设计意见后再定。\n\n## Business reason\nWho benefits: every managed suite that records a quantity, and the customers who run one of them next to an ERP.\n\n- **Sell side.** hotcrm sales order lines and quote lines carry a `unit_price` but no unit at all.\n- **Buy side.** hotsrm has `srm_material.uom` and `srm_delivery_record.uom` as free text with `maxLength: 20`. \"kg\", \"KG\", \"千克\" and \"公斤\" are four different values there.\n- **Production.** The planned production suite (the one EE customer builds production management) lives on unit conversion: bills of material, material issue, finished goods.\n\nThe cross-suite master-data ruling on #35328 (A: each suite owns its records, matched by contract keys) only works if quantities mean the same thing on both sides of a match. A unit is the quantity's half of that contract, the way ISO 4217 is the amount's half.\n\nIf this isn't done, each suite ships its own unit list. Every later ERP or cross-suite link then starts with a data-cleaning project.\n\n## What the platform has today (read, not measured)\n- Three standard value domains, `iana_time_zone`, `iso_4217_currency` and `iso_3166_alpha2`, at `packages/spec/src/shared/value-domain.zod.ts:96-100`. Its header records the 2026-09-02 ruling that the vocabulary **\"does not widen\"**, so adding a fourth member is itself a ruling, not a dev choice.\n- Multi-currency (ADR-0144): a record currency in a sibling code field, dated rates, and a home-currency amount stored at write. This is the nearest existing pattern for \"a number plus the code that gives it meaning, plus a conversion\".\n- Nothing for units. `uom` in `packages/spec/src`: 0 hits; `unit of measure` / `units of measure` in open issues: 0.\n\n## Questions for the review (not prescriptions)\n1. **Code list.** A fixed standard list (UN/ECE Recommendation 20 common codes) as a value domain, which needs the \"does not widen\" ruling reopened? Or a platform reference object that ships the standard set and lets an organization add its own packs (case, box, pallet)? Or both: standard codes fixed, org packs added?\n2. **Quantity shape.** A number plus a sibling unit-code field, mirroring ADR-0144 D1, or a new field type? What does each do to formulas, summaries, reports and import?\n3. **Conversion split.**\n   - Fixed-ratio conversions inside a dimension (kg↔t, m↔cm) are universal, so the platform should own them.\n   - Item-specific packs (1 case = 24 each of item X) belong to the suite that owns the item.\n   - Should the platform give only the table shape and the conversion function for packs, with the rows staying in the suite?\n4. **When conversion happens.** At write, like ADR-0144's home projection, or at read and report time? What about rounding and decimal places per unit?\n5. **Enforce-or-remove (ADR-0049).** Which consumer reads the unit on day one? Validation of compatible units on a summary, conversion in a report, and a formula function are the candidates. A declared unit nobody reads is inert.\n\n## Non-goals\nInventory, costing and valuation stay with the suites and the ERP. Unit-master sync from an ERP goes through connectors or one-way sync-in (ADR-0153). No suite-side migration is in scope; each suite adopts the result in its own repo.\n\n## Reader\n1. The maintainer's reviewing agent account reads this first and writes the design opinion; per the maintainer, no fable pass on this card.\n2. After his decision, a `packages/spec` / data seat implements.\n3. hotsrm and the production suite are the first adopters.\n\n## Prior rulings read\n`value domain`, `currency`, `uom`, `unit of measure` → ADR-0144 (pattern to mirror), and the value-domain ruling of 2026-09-02 (\"vocabulary does not widen\", recorded in `value-domain.zod.ts`) → constrains question 1. Also #35328 (ruled A, 2026-11-19), which this complements.\n\n## Dedupe\n- `repo:objectstack-ai/objectstack is:issue uom` → 0.\n- `\"unit of measure\"` → 5, all closed, none on this capability.\n- `\"units of measure\"` → 1, closed, unrelated.\n\n## Grade\n`area:data · Feature · maintainer-sourced (not table-graded) · reach: hotsrm free-text uom, hotcrm order lines without unit (read) · evidence: read` → p3 pending the review; the maintainer may regrade.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 35379,
+  "kind": "issue",
+  "title": "metadata-protocol: the _env address admission still asks the bundle's environment item with the raw member selector, so a read naming no member can split from ?member=en-US",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T07:17:32Z",
+  "updated_at": "2026-11-19T07:49:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35379",
+  "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class a, a follow-up named by the contract review of PR #34910 (card #34682; delta record on e90a02e17b, nit N7 and the reviewer's note to the seat), and by the dev's report 7002321737. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p3 · read off the tree, not measured; the same class #34682 fixed at four other sites\n\n## 维护者速读\n\n- 现象：#34682 之后，按名字读分成员的元数据（如邮件模板）且不指定成员时，四个入口都只问规范成员 `en-US`。但 `_env` 地址的准入判断（`admitEnvironmentQualifier`）仍用原始选择器问环境项。在某种存储组合下，同一请求不写成员和写 `?member=en-US` 可能得到不同答案。\n- 为什么要修：规范说“不指定成员 = 规范成员，是同一个请求”。\n- 需要你做的：无（分诊定级）。\n\n## What (read off the tree by the reviewer, not run)\n\n`admitEnvironmentQualifier` in `packages/metadata-protocol/src/protocol-exact-qualifier.ts` asks the environment item with the raw selector. Naming no member, `pickBundleMember` answers the canonical member, else the first entry. The reviewer's arrangement: a package-less `fr-FR` row plus a row stamped to a package, no shipped holder, after a restart. The `_env` address is admitted naming no member and refused 409 naming `en-US`. Unmeasured.\n\nThe caller-arm resolver (`resolveCallerPackageAddress`) also asks with the raw selector. The reviewer finds that it reaches no door with a bundled type: `?callerPackage=` is `dataset` only. Fold it in only if that changes.\n\n## Done when\n\n`admitEnvironmentQualifier` asks at `bundleMemberDiscriminator(type, member)`, as `admitExactQualifier` does since PR #34910. A pin shows the `_env` read naming no member equals naming `en-US` for the arrangement above, after a restart. The docblock sentence \"so it reaches no door\" in `protocol-bundle-members.ts` is then true as written.\n\n## Notes\n\n- Lands after PR #34910 (same files).\n- If the split is real, the move is from one answer to the other on a read; whether it narrows (and needs an ADR-0087 entry) is decided once it is measured.\n- Dedupe: `admitEnvironmentQualifier`: no open issue."
+}

@@ -2,8 +2,8 @@
   "number": 35068,
   "kind": "issue",
   "title": "skills: an AI-confirmation-gated action does not guard the field it changes; teach \"gated action + a field lock\" for an irreversible transition",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "lease:ai-1",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-18T01:23:49Z",
-  "updated_at": "2026-11-18T16:04:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T05:47:20Z",
+  "closed_at": "2026-11-19T05:38:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35068",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFiling gate: the maintainer's word in the verification seat's session on 2026-11-18. Asked about three product questions from round 2, analysed against the code and prior rulings, the maintainer answered, verbatim: 「三个问题 同意」. This card executes the second answer: the confirmation gate is **not** widened to `update_record`; authors are taught to lock the field.\n\n## Why\n- **What happened:** on scenario card `service_desk` (`qa#1` round 2, round record on #31433), the close action is declared `ai.requiresConfirmation: true`. It answered `428 ACTION_CONFIRMATION_REQUIRED`, and the agent then set `status=closed` with the raw MCP `update_record` tool. The update was accepted.\n- **The gate is meant that way.** It reads only the action's declaration (`packages/runtime/src/action-execution.ts`, the comment near the gate: the other doors sit \"OUTSIDE this gate … Widening that set is its own decision\"; and \"The gate makes forgetting loud. It does not prove a human.\"). Its scope is the action call (`packages/spec/src/contracts/ai-service.ts`). Widening it to `delete_record` was its own ruling (#30813); widening it to `update_record` is declined by the answer above.\n- **The trap is in the authoring.** An author who writes `requiresConfirmation` easily believes the AI cannot make the transition, while the same state stays one raw write away (AGENTS.md PD10: keep the claim as narrow as the enforcement).\n\n## Scope\n1. **Verify first, before writing any text.** Check whether an action body's own write to a field declared `readonly: true` (or `readonlyWhen`) is kept or stripped, i.e. whether a script action can still make the transition once the field is locked against direct writes. The analysis could not verify this. If it is stripped, the taught pattern is a permission set that withholds `edit`, plus a `state_machine` validation rule, instead of `readonly`.\n2. **Skills:** teach that an irreversible transition is a gated action plus a field lock on the state it changes. The lock is one of: `readonly`, `readonlyWhen`, a `state_machine` validation rule (ADR-0020), or a permission set without `edit`. State plainly that `requiresConfirmation` guards the action door only. Files: `skills/objectstack-ai/**` and `skills/objectstack-automation/references/state-machines-and-approvals.md`.\n3. **Two items noted for other lanes, not this card's surface:**\n   - the 428 refusal text adds \"do not complete the same change with another tool\" (#34325, noted there);\n   - the scenario build prompt asks for the field lock (#34887, noted there).\n\nFound by: `qa#1` routine round 2, scenario half (round record on #31433), service_desk `close_ticket`."

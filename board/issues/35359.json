@@ -1,0 +1,36 @@
+{
+  "number": 35359,
+  "kind": "pull_request",
+  "title": "fix(app-shell): AI chat publish seed warning says the pack sentence, not engine text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T06:05:26Z",
+  "updated_at": "2026-11-19T06:49:28Z",
+  "closed_at": "2026-11-19T06:49:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T06:49:26Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35359",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6v19uPsX6gX42G8tGcvvzb)_\nFixes #35303\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:在 AI 对话页发布草稿时,如果示例数据(seed)载入失败,警告提示的详情行改为语言包里的那句「示例数据未能加载。」,不再显示 seed 载入器的英文内部报错,也不再显示 `[object Object]`。\n- 为什么改:用中文发布的搭建者会在警告下看到英文引擎文本,或在只有逐行错误时看到 `[object Object]`;#32984 的裁决是面向用户的文字只用客户句。首页「全部发布」已由 #35301 改好,这是同族的第二个入口。\n- 风险与回滚:只改 `onPublishDrafts` 里警告详情取哪句话,另把引擎文本与错误行原样打到浏览器控制台(`console.warn`);不动接口、语言键和导出。回滚即 revert 本 PR。\n- 先看:`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`(`onPublishDrafts` 里 `console.ai.seedWarn` 那一处 toast);`ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.seedWarnPackSentence-35303.test.tsx`;`.changeset/35303-ai-chat-seed-warn-pack-sentence.md`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/console/ai/__tests__/AiChatPage.seedWarnPackSentence-35303.test.tsx`,预期 6 个用例全绿(en 与 zh-Hans 两种语言)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`AiChatPage`'s `onPublishDrafts` warns `console.ai.seedWarn` when the publish answers `seedApplied.success === false`. The warning's description used to be `seedApplied.error` (the seed loader's engine text), else `String(seedApplied.errors[0])`, which reads `[object Object]` for a structured `{ row, reason }` row.\n\nThe description is now always the pack sentence `chatbot.build.health.seedFailed`: the sentence the chat's publish-health line says for the same failure and the one *Publish all* says since #35301 (objectstack#32984 Q1 ruling: user-facing text is the customer sentence, never developer or engine text). The engine text and the error rows go to `console.warn('[app-shell] Published, but the seed failed to load:', { packageId, error, errors })`, whole, and they still reach the health line's technical details through `publishHealthFromResponse`, which this diff does not touch.\n\nThe changeset is `patch` on `@object-ui/app-shell`. No locale keys, props or exports change.\n\n## Tests\n\nNew file `AiChatPage.seedWarnPackSentence-35303.test.tsx`, built on the `publishAdvisoryReachesAuthor` harness (the real handler, `useMetadataClient` and its client; stubbed `sonner`, `fetch` and the chat tree reduced to the button that fires `onPublishDrafts`), plus `I18nProvider` with the shipped `en` and `zh-Hans` packs. Its own file because `I18nProvider` installs a module-level i18next global, which would leak into the sibling pin's default-value reads.\n\n- engine-text arm: a batch whose `seedApplied` failed with `error` shows the pack's `seedWarn` title and `seedFailed` description; the engine text is absent from the toast and present in the one `console.warn` line;\n- structured-row arm: a batch whose `seedApplied` failed with `errors: [{ row, reason }]` and no `error` shows the pack sentence, never `[object Object]`; the row reaches `console.warn` as an object;\n- CONTROL: a seed that loaded raises no warning, no seed console line, and one `publishOk` success toast.\n\nEach case runs in `en` and `zh-Hans` (6 cases).\n\n## Acceptance notes\n\n- Family check: the other `seedApplied` readers under `ui/` are `usePublishAllDrafts` (fixed by #35301), `publishHealthFromResponse` (already folds the detail under technical details) and the client's type declaration; no third toast producer was found.\n\n## Verification\n\nAll readings at head `09500fa40c`.\n\n<details><summary>Ablation: the old description restored on disk, 4 red / 2 green, then restored</summary>\n\nThe fix was committed first (da8a671b57). `node scripts/ablation-replace.mjs` replaced the new description with the old `seedApplied.error ?? String(seedApplied.errors[0])` expression: anchor 1 to 0, replacement 0 to 1, blob af4e13d997 to a8bb0a93e9. The subject resolves through source (relative import), so no build sits between the edit and the run.\n\n```\nExpected: \"Sample data failed to load.\"\nReceived: \"seed apply stopped at the seed for object 'crm_task': Reference not found: owner = \"ann\"\"\nExpected: \"示例数据未能加载。\"\nReceived: \"[object Object]\"\n Test Files  1 failed (1)\n      Tests  4 failed | 2 passed (6)\nablation-replace: ok restored: blob == HEAD (af4e13d9971d) and `git diff HEAD` is empty\n```\n\nThe 4 failures are the two defect arms in two locales; the 2 passes are the CONTROL cases.\n\n</details>\n\n<details><summary>Green on the fixed head</summary>\n\n```\npnpm --dir ui exec vitest run --maxWorkers=2 (new file + publishAdvisoryReachesAuthor)\n Test Files  2 passed (2)\n      Tests  9 passed (9)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --dir ui exec vitest run --maxWorkers=2 (console/ai/__tests__/ + the app-shell census and ratchet files that walk sources + the i18n and plugin-chatbot files that read sources)\n Test Files  105 passed (105)\n      Tests  1182 passed (1182)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @object-ui/app-shell run type-check (both tsc programs; the new test is in tsconfig.test.json's file list)\nos-verify-lock: VERDICT command-exit 0\n\neslint on the two touched source files: 0 errors (27 pre-existing warnings, none in the edited hunk)\n```\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 38 families)</summary>\n\nAll 38 derived families exited 0, including `pnpm --dir ui exec vitest run scripts/` (171 files passed, 2 skipped), `check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check-empty-changeset`, `check-adr-0087-registration`. Reconciliation: `dispatch-gates --ran` reports 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN, all with recorded exit codes. `overlap-check`: merges cleanly with origin/main. `check:new-line-citations` (ui): 0 new citations.\n\nThe full app-shell suite was not run locally; it is left to CI's Test UI.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbSphdunq2aJq7ktuY\n"
+}

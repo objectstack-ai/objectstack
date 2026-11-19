@@ -11,19 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "domain:ui",
     "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-18T19:07:33Z",
-  "updated_at": "2026-11-18T19:48:44Z",
+  "updated_at": "2026-11-19T06:27:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35250",
   "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, reproduced once in the console.\n\n**Business reason.** An app that adds a print page for an object (a quote, a contract) and does not author a record page expects the platform's synthesized record page when someone opens a record. Instead, the record opens as the printable document: no stage path, no tabs, no related lists, no edit flow. To keep a usable record page, the app has to author a placeholder record page that draws exactly what the default would. hotcrm keeps two such pages, `quote_detail.page.ts` and `contract_detail.page.ts`, only for this reason (objectstack-ai/hotcrm#2665, assessment comment 6988592923).\n\n**Reach (measured once).** hotcrm `main` `a2b7cc0b`, `@objectstack/*` 18.6.0, `objectstack dev`, Playwright:\n1. `quote_detail_page` is unregistered and `quote_print_page` (a print page) is kept. Opening a `crm_quote` record draws `quote_print_page`: header blocks, the line table and a Print button, with no path and no tabs.\n2. Control: with no page at all for `crm_contract`, the contract record draws the synthesized default page. Its text diff against the authored page differs only in timestamps and the record id.\n\nExpected: a print page is never a candidate for an object's record page. With no `isDefault` record page, the record route draws the synthesized default.\n\n**Seam.** `spec:Page` (print kind, `isDefault`) → `renderer:usePageAssignment`, the first-record-page fallback.\n\n**Reader.** objectstack triage grades it and routes it to the record-page lane. Not a claim; awaits triage.\n\n**Dedupe** (`search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed):\n- `usePageAssignment print page`: 8 hits. The nearest is #26583 (closed: print on a named print page), which is the feature, not this fallback.\n- `print page default record page fallback`: 644 hits, none on point in the top results.\n- `isDefault record page print`: 77. The nearest is #28979 (closed: an app's own `sys_user` record page), which is a different object."

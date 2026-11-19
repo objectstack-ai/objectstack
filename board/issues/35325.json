@@ -1,0 +1,38 @@
+{
+  "number": 35325,
+  "kind": "pull_request",
+  "title": "fix(spec): a deployment's validation override prints a written value as written",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T04:47:57Z",
+  "updated_at": "2026-11-19T05:53:37Z",
+  "closed_at": "2026-11-19T05:53:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T05:53:35Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35325",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgRuogP8Tp8XyFXLc92Bxvo6)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFixes #34509\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** `renderValidationMessage` 向部署方的 `validation.field.*` 覆盖文案只要模板(不再把参数交给 i18n 服务),由渲染器自己填一次占位符;两个 `translate` 选项的注释写明这一点。\n- **为什么改：** i18n 服务拿到参数会自己填一遍，渲染器再填一遍。用户写入的值里如果带 `{{label}}` 之类，第二遍会把它换成字段名，报错句子就引错了用户写的内容。\n- **风险与回滚：** 只改展示文字，错误码、状态码、返回的 `value` 字段都不变;只用 `{{name}}` 占位符的覆盖文案读出来与以前一样。函数签名不变。回滚即 revert 本 PR。\n- **先看：** `packages/spec/src/system/validation-message.ts` 中 `opts.translate(key, locale)` 那一行(原来带 `params`);`packages/spec/src/system/validation-message.override-once.test.ts`。\n- **两分钟验证：** `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/system/validation-message.override-once.test.ts`,预期 2 个用例通过。\n- **需要你做的：** 无，席位落地(合入前由区线程安排 L2 契约复核)。\n\n## What changes\n\n- `renderValidationMessage` (`@objectstack/spec/system`) asks the deployment override as `opts.translate(key, locale)`, with no params, and interpolates the answer once. Before, it passed `params` to the translator (which, like `FileI18nAdapter.t`, fills `{{name}}` itself) and interpolated the answer again, so a written value containing a placeholder was expanded on the second pass. This is the shape `renderOperationMessage` already has.\n- Fold-in (accepted nit N2 of contract record 6932332429): the `translate` option docblocks on `RenderValidationMessageOptions` and `RenderOperationMessageOptions` say the lookup is asked for the template with no params. The type `ValidationMessageTranslator` and both option signatures are unchanged (`check:api-surface`: unchanged).\n- Changeset: `@objectstack/spec` patch.\n\n## Tests\n\nNew file `packages/spec/src/system/validation-message.override-once.test.ts`: an interpolating translator (fills `{{name}}` from params, as `FileI18nAdapter.t` does) overrides `invalid_option_value`, which echoes `{{value}}`; the written value is `{{label}} plan`. The override path must print it as written. CONTROL leg: the built-in path (no override), which was already single-pass.\n\n<details><summary>Red leg (test committed before the fix, 128113d167)</summary>\n\n```\n× prints a written value containing a placeholder as written on the override path\nExpected: \"套餐的取值「{{label}} plan」无效，请从 basic, pro 中选择\"\nReceived: \"套餐的取值「套餐 plan」无效，请从 basic, pro 中选择\"\nTests  1 failed | 1 passed (2)\nos-verify-lock: VERDICT command-exit 1\n```\n</details>\n\n<details><summary>Green leg (c0ed09b721)</summary>\n\n```\nvalidation-message.override-once.test.ts + validation-message.test.ts + operation-message.test.ts\nTest Files  3 passed (3)\n     Tests  99 passed (99)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- A1 (callers that pass a `translate`): only `objectql` `record-validator` (through `engine-validation-messages.ts`) and `core` `import-coerce` (through `import-runner`) hand `renderValidationMessage` a translator; `rest` `form-routes`, `service-settings` and `service-messaging` `actor-reference` pass none. Every translator found is a wrapper over `II18nService.t` (`FileI18nAdapter.t`, the core memory fallback), which looks up by key and locale and uses params only to interpolate. None needs params at lookup time.\n- A2: the published `.d.ts` of `RenderValidationMessageOptions.translate` is still `translate?: ValidationMessageTranslator`; only its docblock changed. Clause-② no.\n- The test is a new file, as the claim's file surface names. The twin pin for `renderOperationMessage` sits in `operation-message.test.ts`; a reviewer who prefers the pin as a top-level `describe` in `validation-message.test.ts` can ask for the move.\n- The `RenderOperationMessageOptions` docblock is in `operation-message.ts`, not `validation-message.ts` as the claim's file surface reads; the claim names that docblock, so the one comment edit there is in scope.\n\n## Verification\n\nAll readings are at head `c0ed09b721`.\n\n- `pnpm --filter @objectstack/spec build`: `VERDICT command-exit 0`. The dependency closure of `@objectstack/spec` is empty.\n- `pnpm --filter @objectstack/spec test`: Test Files 856 passed (856), Tests 27366 passed, 1 todo; `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec typecheck`: `VERDICT command-exit 0`.\n- Gate families derived by `node scripts/pm/dispatch-gates.mjs --commands` (83): 80 exit 0, 3 exit 3 (PREREQUISITE NOT MET, they read workspace `dist/` not built here): `check:doc-formula-expressions` (`@objectstack/formula`), `check:dual-build-cjs-loads`, `check:lean-entry-closure` (`@objectstack/objectql`). NOT MEASURED locally; CI's `Lint & Repo Gates` runs them. `--ran` reconciliation: 83 derived, 80 run, 3 NOT-MEASURED, 0 UNRUN.\n- `check:api-surface`: public API surface and factory signatures unchanged. `check:docs`: 249 generated files in sync. `check:nul-bytes`: OK.\n- `pnpm check:dev-prereqs` (local only): exit 1, \"The workspace is not built\" (35 of 108 packages, all outside this diff). This is a reading of this machine, not of the diff.\n- `node scripts/pm/overlap-check.mjs --branch=claude/issue-34509-validation-override-once`: `VERDICT clean exit 0`.\n- `test:repo` and the full dogfood battery are not run locally: the title carries no `!` and no `(narrowing)` arm; CI's `Test Core` runs `test:repo`. Consumer packages' tests (`objectql`, `core`) are left to CI: the public surface is byte-unchanged in signature.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZiaBg6rk7dpy1s9Me)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 34414,
   "kind": "issue",
   "title": "objectql: the engine's aggregate door answers a sum over a formula with \"count the rows\", not the VIRTUAL_FIELD_AGGREGATE_REMEDY of ruling B",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
+    "lease:data-1",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-16T14:16:02Z",
-  "updated_at": "2026-11-18T16:17:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T06:30:06Z",
+  "closed_at": "2026-11-19T06:29:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34414",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② out-of-scope finding (class b, named producer) from the os-dev report on #32598 (comment 6918859900, cloud PR #4743). Reader: the `domain:server` lane (`packages/objectql`). Dedupe, open and closed: `aggregate-field-type-door remedy` (1 hit, #32598 itself) and `VIRTUAL_FIELD_AGGREGATE_REMEDY` (hits #32506, #32443, #32532, #32614, #24426, all closed, none about this door).\n\n## 维护者速读\n\n1. **问题**：对「公式」字段求和时，引擎直接拒绝，给的建议是「换一个能求和的字段，或者改成计数」。这和 #32443 的裁决 B 相反：正确做法是把它改成带同一表达式、按返回值类型存储的字段。\n2. **影响**：通过 MCP 用 `aggregate_records` 的 AI（例如客户本地的 Claude Code）会按这句话把「销售额合计」改成「记录条数」。cloud 的问数工具已经在 cloud PR #4743 里先拦下并给出正确建议；其他入口仍会走到这里。\n3. **修法**：引擎拒绝「对公式求和 / 平均 / 最大 / 最小」时，打印 spec 现成的那一句 `VIRTUAL_FIELD_AGGREGATE_REMEDY`，不再建议计数。\n4. **验收**：一个对公式字段求和的查询被拒，拒绝消息里含 `VIRTUAL_FIELD_AGGREGATE_REMEDY` 原句。\n5. **范围**：只改这一处拒绝消息，不改哪些组合被拒。\n6. **需要你做的**：无。\n\n## What happens\n\n- `packages/objectql/src/aggregate-field-type-door.ts` (objectstack main, around lines 220–221), for a refused `sum` / `avg` / `min` / `max`, prints: `\"<fn> accepts a field of type …: aggregate a field of one of those types, or count the rows with count.\"`\n- It prints this for a `formula` too. Measured by the #32598 dev on objectstack `cfcba539205` through cloud's aggregate path, before cloud PR #4743 put its own refusal in front.\n- Ruling B on #32443: a totalled computed value is a field of its return type carrying the same `expression`. The spec carries that sentence as `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`@objectstack/spec/data`), and `virtualFieldAggregateRemedy(fn, type)` judges the pair. The dataset-compile and lint legs print it. This door does not.\n- The remedy's TSDoc names only the compile and lint legs, so this is not a breach of a declared contract. It is the one refusal of the same pair that still sends the author to a count.\n\n## Expected\n\nWhen `virtualFieldAggregateRemedy(fn, fieldType)` holds for the first refused aggregation, the door's route is `VIRTUAL_FIELD_AGGREGATE_REMEDY`, not the count fallback. The route still comes first so it fits in the 500 characters the REST door keeps. Other refused pairs (text, select, JSON-stored) keep today's wording. One test: a `sum` over a `formula` is refused and the message contains the remedy sentence verbatim.\n\nRelated: #32443 (ruling B), #32598, cloud PR #4743, #32506."

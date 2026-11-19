@@ -1,0 +1,38 @@
+{
+  "number": 35335,
+  "kind": "pull_request",
+  "title": "chore(pm-dispatch): open card threads whenever a slot is free, a regrade alone dispatches nothing, a grade written on the maintainer's word is his",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T05:15:45Z",
+  "updated_at": "2026-11-19T06:55:27Z",
+  "closed_at": "2026-11-19T06:55:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T06:55:25Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35335",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ89VF6XAv3WmbiDeGV2WP8Gs)_\n\nFixes #35333\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: the maintainer, 2026-11-19, project thread, verbatim: 「同意」 (04:56:06Z), 「用 fable先评审你这个意见」 (04:56:19Z), decision card 「派发规则按 fable 评审怎么改?」 → 「加两行,并修代改级漏洞」 (05:05:52Z); quoted in full in the body of #35333, claim comment 7000373266.\n\n## 维护者速读\n\n- 改了什么：协调者有空位就开卡线程，先后只按卡上写明的阻塞排，不再一张等一张；您只说改级时只改级、不借机开工；车队按您原话代落的级（评论里写明落的是哪一级并引您原话）算您亲手定的，改标签工具会拒绝分诊或各席再改它（您自己再下令改仍然可以）；车道自己分诊的记录、认领评论里的引用不算，分诊照常可改判。\n- 为什么改：协调者把能同时做的卡串行派发；您同意加规则，fable 评审后您选了「加两行，并修代改级漏洞」。\n- 风险与回滚：只动规则文本和改标签工具里「谁定的级」这一个判断，不碰产品代码；回滚即 revert 本 PR。\n- 需要你做的：这是照抄您裁决的规则 PR，核对文字与裁决一致后合并即可。\n\n## What changes\n\n1. `.claude/skills/pm-dispatch/references/coordinator.md` (+2 lines)\n   - Section 二: `维护者只说改级 ⇒ 只落级,评论照 filing-gate.md 引原话;⛔ 不借此开线程,照取卡全序。` — p0 still dispatches the same round and p1 still jumps the order, because the pick order is unchanged.\n   - Section 三, beside the batch-open line: `有空槽即开;先后只认卡上 Blocked-by: 与席位串行队,⛔ 不自排、不逐张等。`\n2. `.claude/skills/pm-dispatch/references/filing-gate.md` (+1 line), beside the `labeled`-event line: `代维护者落的级:同笔评论行首 Ruling-ref: priority:pN 引原话才算人定;⛔ 不凭 bot 判车队。` The marker names the grade written, so a `Ruling-ref:` that cites something else is not his grade.\n3. `scripts/pm/label-write.mjs`: the hand-set grade check now also refuses a grade whose newest `labeled` event is the fleet's when the FLEET's own comment (same app/bot allow-list as the event) within `RULING_COMMENT_WINDOW_MS` (2 min) of it has a line opening `Ruling-ref:` followed by that event's grade (`GRADE_RULING_MARK`, `Ruling-ref: priority:pN`) — the fold of a write made on the maintainer's word. Any other `Ruling-ref:` reads as nothing: a lane seat's self-triage record citing the standing exception, a claim citing a ruling comment id, a line naming another grade, or one a person typed — so triage's 改判 of a self-triaged grade still lands. One extra comments read, only when a carried grade reads as the fleet's; an unanswered read refuses, never passes (same rule as the events read). A write that itself folds a `Ruling-ref:` naming every grade it sets still passes with no reads, so the maintainer can always regrade; the marker is read past backticks and a quote set tight after the grade. A folded `Ruling-ref:` that names no grade the write sets is asked as if absent: over a person's (or his) grade it is refused at step ② with the exact line to write (`Ruling-ref: priority:pX 「his words」`), and over a fleet grade it passes with a step ② line saying the new grade will read as the fleet's own — so the write door and the grade read agree. 19 new cases in the hand-set battery, whose pinned floor is raised 23 → 42 (the registered count).\n4. `scripts/pm/check-skill-line-ratchet.mjs`: ordinary ruled raises under the ruling above (record: claim comment 7000373266 on #35333). coordinator.md 49 → 51, measured delta +2; filing-gate.md 82 → 83, measured delta +1.\n\nRules 1 and 2 of the coordinator's original proposal (batch by default; sequence only on a real dependency) are NOT added: the fable review found them already written (`coordinator.md` 「一批开完…满即排队」, `execution-duties.md` 「同批独立按文件面不相交判」) and that adding them as worded would regress the overlap rule; the maintainer chose the two-line form.\n\n## Verification\n\n- `node scripts/pm/label-write.mjs --self-test` → `319 cases pass across 18 batteries` (head 210c64f35d).\n- `node scripts/pm/check-skill-line-ratchet.mjs` → green; `--self-test` 164 cases pass.\n- `pnpm check:pm-skill-id-lint`, `check:pm-governed-prose`, `check:pm-half-states` → green.\n- Every added skill line ≤ 120 bytes (116, 101, 118).\n- `node scripts/pm/overlap-check.mjs` → clean against origin/main and the one open PR sharing a file (#34110).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbYcNzR2Gtyq79H7GLB\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CaAqjP52wVTzs99H5G -->\n\n"
+}

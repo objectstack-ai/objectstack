@@ -1,0 +1,30 @@
+{
+  "number": 35340,
+  "kind": "issue",
+  "title": "Working calendars on the platform: working days, holidays and make-up workdays that deadlines, escalations and schedules count against",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "priority:p1",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T05:35:10Z",
+  "updated_at": "2026-11-19T06:22:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35340",
+  "body": "③ maintainer-directed task · Source: maintainer — 「先立卡，不需要fable，我会用新的agent账户接着评审」「立 objectstack 卡就可以」 (2026-11-19T05:33Z, planning thread on marketplace suites), answering the proposal that working calendars belong at the platform layer.\n\n## 维护者速读\n- **问题：** 平台没有工作日历。审批超时、服务时效、交期都按自然小时算，周末和节假日也算在内；国内的调休补班更没法表达。\n- **要做：** 平台提供工作日历，包括工作日、工作时段、节假日和调休，可以按组织、地区或工厂各设一份。审批、服务时效和日期公式都按它计算。\n- **不做会怎样：** CRM 的服务时效、SRM 的交期、生产排产各算各的，客户看到的到期时间互相矛盾。\n- **你要做的：** 无。待评审账户给出设计意见后再定。这张卡等于解冻以前搁置的「工作时间」那半边。\n\n## Business reason\nWho benefits: every suite with a deadline, and their users who expect \"due in 2 working days\" to skip the weekend and the National Day week.\n\n- **hotcrm.** The case SLA matrix counts wall-clock hours, with a prose warning to say so (outcome of #13801).\n- **hotsrm.** Delivery dates and audit or change-request deadlines.\n- **Production suite.** Every schedule.\n- **Approvals.** Escalation `timeoutHours` counts nights, weekends and holidays. The describe text at `packages/spec/src/automation/approval.zod.ts:865-872` says so: \"The platform ships no business-hours calendar\".\n\nChina adds a twist a fixed weekly pattern can't express: 调休 make-up working Saturdays and Sundays around public holidays.\n\nIf this isn't done, each suite computes due dates its own way. The same request then shows different due times in different apps.\n\n## History (read)\nThe business-hours capability is the parked **B-half of #13655** (ruling 2026-08-31, record 5478756633, cited from #13801; #13655 itself returns 404 to this session).\n- It was frozen with a **named-external-user unfreeze condition**.\n- The A-half, #13801 (closed, completed), made the wall-clock unit explicit instead of building a calendar. Its in-seat ruling (comment 5506987580) found a clock annotation inert while only one clock exists.\n- This card is the maintainer's own order to card the B-half. Whether that order meets the unfreeze condition is the reviewer's first question, not this card's assumption.\n\n## Questions for the review (not prescriptions)\n1. **Shape.** Working week and hours, holidays, date-specific overrides (调休 working days, plant shutdowns). Assigned per organization, business unit, region or plant, with a default. Time zone from the existing `iana_time_zone` domain.\n2. **Holiday data.** Shipped yearly sets per country (who maintains CN's yearly 调休 list?), or org-entered only, or imported?\n3. **First consumers (ADR-0049, enforce-or-remove).** Candidates:\n   - approval escalation (a business-time clock beside wall-clock);\n   - formula and date functions (`addWorkingDays`, `workingDaysBetween`);\n   - SLA due-date computation for hooks and flows;\n   - date macros in filters.\n   A calendar nobody reads is inert.\n4. **Clock declaration.** With two clocks, #13801's finding reverses: a clock marker on duration-shaped keys becomes readable. Which keys get it, and what is the default?\n5. **Boundaries.** Shift rostering (HR) and finite-capacity scheduling (production) are suite work on top of this, not platform.\n\n## Non-goals\nShift rostering, capacity planning, payroll calendars, fiscal periods (the ERP owns the books).\n\n## Reader\n1. The maintainer's reviewing agent account reads this first and writes the design opinion; per the maintainer, no fable pass on this card.\n2. After his decision, the automation/data seat implements.\n3. hotcrm (case SLA), hotsrm and the production suite adopt.\n\n## Prior rulings read\n`business hours`, `holiday`, `working calendar`, `wall-clock` → #13655 B-half frozen (named-external-user unfreeze), #13801 A-half closed completed with in-seat ruling 5506987580, #14483 (skills wall-clock clause, closed). Also #35328 (ruled A, 2026-11-19).\n\n## Dedupe\n- `\"business hours\"` → 14, all closed.\n- `\"business-hours\"` → 14, all closed.\n- `\"working calendar\" OR \"work calendar\"` → 19, all closed.\n- `holiday` → 14, all closed.\n\nNo open card covers the capability.\n\n## Grade\n`area:workflow · Feature · maintainer-sourced (not table-graded) · reach: approval escalation counts wall-clock (read, approval.zod.ts:865-872), hotcrm SLA matrix wall-clock · evidence: read` → p3 pending the review; the maintainer may regrade.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

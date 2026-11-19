@@ -13,17 +13,17 @@
   "labels": [
     "area:fleet",
     "pm:blocked",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-18T17:26:36Z",
-  "updated_at": "2026-11-19T01:08:24Z",
+  "updated_at": "2026-11-19T04:57:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35231",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\nBlocked-by: #35230\n\n## What to do\n\nStep 3. Slim the three entry files every run loads: `.claude/skills/pm-dispatch/SKILL.md`, the `os-dev` agent definition and the `checklist-test` skill. Each keeps what every run needs. Everything else moves to a reference file that is read only on the path that needs it. No rule changes meaning. The PR body lists each moved block and where it went.\n\n## Done when\n\nThe three files are shorter, every moved block is reachable from a pointer, and the skill gates pass."

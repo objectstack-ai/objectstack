@@ -11,20 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "area:build",
+    "area:data",
     "domain:spec",
     "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-15T16:53:10Z",
-  "updated_at": "2026-11-18T16:19:55Z",
+  "updated_at": "2026-11-19T06:29:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34034",
   "body": "security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f\n\nFollow-up to PR #34031 (review record 6898513749, S2).\n\n**Rule:** a share written through the direct-grant door is always a manual share. For a non-system caller, `SharingService.grant` answers `VALIDATION_FAILED` (REST 400) for any `source` other than `'manual'` and for any `sourceId`.\n\n**Gap:** the typed surface still offers what the service always refuses:\n1. **Spec contract.** The jsdoc on `ISharingService.grant` in `packages/spec/src/contracts/sharing-service.ts` lists the non-system refusals but not this one. Add it at the rule level. This is jsdoc only, with no type change: `GrantShareInput` keeps both fields because the system path uses them.\n2. **Client SDK.** The `shares.grant` options in `packages/client/src/index.ts` declare `source?: string` and `sourceId?: string`. The SDK is never the system context, so every SDK caller that sets either is refused. Drop `sourceId`, and type `source` as `'manual'` or remove it. This is a breaking type change in `@objectstack/client` with its own changeset and \"Who moves\".\n\nLeaving the types as they are and documenting the rule only in TSDoc is not recommended: an option that is declared but always refused invites the wrong call.\n\nSize S. Lands after PR #34031.\n"

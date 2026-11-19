@@ -1,0 +1,33 @@
+{
+  "number": 35314,
+  "kind": "issue",
+  "title": "console: the default record page draws a field whose object-level visibleWhen is false (the default form hides one whose visibleWhen holds; the two disagree)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T04:27:24Z",
+  "updated_at": "2026-11-19T07:23:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35314",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, measured once.\n\n**Business reason.** A field that only applies in one state (\"Request Qualification Approval\" while approval is not required) shows on the record page when it should not. Readers see empty or misleading fields, and the page and the form disagree about the same record.\n\n**Reach.** Measured in objectstack-ai/hotcrm PR #2671 (`@objectstack/*` 18.6.0, `objectstack dev`). On a pending opportunity with Qualification Approval = Not Required, *Request Qualification Approval* and *Qualification Approval* (both `visibleWhen … != \"not_required\"`) are drawn on the synthesized default record page. The opposite direction on the default **form** is objectstack-ai/objectstack#35249 (it hides a field whose predicate holds). #35249's body says this direction was not measured.\n\n**Expected:** the default record page honours a field's `visibleWhen` the same way the form does.\n\n**Seam.** `renderer:plugin-detail` `buildDefaultPageSchema` (field sections from `fieldGroups`) against `spec:Field.visibleWhen`.\n\n**Dedupe:** `default record page visibleWhen false field drawn` returned 24 hits; the nearest is #35249, which is the form-side twin. None covers the page side.\n\n**Reader.** objectstack triage grades it and routes it to the owning lane. Not a claim; awaits triage. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「平台缺口全部立卡」, after an independent fable-tier review of HotCRM's pending decisions surfaced it."
+}

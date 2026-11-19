@@ -1,0 +1,36 @@
+{
+  "number": 35331,
+  "kind": "pull_request",
+  "title": "fix(components): a list row's Edit or Delete greyed by disabledWhen says why",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T05:09:09Z",
+  "updated_at": "2026-11-19T05:58:11Z",
+  "closed_at": "2026-11-19T05:58:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T05:58:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35331",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg48yiCyRmnqoUoHcQ9VbBp6)_\n\nFixes #35293\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：列表（数据表）每行「⋮」菜单里的「编辑」「删除」，在对象写了 `userActions.edit.disabledWhen`（或 `delete.disabledWhen`）且条件成立而变灰时，现在在菜单项标签下方显示第二行原因「对此记录不可用」（已有通用句，11 种语言已有翻译），读屏也能读到；与 #35288 给记录页「···」菜单的样子一致。\n- **为什么改**：裁决 6996106574（路线 B，通用原因，不改协议、不加键）。记录页自 #35288 起已说明原因，列表行仍然无声。\n- **风险与回滚**：只改界面一个组件，不改协议、不加可写键、不加翻译键。按钮可用（未写条件或条件不成立）时不显示原因，和以前完全一样。回滚＝还原本 PR。\n- **先看**：`ui/packages/components/src/renderers/complex/data-table.tsx` 的 `DataTableBuiltinRowActionItem`（原因只在声明的 `disabledWhen` 成立时给，且在提前返回之前调用钩子）；`data-table-builtin-row-action-predicates.test.tsx` 新增的 describe。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/components/src/renderers/complex/__tests__/data-table-builtin-row-action-predicates.test.tsx`，预期 9 条全绿，其中「a disabledWhen-greyed item says why」4 条通过。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `DataTableBuiltinRowActionItem` (the data-table row menu's built-in Edit / Delete) now hands its `disabledWhen` verdict to the existing `useDisabledReason` hook, the one `DataTableRowActionItem` in the same file already uses for custom row actions. When the declared `disabledWhen` holds, the item shows the generic `actions.notAvailableForRecord` sentence as a visible second line under its label (`DisabledReasonMenuLabel`) and as its accessible description (`menuItemReasonAria`); its accessible name stays the label. That is the overflow-entry face #35288 gave the record page.\n- `userActions` declares no reason key, so the sentence is always the generic one (ruling 6996106574, route B).\n- An item that is on, with no predicate or with a predicate that does not hold, renders exactly as before: bare label, no ARIA added.\n- No `packages/spec/**` change, no new i18n key, no new exported prop or type.\n\n## Tests\n\n<details><summary>Local runs, head 2170bf0b</summary>\n\n- New describe in the existing harness `data-table-builtin-row-action-predicates.test.tsx`: Edit and Delete greyed by `disabledWhen` show the reason as a visible second line and description, and are still found by role `menuitem` with the label as name; controls: no predicate gives no reason, a predicate that does not hold gives no reason.\n- `pnpm --dir ui exec vitest run` on the 4 data-table row-action files: `Test Files 4 passed (4)`, `Tests 48 passed (48)`, lock `VERDICT command-exit 0`.\n- Wider: the 35 `data-table*.test.tsx` files in `@object-ui/components` plus the 7 ui test files outside it that render built-in row predicates (plugin-detail, plugin-designer, plugin-view, app-shell): `Test Files 42 passed (42)`, `Tests 262 passed (262)`, lock `VERDICT command-exit 0`. plugin-grid has its own row item and is not touched.\n- `pnpm --filter @object-ui/components run type-check` (both `tsc --noEmit` and `tsc -p tsconfig.test.json`): lock `VERDICT command-exit 0`.\n- Ablation (one, on the tested behaviour), via `scripts/ablation-replace.mjs`: `useDisabledReason(disabled)` replaced with `useDisabledReason(false)` (anchor 1 to 0, blob `d0f38ee7` to `07aaebe3`). Result: `Tests 2 failed | 7 passed (9)`; the two red are the two positive pins (edit, delete), every control stayed green. Restored by the tool: blob back to `d0f38ee7` = HEAD blob, `git diff HEAD` empty. No dist step: the test imports the component from source by relative path.\n\n</details>\n\n## Acceptance notes\n\n- Out of scope, same family, not changed here (fence: file surface is `data-table.tsx`): plugin-grid's `BuiltinRowActionItem` in `ui/packages/plugin-grid/src/components/RowActionMenu.tsx`, the row menu `ObjectGrid` draws for an object's list view, greys the built-in Edit / Delete under `disabledWhen` with the same silence (`DropdownMenuItem disabled` plus label, no reason). Named producer: the showcase `invoice` object declares `userActions.edit.disabledWhen` on `record.status == 'paid'`. Reported to the seat for the family.\n\n## Verification\n\n<details><summary>Gate families derived for this diff</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at 2170bf0b derived 38 families; all 38 ran locally and exit 0 (`--ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN, a derived zero with every exit code recorded). `pnpm --dir ui exec vitest run scripts/`: `Test Files 171 passed | 2 skipped (173)`. `pnpm check:new-line-citations`: `0 new citation(s)`. `test:repo`, repo-wide scans and the remaining CI families are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

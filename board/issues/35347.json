@@ -1,0 +1,37 @@
+{
+  "number": 35347,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): a dry-run re-install answers a resolver refusal of either side with its 422, never a throw",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T05:49:23Z",
+  "updated_at": "2026-11-19T06:41:37Z",
+  "closed_at": "2026-11-19T06:41:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T06:41:35Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35347",
+  "body": "Fixes #34846\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：本地安装接口带 `dryRun: true` 预演重装时，如果「已装副本」或「新包」被今天的校验拒收，现在回 422 并点名是哪一份被拒，而不是直接抛错（传输层表现为 500）。\n- 为什么改：真装一次早已回 422 并点名已装副本；同一个包预演却抛错，预演和真装的回答不一致。\n- 风险与回滚：低。只在预演路径上、调用 `planUpgrade` 之前加一次与真装 2c″ 完全相同的预解析；两份都合法时行为不变（CONTROL 用例钉住）。回滚即 revert 本 PR。\n- 先看：`packages/cloud-connection/src/marketplace-install-local-plugin.ts` 的 `answerUpgradeDryRun` 新增的三行与抽出的 `upgradeSideRefusal`；其次新测试文件 `marketplace-install-local-dry-run-refusal-34846.test.ts`。\n- 两分钟验证：`pnpm --filter @objectstack/cloud-connection exec vitest run src/marketplace-install-local-dry-run-refusal-34846.test.ts`，预期 4 个用例全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `answerUpgradeDryRun` (the `dryRun: true` branch of `POST /api/v1/marketplace/install-local`) now pre-resolves both sides before `planUpgrade` folds them, and answers a resolver refusal with `declaredRefusalAnswer(manifestId, err, side)`: the refusal's own declared status and code, with the sentence naming the stored copy (and the remedy) or the incoming package. Before, the refusal left the door as a throw.\n- Step 2c″'s pre-resolve (incoming side first, then the installed side, each in its own `try`) is extracted unchanged into one module-private helper, `upgradeSideRefusal`, which both readers now call: `evaluateDeclaredRenames` and `answerUpgradeDryRun`. An undeclared throw is still rethrown, never relabelled.\n- The 503 for a runtime with no `planUpgrade` is still answered first, as before.\n- Patch changeset for `@objectstack/cloud-connection`.\n\n## Tests\n\nNew file `packages/cloud-connection/src/marketplace-install-local-dry-run-refusal-34846.test.ts`, driven through the real handler (harness as in the step 2c″ refusal suite, with `planUpgrade` being the real fold plus `comparePackageVersions`):\n\n- installed copy refused, incoming well-formed: 422 `INVALID_ARTIFACT_PACKAGE_ENTRY`, message starts with the installed-copy sentence, no plan read, nothing registered or synced, ledger byte-identical;\n- incoming refused, installed well-formed: 422 naming the incoming package;\n- both refused: the incoming refusal, asked first;\n- CONTROL: both well-formed: 200 with the plan, `planUpgrade` called once.\n\nRed first, at `9e2b802c` (test only, code unchanged): 3 failed, 1 passed (the CONTROL); each failure is the thrown `Release artifact packages[0] is not a package entry (ADR-0130 D4): ... indexes[].unique: true was retired ...`.\n\nAblation (committed fix at `d09cd19e`; the test imports the plugin from `src`, so no rebuild is involved): `scripts/ablation-replace.mjs` deleted the dry run's `if (refused) return c.json(refused.body, refused.status);` (anchor 1 to 0, blob `ac4d332f` to `e09c14ed`), giving 3 failed and 1 passed. It then restored the file: blob `ac4d332f` equals HEAD, and `git diff HEAD` is empty.\n\n<details><summary>Package suite and typecheck at 986d579d</summary>\n\n`pnpm --filter @objectstack/cloud-connection exec vitest run --maxWorkers=2 && pnpm --filter @objectstack/cloud-connection typecheck` under the verify lock: `VERDICT command-exit 0`, Test Files 91 passed (91), Tests 1330 passed (1330); typecheck ran `tsc --noEmit && tsc --noEmit -p tsconfig.test.json` (the test config includes `src/**/*`, so the new file is compiled).\n\n</details>\n\n## Acceptance notes\n\n- The transport's 500 for the old throw was not re-measured. It is taken from the real-runtime refusal suite's header, as the card says.\n- The incoming-side refusal reaches the dry run only on a runtime that predates the step-1c code judgements. A runtime that carries those judgements answers the same refusal at step 1c first, as the real install does. The installed side is read by no earlier step, so its refusal reaches the dry run on every runtime. That case is the one this fixes in practice.\n- The dispatch named a new test file for this card. The step 2c″ refusal suite would also have been a home, as a top-level `describe`. The harness was copied from it rather than shared.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, 71) at 986d579d</summary>\n\n69 exit 0. Two were NOT MEASURED, each exiting 3 on its own prerequisite:\n\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` needs an unshallow clone for its pinned positive control. It is a checker-health check only.\n- `pnpm check:dual-build-cjs-loads` reads every package's `dist`, and this worktree built only the closure of cloud-connection.\n\nBoth are left to CI. `dispatch-gates --ran` reconciliation: 71 derived, 69 run, 2 NOT-MEASURED (derived from the recorded exit 3), 0 UNRUN. `overlap-check --branch=HEAD`: `VERDICT clean exit 0`, merges cleanly with origin/main.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaysxGzF62ACvZ1x9x)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35324,
+  "kind": "issue",
+  "title": "docs + skills: state the bounds of a hook transaction (nested transaction() refused in the sandbox, unit not ambient, ledger carve-out, PostgreSQL abort)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T04:46:41Z",
+  "updated_at": "2026-11-19T06:24:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35324",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ② out-of-scope finding from the contract review of PR #35309 (record 6999973886, out-of-scope note 1 plus nits N2 and N3), named for a card there. ⛔ Not a claim. p3: the failure is loud, so this card is not dispatched alone; it rides a same-file p2 PR.\n\n## What happens (read from code by the review, not run)\n\n- A `ctx.api.transaction` nested inside another one in the same sandboxed body is refused: `packages/runtime` sandbox `quickjs-runner.ts:806-807` throws `nested ctx.api.transaction is not supported`. No test pins it, and no doc or skill says it. `content/docs/automation/hooks.mdx:373-374` and the new skill row in PR #35309 both say a nested transaction \"joins\" with no bound, so an author is now more likely to nest.\n- A unit a sandboxed body opened itself is never ambient. The trio does not publish into the store (`packages/objectql/src/engine.ts:6681-6693`; the one publisher is `engine-transactions-section.ts:177`), and the write door opens none under a threaded handle (`engine-hooks-and-functions.ts:538-539`). So a hook's `ctx.api.transaction`, fired by a write inside an action body's transaction, opens a second driver transaction instead of joining.\n- Not stated anywhere a hook author reads: a lifecycle-classed ledger (`audit`, `telemetry`, `event`) on another datasource is written outside the transaction, not refused (`engine-execute-transactions.ts:318`, `transaction-errors.ts:144-147`); on PostgreSQL a failed statement aborts the whole unit even when the body catches the throw (`hooks.mdx:347-354`); a driver with no transactions degrades silently.\n\n## Do\n\n1. Add a test that pins the nested refusal (`quickjs-runner.ts:806-807`).\n2. Bound \"joins\" in `hooks.mdx:373-374` and in the hook skill row PR #35309 adds: one level only in one body, and a body's own unit is not joined by writes it triggers.\n3. Name the ledger carve-out, the PostgreSQL abort and the no-transaction degrade beside it.\n\nLand after PR #35309 merges (same skill row)."
+}

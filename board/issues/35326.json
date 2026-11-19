@@ -1,0 +1,36 @@
+{
+  "number": 35326,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a package create answers with a toast naming the new package; pin Studio Revoke toast",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T04:50:48Z",
+  "updated_at": "2026-11-19T05:36:12Z",
+  "closed_at": "2026-11-19T05:36:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T05:36:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35326",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6v19uPsX6gX42G8tGcvvzb)_\n\nFixes #33865\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:新建软件包成功后弹出提示「已创建软件包「名称」」(按显示名称,不用 ID);Studio 访问页「撤销」默认授予的提示原本就有,本 PR 只为它补了一条 Studio 侧的测试。\n- 为什么改:控制台约定每次写操作都要有点名对象的反馈;新建软件包后对话框直接关闭并跳转,用户看不到任何\"已成功\"的确认。\n- 风险与回滚:极低,只多一次 toast 调用和一条文案(en、zh);失败路径不变。回滚即还原本 PR。\n- 先看:`ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx` 的 create 分支(新增 toast 那段),然后是两个测试文件。\n- 两分钟验证:在 Studio 首页点「新建应用」,填名称后创建,右上角应出现「Created package “名称”.」(中文界面为「已创建软件包「名称」。」)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **Package create (item 2).** `PackageFormDialog` now answers a successful create with `toast.success`, naming the new package by its display name (label first): `engine.packages.create.created`, en \"Created package “NAME”.\" and zh \"已创建软件包「NAME」。\", added to the studio catalogue, which carries only en and zh. The dialog is the only create path, so Studio's *New app* card, the Studio package switcher's *New package* and the Packages page all get the toast. A refused create still shows its banner and no toast. Saving an edit is unchanged: the Packages page already shows its own \"Package updated\" line there.\n- **Revoke on a granted suggestion (item 1): already fixed on `main`, no code change.** `SuggestedBindingsPanel` `act()` toasts `strings.revokedToast(s)` on revoke, and the Studio Access mount passes `engine.studio.access.suggestRevokedToast`. That code was already on the QA run's commit `a557fa38` (`git merge-base --is-ancestor 8c9260f79c a557fa38` → exit 0; `git show a557fa38:…/SuggestedBindingsPanel.tsx` line 149 holds the call). A harness reading of the REAL Studio `AccessPillar` (Grant, then Revoke) shows the toast firing and naming the set by its label. No Studio test covered Revoke, so this PR adds that pin to the existing Studio harness file as a top-level `describe`.\n\n## Tests\n\n- `StudioDesignSurface.accessSuggestionsReadOnly-33158.test.tsx`: new `describe` for this card. Grant → Revoke: the second `toast.success` is the revoked sentence naming \"CRM user\", and the row then reads `dismissed` with Reconsider. CONTROL: a Revoke the server refuses (409) toasts the server's message and never the revoked sentence.\n- `PackageFormDialog.test.tsx` (the shared harness): new `describe`. A create toasts the created sentence once, naming \"New App\" and not the id. zh: the zh sentence. CONTROL: a refused create (409) toasts nothing and keeps its banner. CONTROL: an edit save does not fire the created toast. The file also gains module-top `import '@objectstack/formula'` / `import '@objectstack/lint'`, which `check:test-source-alias` asks for in an edited test that reaches the CEL fields' dynamic loads.\n\n<details><summary>Targeted run at the merged head ce0f6ea227</summary>\n\n```\npnpm --filter @object-ui/app-shell exec vitest run --root ../.. --maxWorkers=2 packages/app-shell/src/views/metadata-admin/PackageFormDialog packages/app-shell/src/views/studio-design/StudioDesignSurface.accessSuggestionsReadOnly-33158.test.tsx packages/app-shell/src/components/SuggestedBindingsPanel.test.tsx packages/app-shell/src/console/marketplace/__tests__/MarketplacePackagePage.installedSuggestions-33158.test.tsx\n Test Files  17 passed (17)\n      Tests  180 passed (180)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablations (one-off, through scripts/ablation-replace.mjs, restored and checked against the HEAD blob)</summary>\n\n- Create toast: `toast.success(` → `void Array.of(` in `PackageFormDialog.tsx`. Mutation landed (blob fd0aefbaa840 → ebd89e3b4a6f), 2 failed | 9 passed: both toast pins red, both CONTROLs green. Restored: blob == HEAD, `git diff HEAD` empty. A first try (`void (`) was a syntax error and the file failed to transform with \"no tests\". That run measured nothing and is void.\n- Revoke pin: `action === 'revoke' ? strings.revokedToast(s) : strings.dismissedToast(s)` → `strings.dismissedToast(s) /* ablated */` in `SuggestedBindingsPanel.tsx`. Mutation landed (85a24a3bc2ff → 5bdf68afec12), 1 failed | 9 passed: the Grant → Revoke pin red, its CONTROL green. Restored. A first try with a replacement that is a substring of the anchor was refused by the tool before any test ran, so it was a no-op.\n- `@object-ui/*` resolves to `src` through the ui vitest alias table, so these ablations need no rebuild.\n</details>\n\n## Acceptance notes\n\n- The QA run reported no Revoke toast at `a557fa38`, but that tree already had the toast call, and the Studio harness shows it firing. This PR does not reproduce or explain the live observation; it adds the pin that holds the behaviour.\n- Same rule (`ux-conventions.write-feedback`), not filed: the inspector's *declare dependency* edit (`ObjectPicker` → `PackageFormDialog mode=\"edit\"`) closes the dialog and shows no feedback. That reading comes from the source only and was not exercised live.\n\n## Verification\n\n- Type-check: `pnpm --filter @object-ui/i18n run type-check && pnpm --filter @object-ui/app-shell run type-check` → exit 0. `tsc -p tsconfig.test.json --listFiles` lists both edited test files.\n- Derived gate families (`dispatch-gates.mjs --commands`): 38 derived, 38 run, all exit 0. `check:test-source-alias` was red once and passed after the module-top imports. `--ran` reconciliation: \"38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero)\". The gates that read the edited test file were run again at the final head, all exit 0.\n- The full app-shell suite and the rest of the CI checks are left to CI. Local runs were limited to the files above.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbSphdunq2aJq7ktuY\n"
+}

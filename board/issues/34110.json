@@ -2,7 +2,7 @@
   "number": 34110,
   "kind": "pull_request",
   "title": "pm: eval-run records are exempt from the first-touch sweep and H13/H74; scenario-eval SKILL.md joins the line ratchet",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T19:30:58Z",
-  "updated_at": "2026-11-17T16:04:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T07:52:12Z",
+  "closed_at": "2026-11-19T07:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34110",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi98eF7dmau7ewzzV1EuovZQd)_\n\nFixes #34012\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:评测记录标签 `eval-run` 与 `qa-run` 一样被首触扫描和 H13/H74 巡查豁免;内部技能 scenario-eval 的 SKILL.md 纳入行数棘轮。\n- 为什么改:评测记录按技能规定终身不挂优先级/车道/状态标签,但扫描只认 `qa-run`,开着的记录会被要求首触;scenario-eval 落地时没进棘轮名单,门禁看不到它增长。\n- 风险与回滚:只动 PM 工具脚本与两份内部技能文本,不发布任何包;回滚即 revert 本 PR。\n- 先看:`scripts/pm/check-half-states.mjs`(两个豁免常量与自测行)、`scripts/pm/check-skill-line-ratchet.mjs`(新增两行)、`.claude/skills/scenario-eval/SKILL.md`(纯空白折行 + 一句改写)。\n- 两分钟验证:`node scripts/pm/check-skill-line-ratchet.mjs` 应见 scenario-eval 两行 ✓(156 行/上限 156,表行 237/pin 237)。\n- 需要你做的:无,席位落地(Tier S)。\n\n## What changes\n\n**S1 — `eval-run` joins `qa-run` wherever a record label is exempt.** The `scenario-eval` skill forbids priority, `domain:*` and `pm:*` labels on an `eval-run` record for its whole life, as `checklist-test` does for `qa-run`; only `qa-run` was exempt in code.\n\n- `scripts/pm/first-touch-sweep.mjs`: `EXCLUDED_LABELS` gains `eval-run`; its mirrored rule phrase and header line follow; the exclusions self-test row covers it.\n- `scripts/pm/check-half-states.mjs`: `H13_EXEMPT_LABELS` and `H74_EXEMPT_LABELS` gain `eval-run`, with one new H13 pin (`H13: eval-run exemption`), the H74 per-label loop and exact-list pin extended, and the H74 row prose naming it. Nothing outside the two constants and their rows moves (PR #34054's record-reader region untouched).\n- `.claude/skills/pm-dispatch/references/triage-duties.md`: the one rule line naming `qa-run` now names `eval-run` too (one line edited, line count unchanged).\n\n**R1 — `.claude/skills/scenario-eval/SKILL.md` joins the skill line ratchet.**\n\n- `scripts/pm/check-skill-line-ratchet.mjs`: `CEILINGS` row at 156 and `MAX_TABLE_ROW_BYTES` row at 237, both the landed measurement (headroom 0); the header's \"four other\" playbook SKILL.md files becomes five; the self-test row naming the covered skills lists `scenario-eval` (row label renamed in the battery roster and the table together).\n- `.claude/skills/scenario-eval/SKILL.md`, per the seat's claim amendment (comment 6899758395 on #34012): (1) the sentence saying the triage sweeps do not know `eval-run` yet, so a record must close in its filing round, was false once S1 lands; reworded to the post-S1 rule (2 lines → 1); (2) its 26 lines over the 120-byte budget re-wrapped whitespace-only to the ratchet's own `wrapLine` canonical form (130 → 156 lines, 0 offenders, bytes identical once whitespace is removed). Without (2), seeding the row reds 26 lines at once: `MAX_LINE_BYTES` is a global rule and the script's header forbids a per-file exemption, so the card's \"width pin seeds at the measurement\" can only mean the table-row pin.\n\nLine counts (whole file, before → after): `scenario-eval/SKILL.md` 131 → 156; `triage-duties.md` unchanged; pm-dispatch family unchanged (`check:pm-skill-ratchet` green). No forced test edits: every self-test change is an added pin or an extended expected list.\n\n## Tests\n\nEach edited script's own self-test, on head `6c876af8`:\n\n- `node scripts/pm/first-touch-sweep.mjs --self-test` → exit 0, `45 cases pass across 5 batteries`.\n- `node scripts/pm/check-half-states.mjs --self-test` → exit 0, `5280 cases pass` (H74 battery 61/46).\n- `node scripts/pm/check-skill-line-ratchet.mjs --self-test` → exit 0, `164 cases pass`.\n- `node scripts/pm/check-skill-line-ratchet.mjs` before the re-wrap: red, `scenario-eval/SKILL.md has 26 line(s) over the 120-byte budget`; after: exit 0, `156 lines (ceiling 156; headroom 0)`, `widest table row is 237 bytes (pin 237; headroom 0)`.\n\n## Acceptance notes\n\n- None beyond the scope above.\n\n## Verification\n\n<details><summary>dispatch-gates reconciliation on 6c876af8</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 55 commands; each was run and recorded with its exit code. `check:doc-formula-expressions` first exited 3 (prerequisite: `@objectstack/formula` / `@objectstack/lint` not built in a fresh worktree); after `turbo run build` of those two under the verify lock (VERDICT command-exit 0) it exited 0. `check:pm-dispatch-gates` ran under nohup: `2205 cases pass` (fast tier). Reconciliation: `✓ dispatch-gates --ran: 55 derived famil(ies) accounted for — 55 run, 0 NOT-MEASURED (a DERIVED zero — all 55 recorded an exit code and none of them is 3).`\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQVgxSYnzqhm5KCyhq)_\n"

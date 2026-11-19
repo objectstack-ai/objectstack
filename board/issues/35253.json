@@ -11,19 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "domain:ui",
     "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-18T19:20:18Z",
-  "updated_at": "2026-11-18T19:51:25Z",
+  "updated_at": "2026-11-19T06:28:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35253",
   "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, reproduced once in the console.\n\n**Business reason.** A deal waiting for approval shows a \"Locked for approval\" chip, so a rep knows why the fields are read-only. When the record's line items are a body table (`relatedList: 'primary'`, record page v4), the chip draws twice on one page. The page reads as if two separate locks applied. Every object with a body table and an approval process shows this. hotcrm's opportunity does since objectstack-ai/hotcrm PR #2671.\n\n**Reach (measured once).** hotcrm PR #2671 head `98f790dd`, `@objectstack/*` 18.6.0, `objectstack dev`. A pending-approval `crm_opportunity` was opened as `na.rep` and as `sales.manager` at 1440 px. \"Locked for approval\" draws above the line-item body table and again above the next details section. Control: the retired authored page (no body table) drew it once. The evidence is the before/after screenshots of the same deal, in the hotcrm seat report on #2382.\n\nExpected: one lock chip per record page, however many body sections the synthesized page splits the details into.\n\n**Seam.** `renderer:plugin-detail` `buildDefaultPageSchema`: the details body is split around a body table, and each part draws the approval-lock chip.\n\n**Reader.** objectstack triage grades it and routes it to the record-page lane. Not a claim; it awaits triage.\n\n**Dedupe** (`repo:objectstack-ai/objectstack is:issue`, open and closed): `Locked for approval chip twice` → 51 hits, all QA runs or unrelated; `approval lock badge duplicated body table` → 18, none on point."

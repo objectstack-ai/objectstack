@@ -2,8 +2,8 @@
   "number": 35041,
   "kind": "issue",
   "title": "skills objectstack-ai SKILL.md: the 'resolution ladder' section names three lint sources for tool names; MCP_FILE_TOOL_NAMES (#35034) makes four",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ai",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "lease:ai-1",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-17T23:55:17Z",
-  "updated_at": "2026-11-18T16:01:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T05:47:44Z",
+  "closed_at": "2026-11-19T05:38:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35041",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6964402867, item 2), from #34948 / PR #35034.\n\n`skills/objectstack-ai/SKILL.md`, section \"Naming the tools: the resolution ladder\", says the lint resolves tool names from **three** sources. Once #35034 adds `MCP_FILE_TOOL_NAMES` there are **four**, so the text goes stale when #35034 lands.\n\nDone when the section names the fourth source, and, if #35036 widens the set further, names it from the same pinned export, so the ladder cannot drift again.\n\nGrade: **p2 · domain:skills**. Theme: MCP (skills that teach authoring); an agent following the ladder would miss the file tools. It is a governed `skills/**` text change.\n\nBlocked-by: #35034"

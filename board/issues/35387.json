@@ -1,0 +1,34 @@
+{
+  "number": 35387,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql): a summary over a plain dynamic currency amount may declare currencyMode 'dynamic'",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T07:42:02Z",
+  "updated_at": "2026-11-19T08:23:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35387",
+  "body": "Fixes #35045\n\nClause-②: yes (widening)\nMetadata-protocol: added\nSkills-docs: follow-up owed — skills/objectstack-data/evals/objects-fields-relationships.json (eval 20's expected output still says `dynamic` is admitted only on a roll-up of a home amount)\n\n## 维护者速读\n\n1. 用户能看到什么变化：在系统默认币种下录入的金额，其子表合计（例如工时单的成本合计）现在可以声明为默认币种，记录页和列表里显示为带币种符号的金额，而不再是一串裸数字；此前这样声明会被校验拒绝。\n2. 为什么做：华为合作的客户关系应用（中文租户，币种为人民币）有十七处这类合计显示不出币种，按您已选定的“合计声明、度量自动跟随”方案，这是两步中的第一步。\n3. 出错会怎样：没有声明币种的合计不受影响；若放行范围有误，最坏是某个合计被错误地按默认币种显示，回滚本次改动即可恢复原先的拒绝。\n4. 要你做什么：无。\n\n## What changes\n\n- `@objectstack/spec`: a `summary` (`sum` / `min` / `max` / `avg`) declaring `currencyMode: 'dynamic'` is admitted over any child `currency` field in `dynamic` mode, not only over a stored home amount (seat ruling record 7000258793: a plain `dynamic` amount is in the tenant currency by definition, ADR-0144 D6 / D8 rule 5 read as written). One new predicate, `isTenantCurrencyAmount` (`record-currency-path.ts`, exported from `@objectstack/spec/data`), is the admission test in `defineStack` case (d) (`stack.zod.ts`).\n- `@objectstack/objectql`: the registry's follow door (`record-currency-aggregate-door.ts`) reads the same predicate at both registration orders, so a single save, a batch row and a run's end admit exactly what `defineStack` admits.\n- Still refused, unchanged: `dynamic` over a record-mode child (prescribing its stored home amount, or `record` when it follows the parent), over a `fixed` child (naming the code), over a `number`, a `formula` or another `summary`. A summary declaring nothing still has no currency.\n- The refusal text moves with the admitted set: the (d) head, the non-currency arm (names the child's type) and its prescription (the child's amounts in the home currency), and the object door's list of admitted roll-up currencies.\n- Prose: `field.zod.ts` `currencyConfig` describe and JSDoc, the regenerated reference pages, `content/docs/data-modeling/currency.mdx` and `field-types.mdx`, and a dated WIDENED line in `packages/spec/liveness/field.json`.\n\n## Tests\n\n- Flipped (were pinning today's refusal of a plain `dynamic` child): spec `currency-summary-home-rollup.test.ts` (plain child, plain child of a home-less record amount, forged-`homeAmount` legs over plain amounts), objectql `record-currency-guards.test.ts` (writable home field re-save), and the message-head constants in both packages.\n- New: admitted over a plain `dynamic` child (no config, explicit `dynamic`, readonly, `expression`-computed; sum/min/max/avg; `{}` config) in `defineStack`, in the registry in both orders, and through a metadata-API publish. Controls kept refused: record-mode child, `fixed` child, `number`, `formula`, child `summary` declaring `dynamic`. A summary declaring nothing parses with no `currencyConfig`.\n- Reverse verification (a second worktree at the base commit, only the new test files copied in): spec 12 failed / 70 passed; objectql 6 failed / 91 passed. With the new spec but the base door: objectql 3 failed (the three admitted legs), which shows the door arm is load-bearing.\n\n## Acceptance notes\n\n- Summary of a summary (A2): kept refused. The ruling names a plain `dynamic` child amount; a child `summary` is not a `currency` field, and the contract review that first named it (N3) asked for a follow-up only if a consumer needs it.\n- Renderer comments under `ui/packages/fields` (`currency.ts:58`, `index.tsx:2881`, `SummaryField.tsx:64`) still say \"a roll-up of a stored home amount\"; the behaviour is right (`summaryDeclaresCurrency` answers true for any `dynamic` summary), and only the comments are narrow. Renderers are outside this card's fence.\n- `skills/objectstack-data/evals/objects-fields-relationships.json` eval 20's expected output ends \"`dynamic` is admitted only on a roll-up of a home amount\". Its assertions do not read that sentence; `skills/**` is a governed surface outside this card.\n\n## Verification\n\nHead `76fb831b` (base `24cc61fa`; `overlap-check` clean against `origin/main` 35c63310 and PR #35362, exit 0). All readings below were taken on this tree before the one commit; the commit added only the changeset's level and declaration lines.\n\n<details><summary>Package suites and typecheck</summary>\n\n- `pnpm --filter @objectstack/spec test`: Test Files 856 passed (856), Tests 27370 passed, 1 todo.\n- `pnpm --filter @objectstack/objectql test`: Test Files 614 passed (614), Tests 13878 passed.\n- `pnpm --filter @objectstack/spec typecheck && pnpm --filter @objectstack/objectql typecheck`: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: 3 of 14 stale (api-surface, export-origins, docs). `--fix` regenerated those 3, and they are committed.\n</details>\n\n<details><summary>Reverse verification (one-off, no permanent test)</summary>\n\n- A worktree at `24cc61fa` with only the new test files copied in: spec 12 failed / 70 passed; objectql (base spec dist) 6 failed / 91 passed.\n- New spec source with the base objectql door, spec rebuilt (`ablation-dist-preflight` found `function isTenantCurrencyAmount` in dist): objectql 3 failed / 94 passed. These are exactly the three admitted legs (registry in both orders, and metadata-API publish), so the door arm carries the fix.\n</details>\n\n<details><summary>Derived gate families (dispatch-gates, 121)</summary>\n\n- `--ran` reconciliation: 121 accounted, 118 run, 3 NOT-MEASURED (exit 3, prerequisite dists not built locally): `check:skill-examples`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`. CI builds them.\n- 117 exit 0. One exit 1 that this diff does not cause: `check:platform-checklist`, platform-core.seed-mode-matrix VARIANTS STALE (SeedMode has 0 members). It is red on the base tree; this diff touches neither `seed.zod.ts` nor `docs/qa`.\n- `node scripts/check-nul-bytes.mjs`: exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CajiB6BSQKWowy6YLB)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 35318,
+  "kind": "issue",
+  "title": "marketplace: a package version's release notes are one string, so a zh-CN reader of the listing sees English release notes",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T04:30:07Z",
+  "updated_at": "2026-11-19T06:38:34Z",
+  "closed_at": "2026-11-19T06:38:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35318",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible gap in shipped listings.\n\n**Business reason.** The marketplace detail page is where a customer decides whether to upgrade. HotCRM's description, tagline and listing pages are per-locale (hotcrm#2392), but release notes are a single string, so zh-CN customers read English notes on a Chinese page (objectstack-ai/hotcrm#2461, item 2).\n\n**Reach (read in source).** `releaseNotes` is a single string in `packages/spec/src/marketplace/package-version.zod.ts:210,250,263`. The console renders that one field (`ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx:1827`), and the CLI sends one `release_notes`. The cloud catalog lives in another repository and was not read.\n\n**Expected:** release notes keyed by locale, with fallback, so an app can publish a zh-CN summary assembled from its changesets.\n\n**Dedupe:** `releaseNotes per locale marketplace version` returned 0 hits.\n\n**Reader.** objectstack triage grades it and routes it to the owning lane. Not a claim; awaits triage. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「平台缺口全部立卡」, after an independent fable-tier review of HotCRM's pending decisions surfaced it."
+}

@@ -2,8 +2,8 @@
   "number": 35189,
   "kind": "issue",
   "title": "Wizard form final-submit gate judges visibleWhen without the form's formula recompute",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:data",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "lease:data-2",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-18T11:21:49Z",
-  "updated_at": "2026-11-18T16:06:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T06:33:35Z",
+  "closed_at": "2026-11-19T06:32:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35189",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\n#35116 made the form compute the object's `formula` fields over the record being edited before it judges field rules. That is `planObjectFormulas` (`ui/packages/core/src/evaluator/formulaRecord.ts`), applied in `ui/packages/components/src/renderers/form/form.tsx` (`ruleRecord = formulaPlan.compute(...)`) and `ui/apps/console/src/components/FormPage.tsx`.\n\nOne form-side judge was not changed. `gateFinalSubmit` in `ui/packages/plugin-form/src/WizardForm.tsx` (about line 865) calls `resolveFieldRuleState` over `mergedData`, the last-read record, with no formula plan. Per the file's own comment (about line 729), a simple form's mobile stepper also submits through it.\n\nSo on a wizard, or on the mobile stepper, a `required` field whose `visibleWhen` reads a formula is judged on the stale formula value. After an edit that moves the field out of (or into) the condition, the final-submit gate can demand a field the server does not require, or skip one it does.\n\nA smaller residual in the same family: in `ui/packages/components/src/renderers/form/objectFormulas.ts`, a data source without `getObjectSchema`, or a failed schema read, yields no plan. The form then judges on the stored value.\n\n## Cheapest disproof\n\nWrite one `WizardForm` test. Give it a required field whose `visibleWhen` reads a formula, make an edit that moves the formula value out of the condition, then final-submit. Today the gate judges the pre-edit value.\n\n## Origin\n\nContract review 6977080790 on PR #34978 (S7, read, not run). PR #34978 records the residual in ADR-0113. The fix belongs to #35116's surface (card #35033's area), not #34978's.\n\nRe-check: `git grep -n \"resolveFieldRuleState\\|planObjectFormulas\" origin/main -- ui/packages/plugin-form/src/WizardForm.tsx`"

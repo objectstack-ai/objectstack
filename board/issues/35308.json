@@ -1,0 +1,31 @@
+{
+  "number": 35308,
+  "kind": "issue",
+  "title": "[Decision] Search title of a refused reader: should the ⌘K palette serve the target's name on a lookup field that declares referenceNameVisible, as $expand does? (follow-up to #34175)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T03:41:56Z",
+  "updated_at": "2026-11-19T03:50:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35308",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② out-of-scope finding owed by the L1 ACCEPT of PR #35292 (comment 6998964493, 范围外去向 (b)). A decision question, not a defect: ⛔ not a claim; the maintainer decides.\n\n## The question\n\nPR #35292 (#34175) titles a ⌘K / global-search hit whose `nameField` is a reference field by the target record's title, read as the searcher. A searcher refused the target keeps the bare id. `$expand` answers differently on a field that declares `referenceNameVisible: true` (ruling 6574398310): it serves `{ id, name, readRefused: true }`, i.e. the target's name even to a refused reader. Should the search title follow `referenceNameVisible` too?\n\n## What each answer means\n\n- **Keep the bare id (today, after #35292):** the stricter answer; no new disclosure. The palette and the record header can disagree for a refused reader on such a field.\n- **Serve the name:** the palette matches `$expand`. It needs a system-context read of the target's title column for refused readers, which is a disclosure decision on a second surface (search), so it is not taken without a ruling.\n\n## Prior rulings\n\nruling 6574398310 (`referenceNameVisible`); ADR-0079 (record title); PR #35292 L1 security read (no system-context read added).\n\n## Reader\n\nThe maintainer (decision), then `domain:server` (`packages/metadata-protocol` record reads)."
+}

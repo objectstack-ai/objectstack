@@ -1,0 +1,37 @@
+{
+  "number": 35332,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): distinct and aggregate group keys present a text boolean as find() does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T05:09:20Z",
+  "updated_at": "2026-11-19T06:19:54Z",
+  "closed_at": "2026-11-19T06:19:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T06:19:51Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35332",
+  "body": "Fixes #34974\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：SQLite 上布尔/开关字段在 `distinct()` 和聚合分组键里，存储的文本 `'0'` / `'false'` 现在显示为 `false`，`'1'` / `'true'` 显示为 `true`，与记录读取（`find()`）完全一致；用的是记录读取同一个函数，不是另写一套规则。\n- **为什么改**：此前这两个出口用 `Boolean(value)`，文本 `'0'` 会被当成 `true`。对于由文本字段改成布尔字段的列（SQLite 保留 TEXT 亲和性），所有未勾选的行在仪表盘分组里都会算进 `true` 桶，`distinct` 也只答 `[true]`。\n- **风险与回滚**：只影响 SQLite / MySQL / Oracle 上布尔字段的 distinct 和分组键显示；数字与布尔值的显示不变，其他文本照旧。回滚即还原一行代码，无数据改动。\n- **先看**：`packages/drivers/driver-sql/src/sql-driver-filter-helpers.ts`（`presentReadValue` 的 `'boolean'` 分支）、`packages/drivers/driver-sql/src/sql-driver-sqlite-serialisation.ts`（`presentStoredBoolean` 改为导出）、`packages/drivers/driver-sql/src/sql-driver-34974-boolean-read-presenter.test.ts`。\n- **两分钟验证**：`pnpm --filter @objectstack/driver-sql exec vitest run src/sql-driver-34974-boolean-read-presenter.test.ts`，预期 10 个测试全部通过。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `sql-driver-filter-helpers.ts`: `presentReadValue`'s `'boolean'` arm calls `presentStoredBoolean`, the function `formatOutput` applies to a `find()` row (#34916). `0` / `'0'` / `'false'` / `false` present as `false`; `1` / `'1'` / `'true'` / `true` as `true`; any other value keeps the `Boolean(value)` reading it had. This makes the class docblock's contract true again: one presenter per kind, the function `formatOutput` itself calls, never a re-derivation.\n- `sql-driver-sqlite-serialisation.ts`: `presentStoredBoolean` gains `export` and one docblock sentence naming its second caller. Nothing else in the file moves.\n- Both doors are covered: `distinct()` presents through `presentReadValue` directly, and `aggregate()` group keys (plain and aliased) through `presentReadColumns`, which calls `presentReadValue`. `min` / `max` / `sum` / `avg` over a boolean still skip the boolean kind and answer a number, as the #11635 ruling says.\n- `sql-driver-34916-boolean-text-read.test.ts`: the `[#34973]` groupBy pin's \"before the convergence\" half asserted the defect this card fixes (the text `'false'` group presenting as `true`). It now asserts that group presents as `false`. The after-convergence half is unchanged.\n- Root changeset, `@objectstack/driver-sql` patch.\n\n## Tests\n\nNew file `packages/drivers/driver-sql/src/sql-driver-34974-boolean-read-presenter.test.ts`, 10 tests on two columns:\n\n- **INTEGER column** (created by the driver, legacy text `'true'` / `'false'` written past the driver, not yet converged): fixture storage types, `find()` as the reference, `distinct()` answers `[false, true]`, group key and aliased group key present the text `'false'` as `false`.\n- **TEXT-affinity column** (raw `flag text` column, legacy `'false'` / `'true'` plus a `'0'`, then a boot): the fixture shows the boot leaves every cell as the text `'0'` / `'1'`; `find()` as the reference; `distinct()` answers `[false, true]`; group key and aliased group key count `[[false, 3], [true, 1]]`.\n\n<details><summary>Reading first: the TEXT-affinity case live on SQLite, before the fix (origin/main de8d5497)</summary>\n\nThe new file run against the unfixed presenter: 6 failed, 4 passed. The fixture and `find()` pins pass, and every `distinct` / group-key pin fails:\n\n```\nTEXT-affinity distinct():   expected [ true ] to deeply equal [ false, true ]\nTEXT-affinity group key:    expected [ [ true, 3 ], [ true, 1 ] ] to deeply equal [ [ false, 3 ], [ true, 1 ] ]\nINTEGER distinct():         expected [ true ] to deeply equal [ false, true ]\nINTEGER group key:          expected [ [ true, 1 ], [ true, 1 ], …(1) ] to deeply equal [ [ false, 1 ], [ true, 1 ], …(1) ]\n```\n\n</details>\n\n<details><summary>Ablation (one, on the committed fix)</summary>\n\n`node scripts/ablation-replace.mjs` swapped `return presentStoredBoolean(value);` back to `return Boolean(value);` in `sql-driver-filter-helpers.ts`: anchor x1 to x0, blob `6ec738601bee` to `77d0e0a57de7`. Result: the new file goes 6 failed / 4 passed, the same six pins as the reading above. Restore: blob back to `6ec738601bee`, equal to HEAD, and `git diff HEAD` empty. The test imports `./sql-driver.js` from `src`, so no `dist` rebuild was involved.\n\n</details>\n\n<details><summary>Package suite</summary>\n\n- `pnpm --filter @objectstack/driver-sql test`: Test Files 264 passed, 13 skipped (277); Tests 4397 passed, 257 skipped (4654).\n- `pnpm --filter @objectstack/driver-sql typecheck`: exit 0. `tsc --listFiles` includes the new test file (1 hit).\n\n</details>\n\n## Acceptance notes\n\n- **Premise check:** `readPresentationKind` already returned `'boolean'` for a declared boolean on SQLite / MySQL / Oracle, so the card body's \"no boolean kind\" was stale. The live defect was the `Boolean(value)` arm, as the triage widening said.\n- **Boot convergence (#35076) does not remove the case.** On a TEXT-affinity column the convergence writes `0` / `1` for a legacy `'false'` / `'true'`, and the affinity stores that as the text `'0'` / `'1'`. It leaves the text `'0'` / `'1'` in place on purpose, because those already read correctly on a row. So a TEXT-affinity column holds `'0'` after every boot.\n- **Separate finding, not fixed here:** on SQLite, a field retyped from `text` to `boolean` keeps its `TEXT` column after the boot (`pragma_table_info` reads `TEXT` before and after). The driver's own `create(…, { flag: false })` then stores the text `'0.0'` (better-sqlite3 binds the number as REAL), and `find()` presents it as `true`, along with `distinct()` and group keys. The same column also misses `'0'` rows on `flag = false`. This is out of this card's scope: fixing it means either reading `'0.0'` / `'1.0'` as booleans in the shared presenter, which changes `find()` and adds a new truthiness rule, or converging or rebuilding the column's storage. That is a design choice, so it goes to the seat in the report.\n\n## Verification\n\nLocal gates and CI check-runs are cited in the os-dev report on the card. `node scripts/pm/overlap-check.mjs --branch=HEAD`: clean, exit 0.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca1jJvsA1dHsPwMiQb)_\n"
+}
