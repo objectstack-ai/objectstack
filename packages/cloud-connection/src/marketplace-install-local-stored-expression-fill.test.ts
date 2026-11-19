@@ -241,6 +241,33 @@ describe('a managed upgrade fills the stored computed fields it makes live (#353
         expect(data).not.toHaveProperty('advisories');
     }, 60_000);
 
+    it('a composed artifact (ADR-0130 D4): the unit that turns the formula into a stored field has its rows filled', async () => {
+        const SUITE = 'com.acme.suite';
+        const unit = (id: string, version: string, objects: Row[]) => ({
+            manifest: { id, name: id, version, type: 'module', namespace: 'acme', objects },
+        });
+        const composed = (version: string, fullName: Row) => ({
+            id: SUITE,
+            name: 'Suite',
+            version,
+            type: 'app',
+            packages: [
+                unit(`${SUITE}.notes`, version, [{ name: 'acme_note', label: 'Note', fields: { text: { type: 'text' } } }]),
+                unit(`${SUITE}.leads`, version, [lead({ full_name: fullName })]),
+            ],
+        });
+        const door = await bootDoor();
+        ok(await door.install(composed('1.0.0', { type: 'formula', returnType: 'text', expression: FULL_NAME })));
+        await door.seedRows();
+
+        const data = ok(await door.install(composed('2.0.0', { type: 'text', expression: FULL_NAME })));
+
+        expect(Object.values(await door.rows()).map((r) => r.full_name)).toEqual(['Ada Lovelace', 'Alan Turing', 'Grace Hopper']);
+        expect(data.advisories.map((a: Row) => [a.rule, a.path])).toEqual([
+            ['stored-expression-filled', `objects.${TABLE}.fields.full_name`],
+        ]);
+    }, 60_000);
+
     it('a fresh install whose object already holds rows (a re-install over kept data) fills them', async () => {
         const door = await bootDoor();
         // The table exists with rows before this package was ever installed here.
