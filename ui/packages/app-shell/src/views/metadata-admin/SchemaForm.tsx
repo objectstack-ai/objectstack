@@ -71,7 +71,7 @@ import {
 import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp, type SupportedLocale } from './i18n.js';
 import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
-import { describeIssuePath, issuePathHead, issuePathRest, splitRowIssues } from './issuePath.js';
+import { describeIssuePath, issuePathHead, issuePathRest, splitRowIssues, useIssuePrefixRegister } from './issuePath.js';
 
 /**
  * The form authoring surface — `FormFieldSpec` and the `VisibilityPredicate`
@@ -1434,104 +1434,10 @@ function useInlineIssueFieldRegister(
   rootIdPath: string | undefined,
   onChange: SchemaFormProps['onInlineIssueFieldsChange'],
 ): InlineIssueFieldRegister {
-  const onChangeRef = React.useRef(onChange);
-  React.useEffect(() => {
-    onChangeRef.current = onChange;
-  });
-  const [counts] = React.useState(() => new Map<string, number>());
-  const [register] = React.useState(() => (field: string) => {
-    const publish = () => onChangeRef.current?.(new Set(counts.keys()));
-    counts.set(field, (counts.get(field) ?? 0) + 1);
-    publish();
-    return () => {
-      const n = (counts.get(field) ?? 1) - 1;
-      if (n > 0) counts.set(field, n);
-      else counts.delete(field);
-      publish();
-    };
-  });
+  const register = useIssuePrefixRegister(onChange);
   const [value, setValue] = React.useState<InlineIssueFieldRegister>(() => ({ rootIdPath, register }));
   if (value.rootIdPath !== rootIdPath) setValue({ rootIdPath, register });
   return value;
-}
-
-/**
- * objectstack#35628 — the inline register for an editor that draws issues
- * outside one whole-draft form: a curated inspector's own rows and any form it
- * mounts over a slice. Each source registers the PATH PREFIX it draws, held
- * while mounted and drawing; `onChange` hears the union, the host's
- * `onInlineIssueFieldsChange`, judged by {@link issuePathDrawnBy}.
- */
-export function useIssuePrefixRegister(
-  onChange: ((prefixes: ReadonlySet<string>) => void) | undefined,
-): (prefix: string) => () => void {
-  return useInlineIssueFieldRegister(undefined, onChange).register;
-}
-
-/**
- * Registers, under `prefix`, the rows a {@link SchemaForm} mounted over the
- * draft slice at `prefix` reports (`setRows` is that form's
- * `onInlineIssueFieldsChange`), so the host hears `config.filter`, never
- * `config` — a key the slice form does not render keeps its issue in the
- * host's banner.
- */
-export function useSliceFormIssueRows(
-  register: (prefix: string) => () => void,
-  prefix: string,
-): (rows: ReadonlySet<string>) => void {
-  const [rows, setRows] = React.useState<ReadonlySet<string>>(() => new Set());
-  React.useEffect(() => {
-    const offs = [...rows].map((row) => register(`${prefix}.${row}`));
-    return () => offs.forEach((off) => off());
-  }, [rows, prefix, register]);
-  return setRows;
-}
-
-/**
- * The issue lines a curated inspector row draws for one path prefix, the way a
- * {@link SchemaForm} row draws its own: an issue AT `prefix` as its message, a
- * deeper one led by the trail of the rest of its path. The row registers
- * `prefix` while mounted, so the host's banner and refusal line leave those
- * issues out (objectstack#27865). Never deferred: no host hands a curated
- * inspector a create form's show-on-touch deferral, so mounted is drawn.
- */
-export function IssuePrefixLines({
-  issues,
-  prefix,
-  label,
-  value,
-  register,
-}: {
-  /** The host's issues, paths relative to the draft. */
-  issues: readonly SchemaFormIssue[] | undefined;
-  /** The dot-joined path this row edits (`label`, `config.columns`). */
-  prefix: string;
-  /** The row's visible label, the trail's head. */
-  label: string;
-  /** The draft value AT `prefix`, which a trail's indices resolve against. */
-  value: unknown;
-  register: (prefix: string) => () => void;
-}) {
-  const locale = useMetadataLocale();
-  React.useEffect(() => register(prefix), [register, prefix]);
-  const lead = prefix.slice(prefix.lastIndexOf('.') + 1);
-  const lines = (issues ?? [])
-    .filter((i) => i.path === prefix || i.path.startsWith(`${prefix}.`))
-    .map((i) => {
-      const message = translateSchemaIssue(i, locale);
-      const rest = i.path.slice(prefix.length);
-      return rest ? `${describeIssuePath(label, `${lead}${rest}`, { [lead]: value })}: ${message}` : message;
-    });
-  if (lines.length === 0) return null;
-  return (
-    <>
-      {lines.map((m, i) => (
-        <div key={i} data-testid="inspector-row-issue" className="text-xs text-destructive">
-          {m}
-        </div>
-      ))}
-    </>
-  );
 }
 
 const isDevBuild = (): boolean =>

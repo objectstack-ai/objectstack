@@ -16,14 +16,15 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import { SchemaForm, type SchemaFormIssue } from './SchemaForm';
 import {
   IssuePrefixLines,
-  SchemaForm,
+  issuePathDrawnBy,
+  issuePathHead,
+  issuesUnderPrefix,
   useIssuePrefixRegister,
   useSliceFormIssueRows,
-  type SchemaFormIssue,
-} from './SchemaForm';
-import { issuePathDrawnBy, issuePathHead, issuesUnderPrefix } from './issuePath';
+} from './issuePath';
 
 afterEach(() => cleanup());
 

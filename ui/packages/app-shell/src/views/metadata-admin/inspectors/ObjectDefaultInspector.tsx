@@ -29,7 +29,7 @@ import { slugify } from '../createDerive.js';
 import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
-import { IssuePrefixLines, useIssuePrefixRegister } from '../SchemaForm.js';
+import { IssuePrefixLines, useIssuePrefixRegister } from '../issuePath.js';
 
 export function ObjectDefaultInspector({
   name,

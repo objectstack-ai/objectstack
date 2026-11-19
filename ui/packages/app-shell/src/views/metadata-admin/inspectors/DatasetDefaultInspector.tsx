@@ -46,7 +46,7 @@ import {
   fieldTypeToDimensionType,
 } from './useDatasetFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
-import { IssuePrefixLines, useIssuePrefixRegister } from '../SchemaForm.js';
+import { IssuePrefixLines, useIssuePrefixRegister } from '../issuePath.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 
 /**

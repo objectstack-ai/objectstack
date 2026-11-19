@@ -38,8 +38,8 @@ import {
 import { InspectorComboField } from './InspectorComboField.js';
 import { useObjectOptions } from './useDatasetFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
-import { IssuePrefixLines, SchemaForm, useIssuePrefixRegister, useSliceFormIssueRows } from '../SchemaForm.js';
-import { issuesUnderPrefix } from '../issuePath.js';
+import { SchemaForm } from '../SchemaForm.js';
+import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFormIssueRows } from '../issuePath.js';
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
 import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
