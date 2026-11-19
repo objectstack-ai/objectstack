@@ -1424,20 +1424,22 @@ export const CEILINGS = new Map([
   // in the text that row moved in). Same ruling as the lines above (2026-10-27, tap A):
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12720 / 4)
-  // 3180 -> 3334 (#35097): a script action writes a sentence in the organization's language.
+  // 3180 -> 3333 (#35097): a script action writes a sentence in the organization's language.
   // One H3 after the refusals paragraph: declare it under `texts`, ask for it with `ctx.text`, the
-  // missing-translation and unreadable-setting answers, and when an undeclared key is refused;
-  // the bundle keys are the i18n skill's and only pointed at. PAID DOWN FIRST by 29 bytes of
-  // restatement in this file: the refusals paragraph no longer spells the bundle key
-  // `objects.<object>._actions.<action>.refusals.<CODE>.message`, which objectstack-i18n owns
-  // (its `_actions.{action_name}.refusals.{CODE}` row), and points there instead. Nothing else
-  // in the file restates another passage (see the 2777 -> 2808 note above), so the same ruling's
-  // second half carries the rest. Arithmetic: the text adds 644 bytes, the cut removes 29, so
-  // the file is 12720 -> 13335 bytes -> 3334 tokens, zero headroom before, ceiling +154, the
-  // measured remainder only, pinned AT the measurement. Same ruling (2026-10-27, tap A):
-  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(13335 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3334],
+  // missing-translation and unreadable-setting answers, when an undeclared key is refused, and the
+  // `texts.<key>.message` key beside the refusals key the paragraph above spells (that key stays:
+  // the bundle's evals grade `_actions` and the with-skill arm reads this bundle only). PAID DOWN
+  // FIRST by 53 bytes of restatement in this file, each of an example right below its sentence:
+  // " as `${result.output.NAME}`" in the `onSuccess` sentence (27; the Convert Lead block's
+  // `${result.output.opportunity_id}` shows the spelling) and "`{recordId}` placeholder; " in the
+  // `newTabUrl` sentence (26; the Open PDF block's `newTabUrl: '/api/v1/invoice/{recordId}/pdf'`
+  // shows it). Nothing else in the file restates another passage (see the 2777 -> 2808 note
+  // above), so the same ruling's second half carries the rest. Arithmetic: the text adds 663
+  // bytes, the cuts remove 53, so the file is 12720 -> 13330 bytes -> 3333 tokens, zero headroom
+  // before, ceiling +153, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(13330 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3333],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

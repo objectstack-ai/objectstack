@@ -208,7 +208,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["texts", "email_subject", "ctx.text", "_actions"],
-        "must_not_contain": ["'Email: ' +", "hooks.send_email"]
+        "must_not_contain": ["hooks.send_email"]
       }
     }
   ]

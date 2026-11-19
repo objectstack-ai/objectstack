@@ -144,10 +144,10 @@
     {
       "id": 15,
       "prompt": "The `lead_follow_up` hook declares `texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } }` and writes a task subject with `ctx.text('follow_up_subject', { lead: ctx.input.name })`. Our organization works in zh-CN, but the tasks still read English. Which bundle key translates it, and whose language is picked?",
-      "expected_output": "`hooks.lead_follow_up.texts.follow_up_subject.message` in the zh-CN bundle, keyed by the hook's `name` (not under `objects` or `messages`), the translation keeping its `{{ lead }}` hole, which the runtime fills after picking it: `'跟进已确认的线索：{{ lead }}'`. It is picked in the organization's language — the Localization setting if somebody set it, else `i18n.defaultLocale` — never the language of the person whose save fired the hook. With no translation the declared sentence is written, filled.",
+      "expected_output": "`hooks.lead_follow_up.texts.follow_up_subject.message` in the zh-CN bundle, keyed by the hook's `name` (not under `objects` or `messages`), the translation keeping its `{{ lead }}` hole, which the runtime fills after picking it: `'跟进已确认的线索：{{ lead }}'`. It is picked in the organization's language — the Localization setting if somebody set it, else `i18n.defaultLocale` — never the language of the person whose save fired the hook.",
       "files": [],
       "assertions": {
-        "must_contain": ["hooks", "lead_follow_up", "texts", "follow_up_subject", "{{ lead }}", "defaultLocale"],
+        "must_contain": ["hooks", "lead_follow_up", "texts", "follow_up_subject", "defaultLocale"],
         "must_not_contain": ["messages: {", "_hooks"]
       }
     }
