@@ -1893,6 +1893,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "内存（MB）",
         helpText: "单次调用内存上限（MB，最大 256）"
       },
+      refusals: {
+        label: "拒绝目录",
+        helpText: "拒绝目录，以操作正文抛出的 SCREAMING_SNAKE 错误码为键（例如 SIGN_IN_REQUIRED）。调用方读到声明的提示语（按其语言翻译）和声明的状态码。适用于 script 操作的 JavaScript（L2）正文；表达式正文声明会被拒绝"
+      },
+      "refusals.message": {
+        label: "提示语",
+        helpText: "正文抛出此错误码时用户读到的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "refusals.status": {
+        label: "状态码",
+        helpText: "拒绝的 HTTP 状态码（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一错误码下的更多句子，以正文在错误码旁抛出的 snake_case 原因为键（{ code, reason }）。线上的错误码和状态码仍取本条目的；未在此声明的原因会被拒绝。不填：抛出的原因不被读取"
+      },
+      "refusals.reasons.message": {
+        label: "提示语",
+        helpText: "正文在此错误码下抛出此原因时用户读到的句子。其中的 {{ }} 占位符遵循本条目的参数"
+      },
+      "refusals.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 state）：正文抛出 { code, params: { state } }，{{ state }} 占位符即显示该值。不填：句子为纯文本"
+      },
       texts: {
         label: "文本",
         helpText: "操作写入记录的句子，以其正文通过 ctx.text 请求的 snake_case 键为键（例如 email_subject）。正文得到按组织语言翻译的声明句子，无翻译时回退为声明的句子。适用于 script 操作的 JavaScript（L2）正文；表达式正文声明会被拒绝"

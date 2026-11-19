@@ -1893,6 +1893,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memoria (MB)",
         helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
+      refusals: {
+        label: "Rechazos",
+        helpText: "Catálogo de rechazos, indexado por el código SCREAMING_SNAKE que lanza el cuerpo de la acción (p. ej. SIGN_IN_REQUIRED). Quien llama recibe el mensaje declarado, traducido a su idioma, con el estado declarado. Para el cuerpo JavaScript (L2) de una acción script; se rechaza en un cuerpo de expresión"
+      },
+      "refusals.message": {
+        label: "Mensaje",
+        helpText: "La frase que lee el usuario cuando el cuerpo lanza este código. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "refusals.status": {
+        label: "Estado",
+        helpText: "Estado HTTP del rechazo (400–499). Si se omite: 400"
+      },
+      "refusals.reasons": {
+        label: "Motivos",
+        helpText: "Más frases bajo este mismo código, indexadas por el motivo snake_case que el cuerpo lanza junto al código ({ code, reason }). El código y el estado que se envían siguen siendo los de esta entrada; se rechaza un motivo no declarado aquí. Si se omite: no se lee un motivo lanzado"
+      },
+      "refusals.reasons.message": {
+        label: "Mensaje",
+        helpText: "La frase que lee el usuario cuando el cuerpo lanza este motivo bajo el código. Sus marcadores {{ }} siguen los params de la entrada"
+      },
+      "refusals.params": {
+        label: "Parámetros",
+        helpText: "Nombres que las frases pueden rellenar (p. ej. state): el cuerpo lanza { code, params: { state } } y un marcador {{ state }} muestra su valor. Si se omite: las frases son texto plano"
+      },
       texts: {
         label: "Textos",
         helpText: "Frases que la acción escribe en los registros, indexadas por la clave snake_case que su cuerpo pide con ctx.text (p. ej. email_subject). El cuerpo recibe el mensaje declarado en el idioma de la organización, traducido, con el mensaje declarado como respaldo. Para el cuerpo JavaScript (L2) de una acción script; se rechaza en un cuerpo de expresión"

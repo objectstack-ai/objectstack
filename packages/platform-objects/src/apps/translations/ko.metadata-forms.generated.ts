@@ -1893,6 +1893,30 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "메모리(MB)",
         helpText: "호출당 메모리 상한(MB, 최대 256)"
       },
+      refusals: {
+        label: "거부",
+        helpText: "작업 본문이 던지는 SCREAMING_SNAKE 코드(예: SIGN_IN_REQUIRED)를 키로 하는 거부 카탈로그입니다. 호출자는 선언된 메시지를 자신의 언어로 번역해 선언된 상태와 함께 읽습니다. script 작업의 JavaScript(L2) 본문용이며, expression 본문에서는 거부됩니다"
+      },
+      "refusals.message": {
+        label: "메시지",
+        helpText: "본문이 이 코드를 던질 때 사용자가 읽는 문장입니다. 일반 텍스트이며, 항목이 params를 선언하면 {{ name }} 자리 표시자에 선언된 매개변수가 채워집니다"
+      },
+      "refusals.status": {
+        label: "상태",
+        helpText: "거부의 HTTP 상태(400–499)입니다. 없으면 400"
+      },
+      "refusals.reasons": {
+        label: "사유",
+        helpText: "같은 코드 아래의 추가 문장으로, 본문이 코드와 함께 던지는 snake_case 사유({ code, reason })를 키로 합니다. 전송되는 코드와 상태는 이 항목의 것을 따릅니다. 여기에 선언되지 않은 사유는 거부됩니다. 없으면 던진 사유를 읽지 않습니다"
+      },
+      "refusals.reasons.message": {
+        label: "메시지",
+        helpText: "본문이 이 코드 아래에서 이 사유를 던질 때 사용자가 읽는 문장입니다. {{ }} 자리 표시자는 항목의 params를 따릅니다"
+      },
+      "refusals.params": {
+        label: "매개변수",
+        helpText: "문장에 채울 수 있는 이름(예: state)입니다. 본문이 { code, params: { state } }를 던지면 {{ state }} 자리 표시자에 그 값이 표시됩니다. 없으면 문장은 일반 텍스트입니다"
+      },
       texts: {
         label: "텍스트",
         helpText: "작업이 레코드에 쓰는 문장으로, 본문이 ctx.text로 요청하는 snake_case 키(예: email_subject)를 키로 합니다. 본문은 선언된 메시지를 조직의 언어로 번역해 받으며, 번역이 없으면 선언된 메시지를 받습니다. script 작업의 JavaScript(L2) 본문용이며, expression 본문에서는 거부됩니다"

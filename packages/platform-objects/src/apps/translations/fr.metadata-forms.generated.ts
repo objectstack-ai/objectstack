@@ -1893,6 +1893,30 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Mémoire (Mo)",
         helpText: "Plafond de mémoire par appel (Mo, 256 max.)"
       },
+      refusals: {
+        label: "Refus",
+        helpText: "Catalogue des refus, indexé par le code SCREAMING_SNAKE que lève le corps de l’action (par ex. SIGN_IN_REQUIRED). L’appelant lit le message déclaré, traduit dans sa langue, avec le statut déclaré. Pour le corps JavaScript (L2) d’une action script ; refusé sur un corps expression"
+      },
+      "refusals.message": {
+        label: "Message",
+        helpText: "La phrase que lit l’utilisateur lorsque le corps lève ce code. Texte brut, sauf si l’entrée déclare des params : un espace réservé {{ name }} reçoit alors un paramètre déclaré"
+      },
+      "refusals.status": {
+        label: "Statut",
+        helpText: "Statut HTTP du refus (400–499). Absent : 400"
+      },
+      "refusals.reasons": {
+        label: "Motifs",
+        helpText: "D’autres phrases sous ce même code, indexées par le motif snake_case que le corps lève avec le code ({ code, reason }). Le code et le statut transmis restent ceux de cette entrée ; un motif non déclaré ici est refusé. Absent : un motif levé n’est pas lu"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "La phrase que lit l’utilisateur lorsque le corps lève ce motif sous ce code. Ses espaces réservés {{ }} suivent les params de l’entrée"
+      },
+      "refusals.params": {
+        label: "Paramètres",
+        helpText: "Les noms que les phrases peuvent remplir (par ex. state) : le corps lève { code, params: { state } }, et un espace réservé {{ state }} en affiche la valeur. Absent : les phrases sont du texte brut"
+      },
       texts: {
         label: "Textes",
         helpText: "Les phrases que l’action écrit dans les enregistrements, indexées par la clé snake_case que son corps demande avec ctx.text (par ex. email_subject). Le corps reçoit le message déclaré dans la langue de l’organisation, traduit, avec le message déclaré comme repli. Pour le corps JavaScript (L2) d’une action script ; refusé sur un corps expression"

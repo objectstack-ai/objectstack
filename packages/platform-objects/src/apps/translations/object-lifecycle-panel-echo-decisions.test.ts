@@ -1292,7 +1292,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 747 since #35096: the action form offers the `texts` record and its
       // `message` / `params` entry fields — three row labels, authored in all
       // three locales.
-      expect(translated.length, `${locale} positive control`).toBe(747);
+      // 753 since #34823: the action form offers the `refusals` record and its
+      // five entry fields — six row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(753);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

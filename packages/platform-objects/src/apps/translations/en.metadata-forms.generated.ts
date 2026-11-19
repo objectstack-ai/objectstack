@@ -1893,6 +1893,30 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
       },
+      refusals: {
+        label: "Refusals",
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the action's body throws (e.g. SIGN_IN_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "refusals.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP status of the refusal (400–499). Absent: 400"
+      },
+      "refusals.reasons": {
+        label: "Reasons",
+        helpText: "Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry's; a reason not declared here is refused. Absent: a thrown reason is not read"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry's params"
+      },
+      "refusals.params": {
+        label: "Params",
+        helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
+      },
       texts: {
         label: "Texts",
         helpText: "Sentences the action writes into records, keyed by the snake_case key its body asks for with ctx.text (e.g. email_subject). The body gets the declared message in the organization's language, translated, with the declared message as the fallback. For a script action's JavaScript (L2) body; refused on an expression body"
