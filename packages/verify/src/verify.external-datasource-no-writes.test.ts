@@ -190,6 +190,12 @@ describe('os verify writes nothing to an external datasource, even one whose wri
 
   it('no derived write family sends a write to the external datasource', () => {
     expect(writesDuringFamilies, Object.values(reports).join('\n')).toEqual([]);
+    // Each family met the external object (its field is in the family's
+    // population) and left it out with the CRUD case's reason, so the silence
+    // is a withheld write, not a family that never looked.
+    for (const family of ['referenceShapes', 'deleteBehaviors', 'uniqueScopes']) {
+      expect(reports[family], `${family}:\n${reports[family]}`).toContain('not exercised');
+    }
   });
 
   it('the CRUD report names the external object as external and not exercised, with its gate open', () => {
