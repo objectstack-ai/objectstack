@@ -220,6 +220,16 @@
         "must_contain": ["resultDialog", "format: 'table'", "columns", "rejected", "reason"],
         "must_not_contain": ["columns: ['email'", "display: 'table'"]
       }
+    },
+    {
+      "id": 23,
+      "prompt": "Our `archive_tasks` script action is wired as a `bulkActionDefs` entry with `execution: 'aggregate'`. Its body loops over the selected ids and updates each task, but some tasks are locked and their update throws, so the whole run is reported as failed even though most rows were archived. Make the result dialog say which rows were archived and why each of the others was not.",
+      "expected_output": "The body reads `input._selectedIds`, wraps each row's update in its own `try` / `catch`, and returns `{ succeeded: [ids], failed: [{ id, message }] }` (a `BulkActionResult`) as its whole return value instead of letting the error escape: a throw is one outcome for the whole selection with no per-row list. Both members are row lists (not counts, and `message`, not `error`), each id one of `_selectedIds`; a selected id named in neither list is reported as not confirmed. Not a `resultDialog`, not the per-record `bulkActions` wiring, and not a rethrow carrying the lists (a rejection's body is dropped).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_selectedIds", "succeeded", "failed", "message", "catch"],
+        "must_not_contain": ["succeeded: ids.length"]
+      }
     }
   ]
 }
