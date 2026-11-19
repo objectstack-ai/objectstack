@@ -8,8 +8,8 @@
 
 /**
  * objectui#12700 — the navigation gate withholds an entry whose `visible`
- * predicate cannot be evaluated; the object-field gate keeps its fail-open
- * answer for the very same fault.
+ * predicate cannot be evaluated; the published `evaluateVisibility` keeps its
+ * fail-open answer for the very same fault.
  *
  * The evaluators are built through the shell's own builder, so the bag is the
  * one `ExpressionProvider` publishes, with and without a permissions payload.
@@ -22,7 +22,6 @@ import {
   createExpressionEvaluator,
   evaluateNavigationVisibility,
   evaluateVisibility,
-  isObjectFieldVisible,
 } from '../ExpressionProvider';
 
 const CAN_READ = { dialect: 'cel', source: "current_user.can('crm_opportunity', 'read')" };
@@ -79,8 +78,9 @@ describe('evaluateNavigationVisibility (objectui#12700)', () => {
     expect(evaluateNavigationVisibility({ dialect: 'cel', source: '  ' }, unbound())).toBe(true);
   });
 
-  it('CONTROL: the object-field gate and the published `evaluateVisibility` stay fail-open on the same fault', () => {
+  it('CONTROL: the published `evaluateVisibility` stays fail-open on the same fault', () => {
+    // The object-field list no longer evaluates `visibleWhen` at all
+    // (objectstack#35249): the form does, under its own fail-open posture.
     expect(evaluateVisibility(CAN_READ, unbound())).toBe(true);
-    expect(isObjectFieldVisible({ visibleWhen: CAN_READ }, unbound())).toBe(true);
   });
 });

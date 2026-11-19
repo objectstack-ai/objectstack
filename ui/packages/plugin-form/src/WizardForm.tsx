@@ -22,6 +22,7 @@ import {
   evalFieldPredicate,
   isMissingForRequired,
   isServerOwnedValue,
+  planObjectFormulas,
   requiredWhenRestsOnStoredRecord,
 } from '@object-ui/core';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
@@ -800,6 +801,20 @@ export const WizardForm: React.FC<WizardFormProps> = ({
    */
   const predicateScope = usePredicateScope();
 
+  /**
+   * The object's `formula` fields, planned from the schema this wizard already
+   * read, for the acting user of the predicate scope (ADR-0113, formula
+   * paragraph). The final gate judges field rules on `plan.compute(record)`,
+   * the value a read of the written record would serve, as the form renderer
+   * does (`objectFormulas.ts`): never on the formula value last read.
+   * `undefined` when the object declares no formula, or its schema read
+   * failed or was never made, and the gate then judges the record as held.
+   */
+  const formulaPlan = useMemo(
+    () => planObjectFormulas(objectSchema?.fields, predicateScope),
+    [objectSchema, predicateScope],
+  );
+
   // Current section fields
   const currentSectionFields = useMemo(() => {
     if (currentStep >= 0 && currentStep < totalSteps) {
@@ -868,17 +883,28 @@ export const WizardForm: React.FC<WizardFormProps> = ({
     ): { missing: Map<number, string[]>; faultedVisibleWhen: Map<number, string[]> } => {
       const out = new Map<number, string[]>();
       const faultedVisibleWhen = new Map<number, string[]>();
+      // The record the rules are judged on: the object's formulas computed over
+      // it (see `formulaPlan`). Emptiness is still read off `record`, the values
+      // that are written.
+      const ruleRecord = formulaPlan ? formulaPlan.compute(record) : record;
       schema.sections.forEach((section, index) => {
         for (const field of buildSectionFields(section)) {
           const name = field?.name;
           if (!name || (field as any).hidden === true) continue;
+          // A `visibleWhen` reading a formula the form cannot compute is dropped,
+          // as the step form that draws the field drops it: shown, keeping its
+          // `required`, and no fault (`withoutUnservableVisibleWhen`).
+          const visibleWhen =
+            formulaPlan && formulaPlan.unservableReadsOf((field as any).visibleWhen).length > 0
+              ? undefined
+              : (field as any).visibleWhen;
           const state = resolveFieldRuleState(
             {
-              visibleWhen: (field as any).visibleWhen,
+              visibleWhen,
               readonlyWhen: (field as any).readonlyWhen,
               requiredWhen: (field as any).requiredWhen,
             },
-            record,
+            ruleRecord,
             {
               required: !!field.required,
               readonly: (field as any).readonly === true,
@@ -913,7 +939,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // receives the ADR-0089 canonical view-level `visibleWhen` spelling.
           const viewVisible =
             (field as any).visibleOn == null ||
-            evalFieldPredicate((field as any).visibleOn, record, true, undefined, predicateScope, {
+            evalFieldPredicate((field as any).visibleOn, ruleRecord, true, undefined, predicateScope, {
               context: `visibleOn of field '${name}'`,
             });
           // A hidden or read-only field is not the user's to fill in.
@@ -938,7 +964,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
       });
       return { missing: out, faultedVisibleWhen };
     },
-    [schema.sections, buildSectionFields, isCreateWizard, isEditWizard, persistedRecord, predicateScope],
+    [schema.sections, buildSectionFields, isCreateWizard, isEditWizard, persistedRecord, predicateScope, formulaPlan],
   );
 
   // Handle step data collection (merge partial data into formData)

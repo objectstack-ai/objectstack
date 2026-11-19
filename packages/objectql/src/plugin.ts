@@ -40,6 +40,7 @@ import { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-do
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
+import { announceSummaryHoles } from './summary-hole-announce.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { readRecycleBinRetentionEnv, type RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
@@ -1417,6 +1418,13 @@ export class ObjectQLPlugin implements Plugin {
         // registered. A bounded sample read that writes nothing and never fails
         // the boot (`stored-expression-backfill.ts`).
         if (this.ql) await announceStoredExpressionHoles(this.ql, ctx.logger);
+        // [#34283] The same, for roll-ups: a `count`/`sum` that arrived with
+        // a restart (a new app version, an install loaded at this boot, a
+        // rehydrated ledger entry) was just sealed as computed above, so its
+        // stored rows keep NULL with no install door to fill them. Name them and
+        // `os migrate summary-nulls`; a bounded sample read that writes nothing
+        // and never fails the boot (`summary-hole-announce.ts`).
+        if (this.ql) await announceSummaryHoles(this.ql, ctx.logger);
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);

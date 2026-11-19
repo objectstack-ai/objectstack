@@ -1370,6 +1370,28 @@ export const SysUser = ObjectSchema.create({
         'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
+    // The development seed's stamp (`plugin-auth` `dev-seed-credential.ts`):
+    // written on an account `os dev`'s admin seed or a stack's `demoStaff`
+    // creates, as a one-way digest of the password hash the seed stored. A
+    // production-mode server refuses that account's sign-in and every new
+    // session while its stored hash still has this digest; `os user
+    // set-password` sets a new password and clears it. A digest of a salted
+    // hash, so `internal`: never served on the generic data path, matched by
+    // the server alone. Owned by objectql (better-auth is oblivious to this
+    // column — like `ai_access`).
+    dev_seed_credential: Field.text({
+      label: 'Development Seed Credential',
+      required: false,
+      maxLength: 64, // a SHA-256 digest in base64url is 43 characters; keyed by the index below
+      readonly: true,
+      internal: true,
+      group: 'System',
+      description:
+        'Set on an account the development seed created. While its password is still the seed password, a ' +
+        'production server refuses its sign-in and every new session; os user set-password sets a new password ' +
+        'and clears it. System-managed; never returned on reads.',
+    }),
+
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the
     // grace clock. Stamped lazily at session validation; system-managed.
     mfa_required_at: Field.datetime({
@@ -1596,6 +1618,10 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1.5 — phone sign-in identifier; unique when present (null for
     // email-only accounts), also the upsert match key for identity import.
     { fields: ['phone_number'], unique: 'global' },
+    // The development seed's stamp, matched by the password verifier on a
+    // server that is not in development mode (`plugin-auth`
+    // `dev-seed-credential.ts`). Null on every account the seed never created.
+    { fields: ['dev_seed_credential'], unique: false },
   ],
 
   enable: {
