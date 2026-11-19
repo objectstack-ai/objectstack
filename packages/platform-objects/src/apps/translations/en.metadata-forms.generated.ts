@@ -427,7 +427,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "User Actions",
-        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission."
+        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission. Change Owner is not part of that matrix: its default follows the sharing model (see its entry)."
       },
       "userActions.create": {
         label: "Create",
@@ -448,6 +448,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "Export CSV",
         helpText: "The CSV export entry. Unset: shown, since every managedBy bucket offers export."
+      },
+      "userActions.transfer": {
+        label: "Change Owner",
+        helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
       },
       editMode: {
         label: "Edit Mode",
@@ -811,7 +815,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Return Type",
-        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset)."
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%."
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -1892,6 +1896,42 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "body.memoryMb": {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
+      },
+      refusals: {
+        label: "Refusals",
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the action's body throws (e.g. SIGN_IN_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "refusals.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP status of the refusal (400–499). Absent: 400"
+      },
+      "refusals.reasons": {
+        label: "Reasons",
+        helpText: "Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry's; a reason not declared here is refused. Absent: a thrown reason is not read"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry's params"
+      },
+      "refusals.params": {
+        label: "Params",
+        helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
+      },
+      texts: {
+        label: "Texts",
+        helpText: "Sentences the action writes into records, keyed by the snake_case key its body asks for with ctx.text (e.g. email_subject). The body gets the declared message in the organization's language, translated, with the declared message as the fallback. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "The sentence the action writes when its body asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "texts.params": {
+        label: "Params",
+        helpText: "Names the sentence may fill (e.g. subject): the body asks for ctx.text(key, { subject }), and a {{ subject }} hole renders it. Absent: the sentence is plain text"
       },
       params: {
         label: "Params",

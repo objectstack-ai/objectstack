@@ -75,13 +75,19 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > datasource: every derived write family leaves it out, even one whose write
 > gate is open (`external.allowWrites` and the object's `external.writable`),
 > and reports it `skipped` as `external datasource "<name>" (writes allowed |
-> read-only): not exercised`. An object bound to a declared MANAGED datasource
-> (or one that declares no `schemaMode`) is written through that datasource,
-> as under `objectstack dev`. A write the app itself makes to an external
-> object (its seed, or a hook or flow
-> that one of verify's writes fires) goes where the app sends it, as under
-> `objectstack dev`; only the `--flow` run refuses every write routed away
-> from the in-memory database.
+> read-only): not exercised`; an object that requires a reference to it is
+> skipped as withheld on purpose, with the target's reason. A write the app
+> itself makes to an external object (its seed, or a hook or flow that one of
+> verify's writes fires) goes where the app sends it, as under
+> `objectstack dev`. A declared MANAGED datasource (or one that declares no
+> `schemaMode`) is never connected to the database it names: verify builds it
+> as a fresh in-memory store of the same kind as its own default store, so its
+> objects are still exercised and every write to them, the app's included,
+> stays in memory. A managed datasource whose engine has no faithful in-memory
+> stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
+> and every derived write family leaves its objects out as `managed datasource
+> "<name>" (driver "<driver>"): not exercised`. Only the `--flow` run refuses
+> every write routed away from the in-memory default database.
 
 ## CLI (zero-config)
 

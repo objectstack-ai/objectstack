@@ -427,7 +427,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "ユーザー操作",
-        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。所有者の変更はこのマトリクスに含まれません。既定は共有モデルに従います（その項目を参照）。"
       },
       "userActions.create": {
         label: "作成",
@@ -448,6 +448,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "CSV エクスポート",
         helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
+      },
+      "userActions.transfer": {
+        label: "所有者の変更",
+        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
       },
       editMode: {
         label: "編集の開き方",
@@ -1892,6 +1896,42 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.memoryMb": {
         label: "メモリ（MB）",
         helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
+      },
+      refusals: {
+        label: "拒否カタログ",
+        helpText: "アクションの本文がスローする SCREAMING_SNAKE のコード（例: SIGN_IN_REQUIRED）をキーとする拒否カタログ。呼び出し元には宣言したメッセージ（その言語に翻訳）と宣言したステータスが返ります。script アクションの JavaScript（L2）本文で使用可能。expression 本文では拒否されます"
+      },
+      "refusals.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードをスローしたときにユーザーが読む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "refusals.status": {
+        label: "ステータス",
+        helpText: "拒否の HTTP ステータス（400–499）。未指定: 400"
+      },
+      "refusals.reasons": {
+        label: "理由",
+        helpText: "同じコードの下に置く追加の文。本体がコードと一緒にスローする snake_case の理由（{ code, reason }）をキーとします。送信されるコードとステータスはこのエントリのものです。ここで宣言されていない理由は拒否されます。未指定: スローされた理由は読まれません"
+      },
+      "refusals.reasons.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードの下でこの理由をスローしたときにユーザーが読む文。{{ }} プレースホルダーはエントリの params に従います"
+      },
+      "refusals.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
+      texts: {
+        label: "テキスト",
+        helpText: "アクションがレコードに書き込む文。本文が ctx.text で要求する snake_case のキー（例: email_subject）をキーとします。本文には宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。script アクションの JavaScript（L2）本文で使用可能。expression 本文では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "本文がこのキーを要求したときにアクションが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: subject）。本文が ctx.text(key, { subject }) を要求すると、{{ subject }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
       params: {
         label: "パラメーター",

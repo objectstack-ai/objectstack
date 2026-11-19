@@ -20,6 +20,7 @@
 export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.action.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.action.fields.patch.label": "815f68570a78eba1",
+  "metadataForms.action.fields.refusals.status.label": "64a420165247654b",
   "metadataForms.agent.fields.avatar.label": "0f06369995b69b8b",
   "metadataForms.agent.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.app.fields.branding.label": "ec6e391065514b64",

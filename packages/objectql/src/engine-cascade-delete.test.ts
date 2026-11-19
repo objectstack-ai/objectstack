@@ -978,6 +978,25 @@ describe('cascadeDeleteRelations — [#23221] every cascade-issued child delete 
         expect((await engine.findOne('side_log', { where: { id: s1.id } }) as any).body).toBe('touched');
     });
 
+    // [#35329] The after-effects a delete runs once its row is gone, counted
+    // for one object: `afterDelete` (with its cascade marker), the secret
+    // release, the roll-up recompute and the `data.record.deleted` event.
+    const watchAfterEffects = (object: string) => {
+        const afterMarkers: boolean[] = [];
+        engine.on('afterDelete', object, (ctx: any) => { afterMarkers.push('referentialCascadeDelete' in ctx); });
+        (engine as any).realtimeService = {};
+        // Each spy with the argument position that names the object.
+        const spies: Array<[{ mock: { calls: unknown[][] } }, number]> = [
+            [vi.spyOn(engine as any, 'releaseSecretHandles'), 0],
+            [vi.spyOn(engine as any, 'recomputeSummaries'), 0],
+            [vi.spyOn(engine as any, 'publishDataEvent').mockResolvedValue(undefined), 1],
+        ];
+        return {
+            afterMarkers,
+            calls: () => spies.map(([spy, at]) => spy.mock.calls.filter((args: unknown[]) => args[at] === object).length),
+        };
+    };
+
     it('a delete of the very same row from inside the cascaded dispatch finds the token claimed', async () => {
         const markers: Array<{ depth: number; hasKey: boolean }> = [];
         let depth = 0;
@@ -991,13 +1010,44 @@ describe('cascadeDeleteRelations — [#23221] every cascade-issued child delete 
             // Once: the hook's own delete of the row it is being asked about.
             if (depth === 1) await ctx.api.object('qline').deleteById(l.id);
         });
+        const effects = watchAfterEffects('qline');
 
-        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+        // [#35329] The hook removed the row after the cascade's child delete
+        // read it, so that delete's driver answers `false`. A cascade-issued
+        // child delete does not refuse for it: the walk goes on and the
+        // parent's delete completes.
+        await expect(engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any)).resolves.toBe(true);
+        expect(await engine.findOne('acct', { where: { id: a.id } })).toBeNull();
+        expect(await engine.findOne('qline', { where: { id: l.id } })).toBeNull();
 
         expect(markers).toEqual([
             { depth: 1, hasKey: true },
             { depth: 2, hasKey: false },
         ]);
+        // Only the hook's own delete, which removed the row, ran them: the
+        // cascade's child delete removed nothing and ran none.
+        expect(effects.afterMarkers).toEqual([false]);
+        expect(effects.calls()).toEqual([1, 1, 1]);
+    });
+
+    it('CONTROL: the same self-delete on a by-id delete the caller addressed still refuses with RECORD_NOT_FOUND', async () => {
+        let depth = 0;
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const l = await engine.insert('qline', { title: 'one', parent: a.id });
+
+        engine.on('beforeDelete', 'qline', async (ctx: any) => {
+            depth += 1;
+            if (depth === 1) await ctx.api.object('qline').deleteById(l.id);
+        });
+        const effects = watchAfterEffects('qline');
+
+        const outcome = await engine.delete('qline', { where: { id: l.id }, context: { ...CALLER } } as any)
+            .then(() => 'resolved', (e: any) => ({ code: e?.code, status: e?.status }));
+        expect(outcome).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(await engine.findOne('qline', { where: { id: l.id } })).toBeNull();
+        expect(effects.afterMarkers).toEqual([false]);
+        expect(effects.calls()).toEqual([1, 1, 1]);
     });
 
     it('an identity-LESS cascade still marks its child, and puts no operation-private key on the envelope', async () => {

@@ -22,6 +22,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
 import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
@@ -105,6 +106,9 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
+import { useListPageBarSlot, useListPageBarState } from './listPageBarSlot';
+import { SelectionPageBar } from './components/SelectionPageBar';
+import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
 
@@ -716,6 +720,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   search: hostSearch,
   onSearchChange: hostOnSearchChange,
   findParams: hostFindParams,
+  onLoadMore,
+  hasMoreRows,
+  scrollRestoreKey,
   onColumnStateChange,
   objectFields: hostObjectFields,
   showRowNumbers: hostShowRowNumbers,
@@ -803,6 +810,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const { pullRef, isRefreshing, pullDistance } = useObjectGridMobile({
     schema, dataSource, setRefreshKey, setUseCardView,
   });
+
+  // objectstack#35554 — the list page bar's selection slot
+  // (`./listPageBarSlot`). A grid inside a list page's page column fills the
+  // page bar's slot: it draws no row-end control and no bulk bar, and its
+  // selection swaps the page bar's content instead. Any other host (a related
+  // list, a page block, the record drawer) finds no slot and keeps both.
+  const [gridRoot, setGridRoot] = useState<HTMLDivElement | null>(null);
+  const setRootRef = useCallback((el: HTMLDivElement | null) => {
+    setGridRoot(el);
+    (pullRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  }, [pullRef]);
+  const pageBarSlot = useListPageBarSlot(gridRoot);
 
   // `passedData` — data handed down directly (from ListView) — is destructured
   // from props above.
@@ -1455,6 +1474,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     fetchWindow, serverGroupedFetch, isGrouped,
   });
 
+  // objectstack#35554 — tell the page bar whether a selection is open and how
+  // many rows the list's query matches (the count beside the view name).
+  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 });
+
+  // objectstack#35554 — a host that loads its rows window by window
+  // (`onLoadMore`) is asked for the next window as the table's scroll box
+  // nears its end, and the box's position is kept across a return to the list
+  // (`./objectGridInfiniteLoad`).
+  useInfiniteRowLoad({
+    root: gridRoot,
+    enabled: !!onLoadMore,
+    hasMore: !!hasMoreRows,
+    loading,
+    rowCount: data.length,
+    onLoadMore,
+    restoreKey: scrollRestoreKey,
+  });
+
   // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
   // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).
   useObjectGridDiagnostics(schema);
@@ -1787,6 +1824,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
     setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    drawRowControls: !pageBarSlot,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
@@ -2844,7 +2882,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     columns: tableColumns,
     data,
     summaryRow,
-    pagination: paginationEnabled,
+    // objectstack#35554 — a host that loads window by window draws no pager.
+    pagination: paginationEnabled && !onLoadMore,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
     // Rows-per-page selector options sourced from view metadata
     // (schema.pagination.pageSizeOptions). When absent the DataTable falls back
@@ -4188,7 +4227,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   );
 
   return (
-    <div ref={pullRef} className="relative h-full flex flex-col">
+    <div ref={setRootRef} className="relative h-full flex flex-col">
       {/* Re-fetch indicator while existing rows remain visible (filter/sort
           change). The initial-load skeleton above handles the empty case. */}
       <RefreshIndicator active={loading && data.length > 0} ariaLabel={t('grid.refreshing')} />
@@ -4207,19 +4246,42 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
       )}
-      <BulkActionBar
-        selectedRows={selectedRows}
-        actions={effectiveBulkActions ?? []}
-        actionDefs={bulkActionDefs}
-        objectFields={objectSchema?.fields}
-        onAction={dispatchBulkAction}
-        onActionDef={dispatchBulkActionDef}
-        onClearSelection={resetSelection}
-        pageSize={data.length}
-        totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
-        allMatchingSelected={selectAllMatching}
-        onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
-      />
+      {pageBarSlot ? (
+        // objectstack#35554 — on a list page the selection is the page bar's:
+        // its content is drawn into the bar's slot, and no bar floats over
+        // the rows.
+        selectedRows.length > 0 && createPortal(
+          <SelectionPageBar
+            selectedRows={selectedRows}
+            singleRowMenu={selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
+            actions={effectiveBulkActions ?? []}
+            actionDefs={bulkActionDefs}
+            objectFields={objectSchema?.fields}
+            onAction={dispatchBulkAction}
+            onActionDef={dispatchBulkActionDef}
+            onClearSelection={resetSelection}
+            loadedCount={data.length}
+            totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+            allMatchingSelected={selectAllMatching}
+            onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+          />,
+          pageBarSlot,
+        )
+      ) : (
+        <BulkActionBar
+          selectedRows={selectedRows}
+          actions={effectiveBulkActions ?? []}
+          actionDefs={bulkActionDefs}
+          objectFields={objectSchema?.fields}
+          onAction={dispatchBulkAction}
+          onActionDef={dispatchBulkActionDef}
+          onClearSelection={resetSelection}
+          pageSize={data.length}
+          totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+          allMatchingSelected={selectAllMatching}
+          onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+        />
+      )}
       {navigation.isOverlay && (
         <NavigationOverlay
           {...navigation}
