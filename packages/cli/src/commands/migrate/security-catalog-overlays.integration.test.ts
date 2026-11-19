@@ -9,12 +9,14 @@
  * ## The fixture
  *
  * A compiled artifact (`dist/objectstack.json`, the shape a deployed app boots
- * from) whose package declares two positions and one permission set, over a
+ * from) whose package declares two positions, one permission set and one
+ * capability, over a
  * database an older release left behind with:
  *
  *  - LISTED: a `permission` row and a `position` row over the package's names,
- *    one bound to no package and one bound to the package itself, and a
- *    legacy-plural `positions` row over the package's other position;
+ *    one bound to no package and one bound to the package itself, a
+ *    legacy-plural `positions` row over the package's other position, and
+ *    (#35157) a `capability` row over the capability the package declares;
  *  - LISTED ONLY WITH AUTH ON: a legacy-plural `permissions` row over
  *    `member_default`, a set the platform security plugin declares — and that
  *    plugin is composed only behind `os serve`'s auth gate;
@@ -66,6 +68,7 @@ const ARTIFACT = {
   manifest: { id: PKG, name: 'm22371', version: '1.0.0', type: 'app' },
   positions: [{ name: 'm22371_lead', label: 'Lead' }, { name: 'm22371_old_lead', label: 'Old lead' }],
   permissions: [{ name: 'm22371_rep', label: 'Rep', objects: {} }],
+  capabilities: [{ name: 'm22371.approve', label: 'Approve' }],
 };
 
 interface SeedRow { type: string; name: string; organization_id: string | null; package_id: string | null; state: string }
@@ -74,6 +77,7 @@ const SEED: SeedRow[] = [
   { type: 'position', name: 'm22371_lead', organization_id: null, package_id: PKG, state: 'active' },
   { type: 'positions', name: 'm22371_old_lead', organization_id: null, package_id: null, state: 'active' },
   { type: 'permissions', name: 'member_default', organization_id: null, package_id: null, state: 'active' },
+  { type: 'capability', name: 'm22371.approve', organization_id: null, package_id: null, state: 'active' },
   // Controls.
   { type: 'permission', name: 'm22371_free', organization_id: null, package_id: null, state: 'active' },
   { type: 'permission', name: 'm22371_rep', organization_id: 'org_m22371', package_id: null, state: 'active' },
@@ -87,10 +91,13 @@ const LISTED_AUTH_OFF = [
   `position/m22371_lead@${PKG} ${PKG}`,
   `positions/m22371_old_lead@- ${PKG}`,
   `permission/m22371_rep@- ${PKG}`,
+  `capability/m22371.approve@- ${PKG}`,
 ];
+// Positions, then permission sets, then capabilities (the step's order).
 const LISTED_AUTH_ON = [
-  ...LISTED_AUTH_OFF,
+  ...LISTED_AUTH_OFF.slice(0, 3),
   `permissions/member_default@- ${SECURITY_PLUGIN_ID}`,
+  ...LISTED_AUTH_OFF.slice(3),
 ];
 
 const CONTROLS = [
@@ -340,11 +347,16 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
       'positions/m22371_old_lead deleted sys-metadata-repository',
       'permission/m22371_rep deleted protocol.deleteMetaItem',
       'permissions/member_default deleted sys-metadata-repository',
+      // [#35157] The protocol's door refuses a capability row over a managed
+      // package's capability (its type takes no overlay), so it takes the
+      // repository beneath, as a legacy plural does.
+      'capability/m22371.approve deleted sys-metadata-repository',
     ]);
 
     // Exactly the listed rows are gone; every control is still stored.
     const after = await storedRows(db);
     expect(before.filter((r) => !after.includes(r)).sort()).toEqual([
+      'capability/m22371.approve/env/active',
       'permission/m22371_rep/env/active',
       'permissions/member_default/env/active',
       'position/m22371_lead/env/active',
@@ -356,6 +368,7 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
     // row for each one the protocol's door deleted.
     const { history, audit } = await trail(db);
     expect(history).toEqual([
+      'capability/m22371.approve delete by os migrate security-catalog-overlays',
       'permission/m22371_rep delete by os migrate security-catalog-overlays',
       'permissions/member_default delete by os migrate security-catalog-overlays',
       'position/m22371_lead delete by os migrate security-catalog-overlays',

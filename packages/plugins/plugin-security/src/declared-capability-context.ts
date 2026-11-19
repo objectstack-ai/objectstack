@@ -86,23 +86,32 @@ export async function readDeclaredCapabilityContext(
   ql: any,
   metadataService?: any,
 ): Promise<AnchorBindingContext | undefined> {
-  const registered: any[] = readDeclared(ql, 'capability');
   // [ADR-0090 D5, #35157] Only a declaration with PACKAGE provenance is the
   // app's own token (「带 package provenance 的应用声明 capability 令牌不计」).
-  // A capability is runtime-creatable since #35157, and an environment save
-  // registers it in this same collection with no `_packageId` — counting it
-  // would let a metadata author excuse any name from the anchor gate by
-  // saving a declaration of it. An unmanaged copy's capabilities carry the
-  // copy package's id, so they still count. Dropping one errs toward
-  // refusing a binding, never toward granting one.
-  let caps: any[] = registered.filter(
+  // A capability is runtime-creatable since #35157. A save with no package
+  // registers it here with no `_packageId`, and it excuses nothing. A save
+  // into a writable package (an unmanaged copy, a duplicate, a base the
+  // environment authors) carries that package's id, and it counts: the copy's
+  // capabilities must, and a row cannot tell a copied declaration from one
+  // saved by hand into the same package. What bounds that is the save door,
+  // not this filter: a platform capability's name and a name a package
+  // already declares are refused there, and `describeHighPrivilegeBits`
+  // applies the platform floor again. A name nobody declares can be declared
+  // once, by a `manage_metadata` holder, inside a writable package.
+  // Dropping a declaration errs toward refusing a binding, never toward
+  // granting one.
+  const withPackage = (list: any[]): any[] => list.filter(
     (c) => typeof (c as { _packageId?: unknown } | null)?._packageId === 'string'
       && (c as { _packageId: string })._packageId.length > 0,
   );
+  const registered: any[] = readDeclared(ql, 'capability');
+  let caps: any[] = withPackage(registered);
   if (registered.length === 0) {
     try {
       const listed = metadataService?.list?.('capability');
-      caps = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+      const answered = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+      // The fallback is judged by the same provenance test.
+      caps = Array.isArray(answered) ? withPackage(answered) : answered;
     } catch { caps = []; }
   }
   if (!Array.isArray(caps)) return undefined;

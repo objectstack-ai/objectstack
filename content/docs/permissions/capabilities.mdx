@@ -247,11 +247,18 @@ Every such write is judged before anything is stored:
   requirement match a capability by name across the whole deployment, so one
   name has one holder.
 
-A capability saved this way is not an app's own token at the `everyone`
-anchor. Binding a permission set that grants it to `everyone` is judged as for
-any undeclared token, and is refused as high-privilege. Only a declaration that
-carries a package (one an app ships, or an unmanaged copy's) is excused there
-(ADR-0090 D5).
+At the `everyone` anchor, a token a package's declaration names is the app's
+own and is excused (ADR-0090 D5): one an app ships, one an unmanaged copy
+writes, and one saved into a package the environment can write (a copy, a
+duplicate, a base you author). A capability saved with no package is not:
+binding a permission set that grants it to `everyone` is judged as for any
+undeclared token, and refused as high-privilege. The two refusals above are
+what bounds this. No declaration can take a platform capability's name, so a
+platform power is never excused, and none can take a name a package already
+declares. A name nobody declares, such as a token an app grants or requires
+without declaring it, can be declared once inside a writable package, and that
+declaration decides its `scope` and excuses it at the anchor. Only a holder of
+`manage_metadata` can save one.
 
 Under a `group` or `isolated` tenancy posture, a caller below the platform
 operator reads the walled refusal every environment-metadata write takes there
@@ -272,9 +279,17 @@ under a `targetNamespace`, a capability the package names with its namespace
 (`trial1.manage_assets`), and every `systemPermissions` grant and
 `requiredPermissions` requirement of it in the copy follows. So two copies of
 one app never share a gate. A name the package does not declare — a platform
-capability it grants or requires — is copied as written. A capability the
-package declares without its namespace prefix keeps its name, and a second copy
-of it is refused rather than shared, so prefix your capability names.
+capability it grants or requires — is copied as written. The name follows into
+a component's `visibleWhen` too, where `current_user.hasCapability('<name>')`
+gates it with a quoted name. A capability named after an object the copy
+renames (`crm.crm_invoice.void`) keeps one name in the copy, the
+declaration's (`shop.crm_invoice.void`), in every place that names it.
+
+A capability the package declares without its namespace prefix keeps its name.
+An unmanaged install keeps it; a second holder of that name refuses the whole
+install. Duplicating a package refuses that capability, and every item that
+grants, requires or tests for it, because the source stays installed beside the
+copy and the two would share one gate. Prefix your capability names.
 
 ## Checklist
 

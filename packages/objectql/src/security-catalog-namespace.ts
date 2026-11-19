@@ -58,7 +58,7 @@
  * neither door above can see an environment-held name then: the stored row
  * arrives second, in the bare slot. Once hydration has run and before any other
  * plugin starts, the engine plugin asks the registry for every package-held
- * position and permission-set name the environment catalog also holds
+ * position, permission-set and (#35157) capability name the environment catalog also holds
  * ({@link ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES}), and one such name refuses the
  * boot with this rule's envelope, naming both holders. So a cold boot, a hot
  * install and an artifact boot answer alike. (Maintainer ruling, letter A on

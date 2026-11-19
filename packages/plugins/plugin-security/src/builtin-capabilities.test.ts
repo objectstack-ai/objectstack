@@ -100,4 +100,11 @@ describe('readDeclaredCapabilityContext, beside the curated declarations', () =>
     expect(await readDeclaredCapabilityContext(engineWith([ENV_SAVED]), metadata)).toBeUndefined();
     expect(listed).toBe(false);
   });
+
+  it('the metadata-service fallback is judged by the same provenance test', async () => {
+    const metadata = { list: async () => [ENV_SAVED, APP] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), metadata)).toEqual({ declaredCapabilities: [APP] });
+    const onlySaved = { list: async () => [ENV_SAVED] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), onlySaved)).toBeUndefined();
+  });
 });

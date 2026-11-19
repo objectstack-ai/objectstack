@@ -163,5 +163,98 @@ describe('planNamespaceRename — a copied capability, and every grant and requi
         expect(refused).toEqual({ refusal: expect.stringContaining("Capability 'demoasset.manage_assets' is not copied") });
         expect((refused as { refusal: string }).refusal).toMatch(/then install again\.$/);
     });
+
+    it('a `hasCapability` predicate follows the renamed capability, as the action it pairs with does', () => {
+        const rename = plan('trial1');
+        const page = rename.rewrite('page', 'demoasset_asset_page', {
+            name: 'demoasset_asset_page',
+            visibleWhen: "current_user.hasCapability('demoasset_decide_scrap') && record.demoasset_asset != ''",
+            hint: 'current_user.hasCapability("manage_users")',
+        });
+        expect((page as { item: any }).item.visibleWhen)
+            .toBe("current_user.hasCapability('trial1_decide_scrap') && record.trial1_asset != ''");
+        // A name the package does not declare keeps its name.
+        expect((page as { item: any }).item.hint).toBe('current_user.hasCapability("manage_users")');
+    });
+
+    it('a capability named after a renamed object is ONE name in the copy: declaration, grant, requirement and predicate agree', () => {
+        const items: NamespaceRenameItem[] = [
+            { type: 'object', name: 'crm_invoice', body: { name: 'crm_invoice', fields: {} } },
+            { type: 'capability', name: 'crm.crm_invoice.void', body: { name: 'crm.crm_invoice.void', label: 'Void invoices' } },
+            { type: 'permission', name: 'crm_billing', body: { name: 'crm_billing', systemPermissions: ['crm.crm_invoice.void'] } },
+            { type: 'action', name: 'crm_void', body: {
+                name: 'crm_void', objectName: 'crm_invoice', requiredPermissions: ['crm.crm_invoice.void'],
+                visible: "current_user.hasCapability('crm.crm_invoice.void')",
+            } },
+        ];
+        const rename = planNamespaceRename({
+            sourcePackageId: 'com.demo.crm', sourceNamespace: 'crm', targetNamespace: 'shop', items, retryVerb: 'install',
+        });
+        const declared = (rename.rewrite('capability', 'crm.crm_invoice.void', items[1]!.body) as { item: any }).item.name;
+        expect(declared).toBe('shop.crm_invoice.void');
+        const set = (rename.rewrite('permission', 'crm_billing', items[2]!.body) as { item: any }).item;
+        expect(set.systemPermissions).toEqual([declared]);
+        const action = (rename.rewrite('action', 'crm_void', items[3]!.body) as { item: any }).item;
+        expect(action.requiredPermissions).toEqual([declared]);
+        expect(action.visible).toBe(`current_user.hasCapability('${declared}')`);
+        // CONTROL: the object reference outside the capability places still follows the object.
+        expect(action.objectName).toBe('shop_invoice');
+    });
+
+    describe('when the source stays installed beside the copy (duplicatePackage)', () => {
+        const duplicate = (items = app) => planNamespaceRename({
+            sourcePackageId: 'com.demo.asset', sourceNamespace: 'demoasset', targetNamespace: 'trial1', items,
+            retryVerb: 'duplicate', sourceStaysInstalled: true,
+        });
+
+        it('a declared capability the copy cannot rename is refused, and so is every item that names it — no shared gate', () => {
+            const items: NamespaceRenameItem[] = [
+                ...app,
+                { type: 'permission', name: 'demoasset_auditor', body: { name: 'demoasset_auditor', systemPermissions: ['audit_trail'] } },
+                { type: 'page', name: 'demoasset_audit_page', body: {
+                    name: 'demoasset_audit_page', visibleWhen: "current_user.hasCapability('audit_trail')",
+                } },
+            ];
+            const rename = duplicate(items);
+            const capability = rename.rewrite('capability', 'audit_trail', { name: 'audit_trail' });
+            expect((capability as { refusal: string }).refusal).toMatch(
+                /^Capability 'audit_trail' is not copied: it carries no 'demoasset\.' or 'demoasset_' prefix .* share one gate\. .*then duplicate again\.$/,
+            );
+            const set = rename.rewrite('permission', 'demoasset_auditor', items[6]!.body);
+            expect((set as { refusal: string }).refusal).toMatch(
+                /^Permission set 'demoasset_auditor' is not copied: it names capability 'audit_trail', which package 'com\.demo\.asset' declares/,
+            );
+            const page = rename.rewrite('page', 'demoasset_audit_page', items[7]!.body);
+            expect((page as { refusal: string }).refusal).toMatch(/it names capability 'audit_trail'/);
+        });
+
+        it('a capability whose copy name the package already declares refuses the items that name it too', () => {
+            const rename = duplicate([
+                ...app,
+                { type: 'capability', name: 'trial1.manage_assets', body: { name: 'trial1.manage_assets' } },
+            ]);
+            const set = rename.rewrite('permission', 'demoasset_manager', app[4]!.body);
+            expect((set as { refusal: string }).refusal).toMatch(
+                /it names capability 'demoasset\.manage_assets'.*a capability the package already declares/,
+            );
+        });
+
+        it('CONTROL: renamed capabilities and names the package does not declare copy as before', () => {
+            const rename = duplicate(app.filter((item) => item.name !== 'audit_trail'));
+            const set = rename.rewrite('permission', 'demoasset_manager', app[4]!.body);
+            expect((set as { item: any }).item.systemPermissions).toEqual(['trial1.manage_assets', 'trial1_decide_scrap', 'manage_users']);
+        });
+
+        it('CONTROL: the unmanaged import (source not installed) keeps an unprefixed capability and the items naming it', () => {
+            const items: NamespaceRenameItem[] = [
+                ...app,
+                { type: 'permission', name: 'demoasset_auditor', body: { name: 'demoasset_auditor', systemPermissions: ['audit_trail'] } },
+            ];
+            const rename = plan('trial1', items);
+            expect(rename.rewrite('capability', 'audit_trail', { name: 'audit_trail' })).toEqual({ item: { name: 'audit_trail' } });
+            expect((rename.rewrite('permission', 'demoasset_auditor', items[6]!.body) as { item: any }).item.systemPermissions)
+                .toEqual(['audit_trail']);
+        });
+    });
 });
 
