@@ -191,7 +191,7 @@ async function bootServer(databaseUrl, label, extraEnv = {}) {
   for (;;) {
     if (server.exited) throw new Error(`server exited during boot; see ${logFile}`);
     const text = readFileSync(logFile, 'utf8');
-    if (text.includes('Compile failed')) throw new Error(`fixture compile failed; see ${logFile}`);
+    if (text.includes('did not load or compile')) throw new Error(`fixture compile failed; see ${logFile}`);
     if (text.includes('Server is ready')) break;
     if (Date.now() - started > args.bootTimeoutMs) throw new Error(`server not ready within ${args.bootTimeoutMs} ms; see ${logFile}`);
     await new Promise((r) => setTimeout(r, 500));

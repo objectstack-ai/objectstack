@@ -284,6 +284,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "移除待登录用户",
+        confirmText: "移除这位尚未登录的人员并取消其邀请？如果对方在此期间已经登录，或无法联系到托管组织，则不会移除任何人。",
+        successMessage: "已移除待登录用户"
+      },
       set_user_password: {
         label: "设置密码",
         successMessage: "密码已更新",
