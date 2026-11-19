@@ -498,18 +498,30 @@ export const BuiltinRowActionItem: React.FC<{
     label: `builtin:${name}:disabledWhen`,
     fields: objectFields,
   });
+  // The declared `disabledWhen` verdict alone — never the OR below, so a
+  // pending record-grained verdict greys the item without earning a reason.
+  const disabledByPredicate = predicates?.disabledWhen != null && isDisabled;
+  // The reason the record page gives for the same verdict (objectstack#35135):
+  // `userActions` declares no reason key, so the generic
+  // `actions.notAvailableForRecord` sentence, as the item's second line and its
+  // accessible description. Called ahead of the early return.
+  const disabledReason = useDisabledReason(disabledByPredicate);
   if (!isVisible) return null;
-  const disabled = verdictPending || (predicates?.disabledWhen != null && isDisabled);
+  const disabled = verdictPending || disabledByPredicate;
   return (
     <DropdownMenuItem
       disabled={disabled}
       aria-busy={verdictPending || undefined}
       onClick={() => { if (!disabled) onSelect(row); }}
       data-testid={`row-action-builtin-${name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={className}
     >
       {icon}
-      {label}
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{label}</DisabledReasonMenuLabel>
+        : label}
     </DropdownMenuItem>
   );
 };

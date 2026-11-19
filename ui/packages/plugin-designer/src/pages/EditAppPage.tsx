@@ -17,6 +17,7 @@ import { useMetadata } from '@object-ui/react';
 import { useAdapter } from '@object-ui/react';
 // Declares the ObjectStackAdapter this page reads `getClient` off.
 import '../adapter-context-register';
+import { owningPackage, useAuthoredObjectReader } from './authoredObjectReader';
 import { toast } from 'sonner';
 
 /**
@@ -41,25 +42,6 @@ function getBrandingDeclaredKeys(): ReadonlySet<string> {
   return brandingDeclaredKeys;
 }
 
-/**
- * The value the server stamps as `_packageId` on a row bound to NO package. It
- * names no package, so it is never sent as one.
- */
-const PACKAGELESS_SENTINEL = 'sys_metadata';
-
-/**
- * The package that owns the served app, or `undefined` for an app no package
- * owns: the one address this page reads the app at and saves it to
- * (objectstack#35115). The same reading as App management's `owningPackage`
- * (objectui#12300), so one served value means one scope across the console.
- */
-function owningPackage(app: { _packageId?: unknown } | undefined): string | undefined {
-  const packageId = app?._packageId;
-  return typeof packageId === 'string' && packageId !== '' && packageId !== PACKAGELESS_SENTINEL
-    ? packageId
-    : undefined;
-}
-
 /** The entries of `record` whose key `declared` holds. */
 function pickDeclared(record: unknown, declared: ReadonlySet<string>): Record<string, unknown> {
   if (!record || typeof record !== 'object') return {};
@@ -71,6 +53,9 @@ export function EditAppPage() {
   const { appName, editAppName } = useParams();
   const { apps, objects, refresh } = useMetadata();
   const adapter = useAdapter();
+  // objectstack#35101 — the generated nav entries' labels come from the
+  // objects as authored, never from the served (translated) list.
+  const readAuthoredObject = useAuthoredObjectReader(adapter, objects);
 
   const targetAppName = editAppName || appName;
 
@@ -224,6 +209,7 @@ export function EditAppPage() {
         onComplete={handleComplete}
         onCancel={handleCancel}
         onSaveDraft={handleSaveDraft}
+        readAuthoredObject={readAuthoredObject}
       />
     </div>
   );

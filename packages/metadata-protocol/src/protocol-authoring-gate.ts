@@ -99,6 +99,8 @@ export interface AuthoringGateHost {
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
+    /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
+    sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -319,7 +321,7 @@ export function withTargetFoldedWithout(
  * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
  * collections every judgement of the shared rules is made against.
  */
-type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>;
+type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'>;
 
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
@@ -607,6 +609,11 @@ export async function judgeRuntimeAuthoringRules(
     // gate stays pure.
     const rlsMembershipResolverKeys = this.rlsMembershipResolverKeys();
 
+    // The automation engine's node-type vocabulary, stated only once the engine
+    // has sealed it — a host fact of the same kind, read here per publish, on a
+    // flow write only, and passed in so the gate stays pure.
+    const flowNodeTypeVocabulary = singular === 'flow' ? this.sealedFlowNodeTypeVocabulary() : undefined;
+
     // [#26188] Is a hierarchy resolver mounted — a host fact of the same kind,
     // read here per publish and passed in so the gate stays pure.
     const hierarchyResolverMounted = this.hierarchyResolverMounted();
@@ -656,6 +663,8 @@ export async function judgeRuntimeAuthoringRules(
         // [#25234] The resolver's keys, read per publish; with them the
         // gate judges who owns each membership key.
         ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
+        // With it the gate refuses a flow node no executor of this deployment runs.
+        ...(flowNodeTypeVocabulary !== undefined ? { flowNodeTypeVocabulary } : {}),
         // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
         // [#28448] With it the gate refuses a rule copy that changes what the package owns.
@@ -869,4 +878,38 @@ export async function draftPublishJudgement(
         });
     }
     return { refusals: told.length > 0 ? [...told, ...issues] : issues, advisories: verdict.advisories };
+}
+
+/**
+ * [#34776] The node types the registered automation engine runs, read through
+ * its `getSealedNodeTypeVocabulary()`: the input the runtime publish gate
+ * refuses a flow node no executor runs with (`flow-node-type-no-executor`).
+ *
+ * Read per write, as the posture probes read their services, and recorded
+ * nowhere. `undefined` (the CLI's reading, under which no node type is judged)
+ * when the host has no registry, no automation service, or an engine that has
+ * not sealed its vocabulary yet: before the seal a plugin may still contribute
+ * a type, so "no executor" is not a verdict anyone may act on (AGENTS.md
+ * "Startup registry reads").
+ */
+export function sealedFlowNodeTypeVocabulary(
+    this: { readonly getServicesRegistry?: () => Map<string, any> },
+): readonly string[] | undefined {
+    let automation: unknown;
+    try {
+        automation = this.getServicesRegistry?.().get('automation');
+    } catch {
+        return undefined;
+    }
+    const read = (automation as { getSealedNodeTypeVocabulary?: () => unknown } | undefined)?.getSealedNodeTypeVocabulary;
+    if (typeof read !== 'function') return undefined;
+    let vocabulary: unknown;
+    try {
+        vocabulary = read.call(automation);
+    } catch {
+        return undefined;
+    }
+    return Array.isArray(vocabulary) && vocabulary.length > 0 && vocabulary.every((t) => typeof t === 'string')
+        ? (vocabulary as readonly string[])
+        : undefined;
 }

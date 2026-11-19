@@ -710,6 +710,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       enableReactions && onToggleReaction && canStoreReaction(item)
         ? (emoji: string) => onToggleReaction(item.id, emoji)
         : undefined;
+    const changeLines = fieldHistoryOf(item)?.fieldChanges ?? (item.type === 'field_change' ? item.fieldChanges : undefined);
 
     return (
       <div key={item.id}>
@@ -781,10 +782,12 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               </a>
             )}
 
-            {/* Field changes */}
-            {item.type === 'field_change' && item.fieldChanges && (
+            {/* Field changes. An activity row paired with its audit entry
+                (objectstack#30122) shows that entry's before and after values,
+                as the stream's row does (objectstack#33996). */}
+            {changeLines && (
               <div className="space-y-1 mt-1">
-                {item.fieldChanges.map((change, idx) => (
+                {changeLines.map((change, idx) => (
                   <FieldChangeItem key={idx} change={change} />
                 ))}
               </div>

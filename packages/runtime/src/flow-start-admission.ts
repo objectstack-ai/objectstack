@@ -271,7 +271,8 @@ export function confirmationGatedStarterOf(
 /**
  * Rule 2b's refusal for `declaration`: the action door's own refusal of an AI
  * service account (`actionConfirmationRefusal`), naming the action, its
- * object and the confirmation member in `details` as that door does. The
+ * object, the confirmation member and `reason: 'service_account'` in
+ * `details` as that door does. The
  * message states the rule and prescribes no retry: nothing the account adds
  * to the request starts this flow. It names the action, which is the thing
  * that declares the gate, and nothing of the flow's definition.
@@ -283,6 +284,11 @@ export function confirmationGatedStartRefusal(declaration: FlowStartActionDeclar
         actionName,
         ...(objectName ? { objectName } : {}),
         confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+        // The action door's reason for an account (`actionConfirmationRefusal`,
+        // `action-execution.ts`), so a client that branches on it treats a
+        // flow start as it treats an action. Typed to the contract's closed set
+        // (`ACTION_CONFIRMATION_REFUSAL_REASONS`, `@objectstack/spec/contracts`).
+        reason: 'service_account',
     };
     const on = objectName ? ` on '${objectName}'` : '';
     return {

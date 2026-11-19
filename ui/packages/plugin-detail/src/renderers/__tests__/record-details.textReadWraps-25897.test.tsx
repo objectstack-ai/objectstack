@@ -42,6 +42,7 @@ import { RecordContextProvider } from '@object-ui/react';
 import {
   FormulaCellRenderer,
   FormulaField,
+  SummaryField,
   TextField,
   TextCellRenderer,
   getCellRenderer,
@@ -299,6 +300,101 @@ describe('objectstack#34148 — CONTROLS', () => {
       expect(cell.querySelector('em[data-host-formula]')?.textContent).toBe(EXPLANATION);
     } finally {
       registerFieldRenderer('formula', shipped);
+    }
+  });
+});
+
+/**
+ * objectstack#34182 — a text-returning summary (roll-up) wraps in
+ * `record:details` read mode too, the summary half of objectstack#34148.
+ *
+ * `summary` maps to `FormulaCellRenderer` as `formula` does, so a long text
+ * roll-up read cut to one line with the whole value only in a hover `title`.
+ * The row now reads it through `SummaryField`, the face the record form draws.
+ *
+ * Controls: the grid keeps the one-line summary cell; a number roll-up keeps
+ * its number text; a host's own `summary` face is kept on the record page.
+ */
+const ROLLUP_TEXT = EXPLANATION;
+
+const accountSchema = {
+  name: 'account',
+  label: 'Account',
+  nameField: 'case_number',
+  fields: {
+    case_number: { type: 'text', label: 'Account' },
+    latest_note: {
+      type: 'summary',
+      label: 'Latest Note',
+      summaryOperations: { object: 'note', field: 'body', function: 'max' },
+    },
+    deal_total: {
+      type: 'summary',
+      label: 'Deal Total',
+      scale: 2,
+      summaryOperations: { object: 'deal', field: 'amount', function: 'sum' },
+    },
+  },
+} as unknown as typeof caseSchema;
+const ACCOUNT_FIELDS = ['latest_note', 'deal_total'];
+const ACCOUNT = { latest_note: ROLLUP_TEXT, deal_total: 1234.5 };
+
+const summaryReadDisplay = (name: string, value: unknown) =>
+  markupOf(
+    <SummaryField
+      field={{ ...(accountSchema.fields as Record<string, object>)[name], name } as never}
+      value={value}
+      onChange={() => {}}
+      readonly
+    />,
+  );
+
+for (const [layout, width] of [['desktop 1440', 1440], ['phone', MOBILE_WIDTH]] as const) {
+  describe(`objectstack#34182 — record:details read mode, ${layout}: a long text summary wraps`, () => {
+    const cellLayout = layout === 'phone' ? 'mobile' : 'desktop';
+    beforeEach(pinViewport(width));
+
+    it('a summary cell holds the read display SummaryField renders, in full, and wraps', async () => {
+      await renderBody(ACCOUNT, accountSchema, ACCOUNT_FIELDS);
+      const cell = valueCellOf('Latest Note', cellLayout);
+      expect(cell.innerHTML).toBe(summaryReadDisplay('latest_note', ROLLUP_TEXT));
+      const node = drawingNodeOf(cell, ROLLUP_TEXT);
+      expect(node.textContent).toBe(ROLLUP_TEXT);
+      expect(oneLineClassesBetween(node, cell)).toEqual([]);
+      // The whole value is the visible text, not a hover tooltip.
+      expect(node).not.toHaveAttribute('title');
+    });
+  });
+}
+
+describe('objectstack#34182 — CONTROLS', () => {
+  beforeEach(pinViewport(1440));
+
+  it('the grid keeps its one-line summary cell, titled with the whole value', () => {
+    expect(getCellRenderer('summary')).toBe(FormulaCellRenderer);
+    const { container } = render(
+      <FormulaCellRenderer value={ROLLUP_TEXT} field={{ name: 'latest_note', type: 'summary' } as never} />,
+    );
+    const span = container.querySelector('span');
+    expect(span).toHaveClass('truncate');
+    expect(span).toHaveAttribute('title', ROLLUP_TEXT);
+  });
+
+  it('a number summary keeps its number text on the record page', async () => {
+    await renderBody(ACCOUNT, accountSchema, ACCOUNT_FIELDS);
+    expect(valueCellOf('Deal Total', 'desktop').textContent).toBe('1,234.50');
+  });
+
+  it("a host's own `summary` face is kept on the record page", async () => {
+    const shipped = getCellRenderer('summary');
+    const HostSummary = ({ value }: { value: unknown }) => <em data-host-summary>{String(value)}</em>;
+    try {
+      registerFieldRenderer('summary', HostSummary as never);
+      await renderBody(ACCOUNT, accountSchema, ACCOUNT_FIELDS);
+      const cell = valueCellOf('Latest Note', 'desktop');
+      expect(cell.querySelector('em[data-host-summary]')?.textContent).toBe(ROLLUP_TEXT);
+    } finally {
+      registerFieldRenderer('summary', shipped);
     }
   });
 });

@@ -561,6 +561,9 @@ const es = {
       resultFailed: " · Fallidos {{count}}",
       succeededRecords: "Registros correctos",
       aggregateNotCompleted: "La acción no se completó para los registros seleccionados. Es posible que algunos registros ya se hayan modificado; al cerrar, la lista muestra sus valores actuales.",
+      resultNotConfirmed: " · Sin confirmar {{count}}",
+      notConfirmedRecords: "La acción no informó sobre estos registros. Compruebe sus valores actuales:",
+      aggregateUnreadable: "La acción terminó, pero no se pudo leer su resultado, así que no se sabe qué registros se modificaron. Al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",
@@ -4150,6 +4153,7 @@ const es = {
     composer: {
       queued: "Se enviará cuando termine la respuesta actual",
       queuedCancel: "Cancelar",
+      fileTooLarge: "Demasiado grande para adjuntar (límite {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Mostrar respuesta completa',
@@ -5375,6 +5379,7 @@ const es = {
     loading: "Cargando tu configuración de notificaciones…",
     loadFailed: "No se pudo leer tu configuración de notificaciones. Recarga la página para intentarlo de nuevo.",
     saveFailed: "El cambio no se guardó: {{reason}}",
+    readOnly: "Puedes ver estos ajustes, pero tus permisos no te permiten cambiarlos. Un administrador de tu organización puede cambiarlos por ti.",
     general: "General",
     generalWarning: "Al cambiar el resumen o las horas de silencio se guarda tu propia configuración general. A partir de entonces se aplica a cada tema y canal que no hayas configurado tú, en lugar de los valores predeterminados de tu organización.",
     digest: "Resumen",

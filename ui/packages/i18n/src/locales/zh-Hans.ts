@@ -789,6 +789,9 @@ const zh = {
       resultFailed: ' · 失败 {{count}}',
       succeededRecords: '成功的记录',
       aggregateNotCompleted: '操作未对所选记录全部完成。部分记录可能已被修改；关闭后列表会显示它们的当前值。',
+      resultNotConfirmed: ' · 未确认 {{count}}',
+      notConfirmedRecords: '操作未报告这些记录的结果，请检查它们的当前值：',
+      aggregateUnreadable: '操作已完成，但无法读取其结果，因此不知道哪些记录被修改了。关闭后列表会显示它们的当前值。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
       cancel: '取消',
@@ -4321,6 +4324,7 @@ const zh = {
     composer: {
       queued: '当前回复结束后发送',
       queuedCancel: '取消',
+      fileTooLarge: '文件过大，无法添加（上限 {{limit}}）：{{files}}',
     },
     answer: {
       showFull: '展开全文',
@@ -5284,6 +5288,7 @@ const zh = {
     loading: "正在读取你的通知设置…",
     loadFailed: "无法读取你的通知设置。请刷新页面重试。",
     saveFailed: "更改未保存：{{reason}}",
+    readOnly: "你可以查看这些设置，但你的权限不允许更改。组织管理员可以代你更改。",
     general: "常规",
     generalWarning: "更改摘要或免打扰时段会保存你自己的常规设置。之后，对于你没有单独设置的每个主题和渠道，它将代替组织的默认设置生效。",
     digest: "摘要",

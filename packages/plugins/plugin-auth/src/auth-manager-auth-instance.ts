@@ -57,6 +57,7 @@ import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { withLockoutRefusal } from './sign-in-lockout-refusal.js';
+import { refuseDevSeedPasswordSignIn, withDevSeedPasswordRefusal } from './dev-seed-credential.js';
 import { resolveEmailVerificationRequirement } from './audience-posture.js';
 import { globalAfterHook, type AfterHookHost } from './auth-manager-after-hook.js';
 import { globalBeforeHook, type BeforeHookHost } from './auth-manager-before-hook.js';
@@ -460,7 +461,12 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
       return {
         enabled: this.config.emailAndPassword?.enabled ?? true,
-        password: passwordHasher,
+        // A server outside development mode never accepts a development seed
+        // credential at any password check (`dev-seed-credential.ts`).
+        password: withDevSeedPasswordRefusal(passwordHasher, {
+          engine: () => this.config.dataEngine as never,
+          logger: () => this.config.logger,
+        }),
         ...(effectiveDisableSignUp != null
           ? { disableSignUp: effectiveDisableSignUp } : {}),
         // [#11739] Invariant: a posture that permits self-registration
@@ -837,7 +843,11 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // [#25224 cut 13] The body moved to `auth-manager-before-hook.ts`; this
       // arrow hands it the members it reads (`BeforeHookHost`) and the one
       // local it read, `setShouldSkipSessionRefresh`.
-      before: createAuthMiddleware((ctx: any) => {
+      before: createAuthMiddleware(async (ctx: any) => {
+        // A password sign-in that submits the development seed password is
+        // refused outside development mode, before any account is read
+        // (`dev-seed-credential.ts`).
+        await refuseDevSeedPasswordSignIn(ctx);
         const readConfig = () => this.config;
         const host: BeforeHookHost = {
           admitSignInAttempt: (...a) => this.admitSignInAttempt(...a),

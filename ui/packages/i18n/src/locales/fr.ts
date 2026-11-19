@@ -556,6 +556,9 @@ const fr = {
       resultFailed: " · Échecs {{count}}",
       succeededRecords: "Enregistrements réussis",
       aggregateNotCompleted: "L’action ne s’est pas terminée pour les enregistrements sélectionnés. Certains enregistrements ont peut-être déjà été modifiés. À la fermeture, la liste affiche leurs valeurs actuelles.",
+      resultNotConfirmed: " · Non confirmés {{count}}",
+      notConfirmedRecords: "L’action n’a rien indiqué pour ces enregistrements. Vérifiez leurs valeurs actuelles :",
+      aggregateUnreadable: "L’action s’est terminée, mais son résultat n’a pas pu être lu : on ne sait pas quels enregistrements ont été modifiés. À la fermeture, la liste affiche leurs valeurs actuelles.",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",
@@ -4146,6 +4149,7 @@ const fr = {
     composer: {
       queued: "Sera envoyé à la fin de la réponse en cours",
       queuedCancel: "Annuler",
+      fileTooLarge: "Trop volumineux pour être joint (limite {{limit}}) : {{files}}",
     },
     answer: {
       showFull: 'Afficher toute la réponse',
@@ -5371,6 +5375,7 @@ const fr = {
     loading: "Chargement de vos paramètres de notification…",
     loadFailed: "Impossible de lire vos paramètres de notification. Rechargez la page pour réessayer.",
     saveFailed: "La modification n'a pas été enregistrée : {{reason}}",
+    readOnly: "Vous pouvez consulter ces paramètres, mais vos droits ne vous permettent pas de les modifier. Un administrateur de votre organisation peut les modifier pour vous.",
     general: "Général",
     generalWarning: "Modifier le résumé ou les heures calmes enregistre votre propre paramètre général. Il s'applique ensuite à chaque sujet et canal que vous n'avez pas réglés vous-même, à la place des valeurs par défaut de votre organisation.",
     digest: "Résumé",

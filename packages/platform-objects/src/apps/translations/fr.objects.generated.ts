@@ -72,6 +72,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Doit changer de mot de passe",
         help: "Lorsque cette option est activée, l’utilisateur doit changer son mot de passe avant de pouvoir continuer. Activée lorsqu’un administrateur crée ou importe le compte, ou en réinitialise le mot de passe ; gérée par le système."
       },
+      dev_seed_credential: {
+        label: "Identifiant d'amorçage de développement",
+        help: "Défini sur un compte créé par l'amorçage de développement. Tant que son mot de passe est encore celui de l'amorçage, un serveur de production refuse sa connexion et toute nouvelle session ; os user set-password définit un nouveau mot de passe et l'efface. Géré par le système ; jamais renvoyé en lecture."
+      },
       mfa_required_at: {
         label: "MFA exigée le",
         help: "Date à laquelle la MFA obligatoire s’est appliquée pour la première fois à cet utilisateur (point de départ du délai de grâce). Sert de base à mfa_required ; géré par le système."
@@ -155,7 +159,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -261,7 +265,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Terminé",
           fields: {
             "summary.added": "Ajoutés",
-            "summary.alreadyPending": "Déjà en attente, prévenus à nouveau",
+            "summary.alreadyPending": "Déjà en attente",
             "summary.failed": "Non ajoutés",
             rows: "Résultat par ligne"
           },
@@ -270,7 +274,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
               row: "Ligne",
               email: "E-mail",
               ok: "Réussi",
-              alreadyPending: "Déjà en attente, prévenu à nouveau",
+              alreadyPending: "Déjà en attente",
               "host.notified": "Organisation d’hébergement prévenue",
               "host.reason": "Pourquoi non prévenue",
               "error.message": "Non ajouté car",
@@ -705,7 +709,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -811,7 +815,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -963,7 +967,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -990,7 +994,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation renvoyée",
         outcomeMessages: {
           sent: "Invitation renvoyée à {{ result.email }}",
-          link_only: "Invitation renouvelée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation renouvelée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         }
       },
       copy_invitation_link: {

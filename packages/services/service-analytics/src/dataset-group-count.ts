@@ -33,7 +33,11 @@
  * for a statement with no `LIMIT`, the ObjectQL face for the engine's answer.
  * The executor counts only when every read was answered and each answer's
  * count equals the rows it handed back, so a read cut by any cap under it (a
- * host strategy's row guard, say) leaves the count out.
+ * host strategy's row guard, say) leaves the count out. The proof stops at the
+ * strategy's own read seam: a strategy counts the rows `ctx.executeRawSql` or
+ * `ctx.executeAggregate` handed it, so a host-supplied bridge or an
+ * out-of-repo driver that silently truncates an unwindowed read is counted as
+ * whole. No in-repo seam cuts an unwindowed read.
  *
  * ## Asked for, never assumed
  *

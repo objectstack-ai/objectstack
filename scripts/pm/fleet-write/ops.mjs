@@ -432,7 +432,7 @@
  * the pull is no longer listed (`dequeueReadBack`) AND its own GET reads it
  * still open with `merged` false (`dequeuePullAfter`) on two reads one poll
  * apart — out of the queue and not landed, the two readings
- * `platform-readings.md` asks for, whose removal and `merged` arrive seconds
+ * `readings-queue.md` asks for, whose removal and `merged` arrive seconds
  * apart in either order. A pull that
  * left by MERGING inside the window is a FAILED action naming the merge; one
  * closed unmerged is FAILED too. A read-back that still lists it after the
@@ -2943,6 +2943,13 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  * neither; `shape` on a `str` holds it to a pattern, named by `what`
  * (`branch`, `mailbox_branch_delete`'s, alone).
  */
+/**
+ * The native issue types a seat may set — the three `docs/NORTH-STAR.md` "Priority" rule 2 grades by. The organization's
+ * issue-types endpoint answers this integration 403, so the names are a closed list here and never read from it; a
+ * name the organization does not define is the platform's 422, a FAILED action.
+ */
+export const ISSUE_TYPES = Object.freeze(['Bug', 'Feature', 'Task']);
+
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
   pull: Object.freeze({ kind: 'int' }),
@@ -2959,6 +2966,8 @@ export const FIELDS = Object.freeze({
   team_reviewers: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
   state: Object.freeze({ kind: 'enum', values: Object.freeze(['open', 'closed']) }),
   state_reason: Object.freeze({ kind: 'enum', values: Object.freeze(['completed', 'not_planned', 'duplicate', 'reopened']) }),
+  // The native issue type, by NAME (`issue_patch` alone): the three the grading rules name, and nothing else.
+  type: Object.freeze({ kind: 'enum', values: ISSUE_TYPES }),
   target_repo: Object.freeze({ kind: 'enum', values: TRANSFER_TARGETS }),
   run_id: Object.freeze({ kind: 'int' }),
   workflow: Object.freeze({ kind: 'enum', values: WORKFLOW_DISPATCH_ALLOWLIST }),
@@ -3262,12 +3271,14 @@ export const OPS = Object.freeze({
   issue_patch: Object.freeze({
     permission: 'issues',
     required: Object.freeze(['issue']),
-    optional: Object.freeze(['title', 'body', 'state', 'state_reason']),
-    atLeastOne: Object.freeze(['title', 'body', 'state', 'state_reason']),
+    optional: Object.freeze(['title', 'body', 'state', 'state_reason', 'type']),
+    atLeastOne: Object.freeze(['title', 'body', 'state', 'state_reason', 'type']),
+    // `type` is the native issue type by name (`ISSUE_TYPES`), PATCHed on the issue with the rest. The answer is the
+    // issue, so the request carries `typed`: a 2xx whose answer names another type, or none, is a FAILED action.
     requests: (a, repo) => {
       const body = {};
-      for (const k of ['title', 'body', 'state', 'state_reason']) if (k in a) body[k] = a[k];
-      return [{ verb: 'PATCH', path: issues(repo, a.issue), body }];
+      for (const k of ['title', 'body', 'state', 'state_reason', 'type']) if (k in a) body[k] = a[k];
+      return [{ verb: 'PATCH', path: issues(repo, a.issue), body, ...('type' in a ? { typed: a.type } : {}) }];
     },
   }),
   issue_create: Object.freeze({

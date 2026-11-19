@@ -1954,6 +1954,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.submit': 'Create package',
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
+  'engine.packages.create.created': 'Created package “{name}”.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2799,6 +2800,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.operation': 'Operation',
   'engine.studio.access.explain.run': 'Explain',
   'engine.studio.access.explain.running': 'Explaining…',
+  'engine.studio.access.explain.needObject': 'Choose an object first',
   'engine.studio.access.explain.allowedLine': '{operation} on “{object}” is ALLOWED for this principal.',
   'engine.studio.access.explain.deniedLine': '{operation} on “{object}” is DENIED for this principal.',
   'engine.studio.access.explain.principal': 'Principal',

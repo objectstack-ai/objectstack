@@ -556,6 +556,9 @@ const pt = {
       resultFailed: " · Falhas {{count}}",
       succeededRecords: "Registros concluídos",
       aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
+      resultNotConfirmed: " · Não confirmados {{count}}",
+      notConfirmedRecords: "A ação não informou nada sobre estes registros. Verifique os valores atuais:",
+      aggregateUnreadable: "A ação terminou, mas o resultado não pôde ser lido, então não se sabe quais registros foram alterados. Ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -4145,6 +4148,7 @@ const pt = {
     composer: {
       queued: "Será enviada quando a resposta atual terminar",
       queuedCancel: "Cancelar",
+      fileTooLarge: "Grande demais para anexar (limite {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Mostrar resposta completa',
@@ -5370,6 +5374,7 @@ const pt = {
     loading: "Carregando suas configurações de notificação…",
     loadFailed: "Não foi possível ler suas configurações de notificação. Recarregue a página para tentar novamente.",
     saveFailed: "A alteração não foi salva: {{reason}}",
+    readOnly: "Você pode ver estas configurações, mas suas permissões não permitem alterá-las. Um administrador da sua organização pode alterá-las por você.",
     general: "Geral",
     generalWarning: "Alterar o resumo ou o horário silencioso salva sua própria configuração geral. A partir daí ela vale para todo tópico e canal que você não configurou, no lugar dos padrões da sua organização.",
     digest: "Resumo",

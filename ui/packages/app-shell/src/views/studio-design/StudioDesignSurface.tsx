@@ -370,6 +370,7 @@ import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
+import { suggestedSetLabel as suggestedSetLabelOf } from '../../components/suggestedSetLabel.js';
 import {
   AppNavCanvas,
   heldNavEntriesOf,
@@ -395,7 +396,7 @@ import {
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
-import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
+import { useFlowLabelOf, useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import {
   navEntryLabelText,
@@ -8270,7 +8271,14 @@ export function AutomationsPillar({
   // or the machine name. Ephemeral (AGENTS.md #8): nobody expects it back.
   const [railQuery, setRailQuery] = React.useState('');
   const railNeedle = railQuery.trim().toLowerCase();
-  const flowMatches = (f: Surface) => f.label.toLowerCase().includes(railNeedle) || f.name.toLowerCase().includes(railNeedle);
+  // objectstack#35319 — a row names its flow as the open flow's header does:
+  // the package's `flows.NAME.label` in the console's language, else the
+  // authored label. The search matches that name, the authored label and the
+  // machine name, so what the row shows is always searchable.
+  const flowLabelOf = useFlowLabelOf();
+  const railLabel = (f: Surface) => flowLabelOf(f.name) || f.label;
+  const flowMatches = (f: Surface) =>
+    [railLabel(f), f.label, f.name].some((text) => text.toLowerCase().includes(railNeedle));
   // objectstack#28572 — "only customizations" keeps the marked rows.
   const flowShown = (f: Surface) =>
     (!railNeedle || flowMatches(f)) && (!onlyCustomized || railMarks?.markOf(f) != null);
@@ -9554,7 +9562,7 @@ export function AutomationsPillar({
                       active={active}
                       data-testid={`auto-rail-row-${f.name}`}
                       data-trigger={glyph}
-                      title={[f.label, t(FLOW_GLYPH_LABEL_KEY[glyph], locale), reading?.view.label].filter(Boolean).join(' · ')}
+                      title={[railLabel(f), t(FLOW_GLYPH_LABEL_KEY[glyph], locale), reading?.view.label].filter(Boolean).join(' · ')}
                       onClick={() => {
                         // objectstack#26705 — another flow's load replaces the
                         // buffer the held step lives in; the open one keeps it.
@@ -9570,7 +9578,7 @@ export function AutomationsPillar({
                         </>
                       }
                     >
-                      {f.label}
+                      {railLabel(f)}
                     </StudioRailRow>
                   );
                 })}
@@ -10858,8 +10866,7 @@ export function AccessPillar({
   // (`ux-conventions.labels-over-machine-names`). The suggestions listed here
   // are this package's own sets, which the rail read; a set the rail does not
   // hold, or one with no label, is named by its machine name.
-  const suggestedSetLabel = (s: SuggestedBinding): string =>
-    perms.find((p) => p.name === s.permission_set_name)?.label || s.permission_set_name;
+  const suggestedSetLabel = (s: SuggestedBinding): string => suggestedSetLabelOf(s, perms);
 
   return (
     <div className="flex h-full flex-col">

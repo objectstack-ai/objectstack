@@ -789,6 +789,9 @@ const zhHant = {
       resultFailed: ' · 失敗 {{count}}',
       succeededRecords: '成功的記錄',
       aggregateNotCompleted: '操作未對所選記錄全部完成。部分記錄可能已被修改；關閉後列表會顯示它們的當前值。',
+      resultNotConfirmed: ' · 未確認 {{count}}',
+      notConfirmedRecords: '操作未報告這些記錄的結果，請檢查它們的當前值：',
+      aggregateUnreadable: '操作已完成，但無法讀取其結果，因此不知道哪些記錄被修改了。關閉後列表會顯示它們的當前值。',
       retry: '重試',
       downloadErrorCsv: '下載錯誤 CSV',
       cancel: '取消',
@@ -4321,6 +4324,7 @@ const zhHant = {
     composer: {
       queued: '當前回覆結束後傳送',
       queuedCancel: '取消',
+      fileTooLarge: '檔案過大，無法新增（上限 {{limit}}）：{{files}}',
     },
     answer: {
       showFull: '展開全文',
@@ -5284,6 +5288,7 @@ const zhHant = {
     loading: "正在讀取你的通知設定…",
     loadFailed: "無法讀取你的通知設定。請重新整理頁面重試。",
     saveFailed: "更改未儲存：{{reason}}",
+    readOnly: "你可以檢視這些設定，但你的權限不允許更改。組織管理員可以代你更改。",
     general: "常規",
     generalWarning: "更改摘要或免打擾時段會儲存你自己的常規設定。之後，對於你沒有單獨設定的每個主題和渠道，它將代替組織的預設設定生效。",
     digest: "摘要",

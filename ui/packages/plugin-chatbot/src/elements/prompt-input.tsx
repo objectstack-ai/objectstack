@@ -455,6 +455,38 @@ export const PromptInputActionAddAttachments = ({
   );
 };
 
+/**
+ * Whether `file` is admitted by `accept`, read in the HTML `accept` grammar
+ * the file picker itself uses: a `.ext` token matches the end of the file
+ * NAME, a `type/*` token matches the MIME prefix, any other token matches the
+ * MIME type exactly — all case-insensitive. An empty list admits everything.
+ * A `.ext` token is never compared with `File.type`: no MIME type starts with
+ * a dot.
+ */
+function fileMatchesAccept(
+  file: { name: string; type: string },
+  accept: string | undefined
+): boolean {
+  const tokens = (accept ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return true;
+  }
+  const name = file.name.toLowerCase();
+  const mime = (file.type || "").toLowerCase();
+  return tokens.some((token) => {
+    if (token.startsWith(".")) {
+      return name.endsWith(token);
+    }
+    if (token.endsWith("/*")) {
+      return mime.startsWith(token.slice(0, -1)); // image/* -> image/
+    }
+    return mime === token;
+  });
+}
+
 export type PromptInputMessage = {
   text: string;
   files: FileUIPart[];
@@ -477,6 +509,13 @@ export type PromptInputProps = Omit<
   onError?: (err: {
     code: "max_files" | "max_file_size" | "accept";
     message: string;
+    /**
+     * The files this refusal turned away, so a host can name them to the
+     * user. Set on `max_file_size` (every over-size file of the pick) and on
+     * `accept` (every file of the pick whose type `accept` does not admit),
+     * whether the rest of the pick attached or not.
+     */
+    files?: File[];
   }) => void;
   onSubmit: (
     message: PromptInputMessage,
@@ -519,24 +558,7 @@ export const PromptInput = ({
   }, []);
 
   const matchesAccept = useCallback(
-    (f: File) => {
-      if (!accept || accept.trim() === "") {
-        return true;
-      }
-
-      const patterns = accept
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      return patterns.some((pattern) => {
-        if (pattern.endsWith("/*")) {
-          const prefix = pattern.slice(0, -1); // e.g: image/* -> image/
-          return f.type.startsWith(prefix);
-        }
-        return f.type === pattern;
-      });
-    },
+    (f: File) => fileMatchesAccept(f, accept),
     [accept]
   );
 
@@ -544,21 +566,40 @@ export const PromptInput = ({
     (fileList: File[] | FileList) => {
       const incoming = Array.from(fileList);
       const accepted = incoming.filter((f) => matchesAccept(f));
-      if (incoming.length && accepted.length === 0) {
+      const refused = incoming.filter((f) => !matchesAccept(f));
+      // Report EVERY type-refused file, a mixed pick included, the same way
+      // over-size files are reported below.
+      if (refused.length > 0) {
         onError?.({
           code: "accept",
-          message: "No files match the accepted types.",
+          message:
+            accepted.length === 0
+              ? "No files match the accepted types."
+              : "Some files do not match the accepted types and were not added.",
+          files: refused,
         });
+      }
+      if (accepted.length === 0) {
         return;
       }
       const withinSize = (f: File) =>
         maxFileSize ? f.size <= maxFileSize : true;
       const sized = accepted.filter(withinSize);
-      if (accepted.length > 0 && sized.length === 0) {
+      const oversized = accepted.filter((f) => !withinSize(f));
+      // Report EVERY over-size file, a mixed pick included: the rest of the
+      // pick still attaches, and an over-size file dropped without a report
+      // just fails to appear, with no reason given (objectstack#34463).
+      if (oversized.length > 0) {
         onError?.({
           code: "max_file_size",
-          message: "All files exceed the maximum size.",
+          message:
+            sized.length === 0
+              ? "All files exceed the maximum size."
+              : "Some files exceed the maximum size and were not added.",
+          files: oversized,
         });
+      }
+      if (sized.length === 0) {
         return;
       }
 

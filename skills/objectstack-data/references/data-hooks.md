@@ -7,9 +7,7 @@
 - [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
-data hooks. Covers the lifecycle events, the sandboxed `body` (and the deprecated
-inline `handler`), the `HookContext` API, registration, and the canonical patterns
-(delete guards, audit trails, cross-object writes, read masking).
+data hooks.
 `check:skill-examples` skips the unmarked blocks: fragments, shapes, and pattern 4's bare `any`.
 
 
@@ -61,7 +59,7 @@ ObjectStack provides lifecycle events organized by operation type:
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | Within transaction | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
+| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes; no per-hook opt-out. Exits: a caller's open transaction decides; a hooked object off the default datasource, or a default driver with no transactions (Turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code (`registerHook`) opens none. MongoDB needs a replica set (read in code, not measured) | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
 | **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
@@ -128,14 +126,7 @@ const myHook = defineHook({
 #### `body` — Implementation
 
 A `source` of statements against `ctx`; a throw aborts the write
-([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)):
-
-```typescript
-body: {
-  language: 'js',
-  source: `if (ctx.input.email) ctx.input.email = ctx.input.email.trim().toLowerCase();`,
-}
-```
+([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)).
 
 #### `condition` — Declarative Filtering
 
@@ -191,14 +182,9 @@ in neither). So:
   object) — the engine refuses the batch whole, before any write, when two rows'
   key sets differ (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, status 400; ADR-0058
   Amendment II.3).
-- **`after*` hooks fire PER ROW, so a bulk write needs no special
-  condition.** A predicate (`multi: true`) update/delete dispatches its `after*`
-  hooks **once per matched row**, each on a single-record-shaped context —
-  `previous` is that row's pre-image, `record` is that row's real state (not the
-  bare payload), and `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row. A transition condition therefore
-  **is** available on `afterUpdate` / `afterDelete`: write it once and it means
-  the same thing whether the write carried an id or a predicate, with no
-  bulk-aware branch of its own.
+- **`after*` hooks dispatch once per matched row too** (`record` is that row's
+  real state, not the bare payload), so a transition condition on `afterUpdate` /
+  `afterDelete` means the same whether the write carried an id or a predicate.
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
   `has(record.spent) && record.spent > record.budget` still faults on
@@ -228,7 +214,7 @@ CEL has no overload for does **not** degrade to "the hook did not fire" — it
 ```jsonc
 body: {
   language: 'js',                 // 'js' = L2 sandboxed script | 'expression' = L1 pure formula
-  source: "/* function body */",  // the FUNCTION BODY only — not a module
+  source: "/* function body */",
   capabilities: ['api.read', 'api.write', 'log'],  // default: []
   timeoutMs: 250,                 // optional, ≤ 30000 (hook default 250ms, action 5000ms)
   memoryMb: 32,                   // optional, ≤ 256 (best-effort under QuickJS)
@@ -261,9 +247,10 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
-| `ctx.email` | `{ send }` | Gated by `email.send`; not in a hook body. |
+| `ctx.email` | `{ send }` | Gated by `email.send`. |
 | `ctx.activity` | `{ append }` | Gated by `activity.append`. |
 | `ctx.notice` | `(message) => void` | **Tell the saver what this save set in motion** — answered as the create/update `notice`, shown on the save toast. No capability; insert/update only; last call wins. [`rules/lifecycle.md` § Save Notice](../rules/lifecycle.md#save-notice). |
+| `ctx.text` | `(key, params?) => Promise<string>` | A declared sentence in the organization's language — [`texts`](#declared-texts-texts). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
@@ -329,9 +316,9 @@ set of legal tokens (`HookBodyCapability`) is exactly seven:
 
 | Token | Unlocks |
 |:--|:--|
-| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
+| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`. |
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` |
-| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
+| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on the default datasource**: commit on return, rollback on throw. A write in it to an object on any other datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit already open (the one the hook's write runs in, or a caller's) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 | `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
@@ -407,12 +394,9 @@ const fillPositionOnHire = defineHook({
   body: {
     language: 'js',
     source: `
-      // afterUpdate → ctx.result is the PARTIAL patch. Gate on the field this
-      // write actually set, then re-query for the lookup FK it does NOT carry.
       if (!ctx.result || ctx.result.stage !== 'hired') return;
       const rec = await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
       if (!rec || !rec.position_id) return;
-      // Cross-object write — needs the acting user to be able to edit 'position'.
       await ctx.api.object('position').update({ id: rec.position_id, status: 'filled' });
       ctx.log.info('position filled', { position: rec.position_id });
     `,
@@ -444,11 +428,8 @@ export default fillPositionOnHire;
 
 ## Hook Context API
 
-> **Sandbox vs in-process.** The `ctx` documented below is the **in-process
-> `handler`** context (full Node; `handler` is deprecated). A metadata-native **`body`** sees a
-> capability-gated *subset* of it inside an isolated VM — see
-> [Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)
-> for exactly what is and isn't available there.
+> The `ctx` below is the deprecated in-process `handler`'s; a `body` sees the
+> [sandbox subset](#what-lives-on-the-sandbox-ctx).
 
 The engine's `HookContext` provides:
 
@@ -483,7 +464,7 @@ interface HookContext {
   // Engine access
   ql: IDataEngine;       // ObjectQL engine instance
   api?: ScopedContext;   // Cross-object CRUD API
-  notice?: (message: string) => void; // Save notice: rules/lifecycle.md § Save Notice
+  notice?: (message: string) => void;
 
   // User info shortcut (undefined for system / unauthenticated writes)
   user?: {
@@ -497,10 +478,7 @@ interface HookContext {
 
 ### Reading the current organization
 
-The value a hook usually wants when it needs "the current org to filter/scope
-by" is the caller's **active organization** — the same value that lives in the
-`organization_id` column, in `current_user.organizationId` inside RLS/sharing
-predicates, and in seed rows. Read it as **`organizationId`**:
+To scope by the caller's **active organization**, read **`organizationId`**:
 
 ```typescript
 // ✅ Blessed — matches columns, RLS `current_user`, and seed data
@@ -686,7 +664,7 @@ A `body` cannot do this: it writes back only `ctx.input`, and its `ctx.result` i
 > set or position), prefer declarative **field-level metadata** (secret/masked
 > fields) — it applies on every read path automatically. Use an `afterFind` hook
 > only for masking that depends on runtime logic the field metadata can't
-> express. A single `afterFind` subscription covers both `find` and `findOne`.
+> express.
 
 ```typescript
 const maskSensitiveData = defineHook({
@@ -696,12 +674,7 @@ const maskSensitiveData = defineHook({
   handler: async (ctx) => {
     // Exempt the engine's own elevated reads (`isSystem`) — internal writes
     // and self-reads must see the real values.
-    //
-    // ⚠️ Never gate this on a session claim: `ctx.session?.roles?.includes(…)`
-    // is always `undefined` (see the ctx table above), so a mask written that
-    // way never exempts anyone. A per-permission-set or per-position exemption
-    // belongs in field-level permissions (the callout above), which the read
-    // path applies for you.
+    // ⚠️ Never a session claim (`ctx.session.roles` is gone, ctx table above).
     const isElevated = ctx.session?.isSystem === true;
 
     if (!isElevated) {
@@ -772,9 +745,7 @@ with no start or end is neither checked nor counted.
 ## Registration Methods
 
 **1. Declarative — `defineStack({ hooks })`, the default.** `AppPlugin` auto-binds
-these at startup: no `register*Hook` boilerplate, and the declarative fields
-(`condition`, `async`, `retryPolicy`, `timeoutMs`, `onError`, `priority`) are honoured
-**only** on this path. A string-named `handler` (deprecated) resolves through the stack's
+these at startup: no `register*Hook` boilerplate. A string-named `handler` (deprecated) resolves through the stack's
 `functions` map.
 
 ```typescript
@@ -811,8 +782,12 @@ the layout both real hook modules in the repo use.
 cross-object operations; refuse a business rule by a
 [declared code](#declared-refusals-refusals); test hooks in isolation.
 
-❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
-hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
+❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write
+business records to another datasource from a `before*` hook through `ctx.api`
+(its transaction refuses that write with `CrossDatasourceTransactionWriteError`;
+only an append-only ledger, `lifecycle.class` `audit` / `telemetry` / `event`, is
+written outside it and survives its rollback); let a hook re-trigger itself;
+use `object: '*'` unless you mean every object; throw in
 `after*` unless the failure must abort the operation; react to a refused or
 rolled-back write from an `async: true` hook, which never runs then — use a sync
 hook (its `ctx.api` writes roll back with the write) or record it in the caller,
@@ -878,6 +853,29 @@ export default defineHook({
   refused: at save if thrown literally, else as a `500`. Unchanged `ctx.api`
   errors and crashes pass through.
 
+### Declared texts (`texts`)
+
+A sentence the hook writes into a record (a task's subject, a logged summary) is
+read by the whole organization: declare it in `texts` and ask for it with
+`ctx.text(key, params?)` — no capability; a `js` body or a `handler`, never an
+`expression` body.
+
+```typescript
+texts: { follow_up_subject: { message: 'Follow up with lead: {{ lead }}', params: ['lead'] } },
+// afterInsert body (capabilities: ['api.write']):
+const subject = await ctx.text('follow_up_subject', { lead: ctx.input.name });
+await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.result.id });
+```
+
+- In the **organization's** language (Setup → Localization, else the app's
+  `i18n.defaultLocale`), never the saver's.
+- Translated first, then the `{{ }}` holes are filled from `params` (holes as in `refusals`).
+- A missing translation never fails the hook: the declared `message` is written.
+- An unreadable Localization setting rejects `ctx.text`; catch it to write anyway.
+- Only declared keys: another is refused at save if asked for literally, else as
+  a `500`. A string the hook builds itself is written as it is.
+- Translation key `hooks.<hook>.texts.<key>.message`; the bundle: [objectstack-i18n](../../objectstack-i18n/SKILL.md).
+
 ---
 
 ## References
@@ -885,6 +883,6 @@ export default defineHook({
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Hook schema definition, HookContext interface
 - [objectstack-platform/references/plugin-hooks.md](../../objectstack-platform/references/plugin-hooks.md) — plugin/kernel hooks (a different extension point)
 - [objectstack-automation](../../objectstack-automation/SKILL.md) — Flows and Workflows
-- [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md) — hook test harnesses (vitest units, `LiteKernel`)
+- [objectstack-project/SKILL.md](../../objectstack-project/SKILL.md) — testing an app's hooks (`bootStack`); a plugin's: objectstack-platform
 
 ---

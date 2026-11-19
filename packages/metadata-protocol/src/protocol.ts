@@ -273,6 +273,7 @@ import {
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
+    sealedFlowNodeTypeVocabulary,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1858,20 +1859,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof assertRuntimeAuthoringRules> = {
-            get authoringChannel() { return readAuthoringChannel(); },
-            get engine() { return readEngine(); },
-            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
-            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
-            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
-            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
-            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
-            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
-            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-        };
-        return assertRuntimeAuthoringRules.call(host, evt);
+        // [#34776] Its host is the draft verdicts' (a superset of the members it reads), so the two cannot drift.
+        return assertRuntimeAuthoringRules.call(this.draftVerdictHost(), evt);
     }
 
     /**
@@ -1939,6 +1928,7 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return host;
@@ -2234,6 +2224,15 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
+    }
+
+    /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
+    private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return sealedFlowNodeTypeVocabulary.call(host);
     }
 
     /**
@@ -9065,10 +9064,9 @@ export class ObjectStackProtocolImplementation implements
      * same package batch (`pending` as the batch's object declarations), else
      * the engine's registered definition, whose fields include extension
      * fields; the columns the registry injects (`id`, the audit and tenant
-     * columns) count. Not refused when the object cannot be resolved: on a
-     * draft save, an object that is itself still a draft (`pending` as
-     * `'drafts'`) is judged at the seed's publish; an object resolved by
-     * neither is reported by the load.
+     * columns) count; on a draft save, an object itself still a draft (`pending`
+     * as `'drafts'`) is judged at the seed's publish. [#34864] One nothing resolves is
+     * refused by the save door alone (`door`): `unknownSeedObjectRefusal`'s docblock.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -9089,13 +9087,15 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         pending?: 'drafts' | ReadonlyArray<unknown>,
         writeFace?: MetadataWriteFace,
+        door?: 'save',
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
             get engine() { return readEngine(); },
             listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
     }
 
     /**

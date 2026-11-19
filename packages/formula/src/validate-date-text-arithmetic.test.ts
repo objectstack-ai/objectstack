@@ -442,11 +442,11 @@ describe('a flow value envelope typed for the date-text family alone (#34451)', 
   /** The expression cloud measured in an `update_record` node's `fields.due_date`. */
   const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
 
-  it('refuses the measured expression under the run-may-fail arm, with the addDays shift', () => {
+  it('refuses the measured expression under the value-run-may-fail arm, with the addDays shift', () => {
     const r = validateExpression('value', { dialect: 'cel', source: MEASURED }, ENVELOPE);
     expect(r.warnings).toEqual([]);
     expect(r.errors.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
-      code: 'date-text-call-run-may-fail',
+      code: 'date-text-call-value-run-may-fail',
       params: {
         call: 'timestamp(record.borrow_date)',
         reference: 'record.borrow_date',
@@ -458,9 +458,9 @@ describe('a flow value envelope typed for the date-text family alone (#34451)', 
   });
 
   it('refuses the bare call, a previous.<field> read, and date-text arithmetic over record.<field>', () => {
-    expect(codes('timestamp(record.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
-    expect(codes('timestamp(previous.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
-    expect(codes("record.borrow_date - duration('24h')")).toEqual(['date-text-arithmetic-run-may-fail']);
+    expect(codes('timestamp(record.borrow_date)')).toEqual(['date-text-call-value-run-may-fail']);
+    expect(codes('timestamp(previous.borrow_date)')).toEqual(['date-text-call-value-run-may-fail']);
+    expect(codes("record.borrow_date - duration('24h')")).toEqual(['date-text-arithmetic-value-run-may-fail']);
   });
 
   it('CONTROL: a datetime field under timestamp(), and the taught shift, stay clean', () => {
@@ -489,5 +489,166 @@ describe('a flow value envelope typed for the date-text family alone (#34451)', 
     expect(codes('{record.borrow_date}')).toEqual(['cel-template-brace']);
     expect(validateExpression('value', { dialect: 'cel', source: MEASURED }).errors).toEqual([]);
     expect(codes(MEASURED, { flowValueEnvelope: true })).toEqual([]);
+  });
+});
+
+// [#34660] A value slot computes a value; no condition runs there. The
+// envelope's date-text verdict names the value being computed and the step,
+// under its own codes, while a flow condition over the same source keeps the
+// `-run-may-fail` codes and sentence. One entry serves both doors:
+// `@objectstack/lint`'s `validateStackExpressions` (`checkDeclaredValue`) and
+// `@objectstack/service-automation`'s `registerFlow` (`valueEnvelopeRefusals`)
+// each call `validateExpression('value', envelope, { fieldTypes,
+// flowValueEnvelope: true })` for every `assignment` value and every
+// `create_record` / `update_record` `fields.*` value, and prefix the message
+// with the value-envelope sentence; this pins that call, so the two doors keep
+// one verdict.
+describe('a flow value envelope\'s date-text verdict names the value, not a condition (#34660)', () => {
+  /** The object a record-triggered flow binds as `record`: a loan. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  /** The hint both doors hand the shared entry, for an `assignment` value and a `fields.*` value alike. */
+  const DOOR_HINT: ExprSchemaHint = { fieldTypes, flowValueEnvelope: true };
+  /** The same object's flow condition with no declared outcome: the `-run-may-fail` arm. */
+  const CONDITION: ExprSchemaHint = { fields: Object.keys(fieldTypes), fieldTypes };
+  /** What each slot computes: an `assignment` value `due`, an `update_record` `fields.loan_days`. */
+  const SLOTS = [
+    ["an assignment value", "isoDate(timestamp(record.borrow_date) + duration('168h'))", 'date-text-call-value-run-may-fail'],
+    ['an update_record fields.* value', 'record.due_date - record.borrow_date', 'date-text-arithmetic-value-run-may-fail'],
+  ] as const;
+  const VALUE_CLAUSE =
+    'this faults wherever `record.borrow_date` holds that text when the value is computed, and a flow value that ' +
+    'cannot be computed fails the run: the flow stops at this step and the work the flow exists to do is not done ' +
+    '(it does not read null).';
+
+  it.each(SLOTS)('%s: the value arm\'s code and sentence, at the same grade, with the fix hint kept', (_slot, source, code) => {
+    const r = validateExpression('value', { dialect: 'cel', source }, DOOR_HINT);
+    expect(r.ok).toBe(false);
+    expect(r.warnings).toEqual([]);
+    expect(r.errors.map((e) => e.code)).toEqual([code]);
+    const { message } = r.errors[0];
+    expect(message).toContain(VALUE_CLAUSE);
+    expect(message).not.toMatch(/condition/);
+    expect(message).toMatch(code.startsWith('date-text-call-')
+      ? /Parse the text into a timestamp first: `date\(record\.borrow_date\)`\./
+      : /Use `daysBetween\(a, b\)` for the span in whole days/);
+  });
+
+  it('CONTROL: a flow condition reading the same field keeps the run-may-fail codes and their condition sentence', () => {
+    for (const [source, code] of [
+      ['timestamp(record.borrow_date) < now()', 'date-text-call-run-may-fail'],
+      ["record.due_date - record.borrow_date > duration('24h')", 'date-text-arithmetic-run-may-fail'],
+    ] as const) {
+      const r = validateExpression('predicate', source, CONDITION);
+      expect(r.errors.map((e) => e.code), source).toEqual([code]);
+      expect(r.errors[0].message, source).toContain(
+        'this faults wherever `record.borrow_date` holds that text when the condition runs, and a flow condition that ' +
+        'cannot be evaluated fails the run: the flow stops at this condition and the work the flow exists to do is ' +
+        'not done (it does not read null).',
+      );
+    }
+  });
+
+  it('CONTROL: what the envelope accepts is unchanged — the taught shift, a datetime field, and no field types', () => {
+    for (const source of ['isoDate(addDays(record.borrow_date, 7))', "isoDate(timestamp(record.picked_up_at) + duration('168h'))"]) {
+      expect(validateExpression('value', { dialect: 'cel', source }, DOOR_HINT), source).toEqual({ ok: true, errors: [], warnings: [] });
+    }
+    expect(validateExpression('value', { dialect: 'cel', source: SLOTS[0][1] }).errors).toEqual([]);
+  });
+});
+
+describe('a flow condition\'s record.<field> / previous.<field> read takes the date-text family as its bare name does (#34662)', () => {
+  /** A record-triggered flow's condition over a loan: the hint `@objectstack/lint` hands a start, edge or decision condition. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const CONDITION: ExprSchemaHint = { fields: Object.keys(fieldTypes), fieldTypes, faultOutcome: 'run-fails' };
+  const errorsOf = (source: string, hint: ExprSchemaHint = CONDITION) =>
+    validateExpression('predicate', source, hint).errors;
+  const codes = (source: string, hint: ExprSchemaHint = CONDITION) => errorsOf(source, hint).map((e) => e.code);
+  /** What the run binds: the row under `record` (and `previous`), and its fields flattened bare. */
+  const ROW = { title: 'Dune', borrow_date: '2026-11-16', due_date: '2026-11-30', picked_up_at: '2026-11-16T09:30:00.000Z' };
+  const run = (source: string) => celEngine.evaluate({ dialect: 'cel', source }, { ...ROW, record: ROW, previous: ROW });
+
+  it('refuses timestamp() over a date field through record. and previous. under the same code as the bare name, naming the read', () => {
+    expect(codes('timestamp(borrow_date) < now()')).toEqual(['date-text-call-run-fails']);
+    for (const root of ['record', 'previous'] as const) {
+      const source = `timestamp(${root}.borrow_date) < now()`;
+      const errors = errorsOf(source);
+      expect(errors.map((e) => ({ code: e.code, params: e.params })), source).toEqual([{
+        code: 'date-text-call-run-fails',
+        params: {
+          call: `timestamp(${root}.borrow_date)`,
+          reference: `${root}.borrow_date`,
+          rewrite: `date(${root}.borrow_date)`,
+          shift: `isoDate(addDays(${root}.borrow_date, N))`,
+        },
+      }]);
+      expect(errors[0].message).toContain(`\`isoDate(addDays(${root}.borrow_date, N))\``);
+      // The run faults on the date-only text, exactly as the bare spelling does.
+      expect(run(source), source).toMatchObject({ ok: false });
+    }
+    expect(run('timestamp(borrow_date) < now()')).toMatchObject({ ok: false });
+  });
+
+  it('CONTROL: a datetime field under timestamp(), and the prescribed parse, stay clean and evaluate', () => {
+    for (const source of [
+      'timestamp(record.picked_up_at) < now()',
+      'timestamp(previous.picked_up_at) < now()',
+      'date(record.borrow_date) < now()',
+    ]) {
+      expect(validateExpression('predicate', source, CONDITION), source).toEqual({ ok: true, errors: [], warnings: [] });
+      expect(run(source), source).toEqual({ ok: true, value: true });
+    }
+  });
+
+  it('takes the row\'s outcome arm: run-may-fail where none is declared, and run-fails kept when bare names are unproven', () => {
+    const undeclared: ExprSchemaHint = { ...CONDITION, faultOutcome: undefined };
+    expect(codes('timestamp(record.borrow_date) < now()', undeclared)).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(borrow_date) < now()', undeclared)).toEqual(['date-text-call-run-may-fail']);
+    // A node that can bind a name no reader sees moves a bare name's arm, never a root read's.
+    const unproven: ExprSchemaHint = { ...CONDITION, bareNamesUnproven: true };
+    expect(codes('timestamp(borrow_date) < now()', unproven)).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(record.borrow_date) < now()', unproven)).toEqual(['date-text-call-run-fails']);
+  });
+
+  it('a flow variable shadowing the bare name leaves the root read the field\'s', () => {
+    const shadowed: ExprSchemaHint = { ...CONDITION, flowVariables: ['borrow_date'] };
+    expect(codes('timestamp(borrow_date) < now()', shadowed)).toEqual([]);
+    expect(codes('timestamp(record.borrow_date) < now()', shadowed)).toEqual(['date-text-call-run-fails']);
+  });
+
+  it('refuses the other date-text verdicts over a root read too: a call and arithmetic on the text', () => {
+    expect(codes("isoDate(record.picked_up_at) == '2026-11-16'")).toEqual(['date-text-call-run-fails']);
+    const arithmetic = errorsOf("record.due_date - record.borrow_date > duration('24h')");
+    expect(arithmetic.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-arithmetic-run-fails',
+      params: { operands: 'DateText - DateText', reference: 'record.borrow_date' },
+    }]);
+    expect(run("record.due_date - record.borrow_date > duration('24h')")).toMatchObject({ ok: false });
+  });
+
+  it('stands down only on date arithmetic against a number: another Timestamp-typing fault leaves the root read judged, as the bare name is', () => {
+    // A Duration ordered against a number faults the Timestamp typing, but it is no date-arith shape.
+    expect(codes('due_date - borrow_date > 3')).toEqual(['date-text-arithmetic-run-fails']);
+    const span = errorsOf('record.due_date - record.borrow_date > 3');
+    expect(span.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-arithmetic-run-fails',
+      params: { operands: 'DateText - DateText', reference: 'record.borrow_date' },
+    }]);
+    // An ordering of the date text against a text literal (which the runtime answers) does not mask a later call, in either order.
+    for (const [bare, root] of [
+      ['due_date >= "2026-01-01" && timestamp(borrow_date) < now()', 'record.due_date >= "2026-01-01" && timestamp(record.borrow_date) < now()'],
+      ['timestamp(borrow_date) < now() && due_date >= "2026-01-01"', 'timestamp(record.borrow_date) < now() && record.due_date >= "2026-01-01"'],
+    ]) {
+      expect(codes(bare), bare).toEqual(['date-text-call-run-fails']);
+      const errors = errorsOf(root);
+      expect(errors.map((e) => e.code), root).toEqual(['date-text-call-run-fails']);
+      expect(errors[0].params, root).toMatchObject({ call: 'timestamp(record.borrow_date)', reference: 'record.borrow_date' });
+    }
+  });
+
+  it('CONTROL: what the Timestamp typing of the roots faults on, and an input read, are not this family\'s', () => {
+    // `record.due_date + 1` is the date-arithmetic family's shape, not the date-text check's.
+    expect(codes('record.due_date + 1 > 5').filter((c) => c.startsWith('date-text-'))).toEqual([]);
+    // A flow does not bind `input` to the row the types describe.
+    expect(codes('timestamp(input.borrow_date) < now()').filter((c) => c.startsWith('date-text-'))).toEqual([]);
   });
 });

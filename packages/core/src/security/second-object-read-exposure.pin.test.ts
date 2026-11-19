@@ -187,6 +187,14 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/plugins/plugin-approvals/src/approval-service.ts', call: 'this.servesPayloadDisplayTarget(' },
     pin: 'packages/plugins/plugin-approvals/src/payload-display-target-exposure.test.ts',
   },
+  'packages/metadata-protocol/src/protocol-record-reads.ts': {
+    kind: 'decided',
+    read: "global search's hit title for an object whose `nameField` is a reference field (`searchAll` reads the target records' titles as the searcher)",
+    operation: 'get',
+    decision: { file: 'packages/metadata-protocol/src/protocol-record-reads.ts', fn: 'servesSearchTitleTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol-record-reads.ts', call: 'servesSearchTitleTarget(targetObj' },
+    pin: 'packages/metadata-protocol/src/protocol.search-title-lookup.test.ts',
+  },
   'packages/plugins/plugin-audit/src/audit-writers.ts': {
     kind: 'decided',
     read: "the activity timeline's tracked-change and milestone summaries (`resolveLookupTitles` writes referenced records' titles at write time)",
@@ -281,6 +289,18 @@ const CALLERS: Record<string, Classification> = {
   'packages/lint/src/stored-expression-inputs.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
+  },
+  // [#35146] The post-publish build probes' two landed-data checks.
+  'packages/metadata-protocol/src/build-probes.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the post-publish build probes (`runBuildProbes`) name the object a reference column or a roll-up's foreign key " +
+      "points at, under the system identity kept inside an organization the way `inspectDanglingReferences` keeps its " +
+      "probe (#19837: the publishing organization, else the referencing row's own), only to report whether a landed " +
+      "reference resolves (`seed_reference_unresolved`, the target read projected to `id`) or a parent's roll-up was " +
+      "ever computed (`rollup_never_computed`, projected to `id` and the roll-up field); the finding carries counts " +
+      "and the referencing column's own values, never a field of the target, and is returned to the publisher on the " +
+      'publish receipt, not served to a caller',
   },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
@@ -547,6 +567,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         'servesLabelTarget',
         'servesPayloadDisplayTarget',
         'servesReferenceTarget',
+        'servesSearchTitleTarget',
         'servesSummaryTitleTarget',
         'stdioExpandMap',
       ]);

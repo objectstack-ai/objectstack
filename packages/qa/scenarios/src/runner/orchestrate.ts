@@ -63,6 +63,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { resolveStackCollection } from '@objectstack/core';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
 
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
@@ -150,10 +151,11 @@ export interface ProjectOps {
 
 /**
  * Another copy of the app a Run half runs on: booted anew from the same
- * project, with the same build installed the same way, holding no rows of
- * the card's yet ({@link runHalf} seeds it). `release` stops it. A half that
- * has one starts an operation an earlier turn's write would otherwise meet on
- * a copy of its own instead of writing the rows back
+ * project, with the same build installed the same way (template mode: the
+ * metadata its app serves after the iterate, {@link iteratedManifest}),
+ * holding no rows of the card's yet ({@link runHalf} seeds it). `release`
+ * stops it. A half that has one starts an operation an earlier turn's write
+ * would otherwise meet on a copy of its own instead of writing the rows back
  * ({@link restoreSeededRows}).
  */
 export type FreshCopy = () => Promise<{ app: AppHarness; release(): Promise<void> }>;
@@ -695,6 +697,28 @@ export function withoutItems(artifact: Record<string, unknown[]>, baseline: Reco
       return [key, items.filter((item) => !there.has(nameOf(item)))];
     }),
   );
+}
+
+/**
+ * Template mode's iterated app as a manifest the install door takes: the
+ * manifest the run's own install sent, with every collection the app serves
+ * (`served`, the environment's items less what it served before the install)
+ * replaced by the items served now, so a fresh host installed with it holds
+ * the agent's iterate, made live through the app's doors, which a host booted
+ * again from the project would not. A collection served empty is left out, as
+ * {@link installableManifest} leaves one out. Each item comes off its read
+ * decorations first (`stripReadDecorations`, `@objectstack/spec/kernel`): a
+ * served body is no valid input to the schema that produced it until they are
+ * removed, and the unmanaged install door refuses a flow that carries one
+ * (`unrecognized_keys: _diagnostics`, measured on a blank 18.6.0 host).
+ */
+function iteratedManifest(installed: Record<string, unknown>, served: Record<string, unknown[]>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...installed };
+  for (const [key, items] of Object.entries(served)) {
+    if (items.length) out[key] = items.map(stripReadDecorations);
+    else delete out[key];
+  }
+  return out;
 }
 
 /** Seed objects in lookup order: a row's lookup target is inserted before it, wherever a reference cycle allows ({@link seedPlan}). */
@@ -2046,14 +2070,19 @@ interface VerifiedBuild {
  * unmanaged install makes the environment's own. `fresh` boots another blank
  * host from the same directory and installs the same build into it, the same
  * way — in the mode the run's own install landed in ({@link FreshCopy}); a
- * refused install there is that copy's failure.
+ * refused install there is that copy's failure. `copyOf` is the same with
+ * another manifest installed in its place (template mode's iterated app,
+ * {@link iteratedManifest}); `manifest` is the one the run's install sent.
  */
 async function withInstalledBuild(
   original: LoadedScenario,
   ops: ProjectOps,
   mode: ModeRun,
   verified: VerifiedBuild | undefined,
-  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; fresh: FreshCopy }) => Promise<void>,
+  use: (
+    app: AppHarness,
+    installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; manifest: Record<string, unknown>; fresh: FreshCopy; copyOf: (manifest: Record<string, unknown>) => FreshCopy },
+  ) => Promise<void>,
   options: { managedFallback?: boolean } = {},
 ): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
@@ -2112,19 +2141,21 @@ async function withInstalledBuild(
       mode.findings.push(`unmanaged install refused ${install.code} (${install.status}): installed the same build managed instead`);
       landed = { manifest: managed.manifest, install: (a, m) => a.installManaged!(m), mode: 'managed' };
     }
-    const fresh: FreshCopy = async () => {
-      const copy = await freshBoot(ops, dir)();
-      try {
-        await copy.app.signInAdmin();
-        const again = await landed.install(copy.app, landed.manifest);
-        if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
-        return copy;
-      } catch (e) {
-        await copy.release();
-        throw e;
-      }
-    };
-    await use(app, { dir, url: booted.url, collections, baseline, fresh });
+    const copyOf =
+      (installs: Record<string, unknown>): FreshCopy =>
+      async () => {
+        const copy = await freshBoot(ops, dir)();
+        try {
+          await copy.app.signInAdmin();
+          const again = await landed.install(copy.app, installs);
+          if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+          return copy;
+        } catch (e) {
+          await copy.release();
+          throw e;
+        }
+      };
+    await use(app, { dir, url: booted.url, collections, baseline, manifest: landed.manifest, fresh: copyOf(landed.manifest), copyOf });
   });
 }
 
@@ -2134,7 +2165,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   const card = scenario.card;
   const mode: ModeRun = { mode: 'template', findings: [] };
   const iterated = iteratedScenario(scenario);
-  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
+  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline, manifest, copyOf }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
     await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
@@ -2146,9 +2177,10 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    // No fresh copy here: the app holds the agent's iterate, made live through its doors, which a host booted
-    // again would not hold; an earlier write is undone through those doors instead (`restoreSeededRows`).
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
+    // The app holds the agent's iterate, made live through its doors, which a host booted again would not hold:
+    // a fresh copy is a blank host with what the app serves now installed the same way (`iteratedManifest`).
+    const fresh = copyOf(iteratedManifest(manifest, served));
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh);
   });
   return mode;
 }

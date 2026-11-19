@@ -1046,6 +1046,9 @@ const en = {
       resultFailed: ' \u00b7 Failed {{count}}',
       succeededRecords: 'Records that succeeded',
       aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
+      resultNotConfirmed: ' \u00b7 Not confirmed {{count}}',
+      notConfirmedRecords: 'The action did not report on these records. Check their current values:',
+      aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -5007,6 +5010,7 @@ const en = {
     composer: {
       queued: 'Sends when the current reply finishes',
       queuedCancel: 'Cancel',
+      fileTooLarge: 'Too large to attach (limit {{limit}}): {{files}}',
     },
     answer: {
       showFull: 'Show full answer',
@@ -6141,6 +6145,7 @@ const en = {
     loading: "Loading your notification settings…",
     loadFailed: "Could not read your notification settings. Reload the page to try again.",
     saveFailed: "The change was not saved: {{reason}}",
+    readOnly: "You can view these settings, but your access does not let you change them. An administrator of your organization can change them for you.",
     general: "General",
     generalWarning: "Changing your digest or quiet hours saves your own general setting. It then applies to every topic and channel you have not set yourself, in place of your organization's defaults.",
     digest: "Digest",
