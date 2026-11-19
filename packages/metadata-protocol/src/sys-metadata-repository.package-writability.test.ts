@@ -56,6 +56,8 @@
  * discharged, not still standing — do not read the history as a live warning.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
