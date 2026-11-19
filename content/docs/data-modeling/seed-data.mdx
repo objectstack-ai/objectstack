@@ -421,11 +421,9 @@ The rules:
   and the load's error (also logged at warn) names the object. Every marked set
   still loads for the locales it lists, exactly as an unmarked set would, and
   every other object still seeds. Identical copies of one set — the same
-  package's datasets merged twice — count once. Two versions of one package
-  whose marked set changed are two sets: an upgrade keeps the earlier
-  version's datasets on the per-organization replay list until the process
-  restarts, so until then an organization on an unlisted locale gets no
-  fallback for that object.
+  package's datasets merged twice — count once. An upgrade replaces the
+  package's datasets on the per-organization replay list, so two versions of
+  one package are never two sets; two packages marking the same object are.
 
 The loader logs, at info, each fallback set it loaded and the locale it filled
 in for. Datasets without the marker load exactly as before.

@@ -5603,9 +5603,9 @@ function seedDeclarationFingerprint(dataset: Seed): string {
  * a package's datasets once per merge (boot rehydrate, install or upgrade,
  * reseed), and a second copy of the one fallback set is not a second choice.
  * Object names are global, so two packages marking the same object are two
- * declarations and that object's fallback choice is refused. So are two
- * versions of one package whose marked set changed: an upgrade appends the new
- * version's datasets beside the old version's until the process restarts.
+ * declarations and that object's fallback choice is refused. (An upgrade
+ * replaces a package's datasets on the replay list, so two versions of one
+ * package do not meet here.)
  *
  * Judged whatever the load's locale: the declaration is ambiguous on every
  * load, not only on one that needs the fallback, and a refusal that waited for
@@ -5631,10 +5631,9 @@ function findDuplicateFallbackSets(datasets: readonly Seed[]): DuplicateFallback
         `Seed datasets of '${object}' mark ${distinct.size} different sets \`fallback: true\` (${scopes.join('; ')}). ` +
         'An object has at most one fallback set: it is the one set that loads when no other set lists the ' +
         `resolved locale. No fallback was used for '${object}': each marked set still loads for the locales it ` +
-        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. Two causes ' +
-        `leave more than one marked set: the packages being seeded mark more than one set of '${object}' (keep the ` +
-        'marker on one), or an upgrade within this process changed a package\'s marked set (the earlier ' +
-        'version\'s datasets stay on the replay list until the process restarts).',
+        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. The ' +
+        `packages being seeded mark more than one set of '${object}', most often two packages marking the same ` +
+        'object: keep the marker on one.',
     });
   }
   return refusals;
