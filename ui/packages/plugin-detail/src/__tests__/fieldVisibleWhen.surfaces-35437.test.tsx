@@ -157,7 +157,11 @@ async function mountSurface(
             resourceId: row.id,
             data: row,
             showBack: false,
-            sections: [{ title: 'Body', fields: STRIP_FIELDS }],
+            // Field descriptors, as an authored `detail-view` writes them.
+            sections: [{
+              title: 'Body',
+              fields: STRIP_FIELDS.map((name) => ({ name, label: (objectSchema.fields as any)[name].label })),
+            }],
           } as never}
         />
       </SchemaRendererProvider>,
@@ -173,7 +177,7 @@ async function mountSurface(
           resourceId: row.id,
           data: row,
           showBack: false,
-          fields: [{ name: 'region' }],
+          fields: [{ name: 'region', label: 'Region' }],
           highlightFields: STRIP_FIELDS.filter((n) => n !== 'region').map((name) => ({ name })),
         } as any}
       />,
@@ -357,24 +361,24 @@ describe('the highlights strip, the detail-view node and the record drawer judge
 
 describe('the detail-view header draws no summary chip for a field its visibleWhen hides (objectstack#35437)', () => {
   async function chipShows(row: Row): Promise<boolean> {
+    // `stage` is the chip the header picks on its own (a status-like field
+    // with a value); here it is the gated field.
     const objectSchema = objectSchemaWith(undefined);
-    (objectSchema.fields as Record<string, unknown>).region = {
-      type: 'text', label: 'Region', visibleWhen: "record.stage == 'closed_won'",
+    (objectSchema.fields as Record<string, unknown>).stage = {
+      type: 'text', label: 'Stage', visibleWhen: "record.region == 'region-of-won'",
     };
     await mountSurface('node', row, objectSchema, {});
-    // The anchor is the record's title: `region` itself is the gated chip.
-    if (textCount(row.name) < 1) {
+    const header = document.querySelector('h1')?.parentElement;
+    if (!header || !header.textContent?.includes(row.name)) {
       cleanup();
       throw new Error('HARNESS DEAD: the record title never drew');
     }
-    // The node's body draws `region` too; the chip is the header's own copy.
-    const header = document.querySelector('h1')?.parentElement;
-    const shown = !!header && Array.from(header.querySelectorAll('*')).some((el) => el.textContent === row.region);
+    const shown = Array.from(header.querySelectorAll('*')).some((el) => el.textContent === row.stage);
     cleanup();
     return shown;
   }
 
-  it('a `region` chip is drawn on WON and not on LOST', async () => {
+  it('a `stage` chip is drawn on WON and not on LOST', async () => {
     expect([await chipShows(LOST), await chipShows(WON)]).toEqual([false, true]);
   });
 });
