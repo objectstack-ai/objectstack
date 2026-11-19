@@ -25,11 +25,14 @@
  *   1. `priority:p0` first, past every cap (leg `p0`).
  *   2. `priority:p1` next, whatever area it belongs to, a paused area included (leg `p1 jump`).
  *   3. Then the areas and epics `--order` names, in that order (leg `order k`). Inside an epic, its child order
- *      (`GET …/issues/N/sub_issues`; leg `epic child k`); inside an area, p2 by the same-grade tiebreak.
+ *      whatever the grade (`GET …/issues/N/sub_issues`; leg `epic child k`); inside an area, p2 by the same-grade
+ *      tiebreak, then p3 by the same tiebreak (leg `order k p3 close-out`).
  *   4. A card the order reaches that carries no grade comes after every graded leg (leg `ungraded`): the label order
  *      is p0 > p1 > the named order > ungraded.
- *   5. p3 is never a pick. It is printed apart, under Rides, in the same order — "p3 left for the close-out or
- *      batched", after the p2 cards the rule puts first.
+ *   5. An area's p3 is a pick, ranked after every p2 of that same item and before the next item: "p2 first, p3 left
+ *      for the close-out"; "in an area with no sub-epic, p2 before p3". So an area holding only p3 cards yields its
+ *      p3 as the next pick, never an empty queue. The reader cannot tell whether an area has a sub-epic, so every
+ *      area item ranks this way; a sub-epic is named as an `epic:` item and keeps its child order.
  *   6. At one grade: a non-fleet card first (`isFleetCard`), then a `Bug`, then the card opened first.
  *   7. Not a candidate: an assignee, `pm:dispatched`, `needs-user-decision`, `pm:retriage`, a second pm state, an
  *      epic or tracking parent (`pm:epic`, `tracking`), an open line-start `Blocked-by:` target in the body or a
@@ -42,7 +45,8 @@
  *
  * The maintainer's direct dispatch (the first leg of 取卡全序, three provenance pieces), the contract-surface leg
  * (`references/lanes/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
- * machine line) and the multi-seat odd/even alternation. A seat reads those itself; the output says so every time,
+ * machine line), the multi-seat odd/even alternation and batching a p3 onto a PR that touches the same files (rule
+ * ④'s "or batched", a judgement over a diff). A seat reads those itself; the output says so every time,
  * so an absent leg never reads as a leg that found nothing.
  *
  * ## What it reads — REST through `gh api`, every page
@@ -126,6 +130,7 @@ export const DUTIES_PHRASES = Object.freeze([
   '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序',
   '同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄',
   '`node scripts/pm/card-pick.mjs',
+  '开放 = 未派发(无 `pm:dispatched`、无 assignee)',
 ]);
 export const STATE_MACHINE_PATH = '.claude/skills/pm-dispatch/references/state-machine.md';
 export const STATE_MACHINE_PHRASES = Object.freeze([
@@ -141,6 +146,7 @@ export const UNREAD_LEGS = Object.freeze([
   'the contract-surface leg (取卡全序 leg 2, `references/lanes/spec.md`) — a judgement over the diff, not a label',
   "a `tooling` card's three-gate admission — triage's reading; flagged on the row, not judged",
   'multi-seat odd/even alternation — the seat applies it to this list',
+  "batching a p3 onto a PR that touches the same files (rule ④'s \"or batched\") — a judgement over a diff; here every area p3 ranks as its close-out",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -235,7 +241,7 @@ export function placeCard(issue, items, children) {
       childIndex = (children.get(it.number) ?? []).indexOf(issue.number);
       if (childIndex === -1) continue;
     } else if (!labels.includes(it.label)) continue;
-    if (rung === 3) return { leg: 'rides', legRank: 3, orderIndex: k, childIndex, item: it.name };
+    if (rung === 3 && it.kind === 'area') return { leg: `order ${k + 1} p3 close-out`, legRank: 1.75, orderIndex: k, childIndex, item: it.name };
     if (rung === null && it.kind === 'area') return { leg: 'ungraded', legRank: 2, orderIndex: k, childIndex, item: it.name };
     return { leg: it.kind === 'epic' ? `epic child ${childIndex + 1}` : `order ${k + 1}`, legRank: 1.5, orderIndex: k, childIndex, item: it.name };
   }
@@ -243,8 +249,8 @@ export function placeCard(issue, items, children) {
 }
 
 /**
- * Rank the in-scope cards: p0, p1, then each order item in turn (an epic by child order, an area by the same-grade
- * order), then the ungraded leg; Rides apart. Pure.
+ * Rank the in-scope cards: p0, p1, then each order item in turn (an epic by child order whatever the grade; an area
+ * by the same-grade order, every p2 ahead of every p3), then the ungraded leg. Pure.
  */
 export function rankCards(placed) {
   const byLeg = (pred) => placed.filter(pred);
@@ -257,15 +263,10 @@ export function rankCards(placed) {
     const epic = inItem.filter((p) => p.place.childIndex >= 0).sort((a, b) => a.place.childIndex - b.place.childIndex);
     out.push(...epic.map((p) => p.issue));
     out.push(...sameGradeOrder(inItem.filter((p) => p.place.childIndex < 0).map((p) => p.issue)));
+    out.push(...sameGradeOrder(byLeg((p) => p.place.orderIndex === k && p.place.legRank === 1.75).map((p) => p.issue)));
   }
   for (const k of orderIndexes) out.push(...sameGradeOrder(byLeg((p) => p.place.orderIndex === k && p.place.leg === 'ungraded').map((p) => p.issue)));
-  const rides = [];
-  for (const k of orderIndexes) {
-    const inItem = byLeg((p) => p.place.orderIndex === k && p.place.leg === 'rides');
-    const epic = inItem.filter((p) => p.place.childIndex >= 0).sort((a, b) => a.place.childIndex - b.place.childIndex);
-    rides.push(...epic.map((p) => p.issue), ...sameGradeOrder(inItem.filter((p) => p.place.childIndex < 0).map((p) => p.issue)));
-  }
-  return { ranked: out, rides };
+  return { ranked: out };
 }
 
 /**
@@ -361,7 +362,7 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
   for (const row of rows) if (labelNames(row.issue).includes('tooling')) row.flags.push('tooling: three-gate admission unread');
 
   // 4. walk in rank order, reading threads lazily.
-  const { ranked, rides } = rankCards(placed);
+  const { ranked } = rankCards(placed);
   const rowOf = new Map(rows.map((r) => [r.issue.number, r]));
   const targetCache = new Map();
   const resolveTarget = (t) => {
@@ -417,10 +418,8 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
       else row.reasons.push(`below --limit ${limit} (a candidate)`);
     }
   }
-  if (why) for (const issue of rides) evaluate(rowOf.get(issue.number));
   const pickSet = new Set(picks.map((r) => r.issue.number));
-  const rideSet = new Set(rides.map((i) => i.number));
-  const others = rows.filter((r) => !pickSet.has(r.issue.number) && !rideSet.has(r.issue.number) && r.reasons.length > 0);
+  const others = rows.filter((r) => !pickSet.has(r.issue.number) && r.reasons.length > 0);
   return {
     repo,
     items,
@@ -434,7 +433,6 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
     complete: incomplete.length === 0,
     incomplete,
     picks,
-    rides: rides.map((i) => rowOf.get(i.number)),
     others,
     notReached,
   };
@@ -456,7 +454,7 @@ function rowLine(row, rank, nowMs) {
 
 export function verdictLine(r) {
   if (!r.complete) return `card-pick INCOMPLETE — ${r.incomplete.join('; ')}. ⛔ Not a clean pick list: re-run when the reads answer.`;
-  return `card-pick COMPLETE — ${r.picks.length} pick(s), ${r.rides.length} ride(s)`;
+  return `card-pick COMPLETE — ${r.picks.length} pick(s)`;
 }
 
 export function renderText(r) {
@@ -466,9 +464,6 @@ export function renderText(r) {
   L.push(`Picks (limit ${r.limit}) — rank · #N · grade · area/epic · type · leg · age · fleet:`);
   if (r.picks.length === 0) L.push('  (none — every card the order reaches has a named blocking point; --why lists them)');
   r.picks.forEach((row, k) => L.push(`  ${rowLine(row, k + 1, r.nowMs)}`));
-  L.push('Rides (p3 — never a pick: the close-out, or batched onto a PR touching the same files):');
-  if (r.rides.length === 0) L.push('  (none)');
-  for (const row of r.rides) L.push(`  · ${rowLine(row, null, r.nowMs)}${row.read ? (row.reasons.length ? ` ⟂ ${row.reasons.join('; ')}` : '') : ' (thread not read; --why reads it)'}`);
   if (r.why) {
     L.push(`Not a pick (--why) — ${r.others.length} card(s), each with its blocking point:`);
     const sorted = [...r.others].sort((a, b) => (a.place ? 0 : 1) - (b.place ? 0 : 1) || a.issue.number - b.issue.number);
@@ -507,7 +502,6 @@ export function renderJson(r) {
     total_count: r.totalCount,
     reads: r.reads,
     picks: r.picks.map(card),
-    rides: r.rides.map(card),
     not_a_pick: r.why ? r.others.map(card) : null,
     not_reached: r.notReached,
     unread_legs: UNREAD_LEGS,
@@ -647,7 +641,7 @@ export async function main(argv, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 5,
   'the grade legs: p0 above everything, p1 jumps the named order, the ungraded leg comes last': 6,
-  'p3 rides: never a pick, listed apart in the same order': 4,
+  "p3: an area's close-out after every p2 of that item; an epic's children keep their child order": 7,
   'Blocked-by: an open target holds, a closed-unmerged PR holds, a merged PR and a closed issue release, cross-repo is read': 7,
   'the same-grade order and the epic child order': 5,
   'the candidate definition: label reasons, claims and the triage audit': 9,
@@ -734,17 +728,30 @@ export async function selfTest() {
     t('the order items are walked in the order given', nums(r2.picks).join(), [other1, named2].map((c) => c.number).join());
   }
 
-  battery('p3 rides: never a pick, listed apart in the same order');
+  battery("p3: an area's close-out after every p2 of that item; an epic's children keep their child order");
   {
     const p3a = card(['area:ux', 'priority:p3'], { created_at: '2025-01-01T00:00:00Z' });
     const p3b = card(['area:ux', 'priority:p3']);
     const p2 = card(['area:ux', 'priority:p2']);
     const comments = Object.fromEntries([p3a, p3b, p2].map((c) => [c.number, [{ body: AUDIT }]]));
+    const only = await run({ issues: [p3b, p3a], comments }, { limit: 10 });
+    t('⭐ an area holding only p3 cards yields its p3 cards as picks, oldest first — never an empty queue', nums(only.picks).join(), [p3a, p3b].map((c) => c.number).join());
     const r = await run({ issues: [p3b, p2, p3a], comments }, { limit: 10 });
-    t('⭐ a p3 never appears in the picks', nums(r.picks).join(), String(p2.number));
-    t('…only under Rides, oldest first', nums(r.rides).join(), [p3a, p3b].map((c) => c.number).join());
-    t('a p3 outside the order is neither a pick nor a ride', (await run({ issues: [p3a], comments }, { order: 'area:build' })).rides.length, 0);
-    t('without --why a ride is listed with its thread unread, never judged', (await run({ issues: [p3a], comments }, { why: false })).rides[0].read, false);
+    t('⭐ a p2 ranks ahead of every p3 in the same item, an older p3 included', nums(r.picks).join(), [p2, p3a, p3b].map((c) => c.number).join());
+    t('…and the p3 rows name their leg', r.picks.map((p) => p.place.leg).join('|'), 'order 1|order 1 p3 close-out|order 1 p3 close-out');
+    const build2 = card(['area:build', 'priority:p2']);
+    const ungraded = card(['area:ux'], { created_at: '2024-01-01T00:00:00Z' });
+    const c2 = { ...comments, [build2.number]: [{ body: AUDIT }], [ungraded.number]: [{ body: AUDIT }] };
+    const two = await run({ issues: [build2, p3a, ungraded], comments: c2 }, { order: 'area:ux,area:build' });
+    t("an item's p3 closes that item before the next item's p2; the ungraded leg still comes last", nums(two.picks).join(), [p3a, build2, ungraded].map((c) => c.number).join());
+    const out = await run({ issues: [p3a], comments }, { order: 'area:build' });
+    t('a p3 outside the order is not a pick, and says why', [out.picks.length, out.others[0]?.reasons[0]], [0, 'outside --order (p3 · area:ux)']);
+    const e3 = card(['priority:p3']);
+    const e2 = card(['priority:p2']);
+    const ec = Object.fromEntries([e3, e2].map((c) => [c.number, [{ body: AUDIT }]]));
+    const er = await run({ issues: [e2, e3], comments: ec, sub_issues: { 600: [e3, e2].map((c) => ({ number: c.number })) }, rows: { [`${REPO}#600`]: { number: 600, labels: [] } } }, { order: 'epic:#600' });
+    t("⭐ an epic's children follow child order whatever the grade: a p3 first child ranks ahead of a p2 second child", nums(er.picks).join(), [e3, e2].map((c) => c.number).join());
+    t('…under the epic child leg, never the close-out leg', er.picks.map((p) => p.place.leg).join('|'), 'epic child 1|epic child 2');
   }
 
   battery('Blocked-by: an open target holds, a closed-unmerged PR holds, a merged PR and a closed issue release, cross-repo is read');

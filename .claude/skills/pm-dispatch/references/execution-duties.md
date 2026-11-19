@@ -45,6 +45,7 @@
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等;卡 PR 叠未合 PR 或 `Blocked-by:` 未合的,合前 ⛔ 不开线程(维护者令除外)。
 - 取卡次序 = `docs/NORTH-STAR.md`「Priority」第 3 条,现读 `node scripts/pm/card-pick.mjs --order <序>`。
+- 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。
