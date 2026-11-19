@@ -2045,8 +2045,8 @@ export const CEILINGS = new Map([
   // other skill file is edited. The PR that adds the row is Tier H and lands
   // only on an authorized approval, which is the pricing act the header
   // reserves to the maintainer.
-  //   ceil(($(wc -c < skills/objectstack-mcp-build/SKILL.md) - 20) / 4) == ceil(4530 / 4)
-  ['skills/objectstack-mcp-build/SKILL.md', 1133],
+  //   ceil(($(wc -c < skills/objectstack-mcp-build/SKILL.md) - 20) / 4) == ceil(4602 / 4)
+  ['skills/objectstack-mcp-build/SKILL.md', 1151],
 
   // ── the objectstack-project skill joins the catalog ──
   // A new published process skill: how a change moves through a metadata-app

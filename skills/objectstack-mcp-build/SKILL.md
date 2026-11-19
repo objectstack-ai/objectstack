@@ -38,13 +38,13 @@ the authority on its arguments and its reply.
 ## 2. Read what exists
 
 - `list_metadata_items` for each type you will write, then `get_metadata_item`
-  for every item you will change or name: an object before a view, flow or
-  dashboard on it. `describe_object` reads an object's fields where the
-  connection lists it.
+  for every item you will change or name (an object before a view or flow on
+  it). `describe_object` reads an object's fields where the connection lists it.
 - Change an item by reading it whole, editing that, and saving the whole item.
   Reuse the names that exist, their namespace prefix included; never guess one.
-- A save names a package. `list_metadata_items` with type `package` lists
-  them; when the user named none and several are writable, ask which.
+- A save names a package. An item you change stays in the one its list entry
+  names. For a new item with none named, a save without one is refused with
+  the writable packages listed: use the only one, or ask which of several.
 
 ## 3. Read the type's contract
 
@@ -66,7 +66,7 @@ helper. A published item of the same type is a second pattern.
 ## 4. Save, then read the verdict
 
 - `save_metadata_draft`, one item a call, an object before what reads it.
-- A refused save saved nothing: fix what its `issues` name and save again.
+- A refused save saved nothing: fix what its `error` names and save again.
 - An accepted save parsed, and its reply says what a publish would answer:
 
 | The reply shows | What you do |
