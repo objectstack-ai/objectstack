@@ -40,7 +40,8 @@ import {
     kanbanViewOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
-import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { keepInlineEditModeForTheSession, useViewTabsFit } from './objectViewChrome.js';
+import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
 import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -143,9 +144,10 @@ export function useObjectViewListRenderer({
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
-     * objectstack#27058 — on a phone, the title's view switcher, drawn at the
-     * start of the list's toolbar row (`ListView`'s `toolbarLeading`) or above
-     * a chart; `null` elsewhere, where the page header draws it.
+     * The view switcher, drawn at the start of the list's toolbar row — its
+     * view bar (`ListView`'s `toolbarLeading`) — or above a chart, at every
+     * width (objectstack#27058 on a phone, objectstack#35548 everywhere);
+     * `null` with no view to switch.
      */
     phoneTitle: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
@@ -161,6 +163,9 @@ export function useObjectViewListRenderer({
      */
     viewPanelFilters?: FilterBuilderRowGroup;
 }) {
+    // objectstack#27058 — below `sm` the title switcher is the phone's one
+    // view control, so the list offers no layout switcher of its own there.
+    const wideViewport = useViewTabsFit();
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -331,13 +336,13 @@ export function useObjectViewListRenderer({
          */
         if (viewDef.type === 'chart') {
             const chartConfig = viewDef.chart || {};
-            // The way back to the other views is the page title's view
-            // switcher (objectstack#27594), above every face, a chart included.
-            // On a phone the switcher heads the chart (objectstack#27058).
+            // The way back to the other views is the view switcher
+            // (objectstack#27594), which heads the chart in a bar of the
+            // list's view bar's height (objectstack#27058, objectstack#35548).
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
                     {phoneTitle != null && (
-                        <div className="border-b px-2 py-1.5 flex items-center min-w-0 bg-background">
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center min-w-0 bg-background">
                             {phoneTitle}
                         </div>
                     )}
@@ -732,7 +737,7 @@ export function useObjectViewListRenderer({
             // objectstack#27058 — not on a phone: the title switcher is the
             // phone's one view control, and the Display menu drops its Layout
             // row there.
-            showViewSwitcher: phoneTitle == null
+            showViewSwitcher: (phoneTitle == null || wideViewport)
                 && ((viewDef.appearance ?? listSchema.appearance)?.allowedVisualizations?.length ?? 0) > 1,
             // Toolbar policy — one vocabulary (#2890). Stored views may still
             // carry the legacy bare `show*` flags, so each side is run through
@@ -1097,13 +1102,19 @@ export function useObjectViewListRenderer({
                 rowOpensRecord={rowOpensRecord}
                 // objectstack#26681 — the Display menu's Open records section.
                 recordOpen={recordOpen}
-                // objectstack#27058 — on a phone the toolbar row is the title
-                // row: the view switcher, then the filter / sort / display tools.
-                toolbarLeading={phoneTitle}
+                // The toolbar row is the view bar: the view switcher, then the
+                // filter / sort / options tools (objectstack#27058,
+                // objectstack#35548). The switcher shows the list's own record
+                // count and layout, which only the list knows.
+                toolbarLeading={phoneTitle == null ? null : ({ recordCount, layout }) => (
+                    <ListRecordCountContext.Provider value={{ count: recordCount, layout }}>
+                        {phoneTitle}
+                    </ListRecordCountContext.Provider>
+                )}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

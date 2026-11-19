@@ -1000,6 +1000,12 @@ function resolveSelectionMode(selectable: DataTableSchema['selectable'] | 'none'
  * Frozen so a consumer that mutates the array it was handed cannot corrupt the
  * shared instance for every other table on the page.
  */
+/**
+ * The last frozen column's edge while the rows are scrolled sideways under it
+ * (objectstack#35548): a shadow, never a rule, and none at rest.
+ */
+const FROZEN_EDGE_SHADOW = 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.18)] dark:shadow-[4px_0_6px_-4px_rgba(0,0,0,0.6)]';
+
 const EMPTY_COLUMNS = Object.freeze([]) as unknown as DataTableSchema['columns'];
 const EMPTY_ROWS = Object.freeze([]) as unknown as DataTableSchema['data'];
 
@@ -2882,6 +2888,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // (objectui#12708), the same one `ObjectGrid`'s grouped scroller and a
   // page's own table use. Only the shadow's PLACEMENT is this table's own.
   const overflowRight = useHorizontalOverflow(scrollBoxRef, { disabled: disableInnerScroll });
+  // objectstack#35548 — the frozen columns draw no rule of their own: their
+  // edge shadow shows only once the rows are scrolled sideways under them.
+  const [scrolledX, setScrolledX] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box || frozenColumns <= 0) {
+      setScrolledX(false);
+      return;
+    }
+    const read = () => setScrolledX(box.scrollLeft > 0);
+    read();
+    box.addEventListener('scroll', read, { passive: true });
+    return () => box.removeEventListener('scroll', read);
+  }, [disableInnerScroll, frozenColumns]);
   const [rightShadow, setRightShadow] = useState<{ right: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const box = scrollBoxRef.current;
@@ -3540,7 +3560,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       // keeps it, and bump above body pinned cells (z-10).
                       isPinnedRight && 'sticky right-0 z-20',
                       isFrozen && 'sticky z-20',
-                      isFrozen && index === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                      isFrozen && index === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                     )}
                     style={{ 
                       width: columnWidth,
@@ -4066,7 +4086,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
-                              isFrozen && colIndex === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                              isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                             )}
                             style={{
                               width: columnWidth,
