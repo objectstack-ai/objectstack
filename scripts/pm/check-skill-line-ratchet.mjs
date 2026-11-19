@@ -430,7 +430,8 @@ export const CEILINGS = new Map([
   // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
   // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
   // line the renaming touched kept its line. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 329],
+  // 329 → 328 (#35215 G-A, current values and quotes out of the skill): the batch row's current values moved out, the retired `target:<major>` label row deleted; landed count.
+  ['.claude/skills/pm-dispatch/SKILL.md', 328],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -473,7 +474,8 @@ export const CEILINGS = new Map([
   // carries the route, the dev names the owed review in its hand-back and never
   // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
+  // 246 → 245 (#35215 G-A, current values and quotes out of the skill): an expired one-time calibration line deleted, quotes and ids trimmed; landed count.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -625,7 +627,8 @@ export const CEILINGS = new Map([
   // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
   // provenance carrying those two operative quotes (+1). Measured delta +3.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
+  // 63 → 62 (#35215 G-A, current values and quotes out of the skill): the verbatim provenance line deleted; the route it backed stands above it; landed count.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 62],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1226,12 +1229,14 @@ export const CEILINGS = new Map([
   // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
   // paid by that ruling and by nothing else.
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
-  ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
-  ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
+  // readings-queue 89 → 86, readings-channels 76 → 71, readings-write-shapes 84 → 81 (#35215 G-D): stale
+  // platform readings trimmed, the lesson kept; landed counts.
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 86],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 71],
   ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
   ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
   ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
-  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 84],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 81],
   ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
   ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
   ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
@@ -1432,7 +1437,8 @@ export const CEILINGS = new Map([
   // one line, the moving seat — an outgoing account still draining moves to a free
   // seat with its own mailbox, the seat post carries the ownership split, and it posts
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
+  // 100 → 99 (#35215 G-A, current values and quotes out of the skill): the expired pre-filed-children transition line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
   // or shift, startup with the maintainer's authorising line per seat thread (an area
   // thread carries none), the in-area rules as pointers to their owning references, the
@@ -1707,7 +1713,10 @@ export const CEILINGS = new Map([
   // approved with 「同意」: no card for a problem in a feature whose code has not merged, and the
   // type is set card by card — none on an epic or tracking card, Task for ops and verification,
   // +2). Measured delta +4. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 87],
+  // −4 (#35215 G-A, current values and quotes out of the skill): the dated quote block and one maintainer quote deleted; the rules under them stand; landed count.
+  // Merged (#35385 meets #35406): 83 + 4 (#35259) − 4 (#35215 G-A) = 83, measured after the merge.
+  // Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1877,7 +1886,8 @@ export const CEILINGS = new Map([
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
+  // 82 → 81 (#35215 G-A, current values and quotes out of the skill): a provenance line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 81],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
@@ -1967,7 +1977,9 @@ export const CEILINGS = new Map([
   // transcribed verbatim, whose workload names `references/lanes/eval.md`. A
   // NEW file, so this is an added row and no other row moves; set at the
   // landed line count (headroom 0, same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // 45 → 44 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
+  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 44],
   // Merge-queue seat charter (`queue#N`): the neutral cross-lane seat that
   // patrols the queue (the 90-minute stall check, head-ejection causes, flake
   // anchors, flake-victim re-queues, the front-jump under the existing three
@@ -1987,7 +1999,9 @@ export const CEILINGS = new Map([
   // it" interim section lost one line. Ruling of record: the queue card
   // (#33647, filing gate ③), verbatim 「建议有专人来跟进队列吗？这种操作不应该等我」;
   // its order names this widening. Measured delta +2; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 32],
+  // 32 → 31 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
+  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 31],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;

@@ -3660,9 +3660,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     + "an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the "
     + 'action it NAMES once for the whole selection — the renderer injects `params._selectedIds: '
     + 'string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate '
-    + 'artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a '
-    + 'handler that cannot cover the whole selection must reject, and per-row retry is replaced by '
-    + 're-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
+    + 'artifact (zip of QR codes, merged PDF, batch print). A rejection is one outcome for the whole '
+    + 'selection; a run that moved some rows and refused others resolves with a `BulkActionResult` '
+    + '(`{ succeeded, failed }`), a non-empty `failed` being a legal success answer. Per-row retry is '
+    + 'replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
     + "on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` "
     + 'instead — the bare-string form, promoted with the action\'s own label, params and `visible`; a '
     + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time"

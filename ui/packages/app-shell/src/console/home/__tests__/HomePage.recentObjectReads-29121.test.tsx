@@ -19,6 +19,9 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
+// `HomePage` reaches `@objectstack/lint` (through the drafts row), so its first
+// load is paid here, at collection, never inside a clocked `waitFor`.
+import '@objectstack/lint';
 import { MetadataProvider } from '../../../providers/MetadataProvider';
 
 const navigateMock = vi.fn();
@@ -156,10 +159,16 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
-          calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          calls.push(
+            options?.names ? `${type}?names=${options.names.join(',')}` : options?.packageId ? `${type}?package=${options.packageId}` : type,
+          );
           const all = type === 'object' ? OBJECTS : type === 'app' ? state.apps : type === 'view' ? VIEWS : [];
-          const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
+          const items = options?.names
+            ? all.filter((o: any) => options.names!.includes(o.name))
+            : options?.packageId
+              ? all.filter((o: any) => o._packageId === options.packageId)
+              : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
@@ -229,7 +238,7 @@ describe('Home’s recent rows read the objects they name, by name (objectstack#
       'Account',
     ]);
     await settle();
-    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_contact']);
+    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_contact', 'object?names=crm_account,crm_contact']);
   });
 
   it('an object row reads its object by name; a list-view row its object with its views (the view list, never the object list)', async () => {
@@ -249,6 +258,6 @@ describe('Home’s recent rows read the objects they name, by name (objectstack#
       expect(rows().map((row) => row.querySelector('span.truncate')?.textContent)).toEqual(['Accounts', 'Open Leads']),
     );
     await settle();
-    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_lead', 'view']);
+    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_lead', 'object?names=crm_account,crm_lead', 'view']);
   });
 });
