@@ -639,6 +639,42 @@ answers `200 OK` with a zero. Every tile read 0 while the filter bar showed
 meaning "open the picker with no preset applied", and a bare filter value gives
 it no `from`/`to` to hand over.
 
+### Defaulting to the Current ISO Week
+
+Weekly data is often keyed by an ISO week rather than by a date: a text field
+such as `cost_week` holds `2026-W47`. A text filter over that field can default
+to the current week with the placeholder `{current_iso_week}`:
+
+{/* os:check */}
+```typescript
+globalFilters: [
+  { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+]
+```
+
+Each time the dashboard opens, the placeholder resolves to the current week's
+key, and the filter box shows that key (`2026-W47`), not the placeholder. The
+user can edit it like any typed value, and it filters the field the same way.
+
+- **The week.** The key is the ISO-8601 week, written `YYYY-Www`. Weeks start
+  on Monday, and week 1 is the week that holds the year's first Thursday. Near
+  New Year the year in the key can differ from the calendar year: Friday
+  2027-01-01 is in `2026-W53`, and Monday 2027-01-04 starts `2027-W01`. This is
+  the same label an analytics `week` bucket groups by.
+- **The day.** "Today" is the calendar day in the workspace time zone, the
+  same day the date macros such as `{today}` read.
+- **A fixed week.** A literal key, `defaultValue: '2026-W47'`, stays a fixed
+  default.
+- **Widget filters.** `{current_iso_week}` also works as a value in any
+  filter condition, such as a widget's `filter: { cost_week: '{current_iso_week}' }`.
+  It resolves before the query runs, in the browser and on the server.
+- **Not a date.** The key is text. A `type: 'date'` filter refuses it as a
+  default, and so does a calendar view's `initialDate`. To filter a date field
+  to this week, use the `this_week` preset or `{current_week_start}` /
+  `{current_week_end}`. In a filter on a date or datetime field the key is
+  compared as text, not read as a week, so the answer is wrong: use it only on
+  fields that store week keys.
+
 ### Per-Widget Filter Bindings
 
 By default a filter applies to its own `field` on every widget (the date
