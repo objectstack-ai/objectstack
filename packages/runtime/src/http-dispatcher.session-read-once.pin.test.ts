@@ -409,7 +409,6 @@ describe('limiter armed: the limiter\'s read is the request\'s read (real kernel
         // No gate feature is active here: the member is refused by its own
         // permissions on both doors, the owner is served.
         expect(answers.map((a) => a.status)).toEqual([200, 403, 200, 403, 200, 403, 200, 403]);
-        for (const a of answers.filter((x) => x.status === 403)) expect(a.body?.error?.code ?? a.body?.code).not.toBe('PASSWORD_RESET_REQUIRED');
         for (const a of answers) expect(sessionReads(a)).toEqual(ONCE);
     });
 

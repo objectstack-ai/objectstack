@@ -199,6 +199,30 @@ export interface HonoCorsOptions {
 }
 
 /**
+ * The request's headers as this adapter hands them to a {@link Middleware} and
+ * to a route: Hono's lower-cased record, with `host` backfilled from the URL
+ * when the request carries none. A Fetch API `Request` does not expose `Host`
+ * (a forbidden header, derived from the URL by the transport), and
+ * hostname-based routing in REST and the dispatcher depends on it.
+ *
+ * ONE reading for both, so a middleware and the route see the same header set:
+ * the request's session-read carrier (`@objectstack/core`
+ * `readRequestSession`) keys a read by every header, and the inbound rate
+ * limiter's read in the middleware seam is the route's read only when the two
+ * agree.
+ */
+function readRequestHeaders(c: any): Record<string, string> {
+    const headers = c.req.header() as Record<string, string>;
+    if (!headers.host) {
+        try {
+            const u = new URL(c.req.url);
+            if (u.host) headers.host = u.host;
+        } catch { /* non-URL request, leave headers as-is */ }
+    }
+    return headers;
+}
+
+/**
  * The transport's peer address for a Hono context, when the runtime exposes one.
  *
  * `@hono/node-server` puts the Node `IncomingMessage` on `c.env.incoming`, so
@@ -903,17 +927,8 @@ export class HonoHttpServer implements IHttpServer {
 
         _endParse?.();
 
-        const rawHeaders = c.req.header();
-        // Fetch API `Request` objects don't expose the `Host` header
-        // (it's a forbidden header — derived from the URL by the
-        // transport). Hostname-based routing in REST/dispatcher
-        // depends on it, so we backfill from `c.req.url`.
-        if (!rawHeaders.host) {
-            try {
-                const u = new URL(c.req.url);
-                if (u.host) rawHeaders.host = u.host;
-            } catch { /* non-URL request, leave headers as-is */ }
-        }
+        // `host` backfilled from the URL, as the middleware seam reads it too.
+        const rawHeaders = readRequestHeaders(c);
 
         const req = {
             params: readRouteParams(c),
@@ -1754,7 +1769,8 @@ export class HonoHttpServer implements IHttpServer {
                 .map((m) => m.handler);
             if (chain.length === 0) return next();
 
-            const headers = c.req.header() as Record<string, string>;
+            // The route's own reading, `host` included: see `readRequestHeaders`.
+            const headers = readRequestHeaders(c);
             const req = {
                 params: {},
                 query: readQuery(c),
