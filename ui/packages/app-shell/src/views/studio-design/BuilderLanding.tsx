@@ -224,7 +224,7 @@ export function BuilderLanding(): React.ReactElement {
       disabled={manageBusy !== null}
       aria-label={tFormat('engine.studio.landing.manageTitle', locale, { name: p.name })}
       title={tFormat('engine.studio.landing.manageTitle', locale, { name: p.name })}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 max-md:min-h-11 max-md:px-3"
+      className="inline-flex items-center justify-center gap-1 rounded-md border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 max-md:min-h-11 max-md:px-3"
     >
       {manageBusy === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Settings className="h-3 w-3" />}
       {t('engine.studio.landing.manage', locale)}
@@ -616,17 +616,21 @@ export function BuilderLanding(): React.ReactElement {
                   </button>
                   {renderCustomizationLine(p.id)}
                 </div>
-                <button
-                  type="button"
-                  data-testid="studio-landing-customize"
-                  onClick={() => open(p.id)}
-                  aria-label={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
-                  title={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
-                  className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium hover:bg-muted max-md:min-h-11 max-md:px-3"
-                >
-                  {t('engine.studio.customize.action', locale)}
-                </button>
-                {manageButton(p)}
+                {/* objectstack#35196 — Customize and Manage stack in one column,
+                  * so the card's name keeps the width it had with one button. */}
+                <div className="flex shrink-0 flex-col items-stretch gap-1">
+                  <button
+                    type="button"
+                    data-testid="studio-landing-customize"
+                    onClick={() => open(p.id)}
+                    aria-label={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
+                    title={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
+                    className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium hover:bg-muted max-md:min-h-11 max-md:px-3"
+                  >
+                    {t('engine.studio.customize.action', locale)}
+                  </button>
+                  {manageButton(p)}
+                </div>
               </div>
             ))}
           </div>
@@ -667,15 +671,17 @@ export function BuilderLanding(): React.ReactElement {
                 * offered here, on writable bases only; a read-only package's card
                 * offers the routes that exist for it (its `.custom` pair, the
                 * marketplace). */}
-              <button
-                type="button"
-                onClick={() => (dupFor === p.id ? setDupFor(null) : startDup(p))}
-                title={t('engine.studio.landing.dupTitle', locale)}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <Copy className="h-3 w-3" /> {t('engine.studio.landing.dup', locale)}
-              </button>
-              {manageButton(p)}
+              <div className="flex shrink-0 flex-col items-stretch gap-1">
+                <button
+                  type="button"
+                  onClick={() => (dupFor === p.id ? setDupFor(null) : startDup(p))}
+                  title={t('engine.studio.landing.dupTitle', locale)}
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Copy className="h-3 w-3" /> {t('engine.studio.landing.dup', locale)}
+                </button>
+                {manageButton(p)}
+              </div>
             </div>
             {dupFor === p.id && (
               <div className="flex flex-col gap-1.5 border-t px-3 py-2.5">
