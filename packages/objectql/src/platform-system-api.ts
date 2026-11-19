@@ -50,11 +50,7 @@
  *    (ADR-0148 D3) that a host handler keeps.
  *
  * So a handler handing its own api here gains nothing, and its writes to the
- * identity-assignment objects are judged as its own. ⚠️ Not covered: the api
- * `ObjectRepository.execute` hands the action it dispatches
- * (`ctx.api.object(o).execute(name)`, `engine-object-repository.ts`) is a bare
- * `ScopedContext` carrying the `'action'` mark and neither line's flag, so on
- * it this takes the mark off, as on the audit writer's hook api. The api the audit writer
+ * identity-assignment objects are judged as its own. The api the audit writer
  * holds is neither: `buildHookApi` builds a fresh `ScopedContext` over the
  * write's context, carrying the `'action'` mark when an action's write fired
  * the hook, and this takes it off there. Neither line is a security boundary:
