@@ -104,6 +104,30 @@ const fixtureStack = defineStack({
   ],
 } as never);
 
+const CONTROL_TABLE = 'vms_control';
+
+/** Rows of `table` in the real database file, read through the factory `objectstack dev` uses. */
+async function rowsIn(table: string): Promise<number> {
+  const handle = await createDefaultDatasourceDriverFactory().create({
+    ...sideDatasource,
+    config: { ...sideDatasource.config },
+  } as DatasourceConnectionSpec);
+  await handle.connect?.();
+  try {
+    return ((await (handle.driver as any).find(table, {})) as unknown[]).length;
+  } catch {
+    return 0; // no such table
+  } finally {
+    await handle.disconnect?.();
+  }
+}
+
+/** Whether the real database file exists, and how many fixture rows it holds. */
+async function realDatabaseState(): Promise<{ exists: boolean; rows: number }> {
+  if (!existsSync(realDatabase)) return { exists: false, rows: 0 };
+  return { exists: true, rows: await rowsIn(SIDE) };
+}
+
 describe('os verify runs a declared managed datasource on an ephemeral stand-in, never on its real database', () => {
   let stack: VerifyStack | undefined;
   let crud: VerifyReport;
@@ -134,8 +158,8 @@ describe('os verify runs a declared managed datasource on an ephemeral stand-in,
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('nothing reached the real database: its file was never created', () => {
-    expect(existsSync(realDatabase), Object.values(reports).join('\n')).toBe(false);
+  it('nothing reached the real database: its file was never created', async () => {
+    expect(await realDatabaseState(), Object.values(reports).join('\n')).toEqual({ exists: false, rows: 0 });
   });
 
   it("the object's CRUD case still ran, and passed against the stand-in", () => {
@@ -155,10 +179,13 @@ describe('os verify runs a declared managed datasource on an ephemeral stand-in,
     } as DatasourceConnectionSpec);
     const driver = handle.driver as any;
     await handle.connect?.();
-    await driver.syncSchema(SIDE, { name: SIDE, fields: { serial: { type: 'text' } } });
-    await driver.create(SIDE, { id: 'control_1', serial: 'control' });
+    // A table of the control's own, so this write does not depend on what the
+    // run before it left in the file.
+    await driver.syncSchema(CONTROL_TABLE, { name: CONTROL_TABLE, fields: { serial: { type: 'text' } } });
+    await driver.create(CONTROL_TABLE, { id: 'control_1', serial: 'control' });
     await handle.disconnect?.();
     expect(existsSync(realDatabase)).toBe(true);
+    expect(await rowsIn(CONTROL_TABLE)).toBe(1);
   });
 });
 
