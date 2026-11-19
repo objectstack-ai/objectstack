@@ -27,6 +27,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
+// Pays the dynamic `@objectstack/lint` load the pillar's source reaches at collection, not inside a case (check:test-source-alias).
+import '@objectstack/lint';
 
 const PKG = 'com.acme.app';
 const LONG_LABEL = 'Escalate overdue high-priority support cases to the regional on-call manager';
