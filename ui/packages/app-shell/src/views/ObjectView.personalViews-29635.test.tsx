@@ -32,6 +32,10 @@
  */
 
 import * as React from 'react';
+// The view config panel this file mounts reaches `import('@objectstack/lint')`
+// inside a function body; paid here, at collection, rather than inside the
+// first case's clocked window (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import {
