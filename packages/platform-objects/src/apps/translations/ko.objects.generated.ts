@@ -284,6 +284,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
+      },
       set_user_password: {
         label: "비밀번호 설정",
         successMessage: "비밀번호 업데이트됨",

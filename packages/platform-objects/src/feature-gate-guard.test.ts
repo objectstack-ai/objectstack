@@ -188,6 +188,7 @@ function resolveGatedInput(path: string): { visibleSource: string | undefined } 
 const SHOWN_WHEN_ON: ReadonlyArray<[string, PublicAuthFeatureName]> = [
   ['sys_user.actions.add_sso_user', 'cloudManaged'],
   ['sys_user.actions.import_sso_users', 'cloudManaged'],
+  ['sys_user.actions.remove_sso_user', 'cloudManaged'],
 ];
 
 describe('feature-gate completeness guard (#2874)', () => {

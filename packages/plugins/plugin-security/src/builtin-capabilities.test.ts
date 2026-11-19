@@ -73,4 +73,64 @@ describe('readDeclaredCapabilityContext, beside the curated declarations', () =>
       .toEqual(describeHighPrivilegeBits(setGranting(APP.name), undefined));
     expect(describeHighPrivilegeBits(setGranting(APP.name), undefined)).not.toBeNull();
   });
+
+  // [ADR-0090 D5, #35157] A capability saved in the environment registers in the
+  // same collection with no `_packageId` (measured: `{ name, label, _provenance }`).
+  // It is not an app's own token, so it excuses nothing; an unmanaged copy's
+  // capability carries the copy package's id and still does.
+  const ENV_SAVED = { name: 'envcap.export', label: 'Saved in the environment', _provenance: 'org' };
+  const COPIED = { name: 'trial1.export', label: 'Copied', _packageId: 'com.example.field-copy', _provenance: 'org' };
+
+  it('an environment-saved declaration is not the app\'s own token: it excuses nothing', async () => {
+    const context = await readDeclaredCapabilityContext(engineWith([OWN, APP, ENV_SAVED]), undefined);
+    expect(context).toEqual({ declaredCapabilities: [OWN, APP] });
+    expect(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), context)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), context))
+      .toEqual(describeHighPrivilegeBits(setGranting(ENV_SAVED.name), undefined));
+  });
+
+  it('an unmanaged copy\'s capability carries its package and is excused like the source\'s', async () => {
+    const context = await readDeclaredCapabilityContext(engineWith([COPIED]), undefined);
+    expect(describeHighPrivilegeBits(setGranting(COPIED.name), context)).toBeNull();
+  });
+
+  it('a registry holding only environment-saved declarations does not fall back to the metadata service', async () => {
+    let listed = false;
+    const metadata = { list: () => { listed = true; return [APP]; } };
+    expect(await readDeclaredCapabilityContext(engineWith([ENV_SAVED]), metadata)).toBeUndefined();
+    expect(listed).toBe(false);
+  });
+
+  it('the metadata-service fallback is judged by the same provenance test', async () => {
+    const metadata = { list: async () => [ENV_SAVED, APP] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), metadata)).toEqual({ declaredCapabilities: [APP] });
+    const onlySaved = { list: async () => [ENV_SAVED] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), onlySaved)).toBeUndefined();
+  });
+
+  // [ADR-0090 D5, #35157] `packageId` is an author-written key of the strict
+  // declaration schema, so an environment save with no package may carry it and
+  // registers `{ name, packageId, _provenance }` with no `_packageId`. The row's
+  // binding is still empty: it excuses nothing, whatever package it names.
+  const AUTHORED = { name: 'envcap.claim', label: 'Names a package', packageId: 'com.example.anyone' };
+  const NAMING_A_PACKAGE = { ...AUTHORED, _provenance: 'org' };
+
+  it('an environment-saved body naming a package under `packageId` excuses nothing at the `everyone` anchor', async () => {
+    // The key is authorable: the body an environment author saves parses.
+    expect(CapabilityDeclarationSchema.safeParse(AUTHORED).success).toBe(true);
+    const context = await readDeclaredCapabilityContext(engineWith([OWN, APP, NAMING_A_PACKAGE]), undefined);
+    expect(context).toEqual({ declaredCapabilities: [OWN, APP] });
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context))
+      .toEqual(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), undefined));
+  });
+
+  it('the metadata-service fallback reads no body key either: `packageId` or `package` excuses nothing there', async () => {
+    const naming = { list: async () => [NAMING_A_PACKAGE, { name: 'envcap.legacy', package: 'com.example.anyone' }] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), naming)).toBeUndefined();
+    const beside = { list: async () => [NAMING_A_PACKAGE, APP] };
+    const context = await readDeclaredCapabilityContext(engineWith([]), beside);
+    expect(context).toEqual({ declaredCapabilities: [APP] });
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context)).not.toBeNull();
+  });
 });
