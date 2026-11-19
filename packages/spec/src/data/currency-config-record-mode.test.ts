@@ -457,18 +457,19 @@ describe('defineStack: a roll-up through that master_detail declares the parent\
     expect(finding).toContain("It names 'billing_currency' instead");
   });
 
-  it('names the mode a roll-up declared instead; `dynamic` is refused as no home amount, prescribing `record`', () => {
+  it('names the mode a roll-up declared instead; `dynamic` over a following amount is refused, prescribing `record`', () => {
     const fixed = stackRefusal([
       salesOrder({ currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }), region, orderLine(),
     ]);
     expect(fixed).toContain("It declares `currencyMode: 'fixed'`, and would show in that one currency");
     expect(fixed).not.toContain('bare number');
     // Since #33659 the object lets a `dynamic` roll-up naming a child field
-    // through, and the stack admits it only over a stored home amount: a
-    // following amount is not one, and the finding prescribes `record`.
+    // through, and the stack admits it only over an amount in the home
+    // currency (a `dynamic` `currency` field): a following amount is not one,
+    // and the finding prescribes `record`.
     expect(objectIssues(salesOrder({ currencyConfig: { currencyMode: 'dynamic' } }))).toEqual([]);
     const dynamic = stackRefusal([salesOrder({ currencyConfig: { currencyMode: 'dynamic' } }), region, orderLine()]);
-    expect(dynamic).toContain("`currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of a stored home amount");
+    expect(dynamic).toContain("`currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of an amount in the organization's home currency");
     expect(dynamic).toContain("is an amount in its parent's currency");
     expect(dynamic).toContain("declare `currencyMode: 'record'` naming this object's own code field");
   });
@@ -553,7 +554,7 @@ describe('the object refuses a summary currency it can see is not admitted', () 
         /^`rollup` is a `summary` field of object `sales_order` declaring `currencyMode: 'dynamic'` \(an absent `currencyMode` is `dynamic`\) with no `summaryOperations` naming a child field/,
       );
       // Naming a child field, it is the stack's to judge (#33659): only a
-      // roll-up of a stored home amount is admitted there.
+      // roll-up of an amount in the home currency is admitted there.
       expect(objectIssues(orderWith({ summaryOperations: SUM_LINES, currencyConfig }))).toEqual([]);
     }
   });
