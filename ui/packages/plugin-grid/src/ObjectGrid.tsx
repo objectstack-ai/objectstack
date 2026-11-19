@@ -1952,24 +1952,49 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   const applyColumnChrome = (col: any) => withOneLineRichText(withSortability(applyDensity(col)));
 
-  const orderedColumns = hasPinnedColumns
-    ? [
-        ...pinnedLeftCols.map(applyColumnChrome),
-        ...unpinnedCols.map(applyColumnChrome),
-        ...pinnedRightCols.map((col: any) => ({
-          ...applyColumnChrome(col),
-          className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
-          cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
-        })),
-      ]
-    : columnsWithActions.map(applyColumnChrome);
-
   // Calculate frozenColumns: if the USER pinned columns, use their left-pinned
   // count; otherwise fall back to the schema default (freeze the first column).
   // The auto-pinned actions column is intentionally not counted here.
-  const effectiveFrozenColumns = hasUserPinnedColumns
+  const declaredFrozenColumns = hasUserPinnedColumns
     ? userLeftPinnedCount
     : (schema.frozenColumns ?? 1);
+
+  // objectstack#35446 — while the table overflows its box, the Actions column
+  // is drawn right after the frozen columns and frozen with them, instead of
+  // pinned to the right edge, where it sat over the data column reaching that
+  // edge at rest (`./objectGridInlineActionFold`). Every data column then
+  // scrolls and none is ever covered at rest. An author's own right pin is
+  // the author's layout and stays where it is.
+  const actionsColumn = pinnedRightCols.find((col: any) => col.accessorKey === '_actions');
+  const actionsInFrozenZone = inlineActionFold.actionsFrozen && !!actionsColumn;
+  const scrollingColumns = [...pinnedLeftCols, ...unpinnedCols].map(applyColumnChrome);
+  const actionsFrozenAt = Math.min(declaredFrozenColumns, scrollingColumns.length);
+  const rightPinned = (col: any) => ({
+    ...applyColumnChrome(col),
+    className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
+  });
+  // The same cell padding as at the right edge; the frozen zone's own sticky
+  // classes, offset and edge rule come from `data-table`.
+  const inFrozenZone = (col: any) => ({
+    ...applyColumnChrome(col),
+    pinned: undefined,
+    className: ['px-3', col.className].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName].filter(Boolean).join(' '),
+  });
+
+  const orderedColumns = actionsInFrozenZone
+    ? [
+        ...scrollingColumns.slice(0, actionsFrozenAt),
+        inFrozenZone(actionsColumn),
+        ...scrollingColumns.slice(actionsFrozenAt),
+        ...pinnedRightCols.filter((col: any) => col !== actionsColumn).map(rightPinned),
+      ]
+    : hasPinnedColumns
+      ? [...scrollingColumns, ...pinnedRightCols.map(rightPinned)]
+      : columnsWithActions.map(applyColumnChrome);
+
+  const effectiveFrozenColumns = actionsInFrozenZone ? actionsFrozenAt + 1 : declaredFrozenColumns;
 
   // The floor. With no query to replay there is no honest "all N matching", so
   // the escalation is not offered — the same answer as a match set that does not
@@ -3975,6 +4000,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ref={inlineActionFold.hostRef}
         className="flex flex-col flex-1 min-h-0"
         data-row-actions-inline={inlineActionFold.folded ? 'folded' : undefined}
+        data-row-actions-column={inlineActionFold.actionsFrozen ? 'frozen' : undefined}
       >
         <SchemaRenderer schema={dataTableSchema} />
       </div>

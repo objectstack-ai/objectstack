@@ -192,7 +192,9 @@ const seed = (target: string, externalId: string | string[] | undefined, mode = 
     object: target,
     mode,
     ...(externalId !== undefined ? { externalId } : {}),
-    records: [{ name: 'G1', sku: 'g', organization_id: 'org_seedkey' }],
+    // A dataset keyed on `id` carries the id on its record: a keyed load refuses
+    // a record that leaves a key field blank (#34857).
+    records: [{ name: 'G1', sku: 'g', organization_id: 'org_seedkey', ...(externalId === 'id' ? { id: 'seedkey_g1' } : {}) }],
 });
 
 /** Plant a seed draft as a draft stored before the rule sits at rest. */

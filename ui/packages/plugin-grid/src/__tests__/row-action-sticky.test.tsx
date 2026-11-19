@@ -87,3 +87,62 @@ describe('row-actions column sticky-right', () => {
     await waitFor(() => expect(screen.getAllByTestId('row-action-inline-open').length).toBe(ROWS.length));
   });
 });
+
+/**
+ * objectstack#35446 — while the table overflows its box, the row-actions
+ * column leaves the right edge, where it sat over the data column reaching
+ * that edge at rest, and joins the frozen zone right after the name column;
+ * a table that fits keeps it pinned right (the cases above). jsdom does no
+ * layout, so the box's widths are stubbed; the geometry itself is pinned in
+ * Chromium by `e2e/list-narrow-pinned-columns-35446.spec.ts`.
+ */
+describe('row-actions column in the frozen zone while the table overflows (objectstack#35446)', () => {
+  function stubBoxWidths(scrollWidth: number, clientWidth: number): () => void {
+    const proto = HTMLElement.prototype;
+    const isBox = (el: HTMLElement) => el.hasAttribute('data-table-scroll-box');
+    Object.defineProperty(proto, 'scrollWidth', { configurable: true, get(this: HTMLElement) { return isBox(this) ? scrollWidth : 0; } });
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get(this: HTMLElement) { return isBox(this) ? clientWidth : 0; } });
+    return () => {
+      delete (proto as unknown as Record<string, unknown>).scrollWidth;
+      delete (proto as unknown as Record<string, unknown>).clientWidth;
+    };
+  }
+
+  const headerKeys = () =>
+    Array.from(document.querySelectorAll('thead th'))
+      .map((th) => th.getAttribute('data-column-key'))
+      .filter(Boolean);
+
+  it('draws the actions column after the frozen name column, frozen with it, not pinned right', async () => {
+    const restore = stubBoxWidths(1000, 600);
+    try {
+      renderGrid({ rowActionDefs: [{ name: 'archive', label: 'Archive' }] });
+      await waitFor(() => expect(document.querySelector('[data-row-actions-column="frozen"]')).not.toBeNull());
+      expect(headerKeys()).toEqual(['name', '_actions', 'amount']);
+      const actionsHeader = document.querySelector('th[data-column-key="_actions"]') as HTMLElement;
+      expect(actionsHeader.className).toContain('sticky');
+      expect(actionsHeader.className).not.toContain('right-0');
+      const actionsCell = screen.getAllByTestId('row-action-trigger')[0].closest('td')!;
+      expect(actionsCell.className).toContain('sticky');
+      expect(actionsCell.className).not.toContain('right-0');
+      // The name column stays frozen ahead of it.
+      expect(screen.getByText('Alice').closest('td')!.className).toContain('sticky');
+      expect(document.querySelector('td.right-0')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('folds an inline primary action into the row menu first, then moves the column', async () => {
+    const restore = stubBoxWidths(1000, 600);
+    try {
+      renderGrid();
+      await waitFor(() => expect(document.querySelector('[data-row-actions-column="frozen"]')).not.toBeNull());
+      expect(document.querySelector('[data-row-actions-inline="folded"]')).not.toBeNull();
+      expect(screen.queryAllByTestId('row-action-inline-open')).toHaveLength(0);
+      expect(headerKeys()).toEqual(['name', '_actions', 'amount']);
+    } finally {
+      restore();
+    }
+  });
+});
