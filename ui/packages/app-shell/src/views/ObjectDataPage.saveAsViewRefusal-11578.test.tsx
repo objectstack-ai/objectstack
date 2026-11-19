@@ -176,8 +176,15 @@ beforeEach(() => {
   puts.length = 0;
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wire() as unknown as typeof fetch });
   vi.spyOn(console, 'error').mockImplementation(() => {});
+  // objectstack#35624 — the create asks the package list where the app saves
+  // its views; the routed app `demo` is a writable package here.
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+    String(input) === '/api/v1/packages'
+      ? json({ success: true, data: { packages: [{ manifest: { id: 'demo', name: 'Demo' }, writable: true }] } }, 200)
+      : json({}, 404)));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
