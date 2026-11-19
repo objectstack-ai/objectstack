@@ -5,7 +5,12 @@ import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
-import { MCP_FILE_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import {
+  MCP_DOOR_TOOL_NAMES,
+  MCP_FILE_TOOL_NAMES,
+  PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOL_FAMILY_PREFIXES,
+} from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding is one verdict sentence; the reasoning it used to
@@ -57,12 +62,12 @@ describe('validate-ai-tool-references', () => {
     ]);
   });
 
-  it('checks the tools of a skill its owner keeps out of MCP (mcpPrompt: false) exactly as without the key, the MCP file tools aside (#34167)', () => {
+  it('checks the tools of a skill its owner keeps out of MCP (mcpPrompt: false) exactly as without the key, the MCP door tools aside (#34167)', () => {
     // The opt-out narrows MCP prompt projection: the binding is still the
     // in-product agent's tool set, and still checked in both distributions.
-    // Its one effect on this rule is the MCP file tools, which resolve only for
-    // a skill offered over MCP (the #34948 control below); this fixture names
-    // none of them.
+    // Its one effect on this rule is the MCP door's tools, which resolve only
+    // for a skill offered over MCP (the #34948 and #35036 controls below); this
+    // fixture names none the door alone serves.
     const stack = (mcpPrompt?: boolean) => ({
       skills: [
         {
@@ -249,15 +254,17 @@ describe('validate-ai-tool-references', () => {
    * [#34948] The MCP door's file pair. `@objectstack/mcp` registers `read_file`
    * and `create_upload_link` and offers a skill bound to them over MCP, but no
    * cloud package registers either, so they are not in the cloud registry: the
-   * rule reads them from `MCP_FILE_TOOL_NAMES`. While it did not, a skill bound
-   * to the tools it uses failed `os lint --strict`.
+   * rule reads them from the door's list (`MCP_FILE_TOOL_NAMES`, now a part of
+   * `MCP_DOOR_TOOL_NAMES`). While it did not, a skill bound to the tools it
+   * uses failed `os lint --strict`.
    */
   it('resolves the MCP door\'s file tools, read_file and create_upload_link (#34948)', () => {
     const two = ['read_file', 'create_upload_link'];
     expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: two }] })).toEqual([]);
-    // The list the rule reads is the one the door's conformance test holds
-    // equal to what it registers.
+    // The lists the door's conformance tests hold equal to what it registers:
+    // the file pair, inside the door's whole set, which the rule reads.
     expect([...MCP_FILE_TOOL_NAMES].sort()).toEqual([...two].sort());
+    expect(MCP_DOOR_TOOL_NAMES).toEqual(expect.arrayContaining(two));
 
     // The control: a third name shaped like the two and registered by nobody
     // is still reported, so this pin fails on a universe widened too far.
@@ -283,12 +290,72 @@ describe('validate-ai-tool-references', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('skills[0].tools[0]');
     expect(findings[0].message).toContain('"read_file"');
+    // [#35036] The verdict says why: the name resolves over MCP only.
+    expect(findings[0].message).toContain('resolves only for a skill offered over MCP');
     // The same skill with the key absent, or `true`, is offered over MCP and
     // resolves: the verdict follows `mcpPrompt` and nothing else.
     expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: ['read_file'] }] })).toEqual([]);
     expect(
       validateAiToolReferences({ skills: [{ name: 'receipts', mcpPrompt: true, tools: ['read_file'] }] }),
     ).toEqual([]);
+  });
+
+  /**
+   * [#35036] Every other tool the MCP door registers. The door serves the
+   * record, action, federation and dataset tools as well as the file pair, and
+   * a skill offered over MCP is offered where they are listed, but the rule
+   * read only the file pair: a skill bound to `run_action` or
+   * `aggregate_records` failed `os lint --strict` for naming a served tool.
+   * The rule reads `MCP_DOOR_TOOL_NAMES`, which `@objectstack/mcp` holds equal
+   * to what the door registers.
+   */
+  it('resolves every tool the MCP door registers for a skill offered over MCP (#35036)', () => {
+    const eight = [
+      'aggregate_records', 'delete_record', 'delete_records', 'list_actions',
+      'run_action', 'resume_run', 'list_remote_tables', 'import_object',
+    ];
+    // None of the eight is a cloud registration: each resolved from nowhere before.
+    for (const name of eight) expect(PLATFORM_PROVIDED_TOOL_NAMES.has(name), name).toBe(false);
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: eight }] })).toEqual([]);
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: [...MCP_DOOR_TOOL_NAMES] }] })).toEqual([]);
+    // A family the door alone serves resolves too.
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: ['delete_*'] }] })).toEqual([]);
+
+    // The control: a name shaped like the door's and registered by nobody is
+    // still reported, so this pin fails on a universe widened too far.
+    const control = validateAiToolReferences({ skills: [{ name: 'ops', tools: [...eight, 'run_actions'] }] });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[8]');
+    expect(control[0].message).toContain('"run_actions" resolves to no stack, platform or materialised action tool');
+  });
+
+  /**
+   * [#35036] On a skill its owner keeps out of MCP (`mcpPrompt: false`), a
+   * name only the door serves is still reported, since the in-product agents
+   * the skill runs in have no such tool, and the verdict says the name
+   * resolves over MCP only instead of calling it fictional. A door name a
+   * cloud package registers too resolves there as before.
+   */
+  it('reports a door-only name on a mcpPrompt: false skill with a verdict that says it resolves over MCP only (#35036)', () => {
+    const findings = validateAiToolReferences({
+      skills: [{
+        name: 'ops',
+        mcpPrompt: false,
+        tools: ['get_record', 'run_action', 'delete_*', 'nope_tool'],
+      }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['skills[0].tools[1]', 'skills[0].tools[2]', 'skills[0].tools[3]']);
+    expect(findings[0].message).toBe(
+      'Tool "run_action" resolves only for a skill offered over MCP, and this skill sets `mcpPrompt: false`, '
+        + 'so the in-product agents it runs in have no such tool',
+    );
+    expect(findings[0].hint).toBe(
+      'Drop `mcpPrompt: false` if the skill is written for MCP clients, or remove "run_action" and the '
+        + 'instructions that mention it',
+    );
+    expect(findings[1].message).toMatch(/^Tool family "delete_\*" resolves only for a skill offered over MCP/);
+    // The control: a name nobody registers keeps the fictional-name verdict.
+    expect(findings[2].message).toContain('"nope_tool" resolves to no stack, platform or materialised action tool');
   });
 
   /**
@@ -414,8 +481,10 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
     for (const fact of [
       '`stack.tools`',
       '`PLATFORM_PROVIDED_TOOL_NAMES`',
-      '`MCP_FILE_TOOL_NAMES`',
+      '`MCP_DOOR_TOOL_NAMES`',
       'only for a skill offered over MCP',
+      'by a verdict that says the name resolves over MCP only',
+      'bind `action_<name>` (or `action_*`) rather than `run_action`',
       '`mcpPrompt: false`',
       '`stack.actions` or any object\'s `actions`',
       'trailing-wildcard',
@@ -451,7 +520,8 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
 
   it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => f.rule === AI_SKILL_TOOL_UNRESOLVED);
-    // The coverage control first: all three arms fired.
+    // The coverage control first: all four arms fired.
+    expect(converted.some((f) => f.message.includes('resolves only for a skill offered over MCP'))).toBe(true);
     expect(converted.some((f) => f.message.startsWith('Tool family '))).toBe(true);
     expect(converted.some((f) => f.message.includes('does not become an AI tool'))).toBe(true);
     expect(converted.some((f) => f.message.includes('resolves to no stack, platform or materialised action tool'))).toBe(true);
@@ -468,7 +538,8 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
 describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
   it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => f.rule === AI_SKILL_TOOL_UNRESOLVED);
-    // Coverage control: the opt-in arm and the back-it arm both fired.
+    // Coverage control: the MCP-only, opt-in and back-it arms all fired.
+    expect(converted.some((f) => f.hint.startsWith('Drop `mcpPrompt: false`'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Opt "'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Back "'))).toBe(true);
     for (const f of converted) {

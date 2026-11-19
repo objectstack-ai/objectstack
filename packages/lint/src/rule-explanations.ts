@@ -5559,10 +5559,11 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
-      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
-      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
-      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'registers at boot; `MCP_DOOR_TOOL_NAMES` (same module), every tool the MCP door registers ' +
+      '(its record, file, action, federation and dataset tools), only for a skill offered over MCP: ' +
+      'a door tool no cloud package registers, such as `run_action` or `read_file`, is absent from an ' +
+      'in-product turn, so a skill kept out of MCP (`mcpPrompt: false`) is still reported for naming ' +
+      'one, by a verdict that says the name resolves over MCP only; and the materialised action tools, ' +
       'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
       '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
       '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
@@ -5580,7 +5581,9 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     'Family prefixes materialised by the runtime: action_. A materialised tool needs no tool record ' +
       '(the ADR-0109 default path), so backing a name means declaring the action, or referencing a ' +
       'platform tool by its registered name; otherwise remove the name and the instructions that mention ' +
-      'it. Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+      'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
+      'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
+      'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
