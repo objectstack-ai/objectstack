@@ -155,7 +155,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -705,7 +705,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -811,7 +811,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -963,7 +963,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -990,7 +990,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を再送しました",
-          link_only: "{{ result.email }} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         }
       },
       copy_invitation_link: {

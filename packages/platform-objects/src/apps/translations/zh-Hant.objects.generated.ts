@@ -155,7 +155,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -705,7 +705,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -811,7 +811,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -963,7 +963,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 傳送邀請",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 傳送邀請",
-          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 建立邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         },
         params: {
           role: {
@@ -990,7 +990,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "邀請已重新發送",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 重新發送邀請",
-          link_only: "已為 {{ result.email }} 續期邀請。此伺服器未設定郵件，因此沒有發出任何郵件。請在該邀請上使用「複製邀請連結」分享給對方。"
+          link_only: "已為 {{ result.email }} 續期邀請。此伺服器未設定郵件，因此沒有發出任何郵件。接受邀請需要已驗證的電子郵件地址：沒有郵件時，只有透過社群或 SSO 登入且地址已被驗證的受邀者才能接受。其他人請由平台管理員為其建立帳號。"
         }
       },
       copy_invitation_link: {
