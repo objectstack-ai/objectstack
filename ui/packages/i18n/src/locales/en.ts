@@ -1131,7 +1131,6 @@ const en = {
     },
     search: 'Search',
     filter: 'Filter',
-    filterRecords: 'Filter Records',
     filterActive: 'Filter, {{count}} active',
     filterActive_one: 'Filter, {{count}} active',
     filterActive_other: 'Filter, {{count}} active',
@@ -5548,7 +5547,6 @@ const en = {
   filterBuilder: {
     currency: 'Currency',
     currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
-    where: 'Where',
     and: 'AND',
     or: 'OR',
     clearAll: 'Clear all',

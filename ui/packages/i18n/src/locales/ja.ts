@@ -894,7 +894,6 @@ const ja = {
     },
     search: "検索",
     filter: "フィルター",
-    filterRecords: "レコードをフィルター",
     filterActive: "フィルター、{{count}} 件適用中",
     filterActive_one: "フィルター、{{count}} 件適用中",
     filterActive_other: "フィルター、{{count}} 件適用中",
@@ -4797,7 +4796,6 @@ const ja = {
   filterBuilder: {
     currency: '通貨',
     currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
-    where: "条件",
     and: "かつ",
     or: "または",
     clearAll: "すべてクリア",

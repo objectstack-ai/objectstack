@@ -869,7 +869,6 @@ const zhHant = {
     },
     search: '搜尋',
     filter: '篩選',
-    filterRecords: '篩選記錄',
     filterActive: '篩選，{{count}} 個生效',
     filterActive_one: '篩選，{{count}} 個生效',
     filterActive_other: '篩選，{{count}} 個生效',
@@ -4854,7 +4853,6 @@ const zhHant = {
   filterBuilder: {
     currency: '幣種',
     currencyNeedsAnd: '只有在「全部條件都滿足（AND）」時，幣種金額才按所選幣種比較。',
-    where: '其中',
     and: '且',
     or: '或',
     clearAll: '清除全部',

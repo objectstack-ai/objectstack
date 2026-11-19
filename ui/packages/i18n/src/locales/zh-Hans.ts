@@ -869,7 +869,6 @@ const zh = {
     },
     search: '搜索',
     filter: '筛选',
-    filterRecords: '筛选记录',
     filterActive: '筛选，{{count}} 个生效',
     filterActive_one: '筛选，{{count}} 个生效',
     filterActive_other: '筛选，{{count}} 个生效',
@@ -4854,7 +4853,6 @@ const zh = {
   filterBuilder: {
     currency: '币种',
     currencyNeedsAnd: '只有在「全部条件都满足（AND）」时，币种金额才按所选币种比较。',
-    where: '其中',
     and: '且',
     or: '或',
     clearAll: '清除全部',

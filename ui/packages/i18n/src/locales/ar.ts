@@ -999,7 +999,6 @@ const ar = {
     },
     search: "بحث",
     filter: "تصفية",
-    filterRecords: "تصفية السجلات",
     filterActive: "تصفية، عوامل التصفية النشطة: {{count}}",
     filterActive_zero: "تصفية، {{count}} عامل تصفية نشط",
     filterActive_one: "تصفية، {{count}} عامل تصفية نشط",
@@ -5364,7 +5363,6 @@ const ar = {
   filterBuilder: {
     currency: 'العملة',
     currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
-    where: "حيث",
     and: "و",
     or: "أو",
     clearAll: "مسح الكل",

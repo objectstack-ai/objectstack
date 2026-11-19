@@ -25,6 +25,7 @@ import {
   useBelowSm,
 } from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
+import { ConditionChipRow, FilterPanel, SortPanel } from './conditions/ListConditionControls';
 import {
   TOOLBAR_ROW,
   TOOLBAR_ROW_LEADING_PHONE,
@@ -1400,7 +1401,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // THIS copy, so a divergence would make the two paths disagree on one control.
   'table.search': 'Search…',
   'list.filter': 'Filter',
-  'list.filterRecords': 'Filter Records',
   // The Filter trigger's accessible name while filters are active: its
   // `aria-label` replaces the count badge in the name, so the count rides
   // here (objectui#12500). A count family, like `list.recordCount`.
@@ -6765,6 +6765,74 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // Display panel there. Without a Display panel the Sort trigger stays on the
   // bar at every width. Either way it follows `userActions.sort`.
   const sortInDisplay = toolbarFlags.showSort && displayOffered;
+  // The condition controls (objectstack#35549, objectstack#35550): the Filter
+  // and Sort triggers open the shared field list, and the condition row under
+  // the view bar draws the sort and filter chips. The fields the view shows,
+  // in column order, lead the field list.
+  const shownFieldNames = React.useMemo(
+    () => effectiveFields.map((column) => columnIdentity(column)).filter((name): name is string => !!name),
+    [effectiveFields],
+  );
+  const applyPanelFilters = React.useCallback((next: FilterBuilderRowGroup) => {
+    // The panel keeps every row; the host stores only the filter that
+    // applies (objectstack#27520).
+    setCurrentFilters(next);
+    if (onFilterChange) onFilterChange(appliedFilterGroup(next));
+  }, [onFilterChange]);
+  const applySort = React.useCallback((next: SortItem[]) => {
+    // `setCurrentSort` takes the array WHOLE (the in-use exception depends on
+    // it); `emitSortChange` is what the host persists.
+    setCurrentSort(next);
+    setServerPage(1);
+    emitSortChange(next);
+  }, [emitSortChange, setServerPage]);
+  // 「Reset」 on the condition row: the reader's filter and sort back to the
+  // view as saved. Search stays, and so does the view's own filter, which is
+  // never the reader's (`handleClearReaderQuery` clears search too). The
+  // 「Personalized」 badge keeps its own reset.
+  const conditionsDifferFromView =
+    hasFilters || sortDiffersFromDeclared || appliedUserFilterConditions.length > 0 || sittingInQueueOnly;
+  const handleResetConditions = React.useCallback(() => {
+    const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
+    setCurrentFilters(cleared);
+    onFilterChange?.(cleared);
+    userFiltersRef.current?.clear();
+    setSittingInQueueOnly(false);
+    if (sortDiffersFromDeclared) handleResetSort();
+  }, [currentFilters, onFilterChange, sortDiffersFromDeclared, handleResetSort]);
+  // The advanced panel behind the Filter panel's footer and an OR group's
+  // chip: today's `FilterBuilder`, props unchanged.
+  const advancedFilterBuilder = () => (
+    <FilterBuilder
+      fields={filterFields}
+      value={currentFilters}
+      extraOperators={LIST_VIEW_EXTRA_OPERATORS}
+      onChange={applyPanelFilters}
+    />
+  );
+  // Under the Sort panel's field list: why a linked column is not listed
+  // (objectui#12528), and that a picked one sorts by the stored ID.
+  const sortPanelNote = (sortHasRelationalField || sortPicksRelationalField) ? (
+    <div className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
+      {sortHasRelationalField && (
+        <span
+          role="img"
+          tabIndex={0}
+          title={t('list.sortRelationalHint')}
+          aria-label={t('list.sortRelationalHint')}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="sort-relational-info"
+        >
+          <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      )}
+      {sortPicksRelationalField && (
+        <p className="truncate" data-testid="sort-relational-picked">
+          {t('list.sortRelationalPicked')}
+        </p>
+      )}
+    </div>
+  ) : undefined;
   // The Sort panel: the toolbar Sort popover draws it, and so does the
   // Display panel below `sm` (`sortInDisplay`).
   const sortPanelBody = (
@@ -7099,23 +7167,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
-                </div>
-                <FilterBuilder
-                  fields={filterFields}
-                  value={currentFilters}
-                  extraOperators={LIST_VIEW_EXTRA_OPERATORS}
-                  onChange={(newFilters) => {
-                    // The panel keeps every row; the host stores only the
-                    // filter that applies (objectstack#27520).
-                    setCurrentFilters(newFilters);
-                    if (onFilterChange) onFilterChange(appliedFilterGroup(newFilters));
-                  }}
-                />
-              </div>
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
+              <FilterPanel
+                fields={filterFields}
+                shownFields={shownFieldNames}
+                value={currentFilters}
+                onChange={applyPanelFilters}
+                renderAdvanced={advancedFilterBuilder}
+              />
             </PopoverContent>
           </Popover>
           )}
@@ -7204,8 +7263,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              {sortPanelBody}
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
+              <SortPanel
+                fields={sortFields}
+                shownFields={shownFieldNames}
+                value={currentSort}
+                onChange={applySort}
+                onDone={() => setShowSort(false)}
+                footer={sortPanelNote}
+              />
             </PopoverContent>
           </Popover>
           )}
@@ -7677,7 +7743,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           data-slot="list-condition-row"
           data-testid="list-condition-row"
           className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
-        />
+        >
+          {/* objectstack#35549 / #35550: sort chips, the view's own
+              conditions as locked chips, the reader's filter chips, then
+              「Add filter」 and 「Reset」. It draws nothing while there is
+              nothing to show, so the slot stays empty and takes no height. */}
+          <ConditionChipRow
+            sort={currentSort}
+            sortFields={sortFields}
+            onSortChange={applySort}
+            filters={currentFilters}
+            filterFields={filterFields}
+            onFiltersChange={applyPanelFilters}
+            viewFilter={authoredFilter}
+            shownFields={shownFieldNames}
+            renderAdvanced={advancedFilterBuilder}
+            onReset={handleResetConditions}
+            resetDisabled={!conditionsDifferFromView}
+          />
+        </div>
       )}
 
       {/* Filters Panel - Removed as it is now in Popover */}

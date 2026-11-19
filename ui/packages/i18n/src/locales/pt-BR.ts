@@ -918,7 +918,6 @@ const pt = {
     },
     search: "Pesquisar",
     filter: "Filtrar",
-    filterRecords: "Filtrar registros",
     filterActive: "Filtrar, {{count}} ativos",
     filterActive_one: "Filtrar, {{count}} ativo",
     filterActive_many: "Filtrar, {{count}} ativos",
@@ -4933,7 +4932,6 @@ const pt = {
   filterBuilder: {
     currency: 'Moeda',
     currencyNeedsAnd: 'Um valor em moeda só é comparado na moeda escolhida quando todas as condições devem ser atendidas (E).',
-    where: "Onde",
     and: "E",
     or: "OU",
     clearAll: "Limpar tudo",

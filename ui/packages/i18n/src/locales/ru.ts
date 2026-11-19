@@ -948,7 +948,6 @@ const ru = {
     },
     search: "Поиск",
     filter: "Фильтр",
-    filterRecords: "Фильтр записей",
     filterActive: "Фильтр, активных: {{count}}",
     filterActive_one: "Фильтр, {{count}} активный",
     filterActive_few: "Фильтр, {{count}} активных",
@@ -5090,7 +5089,6 @@ const ru = {
   filterBuilder: {
     currency: 'Валюта',
     currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
-    where: "Где",
     and: "И",
     or: "ИЛИ",
     clearAll: "Очистить всё",

@@ -918,7 +918,6 @@ const fr = {
     },
     search: "Rechercher",
     filter: "Filtrer",
-    filterRecords: "Filtrer les enregistrements",
     filterActive: "Filtrer, {{count}} actifs",
     filterActive_one: "Filtrer, {{count}} actif",
     filterActive_many: "Filtrer, {{count}} actifs",
@@ -4934,7 +4933,6 @@ const fr = {
   filterBuilder: {
     currency: 'Devise',
     currencyNeedsAnd: "Un montant en devise n'est comparé dans la devise choisie que lorsque toutes les conditions doivent être remplies (ET).",
-    where: "Où",
     and: "ET",
     or: "OU",
     clearAll: "Tout effacer",

@@ -239,10 +239,12 @@ export interface SortPanelProps {
   onChange: (next: SortItem[]) => void;
   /** Called after a field is picked: the host closes its popover. */
   onDone?: () => void;
+  /** A row under the field list (the host's note on fields it cannot sort by). */
+  footer?: React.ReactNode;
   testId?: string;
 }
 
-export function SortPanel({ fields, shownFields, value, onChange, onDone, testId = 'sort-panel' }: SortPanelProps) {
+export function SortPanel({ fields, shownFields, value, onChange, onDone, footer, testId = 'sort-panel' }: SortPanelProps) {
   const { t } = useListConditionTranslation();
   const [order, setOrder] = React.useState<'asc' | 'desc'>('asc');
   const header = (
@@ -271,6 +273,7 @@ export function SortPanel({ fields, shownFields, value, onChange, onDone, testId
       fields={fields}
       shownFields={shownFields}
       header={header}
+      footer={footer}
       testId={`${testId}-fields`}
       onPick={(item) => {
         onChange(addSortLevel(value, item.value, order, newConditionId()));

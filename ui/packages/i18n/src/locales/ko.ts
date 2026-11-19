@@ -894,7 +894,6 @@ const ko = {
     },
     search: "검색",
     filter: "필터",
-    filterRecords: "레코드 필터",
     filterActive: "필터, {{count}}개 적용됨",
     filterActive_one: "필터, {{count}}개 적용됨",
     filterActive_other: "필터, {{count}}개 적용됨",
@@ -4794,7 +4793,6 @@ const ko = {
   filterBuilder: {
     currency: '통화',
     currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
-    where: "조건",
     and: "그리고",
     or: "또는",
     clearAll: "모두 지우기",
