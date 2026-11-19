@@ -57,10 +57,12 @@
  * Every public card carries exactly one `area:*` and an issue type, set at filing or at triage's first touch. The
  * backstop is the daily read that catches the card neither reached (`AREA_BACKSTOP_PHRASE`, pinned like the
  * disjunctions): every open card of the same walk that carries no `area:*`, and every one whose issue type (the REST
- * row's `type`) is empty, with the sweep's own exclusions plus `security` — a security card owes neither — and, for
- * the type row only, `pm:epic`: an epic takes no type. It rides the walk already paid for, so it costs no request.
+ * row's `type`) is empty, with the sweep's own exclusions — plus `security` on the area row only: a security card
+ * owes no area, and nothing excuses a type. It rides the walk already paid for, so it costs no request.
  * ⛔ It is a DAILY duty, not a first-touch debt: it is printed after the five rows and never enters the `owed` set,
- * the verdict or the exit code, so a board that is mid-backfill does not turn every fire's sweep into FOUND.
+ * the verdict or the exit code. A listed card that IS owed a first touch — bare (①), or queued with no `area:*` (②) —
+ * is owed through that disjunction already; the two rows add no debt of their own, so old cards still missing a type
+ * do not turn every fire's sweep into FOUND.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -108,7 +110,7 @@ export const TRIAGE_RULE_PHRASES = Object.freeze([
 ]);
 
 /** The daily backstop's sentence in the same rule file (the self-test pins it), and how many cards a row prints. */
-export const AREA_BACKSTOP_PHRASE = '日对账扫无 `area:*` 或无 type 的公开卡';
+export const AREA_BACKSTOP_PHRASE = '日对账扫缺 `area:*` 或 type 的公开卡';
 export const AREA_BACKSTOP_LIST_CAP = 30;
 
 /** The multi-lane boards (`cross-repo-coordination.md`: 「多车道仓 `objectstack`」); ② runs on these alone. */
@@ -176,12 +178,12 @@ export function issueTypeOf(issue) {
 }
 
 /**
- * The type backstop: an open card with no issue type. The area backstop's exclusions apply, and an epic (`pm:epic`)
- * owes none — an epic takes no type by rule. Pure.
+ * The type backstop: an open card with no issue type. The sweep's exclusions apply; no label excuses a type (the rule
+ * line scans every public card with none). Pure.
  */
 export function lacksType(issue) {
   const labels = labelsOf(issue);
-  if (labels.some((l) => EXCLUDED_LABELS.includes(l) || l === 'security' || l === 'pm:epic')) return false;
+  if (labels.some((l) => EXCLUDED_LABELS.includes(l))) return false;
   return issueTypeOf(issue) === null;
 }
 
@@ -433,7 +435,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set': 8,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
-  'the area and type backstop: an open card with no area:* or no issue type is listed daily, and never moves the first-touch verdict': 16,
+  'the area and type backstop: an open card with no area:* or no issue type is listed daily, and never moves the first-touch verdict': 14,
 });
 const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -553,15 +555,13 @@ export async function selfTest() {
     t('the type is read from the REST row\'s `type.name`', [issueTypeOf(card(1, [], BUG)), issueTypeOf(card(1, [], { type: 'Task' })), issueTypeOf(card(1, [])), issueTypeOf(card(1, [], { type: { name: ' ' } }))], ['Bug', 'Task', null, null]);
     t('⭐ an area-routed card with no issue type is listed for its type', [lacksArea(card(1, ['area:data', 'pm:queue'])), lacksType(card(1, ['area:data', 'pm:queue']))], [false, true]);
     t('…and the same card carrying one is not', lacksType(card(1, ['area:data', 'pm:queue'], BUG)), false);
-    t('⛔ an epic takes no type, so it is never listed for one', lacksType(card(1, ['pm:epic', 'area:fleet'])), false);
-    t('⛔ a security card owes no type either', lacksType(card(1, ['security'])), false);
     t('the exclusions apply to the type row too', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => lacksType(card(1, [x]))), [false, false, false, false]);
     const rows = [card(41, ['pm:queue', 'priority:p2', 'area:build'], BUG), card(42, ['domain:spec', 'pm:queue', 'priority:p2'], BUG), card(43, ['security', 'pm:dispatched', 'priority:p1']), card(44, ['pm:queue', 'priority:p2', 'area:data'])];
     const get = async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 4, incomplete_results: false } } : { status: 200, json: p.endsWith('page=1') ? rows : [] });
     const r = await sweep({ repo: REPO, nowMs: NOW, sinceMs: Date.parse('2026-11-14T20:00:00Z'), get });
-    t('the walk lists exactly the card with no area and exactly the card with no type', [r.noArea.map((i) => i.number), renderJson(r).no_area, r.noType.map((i) => i.number), renderJson(r).no_type], [[42], [42], [44], [44]]);
+    t('the walk lists exactly the card with no area and exactly the cards with no type — a security card among them', [r.noArea.map((i) => i.number), renderJson(r).no_area, r.noType.map((i) => i.number), renderJson(r).no_type], [[42], [42], [43, 44], [43, 44]]);
     t('⭐ …and neither is a first-touch debt beyond ②: only the domain-only card is owed, and the verdict counts it alone', [[...r.hits], verdictLine(r), sweepExit(r)], [[42], 'sweep FOUND 1 card(s) owed a first touch', EXIT_OK]);
-    t('the text names each count and card, after the five rows and before the verdict', renderText(r).split('\n').slice(-3, -1), ['area:* backstop (daily, not part of the verdict) — open cards with no area:*: 1 · all of them: #42', 'issue type backstop (daily, not part of the verdict) — open cards with no issue type: 1 · all of them: #44']);
+    t('the text names each count and card, after the five rows and before the verdict', renderText(r).split('\n').slice(-3, -1), ['area:* backstop (daily, not part of the verdict) — open cards with no area:*: 1 · all of them: #42', 'issue type backstop (daily, not part of the verdict) — open cards with no issue type: 2 · all of them: #43 #44']);
   }
 
   battery('the CLI: what a typo must never mean, and the exits a patrol reads');

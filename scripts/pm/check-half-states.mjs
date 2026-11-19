@@ -27532,81 +27532,80 @@ async function selfTest() {
   t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
 
   // -- H13: area:* without any pm-state label, aged (2026-08-19 incident) --
-  const domainCard = (labels, updatedAt, extra = {}) => ({
+  const labelledCard = (labels, updatedAt, extra = {}) => ({
     ...issue(labels),
     updated_at: updatedAt,
     ...extra,
   });
-  t('H13: aged area card with no pm-state -> finding', typeof h13AreaWithoutPmState(domainCard(['area:data', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
-  t('H13: …and the finding names the threshold', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes(`${AREA_HALF_STATE_STALE_HOURS}h`), true);
-  t('H13: …and blames the healing loop, not inventory', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('healing loop'), true);
-  t('H13: pm:queue pairs the area label -> clean', h13AreaWithoutPmState(domainCard(['area:data', 'pm:queue'], hoursAgo(26)), NOW), null);
-  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13AreaWithoutPmState(domainCard(['area:build', 'needs-user-decision'], hoursAgo(200)), NOW), null);
-  t('H13: finding is a state (the grading round reads it) -> clean', h13AreaWithoutPmState(domainCard(['area:package', 'finding'], hoursAgo(200)), NOW), null);
+  t('H13: aged area card with no pm-state -> finding', typeof h13AreaWithoutPmState(labelledCard(['area:data', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
+  t('H13: …and the finding names the threshold', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes(`${AREA_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: pm:queue pairs the area label -> clean', h13AreaWithoutPmState(labelledCard(['area:data', 'pm:queue'], hoursAgo(26)), NOW), null);
+  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13AreaWithoutPmState(labelledCard(['area:build', 'needs-user-decision'], hoursAgo(200)), NOW), null);
+  t('H13: finding is a state (the grading round reads it) -> clean', h13AreaWithoutPmState(labelledCard(['area:package', 'finding'], hoursAgo(200)), NOW), null);
   // `pm:blocking` is a derived priority cache, not a state — a card carrying
   // only it is exactly as invisible to candidate queries, so it still flags.
-  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13AreaWithoutPmState(domainCard(['area:workflow', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
-  t('H13: status:parked exemption (its normal shape IS this one)', h13AreaWithoutPmState(domainCard(['area:workflow', 'status:parked'], hoursAgo(200)), NOW), null);
-  t('H13: tracking exemption', h13AreaWithoutPmState(domainCard(['area:fleet', 'tracking'], hoursAgo(200)), NOW), null);
-  t('H13: qa-run exemption', h13AreaWithoutPmState(domainCard(['area:package', 'qa-run'], hoursAgo(200)), NOW), null);
-  t('H13: no area label is out of scope however bare', h13AreaWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
+  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13AreaWithoutPmState(labelledCard(['area:workflow', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
+  t('H13: status:parked exemption (its normal shape IS this one)', h13AreaWithoutPmState(labelledCard(['area:workflow', 'status:parked'], hoursAgo(200)), NOW), null);
+  t('H13: tracking exemption', h13AreaWithoutPmState(labelledCard(['area:fleet', 'tracking'], hoursAgo(200)), NOW), null);
+  t('H13: qa-run exemption', h13AreaWithoutPmState(labelledCard(['area:package', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: no area label is out of scope however bare', h13AreaWithoutPmState(labelledCard(['bug'], hoursAgo(200)), NOW), null);
   // The routing reading moved from `domain:*` to `area:*`: a card carrying
   // only the old lane label is unrouted (the sweep's ① owns it), not H13's.
-  t('H13: ⛔ a domain:* label alone routes nothing -> out of scope', h13AreaWithoutPmState(domainCard(['domain:skills', 'bug'], hoursAgo(200)), NOW), null);
-  t('H13: …while the same card with an area:* is the finding', typeof h13AreaWithoutPmState(domainCard(['domain:skills', 'area:fleet', 'bug'], hoursAgo(200)), NOW), 'string');
-  t('H13: the row names area:*', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('`area:*`'), true);
-  t('H13: …and never domain:*', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('domain'), false);
-  t('H13: fresh half-state is intake latency, not a finding', h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(1)), NOW), null);
-  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(AREA_HALF_STATE_STALE_HOURS)), NOW), null);
+  t('H13: ⛔ a domain:* label alone routes nothing -> out of scope', h13AreaWithoutPmState(labelledCard(['domain:skills', 'bug'], hoursAgo(200)), NOW), null);
+  t('H13: …while the same card with an area:* is the finding', typeof h13AreaWithoutPmState(labelledCard(['domain:skills', 'area:fleet', 'bug'], hoursAgo(200)), NOW), 'string');
+  t('H13: the row names area:*', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('`area:*`'), true);
+  t('H13: …and never domain:*', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('domain'), false);
+  t('H13: fresh half-state is intake latency, not a finding', h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(1)), NOW), null);
+  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(AREA_HALF_STATE_STALE_HOURS)), NOW), null);
   // #4690 in miniature, same as H10/H11/H12: unreadable must not read as fresh.
-  t('H13: unreadable updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(domainCard(['area:data'], 'not-a-date'), NOW), 'string');
-  t('H13: absent updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(domainCard(['area:data'], undefined), NOW), 'string');
+  t('H13: unreadable updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(labelledCard(['area:data'], 'not-a-date'), NOW), 'string');
+  t('H13: absent updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(labelledCard(['area:data'], undefined), NOW), 'string');
   // The louder line — the measured card carried its trigger in its own body.
   const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
-  t('H13: body self-declaring P0 -> louder line', h13row(domainCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
-  t('H13: …which prescribes the emergency-triage channel', h13row(domainCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: body self-declaring P0 -> louder line', h13row(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13row(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
   t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
   t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
   // Strip reuse (H7 reading 4): quoting the token in backticks is not a
   // self-declaration, and `P0` inside a word is not the token.
   t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
-  t('H13: a quiet body stays on the base line', h13row(domainCard(['area:data'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+  t('H13: a quiet body stays on the base line', h13row(labelledCard(['area:data'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
   // -- H18: `pm:retriage` aged past one triage cycle (2026-08-19/20 ruling) --
-  // Reuses `domainCard` — a generic (labels, updated_at, extra) issue builder,
-  // not a domain-specific one despite the name.
-  t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and the finding names the threshold', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
-  t('H18: …and names the coexisting standing label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
-  t('H18: multiple coexisting labels are all named', h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  // Reuses `labelledCard` — the generic (labels, updated_at, extra) issue builder.
+  t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and the finding names the threshold', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
+  t('H18: …and names the coexisting standing label', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
+  t('H18: multiple coexisting labels are all named', h18row(labelledCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(labelledCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
   // The label is a QUESTION put to the triage seat, not a request to re-grade
   // (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」):
   // the row says the question is unanswered, and the remedy is to answer what
   // the objection comment asks and drop the label in the same write.
-  t('H18: the row reads the label as an unanswered question', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
-  t('H18: …and the remedy is answer + drop the label in the same write', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
-  t('H18: …and an answer that needs the maintainer still drops the label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
+  t('H18: the row reads the label as an unanswered question', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
+  t('H18: …and the remedy is answer + drop the label in the same write', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
+  t('H18: …and an answer that needs the maintainer still drops the label', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
   // The retired re-grade vocabulary is gone from BOTH row shapes.
-  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
-  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
+  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
   // Under-threshold: fresh objection is normal intake latency, not a finding.
-  t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
-  t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
+  t('H18: retriage under the threshold -> clean', h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
+  t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
   // No `pm:retriage` label at all is out of scope, however old.
-  t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(domainCard(['pm:queue'], hoursAgo(200)), NOW), null);
+  t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(labelledCard(['pm:queue'], hoursAgo(200)), NOW), null);
   // The disputed-target variant: `pm:retriage` alone, no coexisting `pm:*`.
-  t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and names the disputed-target note', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
-  t('H18: …and does not claim a coexisting label it does not have', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
+  t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(labelledCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and names the disputed-target note', h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: …and does not claim a coexisting label it does not have', h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
   // A non-`pm:*` label (e.g. `domain:*`) never counts as the coexisting label.
-  t('H18: a domain: label is not counted as a coexisting pm:* label', h18row(domainCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: a domain: label is not counted as a coexisting pm:* label', h18row(labelledCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
   // #4690 in miniature, same as H10–H13: unreadable must not read as fresh.
-  t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
-  t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], undefined), NOW), 'string');
+  t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(labelledCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
+  t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(labelledCard(['pm:retriage'], undefined), NOW), 'string');
   // Report-only, ordinary row in both media — never loud (H14–H16's own
   // property, and the card's explicit requirement for this item).
-  t('H18: not a loud finding', isLoudFinding(h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: not a loud finding', isLoudFinding(h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
 
   // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
   // The fixtures below are REAL lines from the 2026-08-19 census of this board
@@ -30419,8 +30418,8 @@ async function selfTest() {
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
   // going quietly unsorted.
-  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(26), p0Body), NOW)), true);
-  t('loudness: H13\'s base line is not', isLoudFinding(h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(26)), NOW)), false);
+  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW)), true);
+  t('loudness: H13\'s base line is not', isLoudFinding(h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(26)), NOW)), false);
 
   // Fold discipline: loud first, issue-number order within each band.
   const mixed = renderMarkdown([quietRow, loudRow, finding(100, 'H1', '`pm:dispatched` with no assignee')], counts);
@@ -31398,8 +31397,8 @@ async function selfTest() {
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
   // The readers the new state joins — each pinned in BOTH directions, so
   // the vocabulary cannot be half-added (the defect class this family is about).
-  t('vocabulary: H13 treats awaiting as a real state -> clean', h13AreaWithoutPmState(domainCard(['area:fleet', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
-  t('vocabulary: …while the same card without it is still H13', typeof h13AreaWithoutPmState(domainCard(['area:fleet'], hoursAgo(200)), NOW), 'string');
+  t('vocabulary: H13 treats awaiting as a real state -> clean', h13AreaWithoutPmState(labelledCard(['area:fleet', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
+  t('vocabulary: …while the same card without it is still H13', typeof h13AreaWithoutPmState(labelledCard(['area:fleet'], hoursAgo(200)), NOW), 'string');
   t('vocabulary: H22 counts awaiting as residue on a closed card', h22labels(closedCard([AWAITING_MAINTAINER_LABEL])), AWAITING_MAINTAINER_LABEL);
   t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
