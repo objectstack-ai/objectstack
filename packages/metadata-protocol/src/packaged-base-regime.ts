@@ -51,8 +51,10 @@
  *    the action-clone half is not chartered, so a clone route named here would
  *    advertise one that does not exist;
  *  - `permission` — the clone only (§8 item 3, the landed lock-and-clone
- *    machinery): the "Clone" action on the permission set, which posts the copy
- *    to `POST /data/sys_permission_set` under a new name. Spelled as
+ *    machinery): the "New similar" action on the permission set — the label
+ *    the console draws on that control in Studio's Access pillar and in Setup
+ *    (`perm.clone.action`) — which posts the copy to the catalog's clone door,
+ *    `POST /security/permission-sets/:name/clone`, under a new name. Spelled as
  *    `plugin-security`'s own lock refusal spells that same path
  *    (`packaged-permission-set-lock.ts`), so one condition reads one way at
  *    every door;
@@ -201,7 +203,7 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
     permission: {
         regime: 'C',
         routes: {
-            clone: 'the "Clone" action on the permission set, '
+            clone: 'the "New similar" action on the permission set, '
                 + 'or POST /api/v1/security/permission-sets/:name/clone with a new name',
         },
     },
