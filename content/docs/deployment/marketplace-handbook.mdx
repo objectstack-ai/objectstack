@@ -362,13 +362,13 @@ client reading the module's objects does meet the `404 OBJECT_PACKAGE_DISABLED`
 refusal while the module is off.
 
 A script action of an enabled package answers the same way. Its body's
-`ctx.api` and `ctx.engine` run in system context inside the server, so an
-`insert` into a disabled module's object succeeds, the action answers `200`,
-and the module's own `beforeInsert` hooks run on the row. The row is kept and
-appears when the module is enabled again. `OBJECT_PACKAGE_DISABLED` is an
-answer of the outward doors only (the data plane, the by-name reads and the
-`/actions` door for the module's own objects); code running in-process never
-meets it.
+`ctx.api` runs in system context inside the server, so an `insert` into a
+disabled module's object succeeds and the action answers `200`. Today the
+module's own `beforeInsert` hooks also run on that row (measured, not ruled).
+The row is kept and appears when the module is enabled again.
+`OBJECT_PACKAGE_DISABLED` is an answer of the outward doors only (the REST data
+plane, the by-name reads, the `/actions` door for the module's own objects, and
+the MCP data tools); code running in-process never meets it.
 
 ## Related
 

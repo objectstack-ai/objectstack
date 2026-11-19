@@ -494,10 +494,11 @@ describe('[#28117 addendum 6523684730] what an app hook meets reading a disabled
  * object. Ruling record 6545646924 on #28117 (letter A) keeps an app's own
  * in-process access served, and a script body's `ctx.api` is that path: it
  * runs in system context inside the server, never through the data plane. So
- * the action answers 200, the disabled module's own `beforeInsert` hook runs
- * on the row, and the row is there on re-enable, while the data plane refuses
- * the same object `404 OBJECT_PACKAGE_DISABLED` in the same window (the
- * control).
+ * the action answers 200 and the row is there on re-enable, while the data
+ * plane refuses the same object `404 OBJECT_PACKAGE_DISABLED` in the same
+ * window (the control). That the disabled module's own `beforeInsert` hook
+ * runs on the row is today's measured answer, pinned here; it is not ruled
+ * (decision letter 6538936519 on #28117 lists it as an open gap).
  */
 describe('[#28117 ruling 6545646924] what an enabled module\'s script action meets writing into a disabled module\'s object through ctx.api', () => {
     let root: string;
