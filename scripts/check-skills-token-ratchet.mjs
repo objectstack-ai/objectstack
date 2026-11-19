@@ -959,7 +959,16 @@ export const CEILINGS = new Map([
   // paragraph. Raise path: ruling record 6513306068, letter B, 「A:先削重复,余额按实测提高」. 8974 -> 9128 bytes (8954 -> 9108 priced); the row
   // moves +38, the measured remainder, pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9108 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2277],
+  // 2277 -> 2279 (#35178): the Actions row of the routing table names `refusals` in the
+  // words of `rules/actions.md`'s heading ("refusing by code (`refusals`)", +31 bytes), so
+  // a model looking for a refused action's message is sent to that rule. PAID DOWN FIRST
+  // by one restatement cut from this file: First checks 3's ": it decides what to write"
+  // (-26 bytes) restates First checks 1's "the installed contract is right". Remainder
+  // raised under the standing ruling 「A:先削重复,余额按实测提高」 (record 6513306068,
+  // letter B): 9128 bytes (9108 priced) -> 9133 (9113 priced) -> 2279 tokens, pinned AT
+  // the measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9113 / 4)
+  ['skills/objectstack-ui/SKILL.md', 2279],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
