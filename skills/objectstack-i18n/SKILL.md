@@ -394,8 +394,7 @@ stack config carries `translations` or `i18n` (kernel bootstrap is
 ## Server-Composed User Text (`userMessage`)
 
 Text the server addresses to the end user — `userMessage` on an error envelope, a save /
-publish advisory, a 422 issue or a post-publish probe finding (`RuntimeBuildIssueSchema`,
-`@objectstack/spec/api`) — comes back in the REQUEST's locale, composed where it is
+publish advisory, a 422 or `probes` issue — comes back in the REQUEST's locale, composed where it is
 produced; a client renders it as received.
 
 - **Platform-composed** text follows one ladder over the platform locale table
@@ -404,8 +403,6 @@ produced; a client renders it as received.
   `localization` settings' locale), else `en`. Each code is read whole and then one subtag
   shorter at a time (`fr-FR` → `fr`, `zh-Hant-US` → `zh-Hant`), so a Traditional Chinese
   code is never handed Simplified text.
-  A probe finding's sentence is on this ladder, where the request is the publish request;
-  its `message` / `fix` stay English, written for the agent that built the app.
 - **App-authored** refusal text is not on this ladder: a hook's catalogued refusal is served
   through `hooks.<hook>.refusals.<CODE>.message` (a declared reason's through
   `….<CODE>.reasons.<REASON>.message`), an action's through its `_actions.{action_name}.refusals`
