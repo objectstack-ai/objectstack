@@ -210,6 +210,16 @@
         "must_contain": ["texts", "email_subject", "ctx.text", "_actions"],
         "must_not_contain": ["hooks.send_email"]
       }
+    },
+    {
+      "id": 22,
+      "prompt": "The `import_contacts` api action on `crm_contact` returns `{ imported: 12, rejected: [{ email, reason }, ...] }` as its `result.data`. When it finishes, show the user how many contacts were imported and every rejected row with its email and reason. Write the part of the action that does this.",
+      "expected_output": "The action declares `resultDialog: { fields: [{ path: 'imported', label: 'Imported', format: 'text' }, { path: 'rejected', label: 'Rejected', format: 'table', columns: [{ path: 'email', label: 'Email' }, { path: 'reason', label: 'Reason' }] }] }`. `table` is a field format: one row per element of the array at `path`, one cell per `columns` entry in order, each column an object whose `path` is read inside one element. `columns` is required with `table` and never guessed from the element's keys. Not a dialog-level `format: 'table'`, not a list of column names, not a `successMessage` that spells the rows out (the dialog replaces the toast), and no promise of a copy button on a text cell.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["resultDialog", "format: 'table'", "columns", "rejected", "reason"],
+        "must_not_contain": ["columns: ['email'", "display: 'table'"]
+      }
     }
   ]
 }
