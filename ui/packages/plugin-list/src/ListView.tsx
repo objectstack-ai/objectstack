@@ -35,6 +35,7 @@ import {
   TOOLBAR_USER_FILTERS_LEADING_PHONE,
   TOOLBAR_CLUSTER,
   TOOLBAR_CLUSTER_LEADING_PHONE,
+  TOOLBAR_TEXT_TRIGGER,
 } from './listToolbarRow';
 import {
   calendarWindowCovers,
@@ -67,7 +68,7 @@ import { canonicalAstOperator, isVirtualSearchField, platformProvisionsStorage, 
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
-import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
+import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning, readListScrollState } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -453,8 +454,12 @@ export interface ListViewProps {
    * header, so the list draws none. Without it the list draws the description
    * itself, as an info control at the start of the toolbar row — never as a
    * row of its own, so the toolbar sits at one height with or without one.
+   *
+   * It may be a function of the list's state (objectstack#35548): the
+   * console's view switcher reads, inside its one trigger, how many records
+   * the list holds and which layout it draws.
    */
-  toolbarLeading?: React.ReactNode;
+  toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
   /**
    * Whether the grid opens with row numbers in its leading cell — the opening
    * state of the Display control's session-only switch, and what its "Reset to
@@ -1469,6 +1474,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.toolbar.densityCycleShortHint': 'Click to cycle',
   // The toolbar's Display control (objectui#12423).
   'list.display': 'Display',
+  'list.options': 'Options',
   'list.layout': 'Layout',
   'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
@@ -2037,6 +2043,19 @@ function ListOptionPicker({
 }
 
 /**
+ * What a function `toolbarLeading` is called with (objectstack#35548).
+ * `recordCount` is the count the record-count bar says — the server's total
+ * under paging and while the list loads as it scrolls (objectstack#35554: the
+ * matching rows, not the rows loaded so far), the rows otherwise, a paged board's view total — or `null`
+ * while the list says none (loading, a windowed calendar, `showRecordCount:
+ * false`). `layout` is the visualization on screen.
+ */
+export interface ListToolbarLeadingState {
+  recordCount: number | null;
+  layout: string;
+}
+
+/**
  * Imperative handle exposed by ListView via React.forwardRef.
  * Allows parent components to trigger a data refresh programmatically.
  *
@@ -2554,6 +2573,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // call it from closures taken renders ago. A move to the page already shown
   // tells the host nothing.
   const [ownPage, setOwnPage] = React.useState(1);
+  // objectstack#35554 — the infinite list's windows (see `infiniteScroll`).
+  // The key the list's scroll position is kept under: this list as the
+  // address bar names it, read once.
+  const [scrollRestoreKey] = React.useState(() =>
+    typeof window === 'undefined'
+      ? undefined
+      : `${schema.objectName ?? ''}|${window.location.pathname}${window.location.search}`,
+  );
+  const [restoreRows] = React.useState(() => readListScrollState(scrollRestoreKey)?.rows ?? null);
+  const [loadedWindows, setLoadedWindows] = React.useState<number | null>(null);
+  const infiniteAppendSkipRef = React.useRef<number | null>(null);
   const pageControlled = page !== undefined;
   const serverPage = pageControlled ? page : ownPage;
   const pageMoveRef = React.useRef({ controlled: pageControlled, current: serverPage, onPageChange });
@@ -2756,8 +2786,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (message) console.warn(message);
   }, [dynamicPageSize, authoredPageSize, schema.objectName, paginate]);
 
-  const fetchSkip = paginate ? (serverPage - 1) * effectivePageSize : 0;
+  // objectstack#35554 — a grid list with no DECLARED `pagination` loads as it
+  // scrolls: no pager, the next window is asked for as the table nears its
+  // end (`onLoadMore` below) and appended. A view that declares `pagination`
+  // keeps its pager. Spec `pagination` is optional with no default
+  // (`view.zod.ts`), so its presence is the declaration. The capped posture
+  // (a page block's bounded list) keeps its one window.
+  const infiniteScroll = paginate && !cappedWindow && schema.pagination === undefined;
+  // How many windows the list holds. `null` until the reader scrolls: then
+  // it is the windows needed to cover the rows a kept position was taken over
+  // (`readListScrollState`), so a return to the list loads back to the row it
+  // left from, in one request.
+  const loadedWindowCount = loadedWindows ?? Math.max(1, Math.ceil((restoreRows ?? 0) / effectivePageSize));
+  const fetchSkip = infiniteScroll
+    ? (loadedWindowCount - 1) * effectivePageSize
+    : paginate ? (serverPage - 1) * effectivePageSize : 0;
   const serverTotal = paginate ? fetchedTotal : null;
+  const hasMoreRows = infiniteScroll && (
+    serverTotal != null ? data.length < serverTotal : dataLimitReached
+  );
+  const loadMoreRows = React.useCallback(() => {
+    // The window this ask appends: the effect below appends it to the rows on
+    // screen only when it is the one asked for here, so any other re-run with
+    // several windows held (a refresh after a write) re-reads them all.
+    infiniteAppendSkipRef.current = loadedWindowCount * effectivePageSize;
+    setLoadedWindows(loadedWindowCount + 1);
+  }, [loadedWindowCount, effectivePageSize]);
 
   // Row color state (initialized from schema, user can configure via popover)
   const [rowColorConfig, setRowColorConfig] = React.useState(schema.rowColor);
@@ -2967,14 +3021,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
   // with every list.
   const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
-
-  // objectui#12528 — the grid's column summaries, drawn at the right of the
-  // record-count row instead of a second footer row of the grid's own. The
-  // grid reports them through its `onColumnSummaryChange` host channel (by
-  // content, `null` when it draws none), and draws no summary row itself.
-  const [gridSummaries, setGridSummaries] = React.useState<
-    ReadonlyArray<{ key: string; header: string; label: string }> | null
-  >(null);
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -4310,7 +4356,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // this effect's dependency list, so what reaches the wire and what
         // re-runs this effect are the same number — there is no second
         // spelling free to drift from it.
-        const skip = fetchSkip;
+        // objectstack#35554 — an infinite list appends the window `loadMoreRows`
+        // asked for; any other run with several windows held (a refresh, the
+        // first load back to a kept position) re-reads them all from the top,
+        // ONE WINDOW PER REQUEST: a host caps a read's `$top`
+        // (`OS_DATA_MAX_PAGE_SIZE`, refused with 400 MAX_RECORDS_EXCEEDED, never
+        // clamped), so the held rows are never asked for in one read.
+        const appendWindow = infiniteScroll && fetchSkip > 0 && infiniteAppendSkipRef.current === fetchSkip;
+        infiniteAppendSkipRef.current = null;
+        const skip = infiniteScroll && !appendWindow ? 0 : fetchSkip;
+        const rereadWindows = infiniteScroll && !appendWindow ? fetchSkip / effectivePageSize + 1 : 1;
+        // Every row this run asks for, across its windows.
+        const windowSize = rereadWindows * effectivePageSize;
 
         // Hoisted out of the `find` call so the exact params that produced this
         // window can be handed down with it (objectui#4501). One object, one
@@ -4357,13 +4414,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           windowCeiling = applyNonGridRowCeiling(walked);
           results = walked;
           items = windowCeiling.rows;
+        } else if (rereadWindows > 1) {
+          // objectstack#35554 — the held windows, each its own read (above).
+          const objectName = schema.objectName;
+          const windows = await Promise.all(
+            Array.from({ length: rereadWindows }, (_, w) =>
+              dataSource.find(objectName, w === 0 ? findParams : { ...findParams, $skip: w * effectivePageSize })),
+          );
+          if (!isCurrentRequest()) return;
+          results = windows[0];
+          items = windows.flatMap((w) => readListRows(w));
         } else {
           results = await dataSource.find(schema.objectName, findParams);
           if (!isCurrentRequest()) return;
           items = readListRows(results);
         }
 
-        setData(items);
+        if (appendWindow) setData((held) => [...held, ...items]);
+        else setData(items);
         if (windowCeiling) {
           const truncated = windowCeiling.truncated;
           setHeldCalendarWindow((held) => (held.truncated === truncated ? held : { ...held, truncated }));
@@ -4405,7 +4473,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // Without a numeric total the grid is never handed a pager (the
         // `serverTotal != null` gate on the handoff), so no page past 1 is
         // reachable to clamp from.
-        if (skip > 0 && items.length === 0 && knownTotal !== null) {
+        if (!infiniteScroll && skip > 0 && items.length === 0 && knownTotal !== null) {
           const lastReachablePage = Math.max(1, Math.ceil(knownTotal / effectivePageSize));
           const requestedPage = Math.floor(skip / effectivePageSize) + 1;
           if (lastReachablePage < requestedPage) {
@@ -4423,7 +4491,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // A calendar's window is walked to its end, so it hides no reachable
         // row behind a batch: when the ceiling stops it, the a′ footnote says
         // so instead (objectui#12081).
-        setDataLimitReached(!calendarWindowNode && items.length >= effectivePageSize);
+        setDataLimitReached(!calendarWindowNode && items.length >= windowSize);
       } catch (err) {
         // Only log + surface errors from the latest request. A failed fetch is
         // NOT an empty result — record it so the render shows an error panel
@@ -4528,7 +4596,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, infiniteScroll, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4546,6 +4614,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (prevPageResetSignature.current !== pageResetSignature) {
       prevPageResetSignature.current = pageResetSignature;
       setServerPage(1);
+      // objectstack#35554 — and an infinite list starts again from its first window.
+      setLoadedWindows(1);
     }
   }, [pageResetSignature]);
 
@@ -6586,14 +6656,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const showDescriptionInfo =
     !!viewDescription && schema.appearance?.showDescription !== false && !hasToolbarLeading;
 
-  // objectui#12528 — the footer row's two halves. The summaries only ever come
-  // from the grid (`gridSummaries`), so they are read only while it is the view
-  // on screen; the row draws for either half, so `showRecordCount: false` does
-  // not take the summaries down with the count.
+  // The footer row: the record count (objectui#12528 drew the grid's column
+  // summaries here too; since objectstack#35548 the grid draws them in its own
+  // table, each under its column).
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
   const dataLimitWarningShown =
-    recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
+    recordCountShown && dataLimitReached && !(paginate && serverTotal != null) && !infiniteScroll;
   // objectui#12619 — a board that pages its own lanes draws every record of the
   // view, a page per lane at a time, so the footer counts the VIEW: the total
   // this component's own query answered, which is the sum of the board's lane
@@ -6601,10 +6670,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // total the footer says nothing rather than count its own window.
   const boardRecordCountShown =
     kanbanLanesPaged && !loading && data.length > 0 && typeof fetchedTotal === 'number' && schema.showRecordCount !== false;
-  const footerSummaryText =
-    currentView === 'grid' && gridSummaries && gridSummaries.length > 0
-      ? gridSummaries.map((s) => `${s.header}: ${s.label}`).join(' · ')
-      : '';
+  // objectstack#35548 — the count the view switcher shows beside the view's
+  // name: the record-count bar's own figure, and none where that bar says none.
+  const leadingRecordCount: number | null = boardRecordCountShown
+    ? (fetchedTotal as number)
+    : !loading && surfaceDrawsFetchedRows && schema.showRecordCount !== false && !calendarWindowed && !kanbanLanesPaged
+      ? (serverTotal ?? data.length)
+      : null;
+  const drawnToolbarLeading = typeof toolbarLeading === 'function'
+    ? toolbarLeading({ recordCount: leadingRecordCount, layout: currentView })
+    : toolbarLeading;
 
   // objectui#12703 — the compact posture a narrow page region asks for (the
   // `compact` host prop). Only over a paged grid that draws the rows this
@@ -6876,7 +6951,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
           {hasToolbarLeading && (
             <div className={TOOLBAR_LEADING} data-testid="list-toolbar-leading">
-              {toolbarLeading}
+              {drawnToolbarLeading}
             </div>
           )}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
@@ -7060,21 +7135,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
-                // Filter, Sort and Display are icon buttons at every width
-                // (objectui#12695), so the name rides on `aria-label` and
-                // `title` — with the active-filter count, which the badge
-                // would otherwise be alone in carrying (objectui#12500).
+                // From `sm` up Filter, Sort and Options are named text buttons
+                // (objectstack#35548); below `sm` they stay icons
+                // (objectui#12695). `aria-label` carries the active-filter
+                // count, which the badge would otherwise be alone in carrying
+                // (objectui#12500).
                 aria-label={hasFilters
                   ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
-                <Funnel className="h-3.5 w-3.5" />
+                <Funnel className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.filter')}</span>
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {shownFilterCount}
@@ -7163,7 +7240,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   // On a phone an active sort keeps this trigger, with its
                   // level count, on the bar: the Display panel holds the
@@ -7173,12 +7250,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
-                // Icon-only (objectui#12695): no visible label carries the
-                // name, so `aria-label` and `title` do.
+                // Named from `sm` up (objectstack#35548), an icon below it
+                // (objectui#12695): `aria-label` and `title` name it there.
                 aria-label={t('list.sort')}
                 title={t('list.sort')}
               >
-                <ArrowUpDown className="h-3.5 w-3.5" />
+                <ArrowUpDown className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.sort')}</span>
                 {currentSort.length > 0 && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {currentSort.length}
@@ -7519,7 +7597,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
                     searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
                   )}
                   data-testid="search-icon-button"
@@ -7651,6 +7729,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       </div>
       )}
 
+      {/* The condition row under the view bar (objectstack#35548): the slot
+          the filter and sort conditions are drawn in. Empty, it takes no
+          height (`empty:hidden`). */}
+      {listChromeShown && (
+        <div
+          data-slot="list-condition-row"
+          data-testid="list-condition-row"
+          className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
+        />
+      )}
 
       {/* Filters Panel - Removed as it is now in Popover */}
 
@@ -8001,9 +8089,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {...(viewComponentSchema.type === 'object-grid'
               // objectui#12423 — the Display control's Row numbers switch, on
               // the grid's host channel (a React prop, never a node key).
-              // objectui#12528 — and the column summaries, drawn in the
-              // record-count row below rather than in a row of the grid's own.
-              ? { showRowNumbers: rowNumbers, onColumnSummaryChange: setGridSummaries }
+              ? { showRowNumbers: rowNumbers }
               : {})}
             {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
               // objectstack#28461 — the grouped grid's open groups and their
@@ -8036,18 +8122,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // own loading state only when it has nothing to draw.
             loading={calendarWindowed ? loading && data.length === 0 : loading}
             onRowSelect={setSelectedRows}
-            {...(paginate && serverTotal != null
+            {...((paginate && serverTotal != null) || infiniteScroll
               ? {
                   // Drive the flat grid's single (DataTable) pager from the
                   // server: it renders THIS window as the current page, the real
                   // total sets the page count, and turning the page asks ListView
                   // to refetch the next window. One pager, server-backed (objectstack-ai/objectstack#2212).
                   manualPagination: true,
-                  rowCount: serverTotal,
-                  page: serverPage,
-                  pageSize: effectivePageSize,
-                  onPageChange: (p: number) => setServerPage(p),
-                  onPageSizeChange: (n: number) => { setDynamicPageSize(n); setServerPage(1); },
+                  rowCount: serverTotal ?? data.length,
+                  ...(infiniteScroll
+                    ? {
+                        // objectstack#35554 — no pager: every loaded window is
+                        // one page of rows, the grid asks for the next as it
+                        // nears its end, and `rowCount` stays the match total.
+                        page: 1,
+                        pageSize: Math.max(data.length, effectivePageSize),
+                        onPageChange: () => {},
+                        onLoadMore: loadMoreRows,
+                        hasMoreRows,
+                        scrollRestoreKey,
+                      }
+                    : {
+                        page: serverPage,
+                        pageSize: effectivePageSize,
+                        onPageChange: (p: number) => setServerPage(p),
+                        onPageSizeChange: (n: number) => { setDynamicPageSize(n); setServerPage(1); },
+                      }),
                   // …and its sort from the same place (#3106). The column
                   // headers and the toolbar's sort builder are two controls over
                   // ONE `currentSort`, so a header click is a shortcut into the
@@ -8179,7 +8279,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -8240,15 +8340,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 }}
               />
             </div>
-          )}
-          {footerSummaryText && (
-            <span
-              className="ml-auto min-w-0 truncate text-right font-medium"
-              title={footerSummaryText}
-              data-testid="record-count-summaries"
-            >
-              {footerSummaryText}
-            </span>
           )}
         </div>
       )}

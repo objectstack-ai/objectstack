@@ -57,6 +57,7 @@ import {
   Loader2,
   Undo2,
 } from 'lucide-react';
+import { TOOLBAR_TEXT_TRIGGER } from '../listToolbarRow';
 
 /**
  * A bar or panel control's touch size below `sm`: 44 px on both sides (WCAG
@@ -552,7 +553,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   const DensityIcon =
     density?.mode === 'compact' ? Rows4 : density?.mode === 'comfortable' ? Rows3 : Rows2;
 
-  const triggerLabel = t('list.display', { defaultValue: 'Display' });
+  // The trigger is named 「Options」 on the view bar (objectstack#35548).
+  const triggerLabel = t('list.options', { defaultValue: 'Options' });
   const hasExport = !!onExport && !!exportFormats && exportFormats.length > 0;
   const hasFooter = !!onReset || !!onRefresh || hasExport;
 
@@ -565,14 +567,16 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           aria-label={triggerLabel}
           title={triggerLabel}
           className={cn(
-            'h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150',
+            TOOLBAR_TEXT_TRIGGER,
             PHONE_TOUCH_TARGET,
             changedCount > 0 && 'text-foreground font-medium',
           )}
           data-testid="toolbar-display-trigger"
         >
-          {/* Icon-only at every width, like Filter and Sort (objectui#12695). */}
-          <SlidersHorizontal className="h-3.5 w-3.5" />
+          {/* A named text button from `sm` up, like Filter and Sort
+              (objectstack#35548); an icon below it (objectui#12695). */}
+          <SlidersHorizontal className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+          <span className="hidden sm:inline">{triggerLabel}</span>
           {changedCount > 0 && (
             <span
               className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums"

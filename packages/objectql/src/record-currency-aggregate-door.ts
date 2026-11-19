@@ -83,10 +83,12 @@
 
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
+  isRecordCurrencyCodeField,
+  isTenantCurrencyAmount,
   recordCurrencyDynamicRollupNotHomeError,
   recordCurrencyFollowedCodeError,
   recordCurrencyUnfollowedRollupError,
-  storedHomeAmountSourceOf,
+  VALUE_DOMAIN_FIELD_TYPES,
 } from '@objectstack/spec/data';
 import { recordCurrencyFieldOf, recordCurrencyPathOf, type RecordCurrencyPath } from './validation/record-currency-code.js';
 
@@ -458,6 +460,44 @@ export function recordCurrencyFollowRefusalOverEnvironmentObjects(
   );
 }
 
+/** The code fields of `fields`, as the prescription names them (the spec's own wording, `record-currency-path.ts`). */
+function siblingCodeFieldCandidates(fields: Record<string, unknown>): string {
+  const names = Object.keys(fields).filter((k) => isRecordCurrencyCodeField(fields[k]));
+  return names.length > 0
+    ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
+    : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`';
+}
+
+/**
+ * [ADR-0144 D2] (b) The refusal of a record-mode amount `field` of `object`
+ * whose one-segment `currencyField` `pointer` names no other field of
+ * `fields` (the object as served), or a field that holds no ISO 4217 code
+ * (`isRecordCurrencyCodeField`); `undefined` when it names a code field. The
+ * served-object twin of `ObjectSchema`'s sibling-pointer refusal, which judges
+ * the authored field map and so cannot see a field an owner or another
+ * extension supplies to an extension's amount.
+ */
+function recordCurrencySiblingCodeError(
+  object: string,
+  field: string,
+  pointer: string,
+  fields: Record<string, unknown>,
+): string | undefined {
+  const where = `Object '${object}' field '${field}' currencyConfig.currencyField`;
+  const target = pointer !== field && Object.prototype.hasOwnProperty.call(fields, pointer) ? fields[pointer] : undefined;
+  if (target === null || typeof target !== 'object') {
+    return `${where}: '${pointer}' names no other field of '${object}' as it is served (its own fields and every `
+      + `enabled extension's), so the amount has no code to read and every write of it would be refused. Name the `
+      + `field of '${object}' that holds each record's ISO 4217 code — ${siblingCodeFieldCandidates(fields)}.`;
+  }
+  if (isRecordCurrencyCodeField(target)) return undefined;
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
+  return `${where}: '${pointer}' names '${object}.${pointer}', a '${String((target as { type?: unknown }).type)}' `
+    + 'field that does not hold an ISO 4217 code, so a write could store any value as the currency. A record '
+    + `currency is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` on '${object}' — `
+    + `${siblingCodeFieldCandidates(fields)}.`;
+}
+
 /** A `summary` field declaring `currencyConfig.currencyMode: 'record'`. */
 function declaresRecordCurrency(def: unknown): boolean {
   const config = (def as { currencyConfig?: unknown } | null)?.currencyConfig;
@@ -491,7 +531,7 @@ export interface RecordCurrencyFollowRegistryView {
 /**
  * [ADR-0144 D2 and D6, amended] The refusal for an object layer about to
  * register (or one of a unit just registered, asked with the whole unit in
- * the view), or `undefined`. Two pairs, each judged at whichever registration
+ * the view), or `undefined`. Each pair is judged at whichever registration
  * completes it; a pair with an end not registered yet is no verdict:
  *
  * - (a) a record-mode amount whose `currencyField` is the path
@@ -502,6 +542,16 @@ export interface RecordCurrencyFollowRegistryView {
  *   child registered. Every write of such an amount is otherwise refused
  *   `ERR_CURRENCY_CODE_REQUIRED` (no code to read) or labelled with whatever
  *   the field holds;
+ * - (b) a record-mode amount whose `currencyField` is ONE segment, a sibling
+ *   name, that names no other field of the object as served, or a field that
+ *   holds no ISO 4217 code ({@link recordCurrencySiblingCodeError}).
+ *   `ObjectSchema` refuses it on an object body, against the authored field
+ *   map; an `extend` contribution's pointer may name a field only its owner
+ *   or another extension declares, so `ObjectExtensionSchema` leaves it to
+ *   this door, which reads the object as served. Judged at the registration
+ *   of any of the object's layers. Every write of such an amount is
+ *   otherwise refused `ERR_CURRENCY_CODE_REQUIRED`, prescribing a field no
+ *   write can fill;
  * - (c) a `summary` declaring `currencyMode: 'record'` that rolls up `sum` /
  *   `avg` / `min` / `max` of a child field following no record's currency (a
  *   `fixed` amount, a `dynamic` one, a plain number). Judged at the parent's
@@ -511,12 +561,12 @@ export interface RecordCurrencyFollowRegistryView {
  *   which refuses any such roll-up whatever it declares;
  * - (d) a `summary` declaring `currencyMode: 'dynamic'` (or a `currencyConfig`
  *   naming no mode) that rolls up `sum` / `avg` / `min` / `max` of a child
- *   field that is not a stored home amount: no valid `homeAmount` on the child
- *   as served names it (`storedHomeAmountSourceOf`, which reads a
- *   `homeAmount` only where it is valid as declared, so an extension cannot
- *   make a plain number a home amount by naming it). The faces draw such a
- *   total in the organization's home currency, which its rows are not known
- *   to be in (ADR-0144 D8 rule 5). Judged at both ends, as (c) is; a child
+ *   field that is not an amount in the home currency: the child as served
+ *   does not declare it a `currency` field in `dynamic` mode
+ *   (`isTenantCurrencyAmount`, `defineStack`'s own test; a stored home amount
+ *   is one such field, and seat ruling record 7000258793 admits every other).
+ *   The faces draw such a total in the organization's home currency, which
+ *   its rows are not known to be in (ADR-0144 D8 rule 5). Judged at both ends, as (c) is; a child
  *   field the child does not hold is no verdict. A child amount in its own
  *   record currency is D6's first, as for (c).
  *
@@ -583,7 +633,7 @@ export function recordCurrencyFollowRefusal(
  * well as the pointer: a run that re-points the pair's master_detail onto
  * another parent makes a new pair, so it is that run's to answer for.
  */
-function followPairKey(kind: 'follow' | 'rollup' | 'dynamic', object: string, field: string, target: string): string {
+function followPairKey(kind: 'follow' | 'sibling' | 'rollup' | 'dynamic', object: string, field: string, target: string): string {
   return `${kind}\u0000${object}\u0000${field}\u0000${target}`;
 }
 
@@ -617,7 +667,7 @@ function* followRefusalsOf(
     if (!rollup || !declaresDynamicCurrency(def)) continue;
     const childFields = rollup.child === name ? own : fieldsOf(view.lookup(rollup.child));
     if (!childFields || !Object.prototype.hasOwnProperty.call(childFields, rollup.childField)) continue;
-    if (storedHomeAmountSourceOf(childFields, rollup.childField) !== undefined) continue;
+    if (isTenantCurrencyAmount(childFields[rollup.childField])) continue;
     yield [followPairKey('dynamic', name, summaryField, `${rollup.child}.${rollup.childField}`), new RecordCurrencyFollowRefusedError(name, summaryField, recordCurrencyDynamicRollupNotHomeError(
       { object: name, field: summaryField, fn: rollup.fn, childObject: rollup.child, childField: rollup.childField },
       childFields,
@@ -636,6 +686,22 @@ function* followRefusalsOf(
       object: name, field, via: path.via, code: path.code, parent: path.master, parentFields,
     });
     if (message !== undefined) yield [followPairKey('follow', name, field, `${path.master}.${String(pointer)}`), new RecordCurrencyFollowRefusedError(name, field, message)];
+  }
+
+  // (b) within the object: its sibling pointers, against the fields it is served with.
+  for (const [field, def] of Object.entries(own)) {
+    const pointer = recordCurrencyFieldOf(def);
+    if (pointer === undefined || recordCurrencyPathOf(pointer, own) !== undefined) continue;
+    const message = recordCurrencySiblingCodeError(name, field, pointer, own);
+    if (message === undefined) continue;
+    // As R6 names it: an amount an extension adds is named with its package,
+    // so an owner's author learns whose field the change leaves without a code.
+    const extendedBy = view.extensionPackageOf(name, field);
+    yield [followPairKey('sibling', name, field, pointer), new RecordCurrencyFollowRefusedError(
+      name,
+      field,
+      extendedBy === undefined ? message : `${message} '${name}.${field}' is added to '${name}' by package '${extendedBy}'.`,
+    )];
   }
 
   // The other ends, already registered: (a) at the parent, (c) and (d) at the child.
@@ -669,7 +735,7 @@ function* followRefusalsOf(
       const childDef = Object.prototype.hasOwnProperty.call(own, rollup.childField) ? own[rollup.childField] : undefined;
       if (childDef === undefined) continue;
       if (declaresDynamicCurrency(def)) {
-        if (storedHomeAmountSourceOf(own, rollup.childField) !== undefined) continue;
+        if (isTenantCurrencyAmount(childDef)) continue;
         yield [followPairKey('dynamic', otherName, field, `${name}.${rollup.childField}`), new RecordCurrencyFollowRefusedError(otherName, field, recordCurrencyDynamicRollupNotHomeError(
           { object: otherName, field, fn: rollup.fn, childObject: name, childField: rollup.childField },
           own,

@@ -11,7 +11,7 @@
 // re-exports, by name, every declaration here it exported before, so every
 // importer of `./engine.js` reads what it read.
 
-import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, percentScaleOf, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
@@ -101,15 +101,18 @@ export interface AdmittedValueShapeViolationTally {
  * in, and an in-engine audit hook depends on landing inside it.
  *
  * Four ordinary paths open such a unit around the dispatch:
- *   - the write door itself, when the object has a metadata-bound `after*`
- *     hook that can abort — blocking with `onError` `abort`, or carrying a
- *     `condition` — so that abort rolls the row back as `HookSchema.onError`
- *     says (#22782, #22856, `opensAfterAbortUnit`);
+ *   - the write's own engine body, when the object has a metadata-bound
+ *     `after*` hook that can abort — blocking with `onError` `abort`, or
+ *     carrying a `condition` — so that abort rolls the row back as
+ *     `HookSchema.onError` says (#22782, #22856, `opensAfterAbortUnit`). One
+ *     rule for `insert`, `update` and `delete`: the unit opens around the
+ *     executor, inside the middleware chain, so a middleware's work before
+ *     and after `next()` runs outside it (#35142, #35167);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
  *     PARENT's `afterDelete` is outside that wrap by construction (inside the
- *     door's own unit when the first path opened one); the cascaded
+ *     write's own unit when the first path opened one); the cascaded
  *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
@@ -1421,10 +1424,25 @@ const MAX_FORMULA_SCALE = 100;
  * carries is a no-op request either way — so the rounding is skipped and the
  * value is returned whole.
  */
-function formulaRoundingScale(def: { scale?: unknown } | undefined): number | undefined {
+function formulaRoundingScale(
+  def: { type?: unknown; scale?: unknown; returnType?: unknown; max?: unknown } | undefined,
+): number | undefined {
   const scale = def?.scale;
   if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
-  return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+  // [#35047] A percentage — a formula returning `percent`, or a stored
+  // `percent` field computed from its `expression` — declares its `scale` as
+  // the decimal places of the DISPLAYED percentage. So the value is rounded at
+  // the storage the percent field uses (`percentScaleOf`, the rule the write
+  // seam's `max_scale` allowance follows): a fraction carries `scale + 2`
+  // places (`scale: 1` keeps 0.417, which reads 41.7%), a whole percentage
+  // exactly `scale`. Rounding a fraction to `scale` itself turned 41.7% into
+  // 40.0%.
+  const percentage = def?.type === 'percent' || (def?.type === 'formula' && def.returnType === 'percent');
+  const places = percentage
+    && percentScaleOf({ type: 'percent', max: typeof def?.max === 'number' ? def.max : undefined }) === 'fraction'
+    ? scale + 2
+    : scale;
+  return places <= MAX_FORMULA_SCALE ? places : undefined;
 }
 
 /**

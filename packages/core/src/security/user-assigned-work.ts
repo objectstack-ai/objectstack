@@ -26,6 +26,25 @@
  *   is a grant, not work, and moving it would move the person's permissions.
  * - a column the platform registers but provisions no storage for (an injected
  *   anchor on a federated object, `unprovisionedInjectedColumns`).
+ * - the owner column (`owner_id`) of a `controlled_by_parent` detail. On a
+ *   detail the owner records who did the work, not who holds it: on a
+ *   timesheet, an expense or a line item it is the person who did it, and
+ *   handing it over would make the successor appear to have done the
+ *   leaver's work. A detail row that names its master is reached through
+ *   that master (ADR-0055), so handing the master over hands over its
+ *   access. A detail row whose master reference is empty, on an OPTIONAL
+ *   master (ADR-0055 as amended), has no master: its owner reads and writes
+ *   it, beside View All / Modify All on the detail. That row's owner is left
+ *   out too, because the skip is per object. After a ban only View All /
+ *   Modify All holders reach such a row, and a holder of Modify All on the
+ *   detail moves it by filtering the detail by owner and editing the owner
+ *   by hand. The maintainer's ruling on Change Owner turns transfer off on a
+ *   detail by default; until an object can say otherwise, the hand-over
+ *   leaves the detail's owner where it is. The detail's own user fields (an
+ *   `approver`, an `assignee`) are app-authored work and still count. It is
+ *   left out rather than counted as not transferable: the only reason the
+ *   count answer can give today (`transferable: false`) reads as a
+ *   multi-valued field.
  *
  * A multi-valued user field is counted (any member names the user) but never
  * transferred: replacing one member of a list is a different edit from
@@ -54,10 +73,27 @@
  */
 
 import { referenceTargetOf, unprovisionedInjectedColumns } from '@objectstack/spec/data';
+import { SystemFieldName } from '@objectstack/spec/system';
 import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
 
 /** The platform user object every user reference targets. */
 const USER_OBJECT = 'sys_user';
+
+/**
+ * Does this object's access follow a master record (`sharingModel:
+ * 'controlled_by_parent'`, ADR-0055)? Read on the flat and the nested spot,
+ * as the access gates read it (`masterGovernsRowWrites` in
+ * `@objectstack/plugin-security`, `effectiveSharingModel` in
+ * `@objectstack/plugin-sharing`), so the hand-over treats as a detail exactly
+ * the objects whose rows the gates answer through a master. Those packages
+ * depend on this one and `@objectstack/spec` exports no object-level
+ * predicate, so the reading is spelled here; a raw-registered object can
+ * reach the registry without the parse, which is why the nested spot is read.
+ */
+function accessFollowsMaster(obj: ObjectLike): boolean {
+  const model = obj.sharingModel ?? obj.security?.sharingModel;
+  return model === 'controlled_by_parent';
+}
 
 /** At most this many (object, field) pairs are counted in one answer. */
 export const USER_ASSIGNED_WORK_FIELD_CAP = 200;
@@ -80,6 +116,8 @@ interface ObjectLike {
   name?: unknown;
   managedBy?: unknown;
   fields?: unknown;
+  sharingModel?: unknown;
+  security?: { sharingModel?: unknown } | null;
 }
 
 /**
@@ -98,8 +136,10 @@ export function userAssignedWorkFields(
     if (obj.managedBy !== undefined && obj.managedBy !== null) continue;
     if (!obj.fields || typeof obj.fields !== 'object') continue;
     const phantom = new Set(unprovisionedInjectedColumns(obj as any));
+    const detail = accessFollowsMaster(obj);
     for (const [field, def] of Object.entries(obj.fields as Record<string, unknown>)) {
       if (phantom.has(field)) continue;
+      if (detail && field === SystemFieldName.OWNER_ID) continue;
       if (referenceTargetOf(def) !== USER_OBJECT) continue;
       const d = def as { readonly?: unknown; multiple?: unknown };
       if (d.readonly === true) continue;

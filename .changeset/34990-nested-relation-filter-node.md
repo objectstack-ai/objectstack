@@ -1,0 +1,24 @@
+---
+'@object-ui/core': patch
+---
+
+fix(core): a relationship-path dashboard drill is sent as one nested-relation condition, so the server joins it in the database instead of the app reading related ids first
+
+Clause-②: yes (narrowing)
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the narrowed input is the in-memory filter a host hands ValueDataSource at runtime, and the comparand it now refuses, a plain object with no $ key under a scalar operator, is one the spec's own comparand door already refuses and ViewFilterRuleSchema.value cannot hold. No metadata an author can save changes meaning, so there is nothing for objectstack migrate meta to do. -->
+
+**BREAKING** for a host that filters a `ValueDataSource` (the in-memory `provider: 'value'` source) with a comparison whose comparand is a plain object (prototype `Object.prototype` or `null`) with no `$` key, such as `['account', '!=', { owner: 'u1' }]`, under `!=`, `not_contains` or an ordering operator (`>`, `>=`, `<`, `<=`).
+
+- FROM: `!=` and `not_contains` served every row, and an ordering operator compared each value with the text `[object Object]` and served the string values that happened to sort past it.
+- TO: the condition is refused by name. It excludes every row and logs the sentence the object form `{ account: { owner: 'u1' } }` already logs. `=` matched no row before and matches none now; it only gains the log line.
+- The spec's comparand door already refuses an object comparand under these operators, so the rows served before were a wrong answer. Spell a relation condition only against a server-backed source, whose server joins it; a value source holds flat rows, so filter there on the row's own fields.
+
+`convertFiltersToAST` now lowers the nested-relation form the spec declares on `FilterCondition` (`{ account: { owner: 'u1' } }`, a plain object with no `$` key beneath a field) to one equality node, `['account', '=', { owner: 'u1' }]`, which the spec's `parseFilterAST` reads back as the same nested condition. It used to refuse that shape as an unknown operator. The condition travels as written, deeper relations included; whether the field is a relationship is judged by the server, which answers `INVALID_FILTER` / 400 for such a condition under a field that stores a scalar or a structured-JSON value, and, under a relationship, for a condition key the related object does not declare, a dotted key, or a relation nested past the hop limit. A map that mixes `$` operators with plain keys is still refused.
+
+`ValueDataSource` (the in-memory `provider: 'value'` source) does not descend into relations, and it now says so for the lowered node too: a comparison whose comparand is a plain object with no `$` key, such as `['account', '=', { owner: 'u1' }]`, excludes every row and logs the same sentence the object form `{ account: { owner: 'u1' } }` already logged, for `=`, `!=` and every other operator that reads the comparand. Before this, `=` compared the object by reference and matched no row without a word, and `!=` matched every row. A class instance is not refused, even one with keys of its own such as a moment, luxon or decimal object: it is a value, and an ordering operator still compares it through its `valueOf`.
+
+`resolveDatasetDrillFilter` uses it: a dataset dimension whose field is a relationship path (`account.owner`, up to three hops) drills as `{ account: { owner: VALUE } }`, nested one level per hop, instead of reading up to 200 related ids per hop and filtering on `$in` them. No related record is read, nothing is capped, and the `too-many` answer is no longer produced; `DATASET_DRILL_RELATED_ID_CAP` and the `too-many` member of `DatasetDrillResolution` stay exported, marked deprecated. The schema reads that check each hop is a single-valued relationship, the hop limit and the empty-bucket refusal are unchanged.
+
+One visible consequence: the drawer's "Open in list" escape hatch is not offered for a relationship-path drill, because the list page's `filter[...]` URL dialect has no spelling for a nested condition; the drill drawer itself lists the records.

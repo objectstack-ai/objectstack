@@ -282,17 +282,15 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # empty description — the same drift the priority:p0 comment above
   # records for objectui.
   gh label create tracking            -R "$R" -c cfd3d7 -d "Generated anchor/tracker issue — not dispatchable; exempt from the half-state sweep's findings" 2>/dev/null || true
-  # pm:blocking is a derived CACHE, never hand state (maintainer opinion
-  # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
-  # the triage sweep writes/removes it from the Blocked-by: reverse index, and
-  # it comes off when every dependent closes. Since 2026-11-18 it is NOT a rank
-  # of the pull order and raises no grade (「有人在等」 is not a grading
-  # criterion): a card carries it only when the card it blocks is in an area
-  # being dispatched. Named consumers: the seat pulling inside that area, which
-  # reads it as "this card unblocks dispatched work" (execution-duties.md
-  # 取卡全序 orders by `Blocked-by:`), and list-page scans. A hand-set instance
-  # is mislabeling — the sweep corrects it against the index.
-  gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
+  # ⛔ RETIRED, on the header's terms — row absent, label OBJECT left exactly as
+  # it is: pm:blocking, the derived cache of the Blocked-by: reverse index that
+  # used to have a row here. The blocking relation has ONE
+  # source, the line-start `Blocked-by:` lines, and scripts read it from there
+  # (scripts/pm/check-half-states.mjs: the reverse index and its relation
+  # rows), so nobody types a label for it and no script reads one. Being absent
+  # from this file, `--reconcile` can neither recreate nor re-describe it.
+  # Stripping it from cards that still carry it, or deleting the object, is a
+  # separate, deliberate PM act — never a side effect of this file.
   # pm:retriage is a QUESTION put to the triage seat (a re-grade, a lane for a
   # cross-domain PR, a re-route, a split, a disposition fork a dev report left
   # open); it COEXISTS with the standing pm:* label and ⛔ never replaces it
@@ -432,27 +430,12 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d
 gh label create pinned           -R objectstack-ai/objectstack -c cfd3d7 -d "Exempt from the stale sweep (stale.yml, issues and PRs); every pm:mailbox PR carries it" 2>/dev/null || true
 gh label create work-in-progress -R objectstack-ai/objectstack -c cfd3d7 -d "PR exempt from the stale sweep (stale.yml exempt-pr-labels); applied by hand, no tool sets it" 2>/dev/null || true
 
-# lease:<area> — the AREA-LEASE family (.claude/skills/pm-dispatch/references/
-# area-lease.md). An area session hangs `lease:<area>` in the same write as its
-# dispatch pair when it claims a card, and reads it back with the pair; every
-# other area that reads a foreign `lease:*` on a card leaves the card alone. Those
-# two area-lease.md lines are the named readers; no script in scripts/pm/ reads
-# the family, and label-write.mjs sends it like any other label.
-#
-# The values are the lease table's area names, and the table is re-derived at
-# every seat, hand-over or shift (area-lease.md 〈分不分区,动态定〉), so the loop
-# below seeds the CURRENT table only — today the server lane's eight pilot areas,
-# whose objects already exist as GitHub's auto-created grey with an empty
-# description, which only `--reconcile` repairs. When a lane re-cuts its table,
-# MOVE the values here, as the release-board loop further down moves its window;
-# a retired area's object stays on its closed cards as history and needs no row.
-# A value with no row is auto-created grey on first use, so it owes one. Main
-# repo only: every lane that runs the mode keeps its cards here. Colour 0052cc is
-# outside every family above — a lease is an ownership seam, not a state, a lane
-# or a marker.
-for A in A1 A2 A3 A4 A5 E1 E2 E2b; do
-  gh label create "lease:$A" -R objectstack-ai/objectstack -c 0052cc -d "Area lease $A: the card belongs to that area's thread session; other areas leave it alone" 2>/dev/null || true
-done
+# No `lease:<area>` family. An area's ownership of a card is the `Area:` line in
+# its `Claim:` comment, beside the assignee and the seat's area table
+# (pm-dispatch references/area-lease.md), so no reference reads a `lease:*`
+# label and this file seeds none. The leftover `lease:*` objects are deleted by
+# a deliberate PM action, never a side effect of this file; ⛔ do not re-add a
+# row here: any seeded value recreates a label that action removed.
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
@@ -509,9 +492,10 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 # ⛔ Two acts this record deliberately does NOT perform. Stripping the label off
 # those 4 live carriers is a BOARD act for the PM at the landing window —
 # nothing in this file ever hangs or clears a label on a card. And the
-# `repo:*` predicate in `scripts/pm/check-half-states.mjs` H14 stays LITERAL:
-# narrowing it is a predicate change ruled on #13992, never a side effect of a
-# vocabulary record. SKILL.md names no `repo:objectstack` (checked 2026-09-01),
+# `repo:*` predicate that `scripts/pm/check-half-states.mjs` kept LITERAL for
+# its blocking-cache row was left alone by this record (#13992); that row has
+# since retired with its label, and the predicate went with it.
+# SKILL.md names no `repo:objectstack` (checked 2026-09-01),
 # so the BY-PR prose sync the domain-lane block below requires has, here,
 # nothing to carry.
 
@@ -585,10 +569,10 @@ gh label create domain:rest     -R objectstack-ai/objectstack -c bfd4f2 -d "Reti
 gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); no objectstack lane claims it" 2>/dev/null || true
 gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); objectui lanes never claim it" 2>/dev/null || true
 # status:parked is the other half of parking: the backlog sweep's disjunct ③
-# (有 domain:* 无 pm-state) and check-half-states.mjs's H13 read it as the
-# exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a card that
-# carries domain:cloud WITHOUT it is listed and "cured" with a pm state every
-# fire, against the ruling above. The object exists in objectstack (auto-created)
+# (有 area:* 无 pm-state) and check-half-states.mjs's H13 read it as the
+# exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a parked
+# card (domain:cloud beside its area:cloud) WITHOUT it is listed and "cured"
+# with a pm state every fire, against the ruling above. The object exists in objectstack (auto-created)
 # and was absent in objectui; the roster makes both. Colour matches `tracking`,
 # the other sweep-exempt label. Descriptions differ per repo on purpose: the
 # check:pm-label-desc-cap dry run wants one distinct description per parsed line.

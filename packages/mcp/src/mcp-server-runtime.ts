@@ -24,7 +24,7 @@ import {
   type McpCallerExecutionContext,
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { wireBridgeTools, datasetToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
+import { wireBridgeTools, datasetToolsServed, packageDocToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
@@ -1883,18 +1883,74 @@ function skillsInstallLine(version: string | undefined): string | undefined {
 }
 
 /**
+ * [#35442] The order an answer about the installed apps follows, in the few
+ * lines `initialize` carries (#34659 ruling D5 = A: a client reads a tool's
+ * description only after it has chosen that tool). A concept is answered
+ * from the manual first, and a general explanation is labelled as one; a
+ * process or rule is answered from the manual and from its real definition,
+ * the definition winning where the two differ; every answer ends with its
+ * sources. It names only tools this connection lists (ruling 6940528935: the
+ * server says what this environment has): `definitionReader` is the
+ * definition reader the request registers ({@link definitionReaderServed}),
+ * and without one the answer says the configuration was not checked. Sent
+ * only where both doc tools register ({@link packageDocToolsServed}).
+ */
+function packageDocAnswerRule(definitionReader: string | undefined): string {
+  const processStep = definitionReader
+    ? `also read its real definition with ${definitionReader}; where the manual and the definition differ, the `
+      + 'definition is what runs: answer from it and name the difference.'
+    : 'this connection lists no tool that reads its definition, so answer from the manual and say that the '
+      + 'configured process was not checked.';
+  return 'For a question about the apps installed here, read their manuals before you answer: call '
+    + 'search_package_docs with the question\'s business words, then read_package_doc on the pages it finds. '
+    + 'A concept ("what is X"): answer from the manual; when no page covers it, give a general explanation and '
+    + 'say the manuals do not cover it. A process or rule (an approval, a routing, a threshold): read the manual '
+    + `and ${processStep} End the answer with its sources: each page's title and url`
+    + (definitionReader ? ', and the name of each definition you read.' : '.');
+}
+
+/**
+ * [#35442] The tools that read a process or rule definition, in the order the
+ * answer-order rule prefers them: `describe_metadata` (a host's authoring
+ * registry) and `get_metadata_item` (the open draft door's,
+ * `mcp-authoring.ts` in `@objectstack/runtime`).
+ */
+const DEFINITION_READER_TOOL_NAMES = ['describe_metadata', 'get_metadata_item'] as const;
+
+/**
+ * [#35442] The definition reader this request registers, or `undefined`:
+ * read off the authoring registry exactly where `registerAuthoringTools`
+ * registers it ({@link authoringToolsServed}). A data-only grant, an API key
+ * and a session register none.
+ */
+function definitionReaderServed(
+  authoring: McpAuthoringInjection | undefined,
+  grantedScopes: readonly string[] | undefined,
+): string | undefined {
+  if (!authoringToolsServed(authoring, grantedScopes)) return undefined;
+  const names = new Set(authoring!.registry.getAll().map((tool) => tool.name));
+  return DEFINITION_READER_TOOL_NAMES.find((name) => names.has(name));
+}
+
+/**
  * [#34686] The open server's own `initialize` text for one HTTP request: the
  * default sentence, the selection rule when this request's grant registers
- * both dataset tools, [#34766] the drafts line when it registers authoring
- * tools, and the skills install line. Read only when neither the
+ * both dataset tools, [#35442] the answer-order rule when it registers both
+ * doc tools, [#34766] the drafts line when it registers authoring tools, and
+ * the skills install line. Read only when neither the
  * host (`hostInstructions`) nor the runtime's configured `instructions`
  * answers: both are whole texts their author owns, and the configured one is
  * the same string for every grant, so nothing is appended to either.
  */
-function openServerInstructions(datasetRule: boolean, authoringServed = false): string {
+function openServerInstructions(
+  datasetRule: boolean,
+  authoringServed = false,
+  docRule: { served: boolean; definitionReader?: string } = { served: false },
+): string {
   return [
     DEFAULT_HTTP_INSTRUCTIONS,
     datasetRule ? DATASET_SELECTION_RULE : undefined,
+    docRule.served ? packageDocAnswerRule(docRule.definitionReader) : undefined,
     authoringServed ? AUTHORING_DRAFTS_LINE : undefined,
     skillsInstallLine(PACKAGE_VERSION),
   ]
@@ -2853,6 +2909,11 @@ export class MCPServerRuntime {
           openServerInstructions(
             datasetToolsServed(opts.bridge, opts.toolOptions),
             authoringToolsServed(opts.authoring, opts.toolOptions?.grantedScopes),
+            // [#35442] The answer-order rule, where both doc tools register.
+            {
+              served: packageDocToolsServed(opts.bridge, opts.toolOptions),
+              definitionReader: definitionReaderServed(opts.authoring, opts.toolOptions?.grantedScopes),
+            },
           ),
       },
     );

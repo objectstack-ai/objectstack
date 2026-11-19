@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from './protocol-upgrade-guide';
 
 import { aliasProbe } from './alias-probe';
+import { suggestRename } from './rename-guess';
 import {
   oppositePoleAmbiguity,
   oppositePolePrescription,
@@ -34,100 +35,10 @@ import {
  * `eager-entry-import.test.ts` fails on the loop.
  */
 
-/**
- * Compute Levenshtein edit distance between two strings.
- * Uses space-optimized two-row approach (O(min(m,n)) space).
- */
-export function levenshteinDistance(a: string, b: string): number {
-  const la = a.length;
-  const lb = b.length;
-
-  if (la === 0) return lb;
-  if (lb === 0) return la;
-
-  // Use only two rows for space efficiency
-  let prev = new Array<number>(lb + 1);
-  let curr = new Array<number>(lb + 1);
-
-  for (let j = 0; j <= lb; j++) {
-    prev[j] = j;
-  }
-
-  for (let i = 1; i <= la; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= lb; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(
-        prev[j] + 1,       // deletion
-        curr[j - 1] + 1,   // insertion
-        prev[j - 1] + cost, // substitution
-      );
-    }
-    [prev, curr] = [curr, prev];
-  }
-
-  return prev[lb];
-}
-
-/**
- * Fold away the differences an author is *never* signalling with: letter case
- * and the dash/space spellings of an underscore separator.
- *
- * Applied to BOTH sides of the comparison in {@link findClosestMatches}. Folding
- * only the input was a real defect (#4990): candidates are camelCase across most
- * of the spec (AGENTS.md Prime Directive #3, "TS config keys → camelCase"), so
- * every capital in a declared key charged the author one extra substitution
- * against a budget that is only `max(2, len/3)`. The observable symptom was
- * inverted quality — `hiddenon` (all-lowercase, plain wrong) resolved to
- * `hiddenOn` at distance 1, while `hideOn` (correctly cased, one real typo)
- * scored 3 against a budget of 2 and got no suggestion at all.
- */
-const foldForScoring = (value: string): string => value.toLowerCase().replace(/[-\s]/g, '_');
-
-/**
- * Find the closest matches from a list of candidates.
- *
- * Scoring is case- and separator-insensitive on both sides; the returned
- * strings are the candidates' ORIGINAL spelling, because that spelling is what
- * the author has to type back.
- *
- * @param input - The user-provided (possibly invalid) value
- * @param candidates - Array of valid values to compare against
- * @param maxDistance - Maximum edit distance to consider (default: 3)
- * @param maxResults - Maximum number of suggestions to return (default: 3)
- * @returns Array of suggested values, sorted by similarity
- */
-export function findClosestMatches(
-  input: string,
-  candidates: readonly string[],
-  maxDistance = 3,
-  maxResults = 3,
-): string[] {
-  const normalized = foldForScoring(input);
-
-  const scored = candidates
-    .map((candidate) => ({
-      value: candidate,
-      distance: levenshteinDistance(normalized, foldForScoring(candidate)),
-      // Tie-break only. Folding is right for RANKING (case is not what the
-      // author meant to signal), but when two declared keys are equidistant
-      // under the fold the author's own capitalisation is the last piece of
-      // evidence left about which one they were reaching for — `yxAis` ties
-      // `yAxis` and `xAxis` at 2 folded, and the capital A picks the intended
-      // one. Kept strictly secondary so it can never resurrect the #4990 bug
-      // of case outranking a real edit.
-      cased: levenshteinDistance(input, candidate),
-    }))
-    // Drop only the candidate the author ALREADY typed verbatim — suggesting a
-    // string back to the author who wrote it is noise. A folded distance of 0
-    // on a differently-spelled candidate (`hiddenon` vs `hiddenOn`) is not that
-    // case: it is the strongest suggestion available, and pre-#4990 the
-    // `distance > 0` test threw it away together with the true self-match.
-    .filter((s) => s.distance <= maxDistance && s.value !== input)
-    .sort((a, b) => a.distance - b.distance || a.cased - b.cased);
-
-  return scored.slice(0, maxResults).map((s) => s.value);
-}
+// The scoring primitives live in the leaf `rename-guess.ts` beside the one
+// rename rule they serve; their published names and this import path are
+// unchanged.
+export { levenshteinDistance, findClosestMatches } from './rename-guess';
 
 /**
  * Format a "Did you mean?" message for display.
@@ -242,6 +153,16 @@ export function keySetMatches(set: KeySetGuidance, key: string): boolean {
   return set.keys instanceof RegExp ? key.search(set.keys) !== -1 : set.keys.includes(key);
 }
 
+/**
+ * One unknown key as the refusal names it: in backticks, the spelling the
+ * author typed. An EMPTY key is spelled out, because backticks around nothing
+ * render as an empty code span (or as two stray backticks), and the author is
+ * left looking for a key the message never shows.
+ */
+function renderUnknownKey(key: string): string {
+  return key === '' ? 'an empty key (`""`)' : `\`${key}\``;
+}
+
 /** Options for {@link strictUnknownKeyError}. */
 export interface StrictUnknownKeyErrorOptions {
   /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
@@ -311,8 +232,9 @@ export interface StrictUnknownKeyErrorOptions {
  * loud; this factory makes it *fixable*: the error names the offending key(s)
  * and, when one is a recognisable spelling of a declared key, points at the
  * canonical one — alias table first (semantic near-misses), then a
- * length-relative edit-distance fallback (matching `suggestKey` in
- * `data/object.zod.ts`: a flat distance of 3 is noise on a short key).
+ * length-relative edit-distance fallback: `suggestRename` in
+ * `rename-guess.ts`, the one rename rule `ObjectSchema.create()` and
+ * `defineSeed` answer with too (a flat distance of 3 is noise on a short key).
  *
  * The fallback's answer is screened once more before it ships, because a
  * distance ranking cannot see meaning: on a shape that declares both ends of a
@@ -410,9 +332,14 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
         }
         continue;
       }
-      const maxDistance = Math.max(2, Math.floor(key.length / 3));
+      // An empty key names nothing, so nothing is a spelling of it: every
+      // declared key of two letters or fewer sits inside the budget, and the
+      // first of them would be offered as the fix.
+      if (key === '') continue;
       const declared = aliases[aliasProbe(key)];
-      const guessed = declared ? undefined : findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+      // The one rename rule every suggester in the package shares — budget and
+      // short-key screen both live in `rename-guess.ts`.
+      const guessed = declared ? undefined : suggestRename(key, knownKeys);
       // Screen the GUESS, never the declaration. `findClosestMatches` ranks by
       // edit distance and nothing else, so on a shape declaring both ends of a
       // range it answers a key that names neither end with whichever end is
@@ -441,7 +368,7 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     // an AI — reads the front of that line and acts on it, so the prescription
     // has to be there. Nothing is dropped or made conditional: the sentence is
     // still emitted verbatim, once per message, just last (#5955).
-    let message = `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}.`;
+    let message = `Unrecognized key(s) on ${surface}: ${keys.map(renderUnknownKey).join(', ')}.`;
     if (renames.length) message += ` Did you mean ${renames.join(', ')}?`;
     if (prescriptions.length) message += `\n${prescriptions.map((p) => `  • ${p}`).join('\n')}`;
     // The last fix channel, still ahead of `history`: where an aged-out

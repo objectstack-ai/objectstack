@@ -24,6 +24,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// Pay `@objectstack/lint`'s first load during collection, not inside a
+// case's timeout (check:test-source-alias): the ObjectView graph reaches it.
+import '@objectstack/lint';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
@@ -63,9 +66,22 @@ vi.mock('sonner', () => ({
   }),
 }));
 
+// objectstack#35548 — the view switcher leads the list's view bar, drawn
+// through `renderListView` by a list stand-in that draws that slot only.
+vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
+  ListView: (props: any) => {
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+  },
+}));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ObjectView: () => <div data-testid="list-body" />,
+  ObjectView: (props: any) => (
+    <div data-testid="list-body">
+      {props.renderListView?.({ schema: props.schema ?? {}, dataSource: props.dataSource, onEdit: props.onEdit, className: '', refreshKey: 0 })}
+    </div>
+  ),
   ManageViewsDialog: () => null,
 }));
 

@@ -187,6 +187,22 @@ type _IsRowEditableShape = Expect<Equal<Declared<DataTableSchema>['isRowEditable
 // @ts-expect-error objectstack#27365 — a verdict that may answer `undefined` must NOT read as equal to the declared one; if it did, the pin above could not see the return type widen.
 type _IsRowEditableLooseReturnIsRefused = Expect<Equal<Declared<DataTableSchema>['isRowEditable'], ((row: any) => boolean | undefined) | undefined>>;
 
+/**
+ * objectstack#35548 — the fifth schema-level runtime slot, `summaryRow`: the
+ * per-column summary row `ObjectGrid` hands the table. Pinned as an exact
+ * shape: `data-table.tsx` reads `lead` and `cells[accessorKey]`.
+ */
+type SummaryRowShape = {
+  lead?: React.ReactNode;
+  cells: Record<string, React.ReactNode>;
+};
+type _SummaryRowIsDeclared = Expect<IsDeclaredOn<'summaryRow'>>;
+type _SummaryRowShape = Expect<Equal<Declared<DataTableSchema>['summaryRow'], SummaryRowShape | undefined>>;
+/** The same shape without `lead` — a CONTROL: it must not read as equal. */
+type SummaryRowShapeWithoutLead = Omit<SummaryRowShape, 'lead'>;
+// @ts-expect-error objectstack#35548 — the shape without `lead` must NOT read as equal to the declared one; if it did, the pin above could not see a member go.
+type _SummaryRowShapeWithoutLeadIsRefused = Expect<Equal<Declared<DataTableSchema>['summaryRow'], SummaryRowShapeWithoutLead | undefined>>;
+
 describe('objectui#6882 — DataTableSchema declares the two keys data-table reads', () => {
   /**
    * The runtime half exists only so the compile-time pins above have a file
@@ -225,6 +241,18 @@ describe('objectui#6882 — DataTableSchema declares the two keys data-table rea
       columns: [{ header: 'Name', accessorKey: 'name' }],
       data: [],
     }).success).toBe(true);
+  });
+
+  it('the zod mirror refuses an authored `summaryRow` by name: it is a runtime slot (objectstack#35548)', () => {
+    const result = DataTableMirror.safeParse({
+      type: 'data-table',
+      columns: [{ header: 'Amount', accessorKey: 'amount' }],
+      data: [],
+      summaryRow: { lead: 'Count 2', cells: { amount: 'Sum 10' } },
+    });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues.map((issue) => issue.path.join('.'))).toEqual(['summaryRow']);
   });
 
   it('the zod mirror refuses an authored `isRowEditable` by name: it is a runtime slot (objectstack#27365)', () => {

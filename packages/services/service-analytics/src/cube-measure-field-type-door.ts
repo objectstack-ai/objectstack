@@ -124,6 +124,7 @@ import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   FieldType,
   isAggregateCompatibleWithFieldType,
+  virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { invalidMemberError } from './dataset-refusal.js';
@@ -202,11 +203,18 @@ export function assertCubeMeasureFieldTypesAccepted(
     if (typeof declared !== 'string' || !DECLARED_FIELD_TYPES.has(declared)) continue;
     if (isAggregateCompatibleWithFieldType(aggregate, declared)) continue;
 
+    // A VIRTUAL field (a `formula`) takes the spec's one prescription (ruling
+    // B), as the dataset compiler and the engine's aggregate door print it:
+    // ⛔ not the count route — a count in place of a total is a plausible
+    // wrong number. The sentence carries its own reason, so none follows it.
+    const remedy = virtualFieldAggregateRemedy(aggregate, declared);
+    const route = remedy !== undefined
+      ? `. ${remedy}`
+      : `; aggregate a field of one of those types, or count the rows with count. ${reasonFor(aggregate)}`;
     const err = invalidMemberError(
       `Measure '${member}' on cube '${cubeName}' takes the ${aggregate} of field '${target.path}', `
       + `${declarerOf(target)} as ${declared}: ${aggregate} does not accept that type, so the query was NOT `
-      + `run. ${aggregate} accepts ${AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate].join(', ')}; aggregate a `
-      + `field of one of those types, or count the rows with count. ${reasonFor(aggregate)}`,
+      + `run. ${aggregate} accepts ${AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate].join(', ')}${route}`,
       { member, param: 'measures', cube: cubeName },
     ) as Error & { field?: string; object?: string };
     err.field = target.path;

@@ -40,6 +40,9 @@ import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IHttpServer } from '@objectstack/spec/contracts';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach
+// (`domains/packages.ts` → `standalone-stack.ts`) loads it lazily.
+import '@objectstack/metadata';
 
 /** Two declared endpoints in the ADR-0121 D1 shape (`<prefix>/apps/<ns>/…`). */
 const DECLARED: ApiEndpoint[] = [
@@ -617,5 +620,100 @@ describe('the wired chain — policies, then the real pipeline (#5129)', () => {
         expect(res.status).toBe(401);
         expect((await res.json() as { error: { code: string } }).error.code).toBe('UNAUTHENTICATED');
         expect(engineFinds.filter((f) => f.object === 'showcase_task')).toEqual([]);
+    });
+});
+
+// ============================================================================
+// One session read per declared-endpoint request
+// ============================================================================
+
+/**
+ * The fallback resolves the request's scope (`resolveRequestScope`, one session
+ * read) and then asks the policy chain two more session questions: the
+ * principal id (`resolvePrincipalId`) and, while an ADR-0069 gate feature is
+ * active, the session user (`resolveGatedSessionUser`). Each was a read of its
+ * own, so a signed-in caller's request read its session three times. A
+ * principal the request's own session admitted now answers both from the
+ * identity step's read.
+ *
+ * Counted: every `getSession` the `auth` service is asked, per request. The
+ * controls run through the same composition: a session the policy holds is
+ * still refused 403 with its posture's code, an anonymous caller is still
+ * refused 401, and concurrent callers with different sessions each get their
+ * own answer.
+ */
+describe('a declared-endpoint request reads its session once (gate active)', () => {
+    let kernel: LiteKernel;
+    let baseUrl: string;
+    const reads: string[] = [];
+    const POSTURE = { code: 'PASSWORD_EXPIRED', message: 'Your password has expired. Please change it to continue.' };
+
+    beforeAll(async () => {
+        ({ kernel, baseUrl } = await boot([
+            fakeMetadataPlugin({ withMatcher: true, endpoints: EXECUTABLE }),
+            {
+                name: 'com.objectstack.test.counting-session-services',
+                version: '1.0.0',
+                init: async (ctx: PluginContext) => {
+                    ctx.registerService('auth', {
+                        isAuthGateActive: () => true,
+                        api: {
+                            async getSession({ headers }: { headers: Headers }) {
+                                const uid = headers.get('x-test-user');
+                                reads.push(uid ?? '');
+                                if (!uid) return null;
+                                return { user: { id: uid, ...(uid === 'held1' ? { authGate: POSTURE } : {}) }, session: { userId: uid } };
+                            },
+                        },
+                    });
+                    ctx.registerService('objectql', {
+                        async find(object: string, options: any) {
+                            if (object === 'sys_user_permission_set') {
+                                return options?.where?.user_id === 'admin1'
+                                    ? [{ user_id: 'admin1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
+                                    : [];
+                            }
+                            if (object === 'sys_permission_set') {
+                                const ids: string[] = options?.where?.id?.$in ?? [];
+                                return ids.includes('ps-admin') ? [ADMIN_SET] : [];
+                            }
+                            if (object === 'showcase_task') return TASK_ROWS;
+                            return [];
+                        },
+                    });
+                },
+            },
+        ]));
+    }, 30_000);
+    afterAll(() => shutdown(kernel), 30_000);
+
+    const get = (user?: string) => fetch(`${baseUrl}/api/v1/apps/showcase/my-tasks`, {
+        headers: user ? { 'x-test-user': user } : {},
+    });
+
+    it('⭐ a signed-in caller is served on ONE session read', async () => {
+        reads.length = 0;
+        const res = await get('admin1');
+        expect(res.status).toBe(200);
+        expect(reads).toEqual(['admin1']);
+    });
+
+    it('CONTROL — a session the policy holds is still refused 403 with its posture\'s code, on one read', async () => {
+        reads.length = 0;
+        const res = await get('held1');
+        expect(res.status).toBe(403);
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('PASSWORD_EXPIRED');
+        expect(reads).toEqual(['held1']);
+    });
+
+    it('CONTROL — an anonymous caller is still refused 401', async () => {
+        const res = await get();
+        expect(res.status).toBe(401);
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('CONTROL — concurrent callers with different sessions each get their own answer', async () => {
+        const statuses = await Promise.all(Array.from({ length: 6 }, (_, i) => get(i % 2 === 0 ? 'admin1' : 'held1').then((r) => r.status)));
+        expect(statuses).toEqual([200, 403, 200, 403, 200, 403]);
     });
 });

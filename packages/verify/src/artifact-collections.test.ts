@@ -85,11 +85,13 @@ describe('#15229 — `@objectstack/verify` reads its collections from `packages[
 
   it('the ADR-0015 write gate resolves the datasource from the OTHER package', () => {
     // The object is in `orders`, the datasource that opens the write gate is in
-    // `core`. A reader that resolved `objects` but not `datasources` reports the
-    // app's write-opted-in external object as read-only and skips it — a
-    // verifier quietly proving less, which is the failure mode of this card.
+    // `core`. Verify never writes an object on an external datasource, so the
+    // case is skipped either way; what the datasource decides is whether the
+    // reason names the gate open. A reader that resolved `objects` but not
+    // `datasources` names the app's write-opted-in external object read-only —
+    // a report quietly saying less, which is the failure mode of this card.
     const federated = deriveCrudCases(optionB()).find((c) => c.object === 'reader_wh_order');
-    expect(federated?.blocked).toBeUndefined();
+    expect(federated?.blocked).toContain('(writes allowed): not exercised');
   });
 
   it('declaredPositionNames covers every package, in package order', () => {

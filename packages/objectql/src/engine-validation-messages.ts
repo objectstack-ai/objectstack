@@ -15,6 +15,13 @@
  * `catch` blocks that keep a misbehaving i18n service from turning a write
  * into a 500.
  *
+ * [#34030] Since moved off `t()` for LABELS: a field, option or object label
+ * a refusal names is resolved by `translateObject` over the bundle and the
+ * `ResolveOptions` the metadata route serves it with
+ * (`ValidationMessageContext.labelTranslation`, built by `labelTranslationOf`
+ * below), so a request in the declared `sourceLocale` reads the authored
+ * label. `translate` stays the channel for MESSAGES.
+ *
  * ## How the moved bodies reach the class
  *
  * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
@@ -46,8 +53,12 @@
  */
 
 import type { ObjectQL } from './engine.js';
-import type { ValidationMessageContext } from './validation/record-validator.js';
-import { objectLabelKey, resolveBundleLocale } from '@objectstack/spec/system';
+import {
+  translatedLabels,
+  type ValidationLabelTranslation,
+  type ValidationMessageContext,
+} from './validation/record-validator.js';
+import { resolveBundleLocale, type ResolveOptions, type TranslationBundle } from '@objectstack/spec/system';
 
 /**
  * The `ObjectQL` members the functions below read — every one of them, and no
@@ -79,12 +90,56 @@ export function validationMessageContext(
 ): ValidationMessageContext & { objectName: string } {
   const t = this.i18nService?.t;
   const packagedRule = packagedRuleLookup(this.registry, objectName);
+  const locale = this.negotiatedMessageLocale(context?.locale);
+  // [#34030] Built on the first label a refusal names, once per context; the
+  // service is read then, through the getter, as `translate` reads it.
+  let labels: { value: ValidationLabelTranslation | undefined } | undefined;
   return {
     objectName,
-    locale: this.negotiatedMessageLocale(context?.locale),
+    locale,
     translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
+    labelTranslation: () => (labels ??= { value: labelTranslationOf(this.i18nService, locale) }).value,
     ...(packagedRule !== undefined ? { packagedRule } : {}),
   };
+}
+
+/**
+ * [#34030] What a refusal's metadata labels are translated with: the bundle
+ * the metadata route translates with — every locale the service holds, keyed
+ * by locale — and the `ResolveOptions` that route builds
+ * (`metaTranslateOptions` in rest, `readerOptionLabels` here): the request's
+ * locale, the DECLARED fallback chain (`getFallbackLocale()`), and the
+ * authored language — the declared `sourceLocale` (`getSourceLocale()`), else
+ * `defaultLocale` (`getDefaultLocale()`). Each getter is feature-detected; a
+ * service that declares none gets none.
+ *
+ * `undefined` — the declared labels stand — with no locale, or a service that
+ * cannot hand its translations over (no `getLocales` / `getTranslations`). A
+ * misbehaving service is the caller's to survive ({@link translatedLabels}).
+ */
+function labelTranslationOf(
+  i18n: ValidationMessageHost['i18nService'],
+  locale: string | undefined,
+): ValidationLabelTranslation | undefined {
+  if (!locale || !i18n || typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') {
+    return undefined;
+  }
+  const bundle: Record<string, unknown> = {};
+  for (const code of i18n.getLocales()) {
+    const data = i18n.getTranslations(code);
+    if (data && typeof data === 'object') bundle[code] = data;
+  }
+  const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+  const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+  const authored = typeof source === 'string' && source.length > 0
+    ? source
+    : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+  const options: ResolveOptions = {
+    locale,
+    ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
+    ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
+  };
+  return { bundle: Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options };
 }
 
 /**
@@ -214,25 +269,19 @@ export function negotiatedMessageLocale(
  * deliberately the same three-step ladder with the same last resort: the API
  * name is what a user must not be shown, so it is where the ladder ENDS, not
  * where it starts. It stays available to clients on the structured fields
- * (`object` / `dependentObject`) and on `developerMessage`.
+ * (`object` / `dependentObject`) and on `developerMessage`. The bundle is read
+ * by the metadata route's rule, as the field label is (`translatedLabels`,
+ * #34030): a request in the declared `sourceLocale` reads the authored label.
  */
 export function objectDisplayLabel(
   objectName: string,
   declaredLabel: unknown,
-  ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
+  ctx: Pick<ValidationMessageContext, 'locale' | 'labelTranslation'>,
 ): string {
-  if (ctx.translate && ctx.locale) {
-    const key = objectLabelKey(objectName);
-    try {
-      const translated = ctx.translate(key, ctx.locale);
-      // II18nService echoes the key back on a miss.
-      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-        return translated;
-      }
-    } catch {
-      // A misbehaving i18n service must not turn a 409 into a 500.
-    }
-  }
   const declared = typeof declaredLabel === 'string' ? declaredLabel.trim() : '';
-  return declared.length > 0 ? declared : objectName;
+  let label: string | undefined = declared;
+  if (ctx.locale) {
+    label = translatedLabels({ name: objectName, ...(declared.length > 0 ? { label: declared } : {}) }, ctx).label;
+  }
+  return typeof label === 'string' && label.length > 0 ? label : objectName;
 }

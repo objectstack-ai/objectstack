@@ -23,6 +23,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
@@ -63,6 +64,10 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 // registry injects is judged by its type as a declared one is. The same cycle
 // as above, one module further: nothing here is called while a module evaluates.
 import { injectedSystemColumnDefs } from './injected-system-column-provenance';
+// [ruling 7000907189 point 1] Change Owner's structural test, read by the
+// `userActions.transfer` refusal. The same cycle as above, one module further
+// (it reads `resolveInjectedSystemColumns`): called only at parse time.
+import { transferIneligibilityReason } from './user-action-transfer';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -2251,14 +2256,15 @@ function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown
  *    number of rows, never an amount, so a currency on it is wrong whichever
  *    reader sees it (the analytics layer relays both a `fixed` code and a
  *    `record` pointer for any field type);
- *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of a
- *    stored home amount only (#33659): a child field some
- *    `homeAmount.field` on the child object names. Such a field is "a
- *    `dynamic`-mode currency field" (ADR-0144 D8 rule 5), every row of it is
- *    in the organization's home currency (`localization.currency`), so its
- *    total is too, and the Console's roll-up faces draw a `dynamic` summary in
- *    that currency, as a metric tile over the same home field does. Whether the
- *    child field is a home field needs the child object, so this door lets a
+ *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of an
+ *    amount in the home currency only: a child `currency` field in `dynamic`
+ *    mode (#33659 admitted a stored home amount, "a `dynamic`-mode currency
+ *    field" by ADR-0144 D8 rule 5; seat ruling record 7000258793 admits every
+ *    such field). Every row of it is in the organization's home currency
+ *    (`localization.currency`), so its total is too, and the Console's roll-up
+ *    faces draw a `dynamic` summary in that currency, as a metric tile over the
+ *    same field does. Whether the child field is such an amount needs the
+ *    child object, so this door lets a
  *    `dynamic` roll-up through only when its `summaryOperations` names a child
  *    object and field, and `defineStack`'s cross-reference pass judges the
  *    rest (`collectRecordCurrencyPathErrors`, stack.zod.ts). A `dynamic`
@@ -2300,9 +2306,9 @@ function refuseUnadmittedSummaryCurrency(
       'A roll-up carries a currency in three cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
       + 'one currency; `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
       + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
-      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up a '
-      + 'stored home amount, a child field that a `homeAmount.field` on the child object names, which is in the '
-      + 'organization\'s home currency.';
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up an '
+      + 'amount in the organization\'s home currency, a child `currency` field in `dynamic` mode (a stored home amount '
+      + 'included).';
     if (ops?.function === 'count') {
       ctx.addIssue({
         code: 'custom',
@@ -2316,8 +2322,9 @@ function refuseUnadmittedSummaryCurrency(
     if (mode === 'dynamic') {
       const namesChild = ops !== undefined && typeof ops.object === 'string' && typeof ops.field === 'string';
       const named = (config as { defaultCurrency?: unknown }).defaultCurrency;
-      // [#33659] The admitted `dynamic` roll-up reads a stored home amount; the
-      // child object says whether it does, so the stack pass judges that half.
+      // [#33659] The admitted `dynamic` roll-up reads an amount in the home
+      // currency; the child object says whether it does, so the stack pass
+      // judges that half.
       if (namesChild && named === undefined) continue;
       ctx.addIssue({
         code: 'custom',
@@ -2327,8 +2334,8 @@ function refuseUnadmittedSummaryCurrency(
             ? ` with \`defaultCurrency: '${String(named)}'\`. \`dynamic\` reads no \`defaultCurrency\`, and metadata never `
               + 'names the home currency: delete `defaultCurrency`, or declare `currencyMode: \'fixed\'` if every amount '
               + 'it reads is in that one currency. '
-            : ' with no `summaryOperations` naming a child field, so it rolls up no stored home amount that would put it '
-              + 'in the organization\'s home currency: delete `currencyConfig`, or declare the roll-up. ')
+            : ' with no `summaryOperations` naming a child field, so it rolls up no amount in the organization\'s home '
+              + 'currency that would put it there: delete `currencyConfig`, or declare the roll-up. ')
           + admitted,
       });
       continue;
@@ -3448,6 +3455,52 @@ function refuseWriteLockedUserActions(
 }
 
 /**
+ * [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` may open the
+ * Change Owner action only on an object that is structurally eligible for it
+ * (`transferIneligibilityReason`, `user-action-transfer.ts`): the platform
+ * injects its reassignable `owner_id`, an owner is provable for it (an
+ * ADR-0015 `external` object declares `owner_id` or maps a remote column onto
+ * it), and the object does not declare that field read-only. One located issue
+ * at `['userActions', 'transfer']` for a bare `true`, or the object form with
+ * `enabled: true`, on any other object — the structure keeps the action off
+ * there whatever the switch says, so the entry would be a key nothing honours.
+ * The reason clause carries its own arm's prescription where one exists (drop
+ * `readonly`, set `ownership`, declare or map the external owner); the message
+ * ends with the one every arm shares, removing the entry or setting it to
+ * false. Closing it (`false`) restates the structure and is accepted, as is a
+ * predicate-only object form, which opens nothing.
+ *
+ * Refused at parse on every door, not only at `create()`: the key is new, so no
+ * stored object carries it. Kept in the existing callback beside
+ * {@link refuseWriteLockedUserActions} so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleUserActionTransfer(
+  object: { name?: unknown; userActions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const userActions = object.userActions;
+  if (userActions === null || typeof userActions !== 'object') return;
+  const flag = (userActions as Record<string, unknown>).transfer;
+  const opens = flag === true
+    || (flag !== null && typeof flag === 'object' && (flag as { enabled?: unknown }).enabled === true);
+  if (!opens) return;
+  const reason = transferIneligibilityReason(object);
+  if (reason === undefined) return;
+  const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['userActions', 'transfer'],
+    message:
+      `Object '${name}' cannot offer the Change Owner action: ${reason}. ` +
+      'userActions.transfer turns the action on or off only on an object whose records have a reassignable ' +
+      'owner (the injected owner_id, on an object with ownership user or omitted, no managedBy and not a sys_ ' +
+      'name, provable on an external object, and not declared readonly), so true here is a switch nothing ' +
+      'honours. Otherwise remove the entry, or set it to false.',
+  });
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -3725,6 +3778,15 @@ const ObjectSchemaBase = strictObject(
    * `create`/`import` evaluate it once per toolbar against the record in
    * scope (#7692). Read that schema's docblock for what `record.*` binds to
    * in each position — they are different records.
+   *
+   * `transfer` is the Change Owner switch (ruling 7000907189 point 1), and it
+   * sits outside the {@link managedBy} matrix: it takes the same union as the
+   * four CRUD flags, but its default derives from `sharingModel` (on, except
+   * off on a `controlled_by_parent` detail), and it can open the action only
+   * on an object that is structurally eligible for it — see
+   * `user-action-transfer.ts` (`isTransferEligible`,
+   * `resolveUserActionTransfer`). Nothing reads it at runtime yet: the Change
+   * Owner endpoint and the console action are cards #35402 and #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -3742,6 +3804,8 @@ const ObjectSchemaBase = strictObject(
       update: 'edit',
       remove: 'delete',
       destroy: 'delete',
+      changeOwner: 'transfer',
+      reassign: 'transfer',
     },
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
@@ -3755,27 +3819,27 @@ const ObjectSchemaBase = strictObject(
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +
-        '(create/import/edit/delete/exportCsv); toolbar controls ' +
+        '(create/import/edit/delete/exportCsv) and the Change Owner action (transfer); toolbar controls ' +
         '(sort/search/filter/refresh/rowHeight/editInline) live on the view.',
       search:
         '`search` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       filter:
         '`filter` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       editInline:
         '`editInline` is a VIEW `userActions` key. The object-level `edit` flag decides ' +
         'whether editing is offered AT ALL; how it is offered (inline vs form) is the ' +
         "view's call.",
       group:
         '`group` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       hideFields:
         '`hideFields` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       rowColor:
         '`rowColor` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       clone:
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
@@ -3800,7 +3864,10 @@ const ObjectSchemaBase = strictObject(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
     exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
-  }).optional().describe('Per-object override of the resolved CRUD affordance matrix.'),
+    transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
+    ),
+  }).optional().describe('Per-object override of the resolved CRUD affordance matrix, plus the Change Owner switch (transfer).'),
 
   /**
    * System-field auto-injection control.
@@ -4778,6 +4845,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
   // the helper's docblock.
   refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
+  // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
+  // Owner only on a structurally eligible object. See the helper's docblock.
+  refuseIneligibleUserActionTransfer(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
@@ -4885,40 +4955,6 @@ function snakeCaseToLabel(name: string): string {
     .join(' ');
 }
 
-/** Levenshtein edit distance — backs the "did you mean" hint for typo'd keys. */
-function editDistance(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0),
-  );
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[a.length][b.length];
-}
-
-/** Closest known key within a small edit distance, for typo hints (`indexs` → `indexes`). */
-function suggestKey(unknown: string, knownKeys: string[]): string | undefined {
-  let best: string | undefined;
-  let bestDist = Infinity;
-  for (const key of knownKeys) {
-    const d = editDistance(unknown.toLowerCase(), key.toLowerCase());
-    if (d < bestDist) {
-      bestDist = d;
-      best = key;
-    }
-  }
-  // Only suggest when the keys are genuinely close (guards against noise).
-  return best !== undefined && bestDist <= Math.max(2, Math.floor(unknown.length / 3))
-    ? best
-    : undefined;
-}
-
 /**
  * Builds a precise, fixable error for unknown top-level keys on
  * `ObjectSchema.create()` — the metadata-shape analogue of ADR-0032's "no
@@ -4931,7 +4967,10 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
   const lines = unknownKeys.map((key) => {
     const guidance = UNKNOWN_KEY_GUIDANCE[key];
     if (guidance) return `  • ${guidance}`;
-    const suggestion = suggestKey(key, knownKeys);
+    // The package's one rename rule (`shared/rename-guess.ts`): the same budget
+    // and short-key screen every `strictObject` refusal answers with, so a
+    // short key is never offered an unrelated one here either.
+    const suggestion = suggestRename(key, knownKeys);
     return suggestion
       ? `  • \`${key}\` is not an ObjectSchema field — did you mean \`${suggestion}\`?`
       : `  • \`${key}\` is not an ObjectSchema field.`;

@@ -69,6 +69,7 @@ import type { PublishHealth, PublishOutcome } from './publishHealth';
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputHeader,
   PromptInputTextarea,
   PromptInputFooter,
   PromptInputTools,
@@ -1261,6 +1262,8 @@ function drawnMultiplierOf(model: ChatbotModelOption): number | undefined {
  *   {@link EXPENSIVE_MODEL_MULTIPLIER} or above asks once before it is written;
  *   Cancel writes nothing, and a model that leaves the list while asked is
  *   dropped. Every chat host renders this picker, so none can skip the question.
+ * - objectstack#35445: the closed trigger shows the model's label alone. The
+ *   multiplier stays on the list rows, where the choice is made.
  */
 function ModelPicker({
   label,
@@ -1288,6 +1291,7 @@ function ModelPicker({
   // now draws it below the threshold or with no multiplier: drop the pick.
   if (confirmingId !== null && confirming === undefined) setConfirmingId(null);
   const at = models.findIndex((m) => m.id === value);
+  const inForce = at !== -1 ? (models[at].label ?? models[at].id) : value;
   // The drawn value is already rounded (drawnMultiplierOf); this only spells it,
   // with as many decimals as that rounding kept.
   const multiplierText = (n: number) =>
@@ -1321,9 +1325,15 @@ function ModelPicker({
       >
         <SelectTrigger
           aria-label={label}
-          className="h-7 w-auto gap-1 px-2 text-xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-offset-0"
+          title={inForce}
+          className="h-7 w-auto min-w-0 max-w-[10rem] gap-1 px-2 text-xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-offset-0"
         >
-          <SelectValue />
+          {/* objectstack#35445 — the closed picker names the model in force and
+              nothing else: no provider, no cost figure (the list, where the
+              choice is made, carries those). Truncated, with the name on its title. */}
+          <SelectValue>
+            <span className="truncate" data-testid="model-picker-value">{inForce}</span>
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {at === -1 && <SelectItem value={OUTSIDE_MODELS}>{value}</SelectItem>}
@@ -2926,6 +2936,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         uploadFiles: labels?.uploadFiles ?? 'Upload files',
         stopResponse: labels?.stopResponse ?? tt('console.ai.stopResponse', 'Stop response'),
         removeAttachment: tt('detail.removeAttachment', 'Remove attachment'),
+        // objectstack#35445 — the composer's icon-only 「+」 (the attachment
+        // menu) and the menu's one item are named for what they do.
+        addAttachment: tt('chatbot.composer.addAttachment', 'Add attachment'),
         sendFailedRateLimited:
           labels?.sendFailedRateLimited ??
           "You're sending messages too quickly. Your message is kept below — wait a moment and try again.",
@@ -5767,16 +5780,6 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               {promptHeaderSlot}
             </div>
           ) : null}
-          {surfaceContextLabel ? (
-            <div className="mb-1 flex" data-testid="surface-context-chip">
-              <span
-                className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
-                title={surfaceContextTitle}
-              >
-                {surfaceContextLabel}
-              </span>
-            </div>
-          ) : null}
           {promptOverlaySlot ? (
             <div className="absolute bottom-full left-0 right-0 z-10 px-3 pb-1">
               {promptOverlaySlot}
@@ -5815,6 +5818,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             onSubmit={handleSubmit}
             onError={handlePromptInputError}
           >
+            {/* objectstack#35445 — the page in view sits on the input's top
+                edge, inside its frame: it belongs to what the next message
+                carries, and it never lies over the conversation. */}
+            {surfaceContextLabel ? (
+              <PromptInputHeader className="px-3 pt-2 pb-0" data-testid="surface-context-chip">
+                <span
+                  className="inline-flex min-w-0 max-w-full items-center gap-1 truncate rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
+                  title={surfaceContextTitle}
+                >
+                  {surfaceContextLabel}
+                </span>
+              </PromptInputHeader>
+            ) : null}
             {enableFileUpload ? (
               <PromptInputBody>
                 <PromptInputAttachments>
@@ -5834,12 +5850,16 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               }
             />
             <PromptInputFooter>
-              <PromptInputTools>
+              <PromptInputTools className="min-w-0">
                 {enableFileUpload ? (
                   <PromptInputActionMenu>
-                    <PromptInputActionMenuTrigger />
+                    <PromptInputActionMenuTrigger
+                      aria-label={L.addAttachment}
+                      title={L.addAttachment}
+                      data-testid="composer-add-attachment"
+                    />
                     <PromptInputActionMenuContent>
-                      <PromptInputActionAddAttachments />
+                      <PromptInputActionAddAttachments label={L.addAttachment} />
                     </PromptInputActionMenuContent>
                   </PromptInputActionMenu>
                 ) : null}
@@ -5858,9 +5878,12 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 {/* #2458 UX#7 — the composer sends on PLAIN Enter (Shift+Enter =
                     newline); the old `⌘` glyph implied Cmd+Enter and misled users.
                     Show the real keys. */}
+                {/* objectstack#35445 — one line: the hint never wraps, it gives way
+                    (shrink-0 keeps it whole) and the model picker truncates. */}
                 <span
-                  className="hidden items-center gap-1 text-[10px] text-muted-foreground sm:inline-flex"
+                  className="hidden shrink-0 items-center gap-1 whitespace-nowrap text-[10px] text-muted-foreground sm:inline-flex"
                   aria-hidden="true"
+                  data-testid="composer-key-hint"
                 >
                   <CornerDownLeft className="h-3 w-3" />
                   <span className="opacity-70">{L.sendHint}</span>

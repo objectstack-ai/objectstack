@@ -1481,7 +1481,18 @@ export const CEILINGS = new Map([
   // before, ceiling +153, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(13330 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3333],
+  // 3333 -> 3711 (#34648, #34268): two bullets in the feedback list. `resultDialog`: its keys,
+  // the `fields` row, the six formats, `table` with its required `columns`, and that a `text` or
+  // `code-list` cell has no copy control while `secret` / `qrcode` keep theirs. The
+  // `execution: 'aggregate'` bulk handler: it resolves `{ succeeded, failed }` and does not throw,
+  // and how the console counts ids against `_selectedIds`. PAID DOWN FIRST by 28 bytes of
+  // restatement in this file: "`{ path, label?, format? }` " on the `preflight` bullet (the
+  // `resultDialog` bullet right below it now spells that row). Arithmetic: the text adds 1541
+  // bytes, the cut removes 28, so the file is 13330 -> 14843 bytes -> 3711 tokens, zero headroom
+  // before, ceiling +378, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(14843 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3711],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

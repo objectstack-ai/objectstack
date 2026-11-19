@@ -72,6 +72,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "يجب تغيير كلمة المرور",
         help: "عند التفعيل، يجب على المستخدم تغيير كلمة المرور قبل أن يتمكن من المتابعة. يُفعَّل عندما ينشئ المسؤول الحساب أو يستورده أو يعيد تعيين كلمة مروره؛ يديره النظام."
       },
+      dev_seed_credential: {
+        label: "بيانات اعتماد البذرة التطويرية",
+        help: "يُعيَّن على حساب أنشأته البذرة التطويرية. ما دامت كلمة مروره هي كلمة مرور البذرة، يرفض خادم الإنتاج تسجيل دخوله وأي جلسة جديدة؛ يعيّن os user set-password كلمة مرور جديدة ويمسحه. يُديره النظام؛ ولا يُعاد عند القراءة أبدًا."
+      },
       mfa_required_at: {
         label: "تاريخ فرض المصادقة متعددة العوامل",
         help: "وقت تطبيق المصادقة متعددة العوامل الإلزامية على هذا المستخدم لأول مرة (بداية مهلة السماح). يستند إليه mfa_required؛ يديره النظام."
@@ -279,6 +283,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "تعيين كلمة المرور",

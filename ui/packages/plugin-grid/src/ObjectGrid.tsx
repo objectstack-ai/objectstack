@@ -22,6 +22,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
 import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
@@ -57,7 +58,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -105,6 +106,9 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
+import { useListPageBarSlot, useListPageBarState } from './listPageBarSlot';
+import { SelectionPageBar } from './components/SelectionPageBar';
+import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
 
@@ -550,6 +554,19 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * review floor") governs nothing now. It was asking for the ruling to be taken
  * deliberately at that package's floor, and that is exactly how `bf97b98c8` took it.
  */
+/**
+ * The grid table's frame (objectstack#35548): every header cell 32px tall at
+ * 13px, and the row lines a shade off the background rather than a rule.
+ */
+export const OBJECT_GRID_TABLE_DENSITY = [
+  '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  // A referenced record (a lookup's link) is a small chip led by its name's
+  // first letter; an option label keeps its colour, less saturated.
+  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
+  '[&_td_a[data-record-link]]:before:flex [&_td_a[data-record-link]]:before:h-3.5 [&_td_a[data-record-link]]:before:w-3.5 [&_td_a[data-record-link]]:before:shrink-0 [&_td_a[data-record-link]]:before:items-center [&_td_a[data-record-link]]:before:justify-center [&_td_a[data-record-link]]:before:rounded-sm [&_td_a[data-record-link]]:before:bg-muted-foreground/20 [&_td_a[data-record-link]]:before:text-[10px] [&_td_a[data-record-link]]:before:font-medium [&_td_a[data-record-link]]:before:content-[attr(data-initial)]',
+  '[&_td_[data-select-badge]]:saturate-[.6]',
+].join(' ');
+
 type RemoveIndexSignature<T> = {
   [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
 };
@@ -703,6 +720,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   search: hostSearch,
   onSearchChange: hostOnSearchChange,
   findParams: hostFindParams,
+  onLoadMore,
+  hasMoreRows,
+  scrollRestoreKey,
   onColumnStateChange,
   objectFields: hostObjectFields,
   showRowNumbers: hostShowRowNumbers,
@@ -790,6 +810,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const { pullRef, isRefreshing, pullDistance } = useObjectGridMobile({
     schema, dataSource, setRefreshKey, setUseCardView,
   });
+
+  // objectstack#35554 — the list page bar's selection slot
+  // (`./listPageBarSlot`). A grid inside a list page's page column fills the
+  // page bar's slot: it draws no row-end control and no bulk bar, and its
+  // selection swaps the page bar's content instead. Any other host (a related
+  // list, a page block, the record drawer) finds no slot and keeps both.
+  const [gridRoot, setGridRoot] = useState<HTMLDivElement | null>(null);
+  const setRootRef = useCallback((el: HTMLDivElement | null) => {
+    setGridRoot(el);
+    (pullRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  }, [pullRef]);
+  const pageBarSlot = useListPageBarSlot(gridRoot);
 
   // `passedData` — data handed down directly (from ListView) — is destructured
   // from props above.
@@ -1442,6 +1474,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     fetchWindow, serverGroupedFetch, isGrouped,
   });
 
+  // objectstack#35554 — tell the page bar whether a selection is open and how
+  // many rows the list's query matches (the count beside the view name).
+  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 });
+
+  // objectstack#35554 — a host that loads its rows window by window
+  // (`onLoadMore`) is asked for the next window as the table's scroll box
+  // nears its end, and the box's position is kept across a return to the list
+  // (`./objectGridInfiniteLoad`).
+  useInfiniteRowLoad({
+    root: gridRoot,
+    enabled: !!onLoadMore,
+    hasMore: !!hasMoreRows,
+    loading,
+    rowCount: data.length,
+    onLoadMore,
+    restoreKey: scrollRestoreKey,
+  });
+
   // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
   // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).
   useObjectGridDiagnostics(schema);
@@ -1774,13 +1824,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
     setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    drawRowControls: !pageBarSlot,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
   // `h-*` enforces a minimum row height so the action-button column doesn't dictate it.
+  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and
+  // the row's 1px line.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-9 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-8 text-[13px] leading-tight'
       : rowHeightMode === 'short'
         ? 'px-3 py-1 h-9 text-[13px] leading-normal'
         : rowHeightMode === 'tall'
@@ -1952,24 +2005,49 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   const applyColumnChrome = (col: any) => withOneLineRichText(withSortability(applyDensity(col)));
 
-  const orderedColumns = hasPinnedColumns
-    ? [
-        ...pinnedLeftCols.map(applyColumnChrome),
-        ...unpinnedCols.map(applyColumnChrome),
-        ...pinnedRightCols.map((col: any) => ({
-          ...applyColumnChrome(col),
-          className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
-          cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
-        })),
-      ]
-    : columnsWithActions.map(applyColumnChrome);
-
   // Calculate frozenColumns: if the USER pinned columns, use their left-pinned
   // count; otherwise fall back to the schema default (freeze the first column).
   // The auto-pinned actions column is intentionally not counted here.
-  const effectiveFrozenColumns = hasUserPinnedColumns
+  const declaredFrozenColumns = hasUserPinnedColumns
     ? userLeftPinnedCount
     : (schema.frozenColumns ?? 1);
+
+  // objectstack#35446 — while the table overflows its box, the Actions column
+  // is drawn right after the frozen columns and frozen with them, instead of
+  // pinned to the right edge, where it sat over the data column reaching that
+  // edge at rest (`./objectGridInlineActionFold`). Every data column then
+  // scrolls and none is ever covered at rest. An author's own right pin is
+  // the author's layout and stays where it is.
+  const actionsColumn = pinnedRightCols.find((col: any) => col.accessorKey === '_actions');
+  const actionsInFrozenZone = inlineActionFold.actionsFrozen && !!actionsColumn;
+  const scrollingColumns = [...pinnedLeftCols, ...unpinnedCols].map(applyColumnChrome);
+  const actionsFrozenAt = Math.min(declaredFrozenColumns, scrollingColumns.length);
+  const rightPinned = (col: any) => ({
+    ...applyColumnChrome(col),
+    className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
+  });
+  // The same cell padding as at the right edge; the frozen zone's own sticky
+  // classes, offset and edge rule come from `data-table`.
+  const inFrozenZone = (col: any) => ({
+    ...applyColumnChrome(col),
+    pinned: undefined,
+    className: ['px-3', col.className].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName].filter(Boolean).join(' '),
+  });
+
+  const orderedColumns = actionsInFrozenZone
+    ? [
+        ...scrollingColumns.slice(0, actionsFrozenAt),
+        inFrozenZone(actionsColumn),
+        ...scrollingColumns.slice(actionsFrozenAt),
+        ...pinnedRightCols.filter((col: any) => col !== actionsColumn).map(rightPinned),
+      ]
+    : hasPinnedColumns
+      ? [...scrollingColumns, ...pinnedRightCols.map(rightPinned)]
+      : columnsWithActions.map(applyColumnChrome);
+
+  const effectiveFrozenColumns = actionsInFrozenZone ? actionsFrozenAt + 1 : declaredFrozenColumns;
 
   // The floor. With no query to replay there is no honest "all N matching", so
   // the escalation is not offered — the same answer as a match set that does not
@@ -2232,9 +2310,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     rows: Array<Record<string, unknown>>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<unknown> => {
     const source = def.actionDef as Record<string, any> | undefined;
-    if (!source) return;
+    if (!source) return undefined;
     const rest = stripCollectedActionKeys(source);
     const ids = rows.map((r) => (r.id != null ? String(r.id) : '')).filter(Boolean);
     // Publish the EXPANDED, eligibility-filtered rows the run actually covers
@@ -2256,6 +2334,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // The handler's own return value, one level below the action envelope:
+    // the executor reads a `BulkActionResult` (`{ succeeded, failed }`) in it
+    // per row.
+    return readActionPayload(res.data);
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
     setActiveBulkDef(null);
@@ -2269,11 +2351,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
-    } else if (result?.aggregateRejection) {
-      // A rejected aggregate run (objectstack#34173) is ONE call that may have
-      // written some rows before it stopped, so the grid re-reads them by the
-      // same path. The selection stays: re-running the whole action is the
-      // retry, as for a total failure.
+    } else if (result?.aggregateRejection || result?.aggregateUnreadable || result?.aggregateUnconfirmed?.length) {
+      // A rejected or unreadable aggregate run is ONE call that may have
+      // written rows nobody counted, as may one that left rows unconfirmed,
+      // so the grid re-reads them by the same path. The selection stays:
+      // re-running the whole action is the retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };
@@ -2779,6 +2861,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   };
 
+  // objectstack#35548 — the column summaries as the table's own last row, each
+  // under its column, led by the count of the records they summarise. A host
+  // that draws them itself (`onColumnSummaryChange`) gets no row here.
+  const summaryRow: ObjectGridDataTableSchema['summaryRow'] = hasSummary && !onColumnSummaryChange
+    ? {
+        lead: t('grid.summary.countLead', {
+          value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
+        }),
+        cells: Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
+      }
+    : undefined;
   const dataTableSchema: ObjectGridDataTableSchema = {
     type: 'data-table',
     // The deprecated `title` fallback resolves like `label` (objectui#10993):
@@ -2788,7 +2881,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       || resolveInlineI18nLabel(schema.title, displayLocale),
     columns: tableColumns,
     data,
-    pagination: paginationEnabled,
+    summaryRow,
+    // objectstack#35554 — a host that loads window by window draws no pager.
+    pagination: paginationEnabled && !onLoadMore,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
     // Rows-per-page selector options sourced from view metadata
     // (schema.pagination.pageSizeOptions). When absent the DataTable falls back
@@ -2931,7 +3026,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
-    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', schema.className].filter(Boolean).join(' '),
+    // objectstack#35548 — a 32px header at 13px over faint row lines.
+    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'
       : rowHeightMode === 'short'
@@ -3061,6 +3157,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     caption: undefined,
     data: rowGroups.flatMap((group) => group.rows),
     rowGroups,
+    // A grouped grid draws no summary row (its summaries are withheld).
+    summaryRow: undefined,
     // Pages are the grid's: whole groups (`groupedPager`), and on a
     // server-grouped grid each open group's own rows (its band footer).
     pagination: false,
@@ -3666,6 +3764,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `FooterSummaryReport` mounted where the row would be, what it would have
   // drawn. Mounted in the same place, so whatever withholds the row (a
   // grouped grid, the card view, a loading or error face) reports `null`.
+  // Without such a host the table draws them (`summaryRow`, objectstack#35548).
   const summaryColumnsShown: Array<{ accessorKey: string; header?: React.ReactNode }> = hasSummary
     ? orderedColumns.filter((col: { accessorKey: string }) => summaries.has(col.accessorKey))
     : [];
@@ -3678,19 +3777,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }))}
       onChange={onColumnSummaryChange}
     />
-  ) : hasSummary ? (
-    <div className="border-t bg-muted/30 px-2 py-1.5" data-testid="column-summary-footer">
-      <div className="flex gap-4 text-xs text-muted-foreground font-medium">
-        {summaryColumnsShown.map((col) => {
-          const summary = summaries.get(col.accessorKey)!;
-          return (
-            <span key={col.accessorKey} data-testid={`summary-${col.accessorKey}`}>
-              {col.header}: {summary.label}
-            </span>
-          );
-        })}
-      </div>
-    </div>
   ) : null;
 
   // Render grid content: grouped (recursive nested headers + leaf table) or
@@ -3971,6 +4057,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ref={inlineActionFold.hostRef}
         className="flex flex-col flex-1 min-h-0"
         data-row-actions-inline={inlineActionFold.folded ? 'folded' : undefined}
+        data-row-actions-column={inlineActionFold.actionsFrozen ? 'frozen' : undefined}
       >
         <SchemaRenderer schema={dataTableSchema} />
       </div>
@@ -4140,7 +4227,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   );
 
   return (
-    <div ref={pullRef} className="relative h-full flex flex-col">
+    <div ref={setRootRef} className="relative h-full flex flex-col">
       {/* Re-fetch indicator while existing rows remain visible (filter/sort
           change). The initial-load skeleton above handles the empty case. */}
       <RefreshIndicator active={loading && data.length > 0} ariaLabel={t('grid.refreshing')} />
@@ -4159,19 +4246,42 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
       )}
-      <BulkActionBar
-        selectedRows={selectedRows}
-        actions={effectiveBulkActions ?? []}
-        actionDefs={bulkActionDefs}
-        objectFields={objectSchema?.fields}
-        onAction={dispatchBulkAction}
-        onActionDef={dispatchBulkActionDef}
-        onClearSelection={resetSelection}
-        pageSize={data.length}
-        totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
-        allMatchingSelected={selectAllMatching}
-        onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
-      />
+      {pageBarSlot ? (
+        // objectstack#35554 — on a list page the selection is the page bar's:
+        // its content is drawn into the bar's slot, and no bar floats over
+        // the rows.
+        selectedRows.length > 0 && createPortal(
+          <SelectionPageBar
+            selectedRows={selectedRows}
+            singleRowMenu={selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
+            actions={effectiveBulkActions ?? []}
+            actionDefs={bulkActionDefs}
+            objectFields={objectSchema?.fields}
+            onAction={dispatchBulkAction}
+            onActionDef={dispatchBulkActionDef}
+            onClearSelection={resetSelection}
+            loadedCount={data.length}
+            totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+            allMatchingSelected={selectAllMatching}
+            onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+          />,
+          pageBarSlot,
+        )
+      ) : (
+        <BulkActionBar
+          selectedRows={selectedRows}
+          actions={effectiveBulkActions ?? []}
+          actionDefs={bulkActionDefs}
+          objectFields={objectSchema?.fields}
+          onAction={dispatchBulkAction}
+          onActionDef={dispatchBulkActionDef}
+          onClearSelection={resetSelection}
+          pageSize={data.length}
+          totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+          allMatchingSelected={selectAllMatching}
+          onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+        />
+      )}
       {navigation.isOverlay && (
         <NavigationOverlay
           {...navigation}

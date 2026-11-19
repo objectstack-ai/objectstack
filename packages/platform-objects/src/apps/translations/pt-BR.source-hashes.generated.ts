@@ -19,6 +19,7 @@
 
 export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.action.fields.patch.label": "815f68570a78eba1",
+  "metadataForms.action.fields.refusals.status.label": "64a420165247654b",
   "metadataForms.agent.fields.avatar.label": "0f06369995b69b8b",
   "metadataForms.dashboard.fields.widgets.label": "bd4bf82396edd638",
   "metadataForms.dashboard.sections.layout.label": "7f508ea1bb2c3a6b",
@@ -158,5 +159,8 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
   "objects.sys_user._actions.import_sso_users.params.csv.label": "bfb77802b66a9222",
+  "objects.sys_user._actions.remove_sso_user.confirmText": "843b7846781ae0eb",
+  "objects.sys_user._actions.remove_sso_user.label": "27e40f055ed9dc98",
+  "objects.sys_user._actions.remove_sso_user.successMessage": "45facf16a8b5ebc7",
   "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };
