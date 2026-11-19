@@ -56,7 +56,6 @@ const OWNED_OBJECTS = new Set([
   'sys_metadata', 'sys_metadata_history', 'sys_metadata_audit', 'sys_metadata_commit',
   // system
   'sys_setting', 'sys_platform_setting', 'sys_secret', 'sys_setting_audit', 'sys_platform_setting_audit', 'sys_migration', 'sys_exchange_rate',
-  'sys_work_calendar', 'sys_work_calendar_exception',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {

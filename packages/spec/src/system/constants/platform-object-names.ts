@@ -102,8 +102,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_user',
     'sys_user_preference',
     'sys_verification',
-    'sys_work_calendar',
-    'sys_work_calendar_exception',
   ],
   /** `@objectstack/plugin-approvals` — ADR-0019 approval-as-flow-node runtime. */
   'plugin-approvals': [

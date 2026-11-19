@@ -203,8 +203,6 @@ import {
   SysPlatformSettingAudit,
   SysMigration,
   SysExchangeRate,
-  SysWorkCalendar,
-  SysWorkCalendarException,
 } from '../src/system/index.js';
 
 // ── Existing Setup app + dashboards + translations ────────────────────────
@@ -362,8 +360,6 @@ const config: ObjectStackDefinition = defineStack({
     SysPlatformSettingAudit,
     SysMigration,
     SysExchangeRate,
-    SysWorkCalendar,
-    SysWorkCalendarException,
   ] as any,
 
   apps: [SETUP_APP, STUDIO_APP, ACCOUNT_APP] as any,

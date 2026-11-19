@@ -264,7 +264,7 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
         // authored groups less `group_approvals`, `group_integrations` and
         // `group_apps`, which nothing in it contributes into and the filter
-        // collapses, plus the 26 entries `SETUP_NAV_CONTRIBUTIONS` carries,
+        // collapses, plus the 24 entries `SETUP_NAV_CONTRIBUTIONS` carries,
         // plus the MCP one.
         // (25 until #25098 moved the unfiltered Packages entry to Studio; 24
         // until #30204 removed the Feature Flags entry with its namespace; 32
@@ -274,17 +274,13 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // Configuration; 32 until the recycle bin entry, `nav_recycle_bin`,
         // joined Configuration (#30239); 33 until objectstack#34724 retired
         // the Packaged Actions entry, `nav_packaged_actions`, the one entry
-        // `group_apps` held here, so that group collapses too; 31 until the
-        // working-calendar pair, `nav_work_calendars` and
-        // `nav_work_calendar_exceptions`, joined Configuration, ADR-0157.)
+        // `group_apps` held here, so that group collapses too.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(33);
-        expect(allowedIds).toContain('nav_work_calendars');
-        expect(allowedIds).toContain('nav_work_calendar_exceptions');
+        expect(allowedIds).toHaveLength(31);
         expect(allowedIds).not.toContain('nav_packaged_actions');
         expect(allowedIds).toContain('nav_settings_access_policy');
         expect(allowedIds).toContain('nav_recycle_bin');
@@ -310,8 +306,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 33: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(33);
+        // 31: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(31);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

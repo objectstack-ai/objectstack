@@ -37,13 +37,6 @@ export {
   EXCHANGE_RATE_SCALE,
   EXCHANGE_RATE_PRECISION,
 } from './sys-exchange-rate.object.js';
-// [ADR-0157 D1] Working calendars and their dated exceptions, read by the
-// calendar service (`@objectstack/objectql`).
-export {
-  SysWorkCalendar,
-  WORK_CALENDAR_PERIODS_HELP,
-} from './sys-work-calendar.object.js';
-export { SysWorkCalendarException } from './sys-work-calendar-exception.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,
