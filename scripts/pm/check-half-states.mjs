@@ -8668,7 +8668,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
     'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
     '`pm:seat`, `qa-run`, `eval-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
-    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
+    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s area or grade.'
   );
 }
 
