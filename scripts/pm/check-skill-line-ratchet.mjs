@@ -1657,8 +1657,10 @@ export const CEILINGS = new Map([
   // Raised 189 → 193 by the effort-by-shape rules (card #35270) — an ORDINARY raise, ⛔ not a
   // cross-file move. The 〈派发〉 effort lines go from five to fourteen: `xhigh` only for a build
   // expected to run unattended for over 30 minutes or a card type a measurement record shows
-  // gains on; L2 review, four-axis analysis, ADR and the read-only diff review of a high-severity
-  // advisory fix stay `xhigh`; an epic child card and a p1 go by the card's own difficulty and a
+  // gains on; L2 review, four-axis analysis, ADR, the red-line re-read and the diff review of a
+  // high-severity advisory fix stay `xhigh`, and of the two re-reads a card thread hands to an
+  // isolated subagent only the design one drops to `high` (that line is rewritten in place); an
+  // epic child card and a p1 go by the card's own difficulty and a
   // category never raises a level; security is graded by consequence, not by label (a `high`
   // build plus that `xhigh` diff review for high severity, `high` for medium, a `security` card
   // that is no advisory fix by difficulty, a regression test per fix, one analysis per shared
@@ -1666,13 +1668,16 @@ export const CEILINGS = new Map([
   // floors; effort values come from this repo's own measurements. Ruling of record: the
   // maintainer, 2026-11-19, verbatim and untranslated: 「立卡修改skills」 after the effort review,
   // with 「安全修复只有高风险的才需要 xhigh 吧」 on security; quoted in the body of card #35270
-  // (filing gate ③), claim comment 7014658145. Authorized under ruling record 6184799323
+  // (filing gate ③), claim comment 7014658145. The red-line re-read staying `xhigh` while only the
+  // design re-read drops is his answer, verbatim and untranslated, 「同意」 (card #35270's project
+  // thread, 2026-11-19 22:20Z) to the option put to him as 「只降设计自查，红线自查保持最贵档」.
+  // Authorized under ruling record 6184799323
   // (letter B). Measured against the 184-line file on main: +9 lines (184 → 193); the standing
   // headroom of 5 pays 5 of them and the row moves +4. Landed count, headroom 0.
   // Raised 193 → 195 by the fold-by-default rules (card #35283, item 8) — an ORDINARY raise, ⛔ not
   // a cross-file move. In 〈候选与批次〉 the five fold gates now fold by default when all pass (at
   // most five cards); gate ① gains the same-file text-only arm (+1 line: the gate line stands at
-  // 117 B), gate ② the shared landing tier and L2 tier with a p1 only at the head of a chain, gate
+  // 117 B), gate ② the shared landing tier and L2 tier, a fold that holds a p1 headed by a p1, gate
   // ⑤ the exemption of a p3 riding a same-file PR, all three in place; the exit line is new (+1): a
   // member whose premise fails, or whose open items are not cleared in one round, loses its commit
   // and `Fixes` line and returns to the queue. The fold-or-serial trigger and the `Fold-with: #N`
@@ -1888,15 +1893,21 @@ export const CEILINGS = new Map([
   // delta +19 (34 → 53 lines); landed count, headroom 0.
   // Raised 53 → 61 by the group-by-mechanism rules (card #35283, items 1–7) — an ORDINARY raise,
   // ⛔ not a cross-file move. Eight rule lines, one rule each: sort `draft` advisories into groups
-  // by shared root mechanism on intake and on each patrol; one lead per group, one analysis on the
-  // lead and a one-line pointer on every other member; an opaque group tag on the ledger row, the
-  // members moving state together; one order, branch, PR and L2 review per group, with the fold
+  // only by shared root mechanism, inside one owning package, on intake and on each patrol; one
+  // lead per group, one analysis on the lead and a one-line pointer on every other member; an
+  // opaque group tag on the ledger row, a member moving state only when the PR that carries its
+  // fix merges; one order, branch, PR and L2 review per group, with the fold
   // gates and the effort rule read from execution-duties.md; a group stays inside one owning
   // package's release line and the normal PR size limits; a regression test per member; groups
-  // holding a high- or medium-severity advisory first, a low-severity one only inside such a
-  // group; the publish-or-not list by group. The dispatch line gains two words in place. Ruling of
+  // holding a high- or medium-severity advisory first, the other groups last, dispatched only when
+  // none of the first kind is waiting and batched by owning package into one order and one PR
+  // (exempt from fold gate ①); the publish-or-not list by group. The dispatch line gains two
+  // words in place. Ruling of
   // record: the maintainer, 2026-11-19, verbatim and untranslated: 「按机制归组，每组做一次分析、出一个合并修复 PR, 同意，立卡修改skills」;
-  // quoted in the body of card #35283 (filing gate ③), claim comment 7014764185. Authorized under
+  // quoted in the body of card #35283 (filing gate ③), claim comment 7014764185. The last-and-batched
+  // rule for the other groups is his answer, verbatim and untranslated, 「同意」 (card #35270's
+  // project thread, 2026-11-19 22:20Z) to the option put to him as
+  // 「排在最后；没有高危、中危的组在等的时候再派，并按所属的产品包攒成一批一起修」. Authorized under
   // ruling record 6184799323 (letter B). Measured delta +8 (53 → 61 lines); every line the file
   // had stays as it was but the dispatch line; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 61],
