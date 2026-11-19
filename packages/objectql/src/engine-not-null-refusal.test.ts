@@ -245,9 +245,13 @@ describe('[#24768] localized the way the validator localizes its own `required`'
     [`objects.${OBJECT}.fields.unit_price.label`]: '销售价格',
     [`objects.${OBJECT}.fields.list_price.label`]: '标价',
   };
+  // [#34030] The labels are read off `getTranslations`, as the metadata route reads them.
   const i18n = {
     t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
     getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+      ? { objects: { [OBJECT]: { fields: { unit_price: { label: '销售价格' }, list_price: { label: '标价' } } } } }
+      : {}),
   };
 
   it.each([['zh-CN'], ['zh']])('%s: the translated label in the zh-CN sentence, word for word the validator\'s', async (locale) => {

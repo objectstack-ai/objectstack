@@ -6,7 +6,7 @@ import '@objectstack/formula';
 import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FieldSchema } from '@objectstack/spec/data';
 
@@ -1052,5 +1052,51 @@ describe('ObjectFieldInspector — label first, API name under Developer info, d
     );
     expect(screen.getByTestId('field-label-input')).toBeInTheDocument();
     expect(screen.queryByTestId('field-more-menu')).not.toBeInTheDocument();
+  });
+});
+
+describe('ObjectFieldInspector — the required visibleWhen formula advisory names only a formula the form cannot compute (ADR-0113 D1)', () => {
+  const ADVISORY = 'field-required-visiblewhen-formula';
+  const fields = (visibleWhen: string) => ({
+    account: { type: 'lookup', label: 'Account', reference: 'account' },
+    amount: { type: 'number', label: 'Amount' },
+    risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'" },
+    tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier' },
+    org_flag: { type: 'formula', label: 'Org', expression: "os.org.id == 'acme'" },
+    po_number: { type: 'text', label: 'PO', required: true, visibleWhen },
+  });
+  // The verdict lands from a lazily loaded parser; once it has loaded, a
+  // macrotask flushes every promise the effect chains on it.
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+  it('advises a formula the server cannot compute either, and draws nothing once the predicate reads only one the form computes', async () => {
+    const { rerender } = renderField(fields("record.tier_name == 'gold'"), 'po_number');
+    const advisory = await screen.findByTestId(ADVISORY);
+    expect(advisory.textContent).toContain('tier_name reads through a reference');
+    expect(advisory.textContent).toContain('keeps it required');
+    expect(advisory.textContent).not.toContain('The form computes the same formula');
+
+    rerender(
+      <ObjectFieldInspector
+        type="object"
+        name="account"
+        draft={{ name: 'account', fields: fields("record.risk == 'high'") }}
+        selection={{ kind: 'field', id: 'po_number' }}
+        onPatch={vi.fn()}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        readOnly={false}
+        locale={'en-US'}
+      />,
+    );
+    await settle();
+    expect(screen.queryByTestId(ADVISORY)).not.toBeInTheDocument();
+  });
+
+  it('advises a formula only the form cannot compute (it reads os): the server can waive the field', async () => {
+    renderField(fields('record.org_flag'), 'po_number');
+    const advisory = await screen.findByTestId(ADVISORY);
+    expect(advisory.textContent).toContain('org_flag reads os');
+    expect(advisory.textContent).toContain('can waive this field');
   });
 });
