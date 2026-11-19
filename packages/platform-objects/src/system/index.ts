@@ -37,6 +37,16 @@ export {
   EXCHANGE_RATE_SCALE,
   EXCHANGE_RATE_PRECISION,
 } from './sys-exchange-rate.object.js';
+// [ADR-0158 U3; Open items 2 and 11] The organization's own units of measure,
+// beside the standard unit table in the spec. Zero platform rows.
+export {
+  SysUnit,
+  UNIT_RATIO_DIRECTION,
+  UNIT_RATIO_EDIT_NOTICE,
+  UNIT_RATIO_SCALE,
+  UNIT_RATIO_PRECISION,
+  UNIT_DECIMAL_PLACES_MAX,
+} from './sys-unit.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,
