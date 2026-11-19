@@ -448,6 +448,14 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     expect(binOps(driver).map((w: any) => w.op)).toEqual(['create']);
   });
 
+  // [#35329] The driver's `false` after the pre-image proved the row present
+  // answers `RECORD_NOT_FOUND`, thrown after the withdrawal, so the entry is
+  // withdrawn exactly as before; an off-contract `0` keeps its pass-through.
+  const settle = (p: Promise<unknown>) =>
+    p.then((value) => ({ value }), (e: any) => ({ code: e?.code, status: e?.status }));
+  const answerOf = (answer: boolean | number) =>
+    answer === false ? { code: 'RECORD_NOT_FOUND', status: 404 } : { value: answer };
+
   it.each<[boolean | number, string]>([
     [false, 'not found'],
     [0, 'an off-contract count of none'],
@@ -455,8 +463,8 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     const { engine, driver, rec } = await makeEngine({ transactional: false, removesNothingOf: { object: 'loner', answer } });
     driver.seed('loner', { id: 'l1', name: 'x' });
     const told: string[] = [];
-    await expect(engine.delete('loner', { where: { id: 'l1' }, onRecycleBinEntry: (id: string) => told.push(id) } as any))
-      .resolves.toBe(answer);
+    expect(await settle(engine.delete('loner', { where: { id: 'l1' }, onRecycleBinEntry: (id: string) => told.push(id) } as any)))
+      .toEqual(answerOf(answer));
     expect(driver.rowsOf('loner')).toHaveLength(1);
     expect(entriesOf(driver)).toHaveLength(0);
     // Written, then withdrawn: not merely never written.
@@ -470,7 +478,7 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     async (answer) => {
       const { engine, driver } = await makeEngine({ removesNothingOf: { object: 'account', answer } });
       seedAccountTree(driver);
-      await expect(engine.delete('account', { where: { id: 'acc1' } } as any)).resolves.toBe(answer);
+      expect(await settle(engine.delete('account', { where: { id: 'acc1' } } as any))).toEqual(answerOf(answer));
       expect(driver.rowsOf('account')).toHaveLength(1);
       expect(entriesOf(driver)).toHaveLength(0);
       const ops = binOps(driver);
@@ -478,6 +486,12 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
       // The withdrawal rides the unit the entry was written in.
       expect(ops[1].transaction).toBeDefined();
       expect(ops[1].transaction).toBe(ops[0].transaction);
+      // [#35329] `RECORD_NOT_FOUND` is thrown inside that unit, so the cascade
+      // the walk ran for a row that was not removed rolls back with it.
+      if (answer === false) {
+        expect(driver.rowsOf('contact')).toHaveLength(2);
+        expect(driver.rowsOf('note')).toHaveLength(1);
+      }
     },
   );
 
@@ -488,7 +502,7 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
       failDeleteOf: 'sys_recycle_bin',
     });
     driver.seed('loner', { id: 'l1', name: 'x' });
-    await expect(engine.delete('loner', { where: { id: 'l1' } } as any)).resolves.toBe(false);
+    expect(await settle(engine.delete('loner', { where: { id: 'l1' } } as any))).toEqual(answerOf(false));
     expect(entriesOf(driver)).toHaveLength(1);
     // Said once, at `error`: the bin keeps an entry for a row that is still live.
     expect(rec.at('error')).toHaveLength(1);

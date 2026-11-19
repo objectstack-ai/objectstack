@@ -992,7 +992,13 @@ describe('cascadeDeleteRelations — [#23221] every cascade-issued child delete 
             if (depth === 1) await ctx.api.object('qline').deleteById(l.id);
         });
 
-        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+        // [#35329] The hook removed the row after the cascade's child delete
+        // read it, so that delete's driver answers `false` and it answers
+        // `RECORD_NOT_FOUND`, as a child already gone at its read did; the
+        // walk stops and the parent's delete refuses with it.
+        const outcome = await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any)
+            .then(() => 'resolved', (e: any) => ({ code: e?.code, status: e?.status }));
+        expect(outcome).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
 
         expect(markers).toEqual([
             { depth: 1, hasKey: true },
