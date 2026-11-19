@@ -220,12 +220,10 @@ function hasOwn(row: Row, key: string): boolean {
 function periodsRefusal(field: string, value: unknown): FieldRefusal | undefined {
   const parsed = parseWorkPeriods(value);
   if (parsed.ok) return undefined;
-  return {
-    field,
-    code: parsed.reason === 'malformed' ? 'invalid_format' : 'invalid_value',
-    message: `${field} ${parsed.message}.`,
-    value,
-  };
+  const message = `${field} ${parsed.message}.`;
+  // Two plain literals, one per branch: a field-level ADR-0114 code, never `error.code`.
+  if (parsed.reason === 'malformed') return { field, code: 'invalid_format', message, value };
+  return { field, code: 'invalid_value', message, value };
 }
 
 /** The organization an insert row is stored in: its own, else the call's tenant, else the writer's. */
@@ -297,15 +295,12 @@ function judgeException(data: Row, previous: Row | undefined): void {
   const day = exceptionDayOf(post);
   if (typeof day !== 'string') return;
   const malformed = periodsRefusal('periods', post.periods);
+  const message = `This exception ${day}.`;
+  if (post.kind === 'off') {
+    refuse(WORK_CALENDAR_EXCEPTION_OBJECT, [{ field: 'periods', code: 'invalid_value', message, value: post.periods }]);
+  }
   refuse(WORK_CALENDAR_EXCEPTION_OBJECT, [
-    malformed && post.kind === 'on'
-      ? malformed
-      : {
-          field: 'periods',
-          code: post.kind === 'on' ? 'required' : 'invalid_value',
-          message: `This exception ${day}.`,
-          value: post.periods,
-        },
+    malformed ?? { field: 'periods', code: 'required', message, value: post.periods },
   ]);
 }
 

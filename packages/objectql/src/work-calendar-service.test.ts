@@ -52,7 +52,13 @@ function readDouble(calendars: Row[], exceptions: Row[]) {
     async find(object: string, query: Row) {
       reads.push({ object, query });
       const src = object === WORK_CALENDAR_OBJECT ? calendars : exceptions;
-      const hits = src.filter((r) => Object.entries(query.where ?? {}).every(([k, v]) => r[k] === v));
+      const hits = src.filter((r) =>
+        Object.entries(query.where ?? {}).every(([k, v]) => {
+          // Equality only: a combinator or an operator object is refused, never answered wrong.
+          if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`readDouble answers equality only, not ${k}`);
+          return r[k] === v;
+        }),
+      );
       const from = query.offset ?? 0;
       return hits.slice(from, from + (query.limit ?? hits.length));
     },
@@ -70,6 +76,7 @@ async function refusal(p: Promise<unknown>): Promise<any> {
 
 describe('WorkCalendarService — resolution (ADR-0157 D2)', () => {
   it('takes the named code, else the organization default; refuses with no default, never wall-clock', async () => {
+    // adr0112-ok: D6b — a calendar's persisted `code` column, not an error code
     const other = { ...CN, id: 'cal_x', code: 'plant_x', is_default: false };
     const svc = new WorkCalendarService({ getEngine: () => readDouble([CN, other], HOLIDAYS) });
     expect((await svc.resolve({ ...ORG, calendar: 'plant_x' })).code).toBe('plant_x');
@@ -83,6 +90,7 @@ describe('WorkCalendarService — resolution (ADR-0157 D2)', () => {
   });
 
   it('refuses two defaults rather than picking one', async () => {
+    // adr0112-ok: D6b — a calendar's persisted `code` column, not an error code
     const svc = new WorkCalendarService({ getEngine: () => readDouble([CN, { ...CN, id: 'cal_2', code: 'two' }], []) });
     await expect(svc.resolve(ORG)).rejects.toMatchObject({ code: WORK_CALENDAR_UNRESOLVED_CODE, reason: 'ambiguous' });
   });
@@ -190,7 +198,10 @@ function memoryDriver() {
   return {
     name: 'com.objectstack.driver.memory.work-calendar', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async initObjects() {}, async checkHealth() { return true; },
-    async find(o: string, q?: any) { return [...table(o).values()].filter((r) => matches(r, q?.where)); },
+    async find(o: string, q?: any) {
+      const rows = [...table(o).values()].filter((r) => matches(r, q?.where));
+      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+    },
     async findOne(o: string, q?: any) { return [...table(o).values()].find((r) => matches(r, q?.where)) ?? null; },
     async count(o: string, q?: any) { return [...table(o).values()].filter((r) => matches(r, q?.where)).length; },
     async create(o: string, data: Row) { table(o).set(String(data.id), { ...data }); return { ...data }; },
@@ -226,14 +237,14 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
     try { await engine.destroy(); } catch { /* noop */ }
   });
 
-  const insertCalendar = (row: Row) => engine.insert(WORK_CALENDAR_OBJECT, { ...CN, ...row }, { context: { isSystem: true } } as any);
+  const insertCalendar = (row: Row) => engine.insert(WORK_CALENDAR_OBJECT, { ...CN, ...row }, { context: { isSystem: true } });
 
   it('refuses a period that crosses midnight, on insert and on update; accepts 24:00 (D7, D10)', async () => {
     const e = await refusal(insertCalendar({ id: 'c1', monday_periods: '22:00-06:00' }));
     expect(resolveThrownHttpError(e)).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
     expect(e.fields).toEqual([expect.objectContaining({ field: 'monday_periods', code: 'invalid_value' })]);
     await insertCalendar({ id: 'c2', monday_periods: '18:00-24:00' }); // CONTROL
-    const u = await refusal(engine.update(WORK_CALENDAR_OBJECT, { friday_periods: '23:00-01:00' }, { where: { id: 'c2' }, context: { isSystem: true } } as any));
+    const u = await refusal(engine.update(WORK_CALENDAR_OBJECT, { friday_periods: '23:00-01:00' }, { where: { id: 'c2' }, context: { isSystem: true } }));
     expect(u.fields).toEqual([expect.objectContaining({ field: 'friday_periods', code: 'invalid_value' })]);
   });
 
@@ -252,14 +263,14 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
   });
 
   it('a create that leaves the time zone out takes the organization\'s (D7)', async () => {
-    await engine.insert(WORK_CALENDAR_OBJECT, { ...CN, id: 'c1', timezone: undefined, organization_id: 'org_z' }, { context: { isSystem: true } } as any);
-    const [row] = await engine.find(WORK_CALENDAR_OBJECT, { where: { id: 'c1' }, context: { isSystem: true } } as any);
+    await engine.insert(WORK_CALENDAR_OBJECT, { ...CN, id: 'c1', timezone: undefined, organization_id: 'org_z' }, { context: { isSystem: true } });
+    const [row] = await engine.find(WORK_CALENDAR_OBJECT, { where: { id: 'c1' }, context: { isSystem: true } });
     expect(row?.timezone).toBe('Asia/Shanghai');
     expect(zoneAsked).toEqual(['org_z']);
   });
 
   it('refuses an off row with periods and an on row without them (D10)', async () => {
-    const insertException = (row: Row) => engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, row, { context: { isSystem: true } } as any);
+    const insertException = (row: Row) => engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, row, { context: { isSystem: true } });
     const off = await refusal(insertException({ id: 'x1', calendar: 'cal_cn', date: '2026-10-01', kind: 'off', periods: '09:00-12:00' }));
     expect(resolveThrownHttpError(off)).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
     expect(off.fields).toEqual([expect.objectContaining({ field: 'periods', code: 'invalid_value' })]);
@@ -271,7 +282,7 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
   it('a calendar or exception write drops the cached calendar', async () => {
     await insertCalendar({ id: 'cal_cn' });
     expect(isWorkingDay(await svc.resolve(ORG), '2026-10-12')).toBe(true);
-    await engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, { id: 'x1', calendar: 'cal_cn', date: '2026-10-12', kind: 'off' }, { context: { isSystem: true } } as any);
+    await engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, { id: 'x1', calendar: 'cal_cn', date: '2026-10-12', kind: 'off' }, { context: { isSystem: true } });
     expect(isWorkingDay(await svc.resolve(ORG), '2026-10-12')).toBe(false);
   });
 });
