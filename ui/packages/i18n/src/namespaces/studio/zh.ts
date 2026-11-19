@@ -2503,6 +2503,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.operation': '操作',
   'engine.studio.access.explain.run': '解释',
   'engine.studio.access.explain.running': '解释中…',
+  'engine.studio.access.explain.needObject': '请先选择对象',
   'engine.studio.access.explain.allowedLine': '该主体对「{object}」执行 {operation} 将被【允许】。',
   'engine.studio.access.explain.deniedLine': '该主体对「{object}」执行 {operation} 将被【拒绝】。',
   'engine.studio.access.explain.principal': '主体',
