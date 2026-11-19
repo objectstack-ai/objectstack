@@ -925,6 +925,7 @@ const de = {
     hideFieldsTitle: "Felder ausblenden",
     dataLimitReached: "Die ersten {{limit}} Datensätze werden angezeigt. Möglicherweise sind weitere Daten verfügbar.",
     display: "Anzeige",
+    options: "Optionen",
     layout: "Layout",
     rowNumbers: "Zeilennummern",
     resetToViewDefault: "Auf Standard der Ansicht zurücksetzen",

@@ -950,6 +950,7 @@ const pt = {
     hideFieldsTitle: "Ocultar campos",
     dataLimitReached: "Os primeiros {{limit}} registros estão sendo exibidos. Pode haver mais dados disponíveis.",
     display: "Exibição",
+    options: "Opções",
     layout: "Layout",
     rowNumbers: "Números de linha",
     resetToViewDefault: "Restaurar o padrão da exibição",

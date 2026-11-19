@@ -981,6 +981,7 @@ const ru = {
     hideFieldsTitle: "Скрыть поля",
     dataLimitReached: "Отображаются первые {{limit}} записей. Возможно, есть ещё данные.",
     display: "Отображение",
+    options: "Параметры",
     layout: "Макет",
     rowNumbers: "Номера строк",
     resetToViewDefault: "Сбросить к настройкам представления",

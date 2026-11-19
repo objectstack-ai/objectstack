@@ -955,6 +955,7 @@ const es = {
     hideFieldsTitle: "Ocultar campos",
     dataLimitReached: "Se muestran los primeros {{limit}} registros. Puede haber más datos disponibles.",
     display: "Visualización",
+    options: "Opciones",
     layout: "Diseño",
     rowNumbers: "Números de fila",
     resetToViewDefault: "Restablecer los valores predeterminados de la vista",

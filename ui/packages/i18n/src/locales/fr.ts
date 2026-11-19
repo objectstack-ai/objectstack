@@ -950,6 +950,7 @@ const fr = {
     hideFieldsTitle: "Masquer les champs",
     dataLimitReached: "Les {{limit}} premiers enregistrements sont affichés. Il peut y avoir plus de données disponibles.",
     display: "Affichage",
+    options: "Options",
     layout: "Disposition",
     rowNumbers: "Numéros de ligne",
     resetToViewDefault: "Rétablir les valeurs par défaut de la vue",

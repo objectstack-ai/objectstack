@@ -1214,6 +1214,7 @@ const en = {
     hideFieldsTitle: 'Hide Fields',
     dataLimitReached: 'Showing first {{limit}} records. More data may be available.',
     display: 'Display',
+    options: 'Options',
     layout: 'Layout',
     rowNumbers: 'Row numbers',
     resetToViewDefault: 'Reset to view default',

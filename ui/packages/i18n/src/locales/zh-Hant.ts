@@ -952,6 +952,7 @@ const zhHant = {
     hideFieldsTitle: '隱藏欄位',
     dataLimitReached: '顯示前 {{limit}} 條記錄。可能有更多資料。',
     display: '顯示',
+    options: '選項',
     layout: '佈局',
     rowNumbers: '行號',
     resetToViewDefault: '恢復檢視預設設定',

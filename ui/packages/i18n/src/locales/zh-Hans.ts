@@ -952,6 +952,7 @@ const zh = {
     hideFieldsTitle: '隐藏字段',
     dataLimitReached: '显示前 {{limit}} 条记录。可能有更多数据。',
     display: '显示',
+    options: '选项',
     layout: '布局',
     rowNumbers: '行号',
     resetToViewDefault: '恢复视图默认设置',

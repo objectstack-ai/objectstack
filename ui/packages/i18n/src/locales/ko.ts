@@ -925,6 +925,7 @@ const ko = {
     hideFieldsTitle: "필드 숨기기",
     dataLimitReached: "처음 {{limit}}개 레코드를 표시합니다. 더 많은 데이터가 있을 수 있습니다.",
     display: "표시",
+    options: "옵션",
     layout: "레이아웃",
     rowNumbers: "행 번호",
     resetToViewDefault: "보기 기본값으로 재설정",

@@ -925,6 +925,7 @@ const ja = {
     hideFieldsTitle: "フィールドを非表示",
     dataLimitReached: "最初の {{limit}} 件のレコードを表示しています。さらにデータがある場合があります。",
     display: "表示",
+    options: "オプション",
     layout: "レイアウト",
     rowNumbers: "行番号",
     resetToViewDefault: "ビューの既定に戻す",

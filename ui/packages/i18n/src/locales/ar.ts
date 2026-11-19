@@ -1034,6 +1034,7 @@ const ar = {
     hideFieldsTitle: "إخفاء الحقول",
     dataLimitReached: "يتم عرض أول {{limit}} سجل. قد تتوفر بيانات إضافية.",
     display: "العرض",
+    options: "خيارات",
     layout: "التخطيط",
     rowNumbers: "أرقام الصفوف",
     resetToViewDefault: "إعادة التعيين إلى الإعدادات الافتراضية للعرض",
