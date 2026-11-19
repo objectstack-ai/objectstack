@@ -63,6 +63,10 @@
  * `{{who}}` is the slate's literals as `type 'value'`. The decision door's
  * refusal of the submitter ends with the same `en` sentence, and the
  * submitter's notice carries it under `approvalNoApproverTitle`.
+ *
+ * `approvalPlatformAdminSlotLabel` is not a sentence: it is the display label
+ * of the platform administrators' slot (`platform_admin:*`), which names no
+ * person to label it by.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -114,6 +118,7 @@ export const enMessages = {
   approvalNoApprover: 'No one else can approve this request yet. An organization administrator must add a member who can approve it, then reassign the request to them.',
   approvalNoApproverHolding: 'No one else can approve this request yet. An organization administrator must add a member who holds {{who}}; that member can then decide it.',
   approvalNoApproverTitle: 'No one can approve your {{object}} {{record}} yet',
+  approvalPlatformAdminSlotLabel: 'Platform administrators',
 } as const satisfies Messages;
 
 /** One approval notification sentence's id. */
@@ -165,6 +170,7 @@ export const zhCNMessages: ApprovalMessages = {
   approvalNoApprover: '目前还没有其他人能审批此请求。组织管理员需要添加一名可以审批的成员，然后将请求转交给该成员。',
   approvalNoApproverHolding: '目前还没有其他人能审批此请求。组织管理员需要添加一名担任 {{who}} 的成员，之后由该成员决定。',
   approvalNoApproverTitle: '您的{{object}} {{record}} 暂时无人可以审批',
+  approvalPlatformAdminSlotLabel: '平台管理员',
 };
 
 export const jaJPMessages: ApprovalMessages = {
@@ -211,6 +217,7 @@ export const jaJPMessages: ApprovalMessages = {
   approvalNoApprover: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が承認できるメンバーを追加し、リクエストをそのメンバーに再割り当てする必要があります。',
   approvalNoApproverHolding: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が {{who}} を担うメンバーを追加する必要があります。追加されたメンバーが判断できます。',
   approvalNoApproverTitle: 'あなたの{{object}} {{record}} を承認できる人がまだいません',
+  approvalPlatformAdminSlotLabel: 'プラットフォーム管理者',
 };
 
 export const esESMessages: ApprovalMessages = {
@@ -257,6 +264,7 @@ export const esESMessages: ApprovalMessages = {
   approvalNoApprover: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que pueda aprobarla y luego reasignarle la solicitud.',
   approvalNoApproverHolding: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que ocupe {{who}}; ese miembro podrá entonces decidirla.',
   approvalNoApproverTitle: 'Nadie puede aprobar todavía su {{object}} {{record}}',
+  approvalPlatformAdminSlotLabel: 'Administradores de la plataforma',
 };
 
 export const zhHantMessages: ApprovalMessages = {
@@ -303,6 +311,7 @@ export const zhHantMessages: ApprovalMessages = {
   approvalNoApprover: '目前還沒有其他人能核准此請求。組織管理員需要新增一名可以核准的成員，再將請求轉交給該成員。',
   approvalNoApproverHolding: '目前還沒有其他人能核准此請求。組織管理員需要新增一名擔任 {{who}} 的成員，之後由該成員決定。',
   approvalNoApproverTitle: '你的{{object}} {{record}} 暫時無人可以核准',
+  approvalPlatformAdminSlotLabel: '平台管理員',
 };
 
 export const arMessages: ApprovalMessages = {
@@ -349,6 +358,7 @@ export const arMessages: ApprovalMessages = {
   approvalNoApprover: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يمكنه الموافقة عليه، ثم إعادة تعيين الطلب إليه.',
   approvalNoApproverHolding: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يشغل {{who}}؛ وعندها يمكن لهذا العضو البتّ فيه.',
   approvalNoApproverTitle: 'لا يمكن لأحد الموافقة على طلبك بشأن {{object}} {{record}} بعد',
+  approvalPlatformAdminSlotLabel: 'مسؤولو المنصة',
 };
 
 export const frMessages: ApprovalMessages = {
@@ -395,6 +405,7 @@ export const frMessages: ApprovalMessages = {
   approvalNoApprover: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui peut l’approuver, puis lui réattribuer la demande.',
   approvalNoApproverHolding: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui occupe {{who}} ; ce membre pourra alors la décider.',
   approvalNoApproverTitle: 'Personne ne peut encore approuver votre demande sur {{object}} {{record}}',
+  approvalPlatformAdminSlotLabel: 'Administrateurs de la plateforme',
 };
 
 export const ptBRMessages: ApprovalMessages = {
@@ -441,6 +452,7 @@ export const ptBRMessages: ApprovalMessages = {
   approvalNoApprover: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que possa aprová-la e depois reatribuir a solicitação a ele.',
   approvalNoApproverHolding: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que ocupe {{who}}; esse membro poderá então decidi-la.',
   approvalNoApproverTitle: 'Ninguém pode aprovar ainda sua solicitação sobre {{object}} {{record}}',
+  approvalPlatformAdminSlotLabel: 'Administradores da plataforma',
 };
 
 export const ruMessages: ApprovalMessages = {
@@ -487,6 +499,7 @@ export const ruMessages: ApprovalMessages = {
   approvalNoApprover: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, который может его согласовать, и переназначить запрос на него.',
   approvalNoApproverHolding: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, занимающего {{who}}; затем этот участник сможет принять решение.',
   approvalNoApproverTitle: 'Ваш запрос по {{object}} {{record}} пока некому согласовать',
+  approvalPlatformAdminSlotLabel: 'Администраторы платформы',
 };
 
 export const deMessages: ApprovalMessages = {
@@ -533,6 +546,7 @@ export const deMessages: ApprovalMessages = {
   approvalNoApprover: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das sie genehmigen kann, und ihm die Anfrage dann neu zuweisen.',
   approvalNoApproverHolding: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das {{who}} innehat; dieses Mitglied kann dann darüber entscheiden.',
   approvalNoApproverTitle: 'Noch kann niemand Ihre Anfrage zu {{object}} {{record}} genehmigen',
+  approvalPlatformAdminSlotLabel: 'Plattformadministratoren',
 };
 
 export const koMessages: ApprovalMessages = {
@@ -579,6 +593,7 @@ export const koMessages: ApprovalMessages = {
   approvalNoApprover: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 승인할 수 있는 구성원을 추가한 뒤 요청을 그 구성원에게 재할당해야 합니다.',
   approvalNoApproverHolding: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 {{who}}을(를) 맡은 구성원을 추가해야 하며, 그러면 그 구성원이 결정할 수 있습니다.',
   approvalNoApproverTitle: '아직 {{object}} {{record}}을(를) 승인할 수 있는 사람이 없습니다',
+  approvalPlatformAdminSlotLabel: '플랫폼 관리자',
 };
 
 /** The shipped locales, keyed as the bundle beside this file keys them. */

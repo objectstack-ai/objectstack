@@ -158,7 +158,9 @@ import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from '
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
+import { enMessages } from './translations/messages.js';
 import {
+  approvalMessageKey,
   approvalNotificationText,
   subjectParams,
   type ApprovalKeyedText,
@@ -9416,6 +9418,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return slots.map((slot) => {
       const name = names.get(slot);
       if (name) return name;
+      // The platform administrators' slot names no person, so it reads by what it is.
+      if (isPlatformAdminAddress(slot)) return enMessages.approvalPlatformAdminSlotLabel;
       const isPerson = !!slot && !slot.includes(':');
       return failed && isPerson ? null : slot;
     });
@@ -9830,7 +9834,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   /**
    * Attach inbox display fields to rows so clients never render a raw
    * identifier: `record_title`, `submitter_name`, `object_label`,
-   * `pending_approver_names` (user-id approvers), `payload_display`
+   * `pending_approver_names` (user-id approvers, and the platform
+   * administrators' slot by its label), `payload_display`
    * (lookup foreign keys in the snapshot → referenced record titles), and
    * `payload_labels` (snapshot field keys → the target object's field labels).
    * Batched: one query per distinct object (target + referenced) plus one
@@ -9934,6 +9939,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
     }
     const names = await this.resolveUserNames(userIdentifiers);
+    // The platform administrators' slot, labelled in the reader's language.
+    const platformSlotLabel = this.readerLabels(context)
+      ?.sentence(approvalMessageKey('approvalPlatformAdminSlotLabel'), {}) ?? enMessages.approvalPlatformAdminSlotLabel;
 
     for (const r of rows as any[]) {
       const title = titles.get(`${r.object_name} ${r.record_id}`)
@@ -9948,6 +9956,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       for (const a of r.pending_approvers ?? []) {
         const n = names.get(String(a));
         if (n) approverNames[a] = n;
+        else if (isPlatformAdminAddress(String(a))) approverNames[a] = platformSlotLabel;
       }
       if (Object.keys(approverNames).length) r.pending_approver_names = approverNames;
 

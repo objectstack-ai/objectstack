@@ -486,7 +486,11 @@ deployment declares in `OS_PLATFORM_OWNER_EMAIL`. It takes no `value` and no
 - **Nobody is told.** The slot names no person, so opening the request sends
   no notification, and the slot grants no read of the record. The request does
   not count as an empty slate, so `onEmptyApprovers` never replaces it with
-  the organization's administrators.
+  the organization's administrators. On a deployment where no one holds
+  platform-administrator standing, no one can take the slot and the request
+  waits with no warning, so give someone that standing before a package whose
+  flow uses this type goes live. The request lists the slot as *Platform
+  administrators*, in the reader's language on the approvals door.
 - **Only the deployment's own packaged flows may use it.** The approval node
   opens on this type only when the flow body it runs ships in a package the
   deployment registers in code (registry `source: 'code'`). The origin is
