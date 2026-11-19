@@ -284,6 +284,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "保留中のユーザーを削除",
+        confirmText: "まだサインインしていないこのユーザーを削除し、招待を取り消しますか？その間にサインインした場合、またはホスト組織に接続できない場合は、誰も削除されません。",
+        successMessage: "保留中のユーザーを削除しました"
+      },
       set_user_password: {
         label: "パスワードを設定",
         successMessage: "パスワードを更新しました",
