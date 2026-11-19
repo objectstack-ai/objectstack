@@ -839,6 +839,41 @@ const ALLOW = {
   // page-nav-misc-spec-parity.test.ts asserts all three names ABSENT from the
   // spec export set, so an upstream re-publish is a loud collision, not an
   // inherited exemption.
+  // ── The gantt's own working calendar, ADR-0157 (objectstack#35355) ────────
+  // `@objectstack/spec/data` began exporting the platform's working-calendar
+  // arithmetic, and two of its names are names the gantt scheduler's
+  // module-local helpers already carried. Both are kept ON PURPOSE until
+  // ADR-0157's Follow-up "The gantt view's own calendar" switches the gantt to
+  // the platform calendar; that switch deletes the helpers, and ratchet 3 then
+  // fails these entries so they cannot outlive it.
+  "@object-ui/plugin-gantt:isWorkingDay": {
+    reason:
+      "Same name, a different calendar, kept on purpose. The spec's `isWorkingDay(cal, day)` reads " +
+      "an org's stored working calendar (`WorkCalendar`: weekly working periods, dated exceptions, " +
+      "a maintained span it refuses outside of) for a `YYYY-MM-DD` key. The gantt scheduler's " +
+      "module-local helper takes a local `Date` and the view's own authored `WorkingCalendar` " +
+      "(`skipWeekends`, `holidays`). ADR-0157 records the gantt's calendar as a second source of truth " +
+      "and names switching it to the platform calendar as a Follow-up, not as part of the record " +
+      "that added the spec function, so binding here would change what the gantt draws and " +
+      "schedules ahead of that ruling. Module-local, so no published name is involved; when the " +
+      "Follow-up lands, the helper goes and this entry goes stale.",
+    issue: 35355,
+  },
+  "@object-ui/plugin-gantt:addWorkingDays": {
+    reason:
+      "Same name, a different calendar and a different count, kept on purpose. The spec's " +
+      "`addWorkingDays(cal, day, days)` answers a `YYYY-MM-DD` day from an org's stored " +
+      "`WorkCalendar` and never counts the start day. The gantt scheduler's module-local helper " +
+      "answers an exclusive end INSTANT (local midnight after the n-th consumed working day, the start " +
+      "day counted when it works) over the view's own `skipWeekends` / `holidays`, the duration " +
+      "arithmetic `computeProjectReschedule` preserves. The two answers part whenever a span ends " +
+      "before a non-working day (Thursday plus two working days with weekends off: the gantt answers " +
+      "Saturday midnight, the spec Monday), and the spec's needs a stored calendar the gantt view " +
+      "does not have. Kept until ADR-0157's " +
+      "Follow-up \"The gantt view's own calendar\" switches the gantt to the platform calendar, the " +
+      "`isWorkingDay` entry's judgement.",
+    issue: 35355,
+  },
 };
 
 // ── Untriaged collisions (the ledger) ────────────────────────────────────────
