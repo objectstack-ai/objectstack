@@ -137,7 +137,7 @@ create/update payload.
   To get a \`defaultValue\`, omit the field: a token (\`NOW()\`, \`current_user\`)
   or an expression object is never copied. A validation's \`message\` is what a
   refused write answers.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, variables?, field? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions; at a \`formula\` or \`validation\` site, every other
@@ -167,8 +167,10 @@ create/update payload.
   At a \`flow_condition\` the verdict is the runtime publish gate's, the one a
   flow saved through MCP meets: \`os validate\` also judges bare names and
   unbound roots over the whole flow, so write \`record.<field>\`, and pass the
-  flow's \`startCondition\` for an edge or \`decision\` condition after it. Pass
-  \`field\` (formula) to be judged as that field: its type, and the formula
+  flow's \`startCondition\` for an edge or \`decision\` condition after it, and
+  its declared \`variables\`: the shadowed-read warning, and the binding of a
+  bare name to the variable rather than the field, need them at a
+  \`flow_condition\`. Pass \`field\` (formula) to be judged as that field: its type, and the formula
   cycle it would close; a field not yet declared is judged as a new formula.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy?, expand?, latestPer? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
