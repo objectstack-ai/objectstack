@@ -123,7 +123,7 @@
         ],
         "must_not_contain": [
           "role:",
-          "'admin_full_access'"
+          "'admin_full_access'", "\"admin_full_access\""
         ]
       }
     },
