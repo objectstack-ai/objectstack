@@ -130,6 +130,7 @@ export const en: TranslationData = {
         nav_settings_hub: { label: 'All Settings' },
         nav_settings_localization: { label: 'Localization' },
         nav_exchange_rates: { label: 'Exchange Rates' },
+        nav_units_of_measure: { label: 'Units of Measure' },
         nav_settings_company: { label: 'Company' },
         nav_settings_mail: { label: 'Mail Delivery' },
         nav_settings_sms: { label: 'SMS Delivery' },

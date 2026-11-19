@@ -127,6 +127,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides who reads and writes
       // (organization admins), and Setup itself already needs `setup.access`.
       { id: 'nav_exchange_rates', type: 'object', label: 'Exchange Rates', objectName: 'sys_exchange_rate', viewName: 'all_rates', icon: 'arrow-right-left' },
+      // [ADR-0158 U3] The organization's own units of measure, beside the
+      // exchange rates as the other per-organization reference table. No
+      // `requiredPermissions`: the object grant decides (every member reads,
+      // organization admins write), and Setup itself already needs `setup.access`.
+      { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
       // `nav_settings_branding` is contributed by `@objectstack/service-settings`
       // with the `branding` namespace, which is offered only where no

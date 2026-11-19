@@ -213,6 +213,11 @@ export * from './field-customization';
 // home currency's CLDR fraction digits with it, from this one table rather
 // than a second copy or a runtime `Intl` probe.
 export * from './currency-fraction-digits';
+// [ADR-0158 U1, U2; Open item 1] The standard unit table: the closed set of
+// UN/ECE Recommendation 20 codes with each one's dimension and its ratio to the
+// dimension's base unit, kept apart from the value-domain vocabulary the way
+// the CLDR digits table is, and the organization unit code namespace (U3).
+export * from './standard-units';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
 // declared until #7572. Both now import this one, so the mask a console sees on
