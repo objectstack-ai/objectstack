@@ -149,12 +149,17 @@ describe('engine write path — validation messages honour ExecutionContext.loca
     const ql = new ObjectQL();
     ql.registerDriver(makeDriver(), true);
     await ql.init();
+    // [#34030] The message override through `t()`, the label off
+    // `getTranslations` — the bundle the metadata route serves it from.
     ql.setI18nService({
       t: (key: string, locale: string) => {
-        if (key === 'objects.mes_settlement.fields.penalty_amount.label' && locale === 'zh-CN') return '处罚金额';
         if (key === 'validation.field.min_value' && locale === 'zh-CN') return '{{label}}不得小于 {{min}} 元';
         return key;
       },
+      getLocales: () => ['zh-CN'],
+      getTranslations: (locale: string) => (locale === 'zh-CN'
+        ? { objects: { mes_settlement: { fields: { penalty_amount: { label: '处罚金额' } } } } }
+        : {}),
     });
     const msg = await messageOf(() =>
       ql.insert('mes_settlement', { penalty_amount: -1 }, { context: zhCN }),
