@@ -48,6 +48,26 @@ export function useDefaultRecordPage(): boolean {
 export const EmptySectionsLineContext = React.createContext(false);
 
 /**
+ * Whether the `DetailView` drawn here draws the record's approval band (the
+ * "Locked for approval" / "In approval" status chip, its recall lever and its
+ * tally) when its own header is suppressed (objectstack#35253).
+ *
+ * The band is the RECORD's state, so a record page draws it once. The
+ * synthesized default page splits its details around a body table — one
+ * `record:details` node per run of sections — and every part used to draw it,
+ * so the page read as if two locks applied. The laid-out page
+ * (`RecordPageColumns`) sets `false` around every details part after the
+ * first, which keeps the band above the body table. Default `true`: an
+ * authored page's details body, a standalone `DetailView` and the drawer keep
+ * their band. Whether the band reads locked or editable is untouched — that is
+ * `resolveApprovalLock`'s rule (a `lockRecord: false` node is never locked).
+ *
+ * Module-internal, the way `EmptySectionsLineContext` is: neither a
+ * `DetailView` prop nor a `DetailViewSchema` key, and not in the barrel.
+ */
+export const ApprovalBandContext = React.createContext(true);
+
+/**
  * The most columns a frameless detail section may take on the page being
  * drawn (objectstack#27524, Target 6): the record page's layout sets 2 in its
  * two-column tier, where the details share the row with the 320 px right

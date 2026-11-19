@@ -3768,14 +3768,21 @@ export class AnalyticsService implements IAnalyticsService {
         // [#28049] A derived measure has no field to lend a code. Its column
         // takes the one `fixed` code its operands resolve to (a `sum` /
         // `difference` over amounts in one `fixed` code), read off the compile
-        // guard's own resolution, so the column says what compile judged. Any
-        // other derived measure (a `ratio`, a `product`, operands in the
-        // tenant's or a record's currency) is monetary only by its own
+        // guard's own resolution, so the column says what compile judged.
+        //
+        // A `sum` / `difference` whose operands are ALL amounts in the
+        // tenant's currency (or such derived measures) is an amount in it too,
+        // so it is monetary and takes the chain's tenant step, as a plain sum
+        // of one of them does (seat ruling record 7000265215, item 2;
+        // `inTenantCurrency`). Any other derived measure (a `ratio`, a
+        // `product`, operands mixing the tenant's currency with a code, a
+        // record's currency or a `count`) is monetary only by its own
         // `currency`, as before.
         const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
         const derivedCode = m.derived ? currencies.fixedCodeOf(m) : undefined;
+        const derivedTenant = currencies.inTenantCurrency(m);
         if (meta?.currencyField !== undefined) {
           const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
             ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
@@ -3783,7 +3790,7 @@ export class AnalyticsService implements IAnalyticsService {
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
           const amount = meta?.type === 'currency' && AMOUNT_AGGREGATES.has(m.aggregate ?? '');
-          const monetary = !!mc.currency || amount || derivedCode !== undefined;
+          const monetary = !!mc.currency || amount || derivedCode !== undefined || derivedTenant;
           if (monetary) {
             const resolved = mc.currency ?? meta?.defaultCurrency ?? derivedCode ?? context?.currency;
             if (resolved) fc.currency = resolved;

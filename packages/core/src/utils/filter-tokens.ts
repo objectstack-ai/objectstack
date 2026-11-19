@@ -112,6 +112,16 @@
  * record" would otherwise come back as "about nobody", or, with the condition
  * gone, "about everybody".
  *
+ * # A period key resolves to its key, never to a date
+ *
+ * `{current_iso_week}` (`PERIOD_KEY_TOKENS` in `@objectstack/spec`) resolves
+ * to the ISO-8601 week key of the reference day, `2026-W47`: the label
+ * {@link bucketDateKey} writes for an analytics `week` bucket, in the
+ * request's reference timezone, so the two cannot disagree about a week. It
+ * is text. The temporal-comparand door judges a resolved DATE MACRO's year;
+ * a period key is not one, and this field-agnostic resolver never decides
+ * what a column makes of the key.
+ *
  * # A `{ $record }` comparand refuses here by name
  *
  * [#34199] The `lookupFilters` comparand `{ $record: 'path' }` reads the record
@@ -123,13 +133,15 @@
 
 import {
   classifyFilterToken,
+  isPeriodKeyToken,
   isReadableIds,
   isRecordContextToken,
   parseDateMacroParam,
   type DateMacroUnit,
+  type PeriodKeyToken,
 } from '@objectstack/spec/data';
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
+import { bucketDateKey, calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
 import {
   isOutsideTemporalYearRange,
   SUPPORTED_TEMPORAL_YEARS,
@@ -185,8 +197,8 @@ export class UnknownFilterTokenError extends Error {
       (suggestion
         ? `Did you mean "{${suggestion}}"? `
         : 'Resolvable placeholders are the context tokens ({current_user_id}, ' +
-          '{current_org_id}) and the date macros ({today}, {current_quarter_start}, ' +
-          '{30_days_ago}, …). ') +
+          '{current_org_id}), the date macros ({today}, {current_quarter_start}, ' +
+          '{30_days_ago}, …) and the ISO week key {current_iso_week}. ') +
       'Sending it to the data engine verbatim would compare it as a literal ' +
       'string and match nothing, which is indistinguishable from an empty result.',
     );
@@ -447,6 +459,20 @@ function dateMacroInstant(
 }
 
 /**
+ * Each period-key token's resolver: the key of the period the reference
+ * instant falls in, as seen in the reference timezone. `satisfies` keeps it
+ * exhaustive: a token added to the spec's list without a resolver here fails
+ * to compile rather than resolving to nothing.
+ *
+ * `{current_iso_week}` is {@link bucketDateKey}'s `week` label, the one
+ * statement of the ISO week rule (Monday-start weeks, the ISO week-numbering
+ * year at the year edges).
+ */
+const PERIOD_KEY_RESOLVERS = {
+  current_iso_week: (now: Date, timezone: string | undefined) => bucketDateKey(now, 'week', timezone),
+} satisfies Record<PeriodKeyToken, (now: Date, timezone: string | undefined) => string | null>;
+
+/**
  * Resolve one token NAME (the bit inside the braces) to its concrete value.
  * Throws {@link UnresolvedFilterTokenError} for a vocabulary token the request
  * carries no value for, and [#21068] `INVALID_FILTER` / 400 for a date macro
@@ -499,6 +525,13 @@ export function resolveFilterToken(
       'page, or filter on a concrete id. Resolving it to null would count no records, and ' +
       'dropping the condition would count them all.',
     );
+  }
+
+  // ── Period keys ───────────────────────────────────────────────────────
+  // A key such as `2026-W47`: text, never a day. `bucketDateKey` answers
+  // `null` only for an invalid instant, which is no key at all.
+  if (isPeriodKeyToken(token)) {
+    return PERIOD_KEY_RESOLVERS[token as PeriodKeyToken](now, ctx.timezone) ?? undefined;
   }
 
   // ── Date macros ───────────────────────────────────────────────────────

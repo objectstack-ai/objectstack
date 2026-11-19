@@ -2741,7 +2741,12 @@ export default class Doctor extends Command {
       process.exit(1);
     } else if (hasWarnings) {
       console.log(chalk.yellow('⚠️  Environment is functional but has some warnings.'));
-      console.log(chalk.dim('   Run with --verbose to see fix suggestions.'));
+      // Only when the flag is off: under `--verbose` the fix suggestions this
+      // line points at are already printed above, so advising the operator to
+      // pass the flag they just passed sends them to re-run for nothing.
+      if (!flags.verbose) {
+        console.log(chalk.dim('   Run with --verbose to see fix suggestions.'));
+      }
     } else {
       console.log(chalk.green('✅ Environment is healthy and ready for development!'));
     }

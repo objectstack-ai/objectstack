@@ -203,11 +203,11 @@ export class MiddlewareAndContextFacet {
    * contract, so a handler reads `ctx.referentialCascadeDelete === true`.
    *
    * Reads {@link cascadeIssuedDeletes}, not the envelope (that field says why),
-   * and CLAIMS the token it matches. Called once per `delete()`, below the
-   * `afterDelete` unit re-entry (`opensAfterAbortUnit`): a call that re-enters
-   * itself returns before reaching here, so the claim is made by the inner
-   * call, the one that dispatches the hooks, and nothing later inside it can
-   * match the same token again.
+   * and CLAIMS the token it matches. Called once per `delete()`, before the
+   * middleware chain; no `delete()` re-enters itself (its `afterDelete` unit
+   * opens around the executor, `opensAfterAbortUnit`), so the claim is made by
+   * the call that dispatches the hooks, and nothing later inside it can match
+   * the same token again.
    */
   static claimReferentialCascadeDelete(this: Pick<MiddlewareAndContextHost, 'cascadeIssuedDeletes'>, object: string, id: unknown): true | undefined {
     const issued = this.cascadeIssuedDeletes.getStore();
