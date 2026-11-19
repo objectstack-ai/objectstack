@@ -3775,8 +3775,10 @@ const FIELD_MISSING_VALUE_DOMAIN_EXPLANATION: RuleExplanation = {
       '`tz` (`iana_time_zone`). Not judged: any other name, a field that already declares a ' +
       '`valueDomain`, and any type but `text` — a `select` takes its values from its options, and ' +
       '`valueDomain` is declared on `text` only.',
-    'A warning, never an error: the name is only a hint. A field with one of these names that holds ' +
-      'something else is correct as it is and keeps its name.',
+    'A warning, never an error: `os validate`, `os build` and the metadata save door are unchanged. A ' +
+      '`--strict` run (`os lint --strict`) fails on every warning, this one included; there is no per-rule ' +
+      'switch, so a strict CI step fails until the field declares the domain. Declaring it does not re-read ' +
+      'rows that already hold free text: only a later write that carries a non-member is refused.',
     DATA_MODEL_SWEEP_REACH,
   ],
 };

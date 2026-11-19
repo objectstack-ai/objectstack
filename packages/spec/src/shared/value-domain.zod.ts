@@ -103,12 +103,13 @@ export type ValueDomain = z.input<typeof ValueDomainSchema>;
 /**
  * Field names that read as a code of one domain: a `text` field with one of
  * these names (whole name, case-insensitive) is expected to declare that
- * `valueDomain`. The one copy of the word list — `@objectstack/lint` warns
- * from it and the authoring catalog teaches from it, so the two cannot
- * diverge. It maps names onto the vocabulary and adds no member to it; a
- * `Record` over {@link ValueDomain}, so a member added without a list fails to
- * compile. Deliberately small: a false hit must never push an author to rename
- * a correct field.
+ * `valueDomain`. The one copy of the word list: `@objectstack/lint` warns
+ * from it, and the authoring catalog of #35345 is to read this same list. It
+ * maps names onto the vocabulary and adds no member to it; a `Record` over
+ * {@link ValueDomain}, so a member added without a list fails to compile.
+ * Deliberately small, because a hit is only a warning: `os validate`,
+ * `os build` and the save door are unchanged, but `os lint --strict` fails
+ * until the field declares the domain.
  */
 export const VALUE_DOMAIN_FIELD_NAMES: Readonly<Record<ValueDomain, readonly string[]>> = Object.freeze({
   iso_4217_currency: Object.freeze(['currency', 'currency_code']),

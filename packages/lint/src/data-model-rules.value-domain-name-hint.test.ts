@@ -44,6 +44,7 @@ describe('field/missing-value-domain', () => {
     expect(issue!.severity).toBe('warning');
     expect(issue!.path).toBe(`objects[0].fields.${name}.valueDomain`);
     expect(issue!.message).toContain(`"acme_party.${name}"`);
+    expect(issue!.message).toContain(`named like a value of domain '${domain}'`);
     expect(issue!.fix).toContain(`\`valueDomain: '${domain}'\``);
   });
 

@@ -198,7 +198,7 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
     for (const [name, domain] of [['currency_code', 'iso_4217_currency'], ['country', 'iso_3166_alpha2'], ['tz', 'iana_time_zone']]) {
       const objects = [{ name: LONG_OBJECT, nameField: 'name', fields: { name: { type: 'text' }, [name]: { type: 'text' } } }];
       expect(fixOf(record(lintDataModel(objects)), FIELD_MISSING_VALUE_DOMAIN), name).toBe(
-        `Add \`valueDomain: '${domain}'\` if the field holds that code; if it holds something else, keep it as it is.`,
+        `Add \`valueDomain: '${domain}'\` if the field holds values of that domain; until then \`os lint --strict\` fails on this warning.`,
       );
     }
   });

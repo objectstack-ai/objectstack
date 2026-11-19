@@ -1118,8 +1118,9 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       // declares no `valueDomain`, so any free text is stored where a code
       // belongs. The whole name is compared, case-insensitively: no namespace
       // prefix is part of a field name (the namespace rule reads object names
-      // only, ADR-0146 D3). A warning only — a false hit must never push an
-      // author to rename a correct field.
+      // only, ADR-0146 D3). A warning only: `os validate`, `os build` and the
+      // save door are unchanged, but `os lint --strict` fails on it until the
+      // field declares the domain (no per-rule switch exists).
       if (type === 'text' && def.valueDomain === undefined) {
         const domain = VALUE_DOMAIN_BY_FIELD_NAME.get(fieldName.toLowerCase());
         if (domain) {
@@ -1127,12 +1128,12 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             severity: 'warning',
             rule: FIELD_MISSING_VALUE_DOMAIN,
             message:
-              `text field "${obj.name}.${fieldName}" is named like a ${domain} code but declares no ` +
-              'valueDomain, so any free text is stored in it',
+              `text field "${obj.name}.${fieldName}" is named like a value of domain '${domain}' but ` +
+              'declares no valueDomain, so any free text is stored in it',
             path: `${fieldPath}.valueDomain`,
             fix:
-              `Add \`valueDomain: '${domain}'\` if the field holds that code; ` +
-              'if it holds something else, keep it as it is.',
+              `Add \`valueDomain: '${domain}'\` if the field holds values of that domain; ` +
+              'until then `os lint --strict` fails on this warning.',
           });
         }
       }
