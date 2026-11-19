@@ -531,10 +531,11 @@ export function orderFields(
 ): ViewSettingsField[] {
   if (!order || order.length === 0) return [...fields];
   const rank = new Map(order.map((name, i) => [name, i]));
+  const rankOf = (fieldName: string): number => rank.get(fieldName) ?? Number.MAX_SAFE_INTEGER;
   return fields
-    .map((field, i) => ({ field, i }))
-    .sort((a, b) => (rank.get(a.field.name) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.field.name) ?? Number.MAX_SAFE_INTEGER) || a.i - b.i)
-    .map(({ field }) => field);
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => rankOf(a.entry.name) - rankOf(b.entry.name) || a.i - b.i)
+    .map(({ entry }) => entry);
 }
 
 /**
