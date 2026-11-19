@@ -73,8 +73,7 @@ which automation fires · which screens change · translations ·
 
 ## 2 · Testing: what the app pins, what the platform checks
 
-The platform checks consistency. The app tests its own business facts. Run all
-four before calling a change done (a scaffolded project's CI runs the first
+Run all four before calling a change done (a scaffolded project's CI runs the first
 three; add `pnpm test` to its `ci.yml`). A project from `os init` has no `test`
 script: add vitest, `@objectstack/verify` and the script first.
 Only errors fail `validate` and `lint`; a warning, such as label case or an
@@ -89,14 +88,13 @@ What the platform checks at 18.x, so the app never hand-writes it:
 
 | Tool | Checks |
 |:--|:--|
-| `os validate` (the same rules `os build` runs) | Protocol schema; CEL expressions and their `record.<field>` paths; references between metadata (fields, objects, views, actions, picklists, capabilities, approvers); dashboard widget bindings and dataset members; view, form and page shape; flow trigger readiness and undeclared flow cycles; sharing and row-level security enforceability; seed rows against state machines; package docs; a provider for every required capability |
+| `os validate` (the same rules `os build` runs) | Protocol schema; CEL expressions and their `record.<field>` paths; references between metadata (fields, objects, views, actions, picklists, capabilities, approvers); dashboard widget bindings and dataset members; view, form and page shape; flow trigger readiness and undeclared flow cycles; sharing and row-level security enforceability; seed rows against state machines; package docs; a provider for every required capability (enterprise: in `plugins[]`) |
 | `os lint` | The shared author-time rules again, plus its own: naming and label style, hook bodies that stop lowering to metadata-only bodies, and translation coverage (a missing non-source locale is an error only with `--i18n-strict`) |
-| `os verify` | Boots the app and writes over REST: every field type round-trips. `--rls`: a user who cannot read a record cannot write it. Also opt-in: `--reference-shapes`, `--delete-behaviors`, `--unique-scopes`, `--parent-write-reach`, `--dashboard-windows`, `--multi-tenant` |
+| `os verify` | Boots the app and writes over REST: every field type round-trips. `--rls`: a user who cannot read a record cannot write it. Also opt-in: `--reference-shapes`, `--delete-behaviors`, `--unique-scopes`, `--parent-write-reach`, `--dashboard-windows`, `--multi-tenant`. `os validate`'s provider check runs here as advisories only (`--json`: `capabilities`) |
 | `pnpm typecheck` | Types against `@objectstack/spec` |
 
-⛔ `os verify` is not one of the four and not in the scaffold's CI. Nothing in
-its row is checked until someone runs it: `npx os verify --rls` before a
-release, or as a CI step.
+⛔ `os verify` is not one of the four and not in the scaffold's CI: run
+`npx os verify --rls` before a release, or as a CI step.
 `npx os explain` lists only the rules that carry an explanation, not every
 check. Unsure whether a check exists? Inject the defect and run the command: if
 it fails, the platform checks it.

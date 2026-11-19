@@ -78,7 +78,7 @@ removed):
 
 | Value | Who can read / write |
 |:--|:--|
-| `private` | owner only (widen with sharing rules, RLS, or `readScope`/`writeScope`) |
+| `private` | owner only |
 | `public_read` | everyone reads; the owner writes |
 | `public_read_write` | everyone reads and writes |
 | `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
@@ -404,8 +404,6 @@ Per-object access control is authored in **permission sets**, not on the object
 schema. There is no object-level `permissions` key (and no `hooks` key either) —
 `ObjectSchema.create()` **rejects** both as unknown keys.
 
-Full rules: **[Security & Access Control](./rules/security.md)**.
-
 ### Access depth (scope-depth) — the ERP "see my unit / my unit and below" axis
 
 On an owner-scoped (`private`) object, a per-object grant in a permission set may
@@ -414,9 +412,10 @@ hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` �
 `unit` · `unit_and_below` · `org`. It resolves at request time into an
 `owner_id IN (…)` set and AND-injects like RLS. ⚠️ Open-core boundary (ADR-0016):
 only `own` and `org` work in open source — the hierarchy-relative three need the
-paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
-it, and `defineStack` errors unless the grant declares
-`requires: ['hierarchy-security']`.
+paid `@objectstack/security-enterprise` plugin in `plugins[]`, **fail closed to
+`own`** without it, and `defineStack` errors unless the grant declares
+`requires: ['hierarchy-security']`. A missing or unwired plugin is only advised:
+`os validate` warns, `os verify --json` lists it in `capabilities`.
 
 ### Ownership queues — park a record for a team to claim
 
