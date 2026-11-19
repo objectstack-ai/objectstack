@@ -8,24 +8,24 @@
 
 /**
  * A dataset dimension whose `field` is a `relationship.field` path
- * (`dimensionFields`, `QueryDatasetOutput`) drills through the related ids,
- * never as a dotted filter key — objectstack#34907.
+ * (`dimensionFields`, `QueryDatasetOutput`) drills as a nested-relation
+ * condition, never as a dotted filter key — objectstack#34907, and since
+ * objectstack#34990 without reading any related id.
  *
- * The data API refuses a dotted filter key (`INVALID_FIELD` / 400), and the
- * client filter dialect has no node for the nested-relation form, so
- * `resolveDatasetDrillFilter` reads the related object's ids matching the
- * clicked value through the drill's own data source and filters the base
- * object on the relationship field `$in` them.
+ * The data API refuses a dotted filter key (`INVALID_FIELD` / 400), so
+ * `resolveDatasetDrillFilter` writes the clicked value beneath the
+ * relationship field (`{ crm_account: { owner_id: 'u1' } }`), one level per
+ * hop, and the server matches it in the database.
  */
 
 import { describe, it, expect } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import {
   buildDatasetDrillFilter,
   resolveDatasetDrillFilter,
   datasetDrillPathsResolvable,
-  DATASET_DRILL_RELATED_ID_CAP,
 } from '../dataset-format';
-import { FilterOperatorError } from '../filter-converter';
+import { convertFiltersToAST, FilterOperatorError } from '../filter-converter';
 
 const SCHEMAS: Record<string, { fields: Record<string, Record<string, unknown>> }> = {
   crm_order: {
@@ -43,7 +43,8 @@ const SCHEMAS: Record<string, { fields: Record<string, Record<string, unknown>> 
       parent: { type: 'lookup', reference: 'crm_group' },
     },
   },
-  crm_group: { fields: { kind: { type: 'select' } } },
+  crm_group: { fields: { kind: { type: 'select' }, zone: { type: 'lookup', reference: 'crm_zone' } } },
+  crm_zone: { fields: { code: { type: 'text' } } },
 };
 
 /** A data source that records every read and answers each object from `rows`. */
@@ -65,39 +66,44 @@ function recordingSource(rows: Record<string, Array<{ id: string }>>) {
 }
 
 describe('resolveDatasetDrillFilter — a relationship-path dimension (objectstack#34907)', () => {
-  it('reads the related ids and filters the base object on the lookup field $in them', async () => {
-    const source = recordingSource({ crm_account: [{ id: 'acc1' }, { id: 'acc2' }] });
+  it.each([
+    ['one hop', 'crm_account.owner_id', { crm_account: { owner_id: 'v' } }, ['crm_order']],
+    ['two hops', 'crm_account.parent.kind', { crm_account: { parent: { kind: 'v' } } }, ['crm_order', 'crm_account']],
+    [
+      'three hops',
+      'crm_account.parent.zone.code',
+      { crm_account: { parent: { zone: { code: 'v' } } } },
+      ['crm_order', 'crm_account', 'crm_group'],
+    ],
+  ])('writes a %s path as one nested condition and reads no related record', async (_, path, filter, schemaReads) => {
+    const source = recordingSource({ crm_account: [{ id: 'acc1' }], crm_group: [{ id: 'g1' }], crm_zone: [{ id: 'z1' }] });
     const resolution = await resolveDatasetDrillFilter({
       object: 'crm_order',
-      rawRow: { owner: 'user_zhang' },
-      drillDims: ['owner'],
-      dimensionFields: { owner: 'crm_account.owner_id' },
+      rawRow: { d: 'v' },
+      drillDims: ['d'],
+      dimensionFields: { d: path },
       dataSource: source,
     });
-    expect(source.finds).toEqual([
-      {
-        object: 'crm_account',
-        params: { $filter: { owner_id: 'user_zhang' }, $select: ['id'], $top: DATASET_DRILL_RELATED_ID_CAP + 1 },
-      },
-    ]);
-    expect(resolution).toEqual({ status: 'resolved', filter: { crm_account: { $in: ['acc1', 'acc2'] } } });
+    expect(resolution).toEqual({ status: 'resolved', filter });
+    expect(source.finds).toEqual([]);
+    expect(source.schemaReads).toEqual(schemaReads);
   });
 
-  it('walks a two-hop path innermost first, one read per hop', async () => {
-    const source = recordingSource({ crm_group: [{ id: 'g1' }], crm_account: [{ id: 'acc9' }] });
+  it('the drawer lowers the nested condition to the equality node the spec reads back as the nested form', async () => {
     const resolution = await resolveDatasetDrillFilter({
       object: 'crm_order',
       rawRow: { kind: 'factory' },
       drillDims: ['kind'],
       dimensionFields: { kind: 'crm_account.parent.kind' },
-      dataSource: source,
+      dataSource: recordingSource({}),
     });
-    expect(source.finds.map((f) => f.object)).toEqual(['crm_group', 'crm_account']);
-    expect((source.finds[1].params as { $filter: unknown }).$filter).toEqual({ parent: { $in: ['g1'] } });
-    expect(resolution).toEqual({ status: 'resolved', filter: { crm_account: { $in: ['acc9'] } } });
+    const filter = resolution.status === 'resolved' ? resolution.filter : {};
+    const node = convertFiltersToAST(filter);
+    expect(node).toEqual(['crm_account', '=', { parent: { kind: 'factory' } }]);
+    expect(parseFilterAST(node)).toEqual({ crm_account: { parent: { kind: 'factory' } } });
   });
 
-  it('reads a shared hop once, on every condition beneath it, beside a plain dimension and the widget filter', async () => {
+  it('shares a hop between path dimensions, beside a plain dimension and the widget filter', async () => {
     const source = recordingSource({ crm_account: [{ id: 'acc1' }] });
     const resolution = await resolveDatasetDrillFilter({
       object: 'crm_order',
@@ -107,38 +113,25 @@ describe('resolveDatasetDrillFilter — a relationship-path dimension (objectsta
       runtimeFilter: { amount: { $gt: 0 } },
       dataSource: source,
     });
-    expect(source.finds).toHaveLength(1);
-    expect((source.finds[0].params as { $filter: unknown }).$filter).toEqual({ owner_id: 'u1', region: 'east' });
+    expect(source.finds).toEqual([]);
     expect(resolution.status).toBe('resolved');
     expect(resolution.status === 'resolved' && resolution.filter).toEqual({
       // `composeDrillFilter`'s own shape: the widget filter AND the bucket's two conditions.
-      $and: [{ amount: { $gt: 0 } }, { $and: [{ status: 'open' }, { crm_account: { $in: ['acc1'] } }] }],
+      $and: [{ amount: { $gt: 0 } }, { $and: [{ status: 'open' }, { crm_account: { owner_id: 'u1', region: 'east' } }] }],
     });
   });
 
-  it('answers no related record with an empty $in, never an absent condition', async () => {
+  it('a plain dimension on the relationship field a path walks is the related record\'s id', async () => {
     const source = recordingSource({});
     const resolution = await resolveDatasetDrillFilter({
       object: 'crm_order',
-      rawRow: { owner: 'nobody' },
-      drillDims: ['owner'],
-      dimensionFields: { owner: 'crm_account.owner_id' },
+      rawRow: { account: 'acc1', owner: 'u1' },
+      drillDims: ['account', 'owner'],
+      dimensionFields: { account: 'crm_account', owner: 'crm_account.owner_id' },
       dataSource: source,
     });
-    expect(resolution).toEqual({ status: 'resolved', filter: { crm_account: { $in: [] } } });
-  });
-
-  it(`refuses more than ${DATASET_DRILL_RELATED_ID_CAP} related records instead of truncating`, async () => {
-    const many = Array.from({ length: DATASET_DRILL_RELATED_ID_CAP + 1 }, (_, i) => ({ id: `acc${i}` }));
-    const source = recordingSource({ crm_account: many });
-    const resolution = await resolveDatasetDrillFilter({
-      object: 'crm_order',
-      rawRow: { owner: 'u1' },
-      drillDims: ['owner'],
-      dimensionFields: { owner: 'crm_account.owner_id' },
-      dataSource: source,
-    });
-    expect(resolution).toEqual({ status: 'too-many', object: 'crm_account', cap: DATASET_DRILL_RELATED_ID_CAP });
+    expect(resolution).toEqual({ status: 'resolved', filter: { crm_account: { owner_id: 'u1', id: 'acc1' } } });
+    expect(source.finds).toEqual([]);
   });
 
   it('offers no drill for an unknown relationship, a multi-valued one, the empty bucket, or a path past the hop limit', async () => {

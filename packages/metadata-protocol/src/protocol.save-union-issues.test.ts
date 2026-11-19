@@ -25,6 +25,7 @@
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from
@@ -36,6 +37,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation, zodIssuesToMetadataIssues } from './protocol.js';
+import { ZOD_UNION_DEFAULT_MESSAGE } from './protocol-metadata-issues.js';
 
 interface Row {
     id: string;
@@ -170,15 +172,15 @@ describe('#5364 saveMetaItem 422 expands union branches', () => {
         // Load-bearing: an invalid body is still refused, and still persists nothing.
         expect(rows.size).toBe(0);
 
-        // The union's own entry is KEPT — the expansion is strictly additive, so
-        // no consumer reading `issues[0]` today loses what it reads.
-        expect(err.issues[0]).toEqual({ path: '', message: 'Invalid input', code: 'invalid_union' });
-        expect(err.issues.length).toBeGreaterThan(1);
+        // [#35400] The union's own bare `"Invalid input"` entry is GONE: the
+        // branch below explains it, so it said nothing the list does not say
+        // better. The first entry is the located cause.
+        expect(err.issues.some((i: any) => i.path === '' && i.code === 'invalid_union')).toBe(false);
 
-        // …and the branch that explains the rejection now rides along, carrying
+        // …and the branch that explains the rejection rides first, carrying
         // the #4001 curated prose WITH the offending key names in it.
-        const unknownKey = err.issues.find((i: any) => i.code === 'unrecognized_keys');
-        expect(unknownKey).toBeDefined();
+        const unknownKey = err.issues[0];
+        expect(unknownKey.code).toBe('unrecognized_keys');
         expect(unknownKey.message).toContain('`type`');
         expect(unknownKey.message).toContain('`columns`');
 
@@ -270,12 +272,13 @@ describe('#7510 the 422 for a broken ViewItem names its own key, not the contain
         // #7510 moves which refusal is explained, never whether it is one.
         expect(rows.size).toBe(0);
 
-        // The union's own entry is still entry 0, unmoved (#5364's additive
-        // contract) — focusing happens inside its `errors`, not around it.
-        expect(err.issues[0]).toEqual({ path: '', message: 'Invalid input', code: 'invalid_union' });
+        // [#35400] No rootless `"Invalid input"` entry ahead of it: focusing
+        // happens inside the union's `errors`, and the bare head they explain
+        // is dropped, so the focused branch's cause is entry 0.
+        expect(err.issues.some((i: any) => i.path === '' && i.code === 'invalid_union')).toBe(false);
 
-        const unknownKey = err.issues.find((i: any) => i.code === 'unrecognized_keys');
-        expect(unknownKey).toBeDefined();
+        const unknownKey = err.issues[0];
+        expect(unknownKey.code).toBe('unrecognized_keys');
         expect(unknownKey.message).toContain('`sort`');
         expect(unknownKey.path).toBe('config.sections.0.fields.0.keyField');
 
@@ -354,8 +357,8 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
                 { code: 'invalid_type', message: 'Required', path: ['title'] },
             ],
         ])]);
+        // [#35400] Without the bare head the selected branch is the whole list.
         expect(out).toEqual([
-            { path: '', message: 'Invalid input', code: 'invalid_union' },
             { path: '', message: 'Unrecognized key(s): `nmae`', code: 'unrecognized_keys' },
         ]);
     });
@@ -363,13 +366,15 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
     it('branches that tie at the top are all emitted, capped at three', () => {
         const branch = (n: number) => [{ code: 'invalid_type', message: `bad ${n}`, path: [`f${n}`] }];
         const out = zodIssuesToMetadataIssues([union([branch(1), branch(2), branch(3), branch(4)])]);
-        expect(out.map((i) => i.path)).toEqual(['', 'f1', 'f2', 'f3']);
+        expect(out.map((i) => i.path)).toEqual(['f1', 'f2', 'f3']);
     });
 
     it('branch paths are resolved against the union\'s own, at every level', () => {
         const inner = union([[{ code: 'invalid_type', message: 'Required', path: ['id'] }]], ['nodes', 0]);
         const out = zodIssuesToMetadataIssues([union([[inner]], ['flow'])]);
-        expect(out.map((i) => i.path)).toEqual(['flow', 'flow.nodes.0', 'flow.nodes.0.id']);
+        // Both bare heads are explained, so both go; the leaf keeps the path
+        // both unions contributed to it.
+        expect(out.map((i) => i.path)).toEqual(['flow.nodes.0.id']);
     });
 
     it('nesting is bounded at three levels — the fourth union is not expanded', () => {
@@ -380,15 +385,17 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
         const level1 = union([[level2]], ['a']);
         const out = zodIssuesToMetadataIssues([level1]);
         // a → a.b → a.b.c → a.b.c.d, and there it stops: `leaf` never appears.
-        expect(out.map((i) => i.path)).toEqual(['a', 'a.b', 'a.b.c', 'a.b.c.d']);
+        // The fourth union is emitted as a head that nothing below explains,
+        // so it is the one entry; the three it sits under are explained by it.
+        expect(out).toEqual([{ path: 'a.b.c.d', message: 'Invalid input', code: 'invalid_union' }]);
         expect(out.some((i) => i.path.endsWith('leaf'))).toBe(false);
     });
 
     it('two branches rejecting the same key with the same words say it once', () => {
         const same = () => [{ code: 'unrecognized_keys', message: 'Unrecognized key(s): `nmae`', path: [] }];
         const out = zodIssuesToMetadataIssues([union([same(), same()])]);
-        expect(out).toHaveLength(2);
-        expect(out[1]!.code).toBe('unrecognized_keys');
+        expect(out).toHaveLength(1);
+        expect(out[0]!.code).toBe('unrecognized_keys');
     });
 
     it('de-duplication is per top-level issue, never across two independent ones', () => {
@@ -400,6 +407,117 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
     it('a non-array `issues` yields an empty envelope rather than throwing', () => {
         expect(zodIssuesToMetadataIssues(undefined)).toEqual([]);
         expect(zodIssuesToMetadataIssues(null)).toEqual([]);
+    });
+});
+
+/**
+ * [#35400] A union's own entry — the head — is dropped only when it is zod's
+ * bare default AND an entry below explains it. Every other head stays, ahead of
+ * its causes: one carrying the schema's own sentence (that sentence is a fix,
+ * often said nowhere else in the list), one nothing below explains, and every
+ * container head.
+ */
+describe('#35400 an explained union head is dropped only when it says nothing of its own', () => {
+    const union = (message: string, errors: unknown[][], path: unknown[] = []) =>
+        ({ code: 'invalid_union', message, path, errors });
+    const explaining = [[{ code: 'unrecognized_keys', message: 'Unrecognized key(s): `nmae`', path: [] }]];
+    const isHeadAt = (path: string) => (i: any) => i.path === path && i.code === 'invalid_union';
+
+    it('PIN: zod\'s own message for a failed union is the text the rule compares against', () => {
+        // ⛔ If zod rewords its default, this goes red. Without it the rule
+        // would stop matching and every bare head would silently come back.
+        const plain = z.union([z.string(), z.object({ a: z.string() }).strict()]).safeParse({ b: 1 });
+        expect(plain.success).toBe(false);
+        expect(plain.error!.issues[0]).toMatchObject({ code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE });
+
+        // …and through the real view schema, the zod instance the save door runs.
+        const view = (getMetadataTypeSchema('view') as any).safeParse(issueReproView());
+        expect(view.error.issues[0]).toMatchObject({ code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE });
+    });
+
+    it('a bare head that something explains is dropped; the same tree with a sentence of its own keeps it', () => {
+        expect(zodIssuesToMetadataIssues([union(ZOD_UNION_DEFAULT_MESSAGE, explaining, ['u'])])).toEqual([
+            { path: 'u', message: 'Unrecognized key(s): `nmae`', code: 'unrecognized_keys' },
+        ]);
+        expect(zodIssuesToMetadataIssues([union('Write a template string here.', explaining, ['u'])])).toEqual([
+            { path: 'u', message: 'Write a template string here.', code: 'invalid_union' },
+            { path: 'u', message: 'Unrecognized key(s): `nmae`', code: 'unrecognized_keys' },
+        ]);
+    });
+
+    it('a refused view save with `label: {not_a_locale}`: only the `label.not_a_locale` entries', async () => {
+        const { protocol, rows } = makeProtocol();
+        const body = {
+            name: 'task_list', object: 'task', viewKind: 'list', type: 'grid',
+            columns: [{ field: 'title' }], label: { not_a_locale: 'Tasks' },
+        };
+
+        const err = await rejection(save(protocol, body));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        // Was `['', 'label', 'label.not_a_locale', 'label.not_a_locale']`: the
+        // root head and the `label` head both said only "Invalid input".
+        expect(err.issues.map((i: any) => i.path)).toEqual(['label.not_a_locale', 'label.not_a_locale']);
+        // CONTROL — the CONTAINER head stays ahead of what it explains: its code
+        // is the one place that says the KEY was refused.
+        expect(err.issues[0]).toEqual({ path: 'label.not_a_locale', message: 'Invalid key in record', code: 'invalid_key' });
+        expect(err.issues[1].code).toBe('invalid_format');
+    });
+
+    it('an object `titleFormat` written as a formula keeps its head: the template prescription is said nowhere else', async () => {
+        const { protocol, rows } = makeProtocol();
+        const body = {
+            name: 'task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } },
+            titleFormat: { dialect: 'cel', source: 'record.name' },
+        };
+
+        const err = await rejection(save(protocol, body, 'task', 'object'));
+
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        const head = err.issues.findIndex(isHeadAt('titleFormat'));
+        expect(head, 'the authored head is kept').toBeGreaterThanOrEqual(0);
+        expect(err.issues[head].message).not.toBe(ZOD_UNION_DEFAULT_MESSAGE);
+        expect(err.issues[head].message).toContain('{{record.name}}');
+        // …ahead of the entry it explains, which alone would say only
+        // `expected "template"`.
+        const cause = err.issues.findIndex((i: any) => i.path === 'titleFormat.dialect');
+        expect(cause).toBeGreaterThan(head);
+        expect(err.issues[cause].message).not.toContain('{{record.name}}');
+    });
+
+    it('an action `confirmText` written as a formula keeps its authored heads', async () => {
+        const { protocol, rows } = makeProtocol();
+        const body = {
+            name: 'do_it', label: 'Do it', type: 'script', target: 'x',
+            confirmText: { dialect: 'cel', source: 'record.name' },
+        };
+
+        const err = await rejection(save(protocol, body, 'do_it', 'action'));
+
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        const heads = err.issues.filter(isHeadAt('confirmText'));
+        expect(heads.length).toBeGreaterThan(0);
+        for (const head of heads) {
+            expect(head.message).not.toBe(ZOD_UNION_DEFAULT_MESSAGE);
+            expect(head.message).toContain('`confirmText` is a template-typed slot');
+        }
+        expect(err.issues.some((i: any) => i.path === 'confirmText.dialect')).toBe(true);
+    });
+
+    it('CONTROL — a bare head nothing below explains stays: `label: 42` on a view', async () => {
+        const { protocol } = makeProtocol();
+        const body = { name: 'task_list', object: 'task', viewKind: 'list', type: 'grid', columns: [{ field: 'title' }], label: 42 };
+
+        const err = await rejection(save(protocol, body));
+
+        expect(err.status).toBe(422);
+        // Every branch of the label union is a bare kind mismatch, so nothing is
+        // selected and the head is the whole answer for that slot.
+        expect(err.issues.find(isHeadAt('label'))).toEqual({ path: 'label', message: ZOD_UNION_DEFAULT_MESSAGE, code: 'invalid_union' });
     });
 });
 

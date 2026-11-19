@@ -37,6 +37,7 @@ import type { Hook } from '@objectstack/spec/data';
 import { ObjectQL, ScopedContext } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
 import { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+import { openTransactionKind } from './open-transaction.js';
 
 interface Recorded {
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -686,24 +687,29 @@ describe('a handle the ScopedContext trio opened is attributed to its owner (#35
     expect(ledgerDb.writes.map((w: RecordedWrite) => w.op)).toEqual(['create']);
   });
 
-  it('forgets the owner once the trio commits — the record does not outlive the handle', async () => {
+  it('treats the handle as closed once the trio commits — a late cross-datasource write runs unenrolled', async () => {
     const { engine, ledgerDb } = await splitEngine();
     const { scoped, handle } = await openTrio(engine);
     await scoped.commitTransaction(handle);
 
-    // A closed handle threaded back in is no open trio transaction: it is
-    // judged as any unattributed handle is (the declared limit above).
+    // [#35149] A closed handle threaded back in is no handle, as a closed
+    // `transaction()` unit's is (#22855): the write is not refused, and it
+    // runs outside any transaction. Before #35149 the commit only dropped the
+    // owner record, so the handle read as an unattributed one and the dead
+    // `primary` handle was handed to `ledger_db`.
     await engine.insert('ledger', { name: 'after commit' }, { context: { transaction: handle } } as any);
     expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
   });
 
-  it('forgets the owner once the trio rolls back, too', async () => {
+  it('treats the handle as closed once the trio rolls back, too', async () => {
     const { engine, ledgerDb } = await splitEngine();
     const { scoped, handle } = await openTrio(engine);
     await scoped.rollbackTransaction(handle);
 
     await engine.insert('ledger', { name: 'after rollback' }, { context: { transaction: handle } } as any);
     expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
   });
 
   it('lets an async afterFind run, detached from the open trio handle, write a business object on another datasource', async () => {
@@ -771,5 +777,89 @@ describe('a handle the ScopedContext trio opened is attributed to its owner (#35
       expect(primary.writes.every((w: RecordedWrite) => w.transaction === handle)).toBe(true);
       expect(rolledBack).toBe(handle);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (g) A closed trio handle is no handle — as a closed transaction() unit's is (#35149)
+// ---------------------------------------------------------------------------
+
+describe('a trio handle closes as a transaction() unit handle does (#35149)', () => {
+  /** The engine's own reading of a threaded handle (`isClosedUnitHandle`), the one every write and read path acts on. */
+  const isClosed = (engine: ObjectQL, handle: unknown): boolean => (engine as any).isClosedUnitHandle(handle);
+
+  async function openTrio(engine: ObjectQL) {
+    const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+    const opened = await scoped.beginTransaction();
+    expect(opened, 'precondition: the default driver opens transactions').not.toBeNull();
+    expect(opened!.owned, 'precondition: the trio opened this handle, it did not join one').toBe(true);
+    return { scoped, ctx: opened!.ctx as any, handle: opened!.handle };
+  }
+
+  it('gives a late cross-datasource write the same answer under a committed trio handle as under a closed unit handle', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    let unitHandle: unknown;
+    await engine.transaction(async (trxCtx: any) => { unitHandle = trxCtx?.transaction; });
+    expect(unitHandle, 'precondition: transaction() threads its handle into the callback').toBeDefined();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.commitTransaction(handle);
+
+    expect(isClosed(engine, unitHandle)).toBe(true);
+    expect(isClosed(engine, handle)).toBe(true);
+    await engine.insert('ledger', { name: 'late, closed unit' }, { context: { transaction: unitHandle } } as any);
+    await engine.insert('ledger', { name: 'late, committed trio' }, { context: { transaction: handle } } as any);
+    expect(ledgerDb.writes.map((w: RecordedWrite) => w.transaction)).toEqual([undefined, undefined]);
+  });
+
+  it('runs a late same-datasource write unenrolled too, never on the dead handle', async () => {
+    const { engine, primary } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.rollbackTransaction(handle);
+
+    expect(isClosed(engine, handle)).toBe(true);
+    await engine.insert('thing', { name: 'after rollback' }, { context: { transaction: handle } } as any);
+    expect(primary.writes).toHaveLength(1);
+    expect(primary.writes[0].transaction).toBeUndefined();
+  });
+
+  it('CONTROL: an open trio handle still enrolls, and a cross-datasource business write under it is still refused', async () => {
+    const { engine, primary, ledgerDb } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+
+    expect(isClosed(engine, handle)).toBe(false);
+    await engine.insert('thing', { name: 'in the trio' }, { context: { transaction: handle } } as any);
+    expect(primary.writes[0].transaction).toBe(handle);
+    const err = await rejection<CrossDatasourceTransactionWriteError>(
+      engine.insert('ledger', { name: 'refused' }, { context: { transaction: handle } } as any),
+    );
+    expect(err.code).toBe('ERR_CROSS_DATASOURCE_TRANSACTION_WRITE');
+    expect(ledgerDb.writes).toHaveLength(0);
+    await scoped.commitTransaction(handle);
+    expect(isClosed(engine, handle)).toBe(true);
+  });
+
+  it('answers the body doors\' question the same way: separate while open, none once committed', async () => {
+    const { engine } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+
+    expect(openTransactionKind(engine, handle)).toBe('separate');
+    await scoped.commitTransaction(handle);
+    expect(openTransactionKind(engine, handle)).toBe('none');
+  });
+
+  it('reads a handle the driver hands out again as open on its next begin', async () => {
+    const { engine, primary } = await splitEngine();
+    const shared = { __trx: 'primary, reused' };
+    primary.beginTransaction = async () => shared;
+    const first = await openTrio(engine);
+    await first.scoped.commitTransaction(first.handle);
+    expect(isClosed(engine, shared)).toBe(true);
+
+    const second = await openTrio(engine);
+    expect(second.handle).toBe(shared);
+    expect(isClosed(engine, shared)).toBe(false);
+    await second.ctx.object('thing').insert({ name: 'on the reopened handle' });
+    expect(primary.writes[0].transaction).toBe(shared);
+    await second.scoped.commitTransaction(shared);
   });
 });

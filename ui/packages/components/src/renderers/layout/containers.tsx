@@ -686,6 +686,63 @@ export function usePageTabCountReporter(): ((count: number) => void) | undefined
 }
 
 /**
+ * The element a `position: sticky` box sticks inside: its nearest ancestor
+ * whose overflow is not `visible`/`clip` in either axis. `null` when the
+ * page itself scrolls (the root has no padding to make up for).
+ */
+function stickyScrollContainer(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p === document.body || p === document.documentElement) return null;
+    const style = getComputedStyle(p);
+    if (/auto|scroll|hidden|overlay/.test(`${style.overflowX} ${style.overflowY}`)) return p;
+  }
+  return null;
+}
+
+/**
+ * objectstack#35414 — how far ABOVE `top: 0` a sticky tab strip must stop so
+ * it sits flush with the visible top of its scroll container.
+ *
+ * Chromium sticks a `top: 0` box at the scroll container's CONTENT edge, not
+ * its visible edge: the record page's scroller is padded (`p-3 sm:p-4
+ * lg:p-6`), so the stuck strip hung 12–24px below the top and the cards
+ * scrolling past showed in the gap above it. The strip's `top` is the
+ * negative of the container's top padding — 0 in an unpadded host, so
+ * nothing moves there — and re-read whenever the container resizes (its
+ * padding changes at breakpoints). Before the first measure the strip keeps
+ * `top-0`, which is today's position.
+ */
+function useStickyTopInset<T extends HTMLElement>(
+  enabled: boolean,
+): [(node: T | null) => void, number] {
+  const [node, setNode] = React.useState<T | null>(null);
+  const [inset, setInset] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!enabled || !node) return undefined;
+    const scroller = stickyScrollContainer(node);
+    if (!scroller) {
+      setInset(0);
+      return undefined;
+    }
+    const measure = () => {
+      const top = Number.parseFloat(getComputedStyle(scroller).paddingTop);
+      setInset(Number.isFinite(top) && top > 0 ? top : 0);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(scroller);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [enabled, node]);
+
+  return [setNode, inset];
+}
+
+/**
  * Whether a tab's subtree holds a `list-view` block, the block that reports its
  * count through {@link PageTabPanelCountContext}. Walks the same slots
  * `collectRelatedLists` walks.
@@ -1162,6 +1219,16 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // A horizontal strip with more tabs than fit scrolls sideways, and fades at
   // each edge that hides a tab, so the reader can tell the strip goes on.
   const [stripRef, stripOverflow] = useHorizontalOverflow<HTMLDivElement>();
+  // objectstack#35414 — the stuck strip sits flush with its scroller's
+  // visible top (see `useStickyTopInset`).
+  const [stickyRef, stickyInset] = useStickyTopInset<HTMLDivElement>(!isVertical);
+  const stripNodeRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      stripRef(node);
+      stickyRef(node);
+    },
+    [stripRef, stickyRef],
+  );
 
   const listClass = cn(
     isVertical && 'flex-col h-auto items-stretch p-1',
@@ -1182,7 +1249,12 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // Pin the horizontal tab strip to the top of the scroll container so
     // users keep their bearings on long record pages. Skipped for vertical
     // layouts where the strip is a sidebar, not a header.
-    !isVertical && 'sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60',
+    // objectstack#35414 — a SOLID page-background fill: the translucent,
+    // blurred fill let the cards scrolling under the stuck strip show through
+    // and overlap the tab labels (worst in the dark theme). `bg-background` is
+    // the theme token, so dark mode gets its own page colour; the bottom rule
+    // (the inset shadow above) is untouched.
+    !isVertical && 'sticky top-0 z-20 bg-background',
   );
 
   const triggerClass = () => cn(
@@ -1232,9 +1304,10 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         schema?.alwaysShowStrip === true ||
         schema?.properties?.alwaysShowStrip === true) && (
         <TabsList
-          ref={isVertical ? undefined : stripRef}
+          ref={isVertical ? undefined : stripNodeRef}
           data-overflow={isVertical ? undefined : stripOverflow}
           className={listClass}
+          style={!isVertical && stickyInset > 0 ? { top: -stickyInset } : undefined}
         >
           {itemsWithValue.map((item) => (
             <TabsTrigger key={item.value} value={item.value} className={triggerClass()}>

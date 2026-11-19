@@ -611,15 +611,17 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   ));
 
   // The datasource-by-name map, watched through the ONE decision it makes: the
-  // ADR-0015 double write gate. A reader that resolved `objects` but not
-  // `datasources` still fails this row — the case comes back `blocked` as
-  // "external read-only", which is a verifier silently skipping an object the
-  // app explicitly opted into writes for.
+  // ADR-0015 double write gate the skipped case's reason names. Verify never
+  // writes an object on an external datasource, so the case is always
+  // `blocked`; what the map decides is whether the reason says the gate is
+  // open. A reader that resolved `objects` but not `datasources` fails this
+  // row — the reason then reads "(read-only)" for an object the app explicitly
+  // opted into writes for.
   const federated = crudCases.find((c) => c.object === PROBE_FEDERATED_OBJECT);
   rows.push(row(
     'B2 · verify deriveCrudCases federated write gate (ADR-0015 double opt-in) · datasources',
-    federated ? (federated.blocked ?? 'derived — probe insert allowed') : 'no case derived at all',
-    !federated || Boolean(federated.blocked),
+    federated ? (federated.blocked ?? 'derived — not skipped as external') : 'no case derived at all',
+    !federated || !(federated.blocked ?? '').includes('(writes allowed)'),
   ));
 
   rows.push(countRow(

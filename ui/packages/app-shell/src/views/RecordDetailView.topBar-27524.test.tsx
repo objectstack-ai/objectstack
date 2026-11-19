@@ -107,8 +107,10 @@ function Where() {
   );
 }
 
-function mountPage(entry: string | { pathname: string; search?: string; state?: unknown }) {
-  const dataSource = makeDataSource();
+function mountPage(
+  entry: string | { pathname: string; search?: string; state?: unknown },
+  dataSource: ReturnType<typeof makeDataSource> = makeDataSource(),
+) {
   render(
     <MemoryRouter initialEntries={[entry as never]}>
       <MetadataCtx.Provider value={metadata}>
@@ -254,6 +256,43 @@ describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
     const backLink = pageBar()!.querySelector('[data-record-crumb-back]')!;
     expect(backLink.getAttribute('aria-label')).toBe('Go back');
     expect(screen.queryByTestId('record-page-crumb')).toBeNull();
+  });
+});
+
+/** A read the test answers when it chooses: `findOne` for `held` waits on it. */
+function deferredRead(held: string) {
+  let answer: (row: unknown) => void = () => {};
+  const pending = new Promise((resolve) => { answer = resolve; });
+  const dataSource = makeDataSource();
+  dataSource.findOne = vi.fn(async (_o: string, recordId: string) =>
+    recordId === held ? pending : { id: recordId, name: `Record ${recordId}` }) as never;
+  return { dataSource, answer: () => answer({ id: held, name: `Record ${held}` }) };
+}
+
+describe('the breadcrumb while the record is read (objectstack#35412)', () => {
+  const crumbName = () => screen.getByTestId('record-page-crumb').querySelector('[aria-current="page"]')?.textContent;
+
+  it('names the record by its object until the read lands, never by its id', async () => {
+    const read = deferredRead('r-1');
+    mountPage(`/apps/${APP}/${LEAD}/record/r-1`, read.dataSource);
+    await waitFor(() => expect(read.dataSource.findOne).toHaveBeenCalled(), { timeout: 5000 });
+    expect(crumbName()).toBe('Lead');
+    expect(screen.getByTestId('record-page-crumb').textContent).not.toContain('#');
+    read.answer();
+    await waitFor(() => expect(crumbName()).toBe('Record r-1'));
+  });
+
+  it('a step to the next record names it by its object while it is read, not by the record left', async () => {
+    const read = deferredRead('r-2');
+    const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS };
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from } }, read.dataSource);
+    await waitFor(() => expect(crumbName()).toBe('Record r-1'), { timeout: 5000 });
+    fireEvent.keyDown(document.body, { key: 'j' });
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
+    await waitFor(() => expect(read.dataSource.findOne.mock.calls.some((call) => call[1] === 'r-2')).toBe(true));
+    expect(crumbName()).toBe('Lead');
+    read.answer();
+    await waitFor(() => expect(crumbName()).toBe('Record r-2'));
   });
 });
 
