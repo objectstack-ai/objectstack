@@ -394,6 +394,31 @@ describe('no stored token: the cookie session is asked at parse time and handed 
     expect(probe.current?.user).toBeNull();
   });
 
+  it('the server\'s 401 UNAUTHENTICATED is a signed-out answer too: one get-session, and the sign-in fallback', async () => {
+    // The platform answers an anonymous get-session 401 in the ADR-0112 envelope.
+    sessionAnswer = () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isLoading).toBe(false);
+    expect(probe.current?.user).toBeNull();
+  });
+
+  it('CONTROL: with a stored Bearer a 401 is still a stale token, purged, and nothing handed on', async () => {
+    localStorage.setItem('auth-session-token', 'tok_stale');
+    sessionAnswer = () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+
+    expect(localStorage.getItem('auth-session-token')).toBeNull();
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeUndefined();
+  });
+
   it('CONTROL: a non-OK answer hands nothing on, and the protected route waits for AuthProvider\'s own read', async () => {
     sessionAnswer = () => json(null, 503);
     runEarlySessionCheck();

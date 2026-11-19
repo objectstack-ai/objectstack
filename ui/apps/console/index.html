@@ -149,8 +149,9 @@
       `AuthProvider` would otherwise ask only after React mounts, behind the
       first visit's language-seed race (objectstack#35455): the same request
       without the `Authorization` header, and the slot carries a null token.
-      The preflight hands that answer on, a signed-out one included, so the
-      page still sends one `get-session` either way.
+      The preflight hands that answer on, a signed-out one (the server's 401
+      UNAUTHENTICATED) included, so the page still sends one `get-session`
+      either way.
 
       Every safety of the preflight is kept. Blocked storage sends nothing,
       exactly as the preflight returns early. A request that fails or answers
@@ -184,6 +185,9 @@
             ? { Authorization: 'Bearer ' + token, Accept: 'application/json' }
             : { Accept: 'application/json' },
         }).then(function (res) {
+          // The cookie question's 401 is the server's "no session" (ADR-0112
+          // UNAUTHENTICATED): a signed-out answer, handed on as one.
+          if (!token && res.status === 401) return null;
           if (!res.ok) throw new Error('get-session ' + res.status);
           return res.json().catch(function () { return null; });
         });
