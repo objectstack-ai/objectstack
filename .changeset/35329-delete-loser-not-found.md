@@ -1,0 +1,19 @@
+---
+'@objectstack/objectql': patch
+---
+
+fix(objectql)!: a by-id delete whose driver removes nothing after the row was read answers RECORD_NOT_FOUND and runs no after-delete work
+
+Clause-②: no (narrowing)
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer an engine caller gets from a by-id delete that loses a race for its row: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** for a caller of the engine's by-id delete (`engine.delete(object, { where: { id } })`, a hook's `ctx.api`, an action handler, a flow `delete_record` step) whose row is removed by another writer after this delete read it and before its own driver call. This happens when two deletes of one row run at once on an object with no metadata `beforeDelete` hook and no blocking metadata `afterDelete` hook; on such an object the two deletes do not queue behind each other.
+
+- FROM: the loser's driver answered `false` (it removed nothing), and the engine still ran every after-delete step for it: the `afterDelete` hooks, the parent roll-up summary recompute and the `data.record.deleted` realtime event. The loser's answer was `false`. On an object with such a metadata hook the loser waited for the winner and answered `RECORD_NOT_FOUND`, so the answer depended on the hook binding.
+- TO: the loser answers `RECORD_NOT_FOUND` (404), the error a by-id delete already gives for an id that names no row, and none of those steps runs for it. The winner's delete is unchanged and runs each step once. A recycle-bin entry the loser wrote is still withdrawn, as before.
+
+The REST and batch delete routes already answered 404 for this case; their answers do not change.
+
+The fix for a caller: treat `RECORD_NOT_FOUND` from a by-id delete as "the row is already gone", as for any id that names no row. A caller that tested the answer for `false` reads the error's `code` instead.
