@@ -430,27 +430,12 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d
 gh label create pinned           -R objectstack-ai/objectstack -c cfd3d7 -d "Exempt from the stale sweep (stale.yml, issues and PRs); every pm:mailbox PR carries it" 2>/dev/null || true
 gh label create work-in-progress -R objectstack-ai/objectstack -c cfd3d7 -d "PR exempt from the stale sweep (stale.yml exempt-pr-labels); applied by hand, no tool sets it" 2>/dev/null || true
 
-# lease:<area> — the AREA-LEASE family (.claude/skills/pm-dispatch/references/
-# area-lease.md). An area session hangs `lease:<area>` in the same write as its
-# dispatch pair when it claims a card, and reads it back with the pair; every
-# other area that reads a foreign `lease:*` on a card leaves the card alone. Those
-# two area-lease.md lines are the named readers; no script in scripts/pm/ reads
-# the family, and label-write.mjs sends it like any other label.
-#
-# The values are the lease table's area names, and the table is re-derived at
-# every seat, hand-over or shift (area-lease.md 〈分不分区,动态定〉), so the loop
-# below seeds the CURRENT table only — today the server lane's eight pilot areas,
-# whose objects already exist as GitHub's auto-created grey with an empty
-# description, which only `--reconcile` repairs. When a lane re-cuts its table,
-# MOVE the values here, as the release-board loop further down moves its window;
-# a retired area's object stays on its closed cards as history and needs no row.
-# A value with no row is auto-created grey on first use, so it owes one. Main
-# repo only: every lane that runs the mode keeps its cards here. Colour 0052cc is
-# outside every family above — a lease is an ownership seam, not a state, a lane
-# or a marker.
-for A in A1 A2 A3 A4 A5 E1 E2 E2b; do
-  gh label create "lease:$A" -R objectstack-ai/objectstack -c 0052cc -d "Area lease $A: the card belongs to that area's thread session; other areas leave it alone" 2>/dev/null || true
-done
+# No `lease:<area>` family. An area's ownership of a card is the `Area:` line in
+# its `Claim:` comment, beside the assignee and the seat's area table
+# (pm-dispatch references/area-lease.md), so no reference reads a `lease:*`
+# label and this file seeds none. The leftover `lease:*` objects are deleted by
+# a deliberate PM action, never a side effect of this file; ⛔ do not re-add a
+# row here: any seeded value recreates a label that action removed.
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
