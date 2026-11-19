@@ -158,8 +158,8 @@ export const CATALOG_ACTIVATION_SEGMENT = '_activation';
 
 /**
  * The ledger types this door writes, each with its refusal wording. Exactly the
- * types the resolver reads from the ledger; `capability` is code-only on the
- * regime and has no switch.
+ * types the resolver reads from the ledger; `capability` has no switch on the
+ * regime (a declaration is a name, granted or not by the sets that switch).
  */
 const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<
     'position' | 'permission' | 'sharing_rule' | 'webhook' | 'queue' | 'assignment_rule',

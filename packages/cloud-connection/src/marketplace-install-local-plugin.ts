@@ -370,10 +370,15 @@ import { planCustomizationPairInstall, type PairInstallItem } from './marketplac
 import {
     INSTALL_RENAME_PLANNER_SERVICE,
     carryInstallDeclaredRenames,
+    contributionsOf,
     reverseInstallDeclaredRenames,
     type InstallRenameRefusal,
     type InstallRenameTable,
 } from './marketplace-install-declared-renames.js';
+// [#35390] The engine's capture of one object's stored computed fields, and
+// the report of its fill — the walk `os migrate stored-expressions` runs.
+// Types only: the door asks the data engine it is handed, by member.
+import type { StoredExpressionBackfillReport, StoredExpressionCapture } from '@objectstack/objectql';
 // [#31895] The planner's one implementation, shared with the door-less
 // MarketplaceInstallRenamePlannerPlugin. Each side of the schema upgrade
 // verdict is folded by `packageUpgradeSideOf`, as `planUpgrade` folds it.
@@ -1451,6 +1456,170 @@ export function asMarketplaceRegistration<T>(artifact: T): T {
         ...artifact,
         packages: artifact.packages.map((entry: unknown) => (restated(entry) ? { ...(entry as object), source: 'marketplace' } : entry)),
     } as T;
+}
+
+/**
+ * [#35390, #32527 ruling 6816429574 letter A] The stored-expression fill a
+ * managed install or upgrade owes: the version it makes live adds a stored
+ * computed field (a non-`formula` field declaring `expression`), changes one's
+ * expression, stored type or scale, or turns a formula into one, so the
+ * object's EXISTING rows are filled with the write's own computation — every
+ * row, every organization, under `preserveAudit` — and each field is reported
+ * on the answer's `advisories`, as the metadata doors report it
+ * (`@objectstack/metadata-protocol`'s `protocol-stored-expression-fill.ts`):
+ * the same rule ids, the same element shape. Not opt-in. A boot (and so the
+ * rehydrate) never fills: rewriting data nobody ordered is why the backfill
+ * is a command (`os migrate stored-expressions`), and that command stays for
+ * a database changed outside a door.
+ *
+ * The walk and its writes are the data engine's (`captureStoredExpressions`,
+ * the walk the command runs); this door only decides when, and says what the
+ * rows hold.
+ */
+const STORED_EXPRESSION_FILLED = 'stored-expression-filled';
+const STORED_EXPRESSION_FILL_INCOMPLETE = 'stored-expression-fill-incomplete';
+
+/** One element of the install answer's `advisories`: the metadata doors' advisory shape. */
+interface InstallStoredExpressionAdvisory {
+    rule: typeof STORED_EXPRESSION_FILLED | typeof STORED_EXPRESSION_FILL_INCOMPLETE;
+    severity: 'info' | 'warning';
+    where: string;
+    path: string;
+    message: string;
+    hint: string;
+}
+
+/** The data-engine member the fill asks, duck-typed: `ObjectQL#captureStoredExpressions`. */
+interface StoredExpressionCaptureEngine {
+    captureStoredExpressions?(object: string): StoredExpressionCapture;
+}
+
+const fillWhere = (object: string, field: string) => `object "${object}" · field "${field}"`;
+const fillPath = (object: string, field: string) => `objects.${object}.fields.${field}`;
+const fillRows = (n: number) => `${n} row${n === 1 ? '' : 's'}`;
+const fillRemedy = (object: string, field: string): string =>
+    'Each such row is computed when it is next written. To fill them all at once, run '
+    + `\`os migrate stored-expressions --object ${object} --field ${field} --changed --apply\` against the `
+    + 'database (its dry run, without --apply, lists them first).';
+
+/**
+ * Capture, BEFORE the install registers anything, the stored computed fields
+ * of every object the incoming body contributes to — its own objects and the
+ * objects its `objectExtensions` extend, across every unit of a composed
+ * artifact ({@link contributionsOf}). Empty for an engine without the capture
+ * (a metadata-only test double), which fills nothing.
+ */
+function captureInstallStoredExpressions(engine: unknown, converted: unknown): StoredExpressionCapture[] {
+    const capture = (engine as StoredExpressionCaptureEngine | undefined)?.captureStoredExpressions;
+    if (typeof capture !== 'function') return [];
+    return [...contributionsOf(converted).keys()].map((object) => capture.call(engine, object));
+}
+
+/** Each changed field of `capture`, reported unfilled for `why`. */
+function unfilledAdvisories(capture: StoredExpressionCapture, why: string, hint: (field: string) => string): InstallStoredExpressionAdvisory[] {
+    const { object } = capture;
+    return capture.changedFields().map((field) => ({
+        rule: STORED_EXPRESSION_FILL_INCOMPLETE,
+        severity: 'warning' as const,
+        where: fillWhere(object, field),
+        path: fillPath(object, field),
+        message: `'${object}.${field}' computes a new value in the version this install made live, and the object's `
+            + `existing rows were NOT filled with it: ${why}. Until they are written, those rows hold NULL or the old `
+            + 'value, and every reader of the column reads it.',
+        hint: hint(field),
+    }));
+}
+
+/**
+ * Fill what each capture's object now serves that computes something new,
+ * once the install's storage sync ran, and say per field what the rows hold.
+ * Nothing for a field the version did not change, and nothing for an object
+ * that holds no row (a fresh install's new table): a clean answer stays
+ * unchanged. One object's fill failing never fails the install, nor stops the
+ * other objects' fills.
+ *
+ * `storageSyncFailed`: the install's schema sync threw, so a column this
+ * version adds may not exist; no fill is attempted and each field is reported
+ * unfilled.
+ */
+async function fillInstallStoredExpressions(
+    captures: readonly StoredExpressionCapture[],
+    options: { storageSyncFailed?: string; logger?: { info?(m: string): void; warn?(m: string): void } },
+): Promise<InstallStoredExpressionAdvisory[]> {
+    const advisories: InstallStoredExpressionAdvisory[] = [];
+    for (const capture of captures) {
+        const { object } = capture;
+        if (options.storageSyncFailed !== undefined) {
+            advisories.push(...unfilledAdvisories(capture,
+                `the schema sync this install ran failed (${options.storageSyncFailed}), so the fill was not attempted`,
+                (field) => `Resolve the schema sync failure first. ${fillRemedy(object, field)}`));
+            continue;
+        }
+        let report: StoredExpressionBackfillReport | undefined;
+        try {
+            report = await capture.fillChanged();
+        } catch (err: unknown) {
+            // Handed to the caller on the answer it reads; the install itself stands.
+            const reason = String((err as Error)?.message ?? err);
+            options.logger?.warn?.(`[MarketplaceInstallLocal] the stored-expression fill of '${object}' did not run: ${reason}`);
+            advisories.push(...unfilledAdvisories(capture, `the fill did not run (${reason})`, (field) => fillRemedy(object, field)));
+            continue;
+        }
+        if (!report) continue;
+        const whole = report.failures.length === 0 && report.skippedRows === 0 && !report.truncated
+            && report.unreadableObjects.length === 0;
+        if (whole && report.scannedRecords === 0) continue;
+        for (const f of report.fields) {
+            const concurrent = f.concurrentRows ?? 0;
+            const left = Math.max(0, f.nullRows + f.staleRows - f.written - concurrent);
+            const meanwhile = concurrent > 0
+                ? ` ${fillRows(concurrent)} written by another write while the fill ran computed it there, and were not written over.`
+                : '';
+            const faulted = f.faultedRows > 0
+                ? ` On ${fillRows(f.faultedRows)} the expression does not evaluate, so it computes NULL there, as any write of them stores.`
+                : '';
+            if (whole || (left === 0 && report.unreadableObjects.length === 0 && !report.truncated)) {
+                options.logger?.info?.(
+                    `[MarketplaceInstallLocal] filled ${f.object}.${f.field}: ${fillRows(f.written)} of ${report.scannedRecords} written`,
+                );
+                advisories.push({
+                    rule: STORED_EXPRESSION_FILLED,
+                    severity: 'info',
+                    where: fillWhere(f.object, f.field),
+                    path: fillPath(f.object, f.field),
+                    message: `'${f.object}.${f.field}' computes a new value in the version this install made live, so the `
+                        + `platform filled the object's existing rows: ${fillRows(f.written)} of ${report.scannedRecords} `
+                        + `written with the value its expression computes; the others already held it.${meanwhile}${faulted}`,
+                    hint: 'Nothing to do: every row holds what a write of it would store.',
+                });
+                continue;
+            }
+            const why = [
+                report.failures.length > 0 ? `${fillRows(report.failures.length)} refused the write` : '',
+                report.skippedRows > 0
+                    ? `${fillRows(report.skippedRows)} hold a value that a field which does not evaluate there would replace with NULL`
+                    : '',
+                report.unreadableObjects.length > 0 || report.truncated ? 'the object\'s rows could not all be read' : '',
+            ].filter(Boolean).join('; ');
+            options.logger?.warn?.(
+                `[MarketplaceInstallLocal] the stored-expression fill of ${f.object}.${f.field} did not finish: `
+                + `${fillRows(f.written)} written, ${left > 0 ? `${fillRows(left)} not` : 'others not read'} (${why})`,
+            );
+            advisories.push({
+                rule: STORED_EXPRESSION_FILL_INCOMPLETE,
+                severity: 'warning',
+                where: fillWhere(f.object, f.field),
+                path: fillPath(f.object, f.field),
+                message: `'${f.object}.${f.field}' computes a new value in the version this install made live, and the fill `
+                    + `of the object's existing rows did not finish: ${fillRows(f.written)} written, `
+                    + `${left > 0 ? `${fillRows(left)} not` : 'others not read'} (${why}). Until they are written, those rows `
+                    + `hold NULL or the old value, and every reader of the column (filters, sorts, roll-ups, reports) reads it.`
+                    + `${meanwhile}${faulted}`,
+                hint: fillRemedy(f.object, f.field),
+            });
+        }
+    }
+    return advisories;
 }
 
 /**
@@ -3527,6 +3696,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         }
 
+        // 2g. [#35390, #32527 ruling 6816429574 letter A] Capture the stored
+        //     computed fields of every object this version contributes to,
+        //     BEFORE the register makes it live, so step 4d can fill what it
+        //     changed ({@link fillInstallStoredExpressions}). Reads only the
+        //     definitions the registry serves now; no row.
+        let storedExpressionEngine: unknown;
+        try { storedExpressionEngine = ctx.getService('objectql'); } catch { /* no data engine: nothing to fill */ }
+        const storedExpressionCaptures = captureInstallStoredExpressions(storedExpressionEngine, converted);
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -3628,6 +3806,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     object definitions to the in-memory registry; the driver
         //     must be asked to materialize tables/columns before any seed
         //     insert (or user write) succeeds.
+        //     [#35390] A failed sync is recorded for step 4d, which then
+        //     fills nothing and says so on the answer.
+        let storageSyncFailed: string | undefined;
         try {
             const ql: any = ctx.getService('objectql');
             if (ql && typeof ql.syncSchemas === 'function') {
@@ -3635,6 +3816,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] syncSchemas() ran after registering ${manifestId}`);
             }
         } catch (err: any) {
+            storageSyncFailed = String(err?.message ?? err);
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] syncSchemas failed for ${manifestId}: ${err?.message ?? err}`);
         }
 
@@ -3664,6 +3846,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     makes for a boot artifact. A reinstall replaces the previous
         //     version's set rather than adding to it.
         await this.bindArtifactHandlers(ctx, converted, manifestId);
+
+        // 4d. [#35390, #32527 ruling 6816429574 letter A] Fill the existing
+        //     rows of each stored computed field this version made live —
+        //     added, its expression changed, or turned from a formula — once,
+        //     every row, every organization, under `preserveAudit`, reported
+        //     per field on the answer's `advisories`. After the schema sync
+        //     (the column exists), the datasources (the rows can be read) and
+        //     the handler bind (each write is one of this version's), and
+        //     BEFORE the seed: a freshly created table holds no row and the
+        //     answer stays clean, and seeded rows are computed by their own
+        //     writes. What is filled is what the registry SERVES now that the
+        //     capture did not: on the lenient path a register that threw
+        //     after serving part of the version fills that part, and one that
+        //     served none of it fills nothing. Never fails the install.
+        const storedExpressionAdvisories = await fillInstallStoredExpressions(storedExpressionCaptures, {
+            storageSyncFailed,
+            logger: ctx.logger,
+        });
 
         // 5. Replicate the AppPlugin start-time side-effects that the
         //    `manifest` service does NOT do on its own:
@@ -3745,6 +3945,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the object, its table, the old key and the new. Omitted when
                 // none was, so that answer's key set is unchanged.
                 ...(renamesCarried.length > 0 ? { renamesCarried } : {}),
+                // [#35390] Each stored computed field whose existing rows step
+                // 4d filled, or did not finish filling — the metadata doors'
+                // `advisories`, same rule ids and element shape. Omitted when
+                // the version changed none over rows, so that answer's key
+                // set is unchanged.
+                ...(storedExpressionAdvisories.length > 0 ? { advisories: storedExpressionAdvisories } : {}),
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
                 // #6721: the RESOLVED ledger directory on THIS host — the same

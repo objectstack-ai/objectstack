@@ -235,7 +235,7 @@ describe('[#35138] the answer names only what the caller can see — CONTROL', (
   it('a read that answers carries no member, and a server fault carries none even for an unknown object', async () => {
     const ok = await callTool(makeBridge({ served: { [OBJECT]: SERVED_FIELDS } }), 'query_records', { objectName: OBJECT, where: { subject: 'x' } });
     expect(ok.isError).toBe(false);
-    expect(ok.payload).toEqual({ object: OBJECT, records: [], total: 0 });
+    expect(ok.payload).toEqual({ object: OBJECT, records: [], total: 0, source: expect.any(Object) });
     const fault = await callTool(
       makeBridge({ served: {}, throws: () => new Error('socket hang up (test)') }),
       'query_records',

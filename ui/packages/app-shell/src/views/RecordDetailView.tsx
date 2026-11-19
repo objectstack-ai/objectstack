@@ -992,7 +992,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   const [historyEntries, setHistoryEntries] = useState<any[] | null>(null);
   const [, setHistoryLoading] = useState(false);
-  const [recordTitle, setRecordTitle] = useState<string | undefined>();
+  // objectstack#35412 — a title is read back only for the record it was
+  // resolved for. The page stays mounted when it steps to another record (the
+  // counter's ↓ ↑, the approvals queue's 「open the next one」), and the
+  // breadcrumb, the favourite and the "Recently Accessed" entry never name the
+  // new record with the old one's title.
+  const routeRecordKey = `${objectName}:${recordId}`;
+  const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
+  const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
   // Setup app draws no floating `ManagedByBadge`; the header's object-label
@@ -1290,6 +1297,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRecordStatus, setPageRecordStatus] = useState<
     'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
+  // objectstack#35412 — which record `pageRecord` holds (`object:id`). A step
+  // to another record reads it in place, so until that read lands `pageRecord`
+  // is the record left behind, and nothing names the route's record from it.
+  const [pageRecordFor, setPageRecordFor] = useState<string | null>(null);
   // objectstack#29704 — the server's code and sentence for a `failed` read it
   // ANSWERED (a 500 it explained), read by the list page's own rule
   // (`answeredLoadFailure`). `null` = no answer, so the state keeps its
@@ -1458,6 +1469,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (rec && typeof rec === 'object') {
             decidedRecordRef.current = null;
             setPageRecord(rec);
+            setPageRecordFor(decidedKey);
             setPageRecordStatus('loaded');
           } else {
             setPageRecord(null);
@@ -1548,12 +1560,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // resolver falls through to its next rung (objectui#10434). When the policy
   // arrives the readable row changes, which re-derives the title.
   useEffect(() => {
+    if (pageRecordFor !== routeRecordKey) return;
     if (!readablePageRecord || typeof readablePageRecord !== 'object' || !objectDef) return;
     const resolved = getRecordDisplayName(objectDef, readablePageRecord);
     if (resolved && resolved !== 'Untitled' && resolved !== recordTitle) {
-      setRecordTitle(resolved);
+      setHeldRecordTitle({ record: routeRecordKey, title: resolved });
     }
-  }, [readablePageRecord, objectDef, recordTitle]);
+  }, [readablePageRecord, objectDef, recordTitle, pageRecordFor, routeRecordKey]);
 
   // Once we have a human-readable title, (a) record this visit into the
   // "Recently Accessed" rail on the home page and (b) self-heal any
@@ -4408,6 +4421,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const shortRecordId = (id: string) => `#${id.length > 12 ? `${id.slice(0, 8)}…` : id}`;
+  // objectstack#35412 — the breadcrumb's name for the route's record. Until
+  // the page holds that record it is the object's label (「审批请求」), never
+  // the raw id; once it does, the record's title, resolved in this render so
+  // the frame that lands the record already draws it. The short id is left
+  // only for a loaded record with nothing to be named by.
+  const holdsRouteRecord =
+    pageRecordFor === routeRecordKey && !!readablePageRecord && typeof readablePageRecord === 'object';
+  const landedRecordName = holdsRouteRecord && !recordTitle && objectDef
+    ? getRecordDisplayName(objectDef, readablePageRecord)
+    : undefined;
+  const recordCrumbName = recordTitle
+    || (landedRecordName && landedRecordName !== 'Untitled' ? landedRecordName : undefined)
+    || (holdsRouteRecord
+      ? (pureRecordId ? shortRecordId(pureRecordId) : '')
+      : objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '');
 
   // objectstack#27058, Target 3 — the top bar on a phone: one link that
   // returns where the page came from. A top-level page reads
@@ -5180,7 +5208,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       })()}
       <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
       <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
-        {recordTitle || (pureRecordId ? shortRecordId(pureRecordId) : '')}
+        {recordCrumbName}
       </span>
     </nav>
   );
