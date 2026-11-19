@@ -478,12 +478,16 @@ describe('Seed.fallback fills in for a locale no set of the object names', () =>
       }
     });
 
-    it('names no fallback it did not use, and does not tell a correctly authored package to drop its marker', async () => {
+    it('names no fallback it did not use, and names the cause that still arises: more than one package marking the object', async () => {
       const { logger, result } = await seedUnder('ja-JP', [PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
       const infos = logger.info.mock.calls.map((c: any[]) => String(c[0]));
       expect(infos.some((m: string) => m.includes('fallback set(s) loaded'))).toBe(false);
       const message = result.errors[0]!.message;
-      expect(message).toContain('an upgrade within this process changed a package');
+      expect(message).toContain("The packages being seeded mark more than one set of 'price_book'");
+      expect(message).toContain('keep the marker on one');
+      // An upgrade replaces a package's datasets on the replay list (#35109),
+      // so the refusal no longer names an upgrade in this process as a cause.
+      expect(message).not.toContain('upgrade');
       expect(message).not.toContain('drop it from the others');
     });
 

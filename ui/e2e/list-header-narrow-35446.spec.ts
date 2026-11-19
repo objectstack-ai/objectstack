@@ -12,8 +12,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * GEOMETRY pin for objectstack#35446, the header half: an app list whose main
  * area narrows (the AI panel docked, a small window, the record drawer open)
  * draws a short header row: the title, New, and the 「⋯」 menu holding Import;
- * the description is not drawn. A full-width list keeps its description and
- * its Import button, as before.
+ * the description is not drawn. A full-width list keeps its full face. Since
+ * objectstack#35548 that face, too, holds the description and Import in its
+ * ⋮ rather than in the row (the list's 44px page bar).
  *
  * ## The rule
  *
@@ -71,6 +72,13 @@ const FULL_PAGE = 1184;
 /** Short enough that the full-width header keeps every action labelled beside it. */
 const DESCRIPTION = 'Open deals and their expected close dates';
 
+/**
+ * The view's label in the title 「Opportunities / VIEW」. Long enough that the
+ * title is wider than 60 % of the narrow row in any font, the share the full
+ * row keeps for its title beside the description.
+ */
+const VIEW_LABEL = 'Open opportunities this quarter';
+
 interface Case {
   name: string;
   viewport: number;
@@ -122,6 +130,7 @@ const t = (key, opts) => TEXT[key] ?? (opts && opts.defaultValue) ?? key;
 const objectDef = { name: 'opportunity', label: 'Opportunity', pluralLabel: 'Opportunities', icon: 'briefcase', description: ${JSON.stringify(DESCRIPTION)} };
 const toolbarBar = { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 };
 const listFavorite = { isFavorite: false, toggle: () => {} };
+const VIEW_LABEL = ${JSON.stringify(VIEW_LABEL)};
 
 function Header() {
   const [, setShowImport] = React.useState(false);
@@ -135,8 +144,8 @@ function Header() {
   });
   return h(ObjectViewPageHeader, {
     objectDef,
-    titleSwitcher: h('span', { 'data-testid': 'view-switcher' }, 'Open opportunities'),
-    titleLabel: 'Open opportunities',
+    titleSwitcher: h('span', { 'data-testid': 'view-switcher' }, VIEW_LABEL),
+    titleLabel: VIEW_LABEL,
     objectListHref: '/apps/sales/opportunity',
     objectPluralLabel: () => 'Opportunities',
     objectDesc: (def) => def.description,
@@ -295,6 +304,8 @@ interface Reading {
   spill: string[];
   /** The title is cut (its content wider than its box). */
   titleClipped: boolean;
+  /** The title's box, its content, and the row's text block it sits in, in px. */
+  title: { box: number; content: number; block: number; maxWidth: string };
 }
 
 async function read(page: Page): Promise<Reading> {
@@ -316,6 +327,12 @@ async function read(page: Page): Promise<Reading> {
       newButton: visible(header.querySelector('[data-testid="object-view-new-button"]')),
       spill,
       titleClipped: h1.scrollWidth > h1.clientWidth + 1,
+      title: {
+        box: h1.clientWidth,
+        content: h1.scrollWidth,
+        block: h1.parentElement!.clientWidth,
+        maxWidth: getComputedStyle(h1).maxWidth,
+      },
     };
   }, DESCRIPTION);
 }
@@ -350,17 +367,25 @@ test.describe('app list header in a narrowed main area — no description, Impor
     await expect.poll(() => page.evaluate(() => (window as unknown as { __imports: number }).__imports)).toBe(1);
   });
 
-  test('CONTROL: on the full list page the description and the Import button stay', async ({ page }, testInfo) => {
+  // objectstack#35548 — the list's page bar draws no description and no Import
+  // button at any width: both wait in its ⋮, beside the favorites entry. So
+  // the full-width CONTROL now reads the full face (not compact, not folded)
+  // with the two of them one click into the ⋮.
+  test('CONTROL: on the full list page the bar is not compact; the description and Import are in the ⋮', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const c: Case = { name: 'fullPage1440', viewport: 1440, frame: FULL_PAGE };
     await mount(page, c);
     const r = await read(page);
     report(testInfo, c, r);
     expect(r.compact).toBe(false);
-    expect(r.descriptionDrawn).toBe(true);
-    expect(r.importButton).toBe(true);
+    expect(r.descriptionDrawn).toBe(false);
+    expect(r.importButton).toBe(false);
     expect(r.newButton).toBe(true);
     expect(r.folded).toBe('false');
     expect(r.spill).toEqual([]);
+    await page.locator('[data-testid="object-view-more-actions"]').click();
+    await expect(page.getByTestId('object-view-description')).toHaveText(DESCRIPTION);
+    await page.getByRole('menuitem', { name: 'Import' }).click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __imports: number }).__imports)).toBe(1);
   });
 });

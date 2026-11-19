@@ -30,7 +30,14 @@
  * The posture is read off the route (`useInSetupApp`), not passed by the
  * page, so a console page outside Setup keeps the one-row header.
  *
- * The fold — in either posture (objectui#12705), a page may also pass
+ * List posture — an object's list page passes `posture="list"`
+ * (objectstack#35548): one 44px bar, the object's single-colour icon and its
+ * name at 13px, and the actions; no accent hairline, no icon tile, no
+ * subtitle. Inside the Setup app the Setup posture still wins, so every Setup
+ * page keeps one header shape.
+ *   [icon] Name [kind]                             [actions...]
+ *
+ * The fold — in every posture (objectui#12705), a page may also pass
  * `foldedActions`: its primary action and its `⋯` menu holding the rest. When
  * the header is too narrow for `actions` and its text, it draws that instead,
  * so the actions fold before the title or the description is cut:
@@ -175,6 +182,11 @@ export interface ConsolePageHeaderProps {
    * conflict with z-index of overlays).
    */
   sticky?: boolean;
+  /**
+   * `'list'` — the object list page's 44px bar (objectstack#35548). Absent ⇒
+   * the one-row header above. Ignored inside the Setup app.
+   */
+  posture?: 'list';
   /** Additional className applied to the outer container. */
   className?: string;
   /** Optional data-testid for E2E selectors. */
@@ -204,6 +216,7 @@ export function PageHeader({
   compactBelow,
   accentColor,
   sticky = false,
+  posture,
   className,
   'data-testid': testId,
 }: ConsolePageHeaderProps) {
@@ -213,6 +226,8 @@ export function PageHeader({
   const style = { '--page-header-accent': accent } as React.CSSProperties;
   // objectui#12606 — Setup's posture: the description under the title.
   const setup = useInSetupApp();
+  // objectstack#35548 — the list page's 44px bar; Setup's posture outranks it.
+  const list = posture === 'list' && !setup;
 
   // objectui#12705 — the actions fold before the text is cut.
   const canFold = foldedActions != null && foldedActions !== false;
@@ -257,17 +272,19 @@ export function PageHeader({
       style={style}
       className={cn(
         'relative shrink-0 border-b bg-background z-10',
+        list && 'h-11',
         sticky &&
           'sticky top-0 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/75',
         className,
       )}
       data-testid={testId ?? 'page-header'}
-      data-posture={setup ? 'setup' : 'row'}
+      data-posture={setup ? 'setup' : list ? 'list' : 'row'}
       data-compact={compact ? 'true' : undefined}
     >
       {/* Accent hairline — a 2px gradient strip that fades to transparent at
           both edges. Picks up the app's accent color, or the default primary
-          token. Decorative only. */}
+          token. Decorative only, and not on the list bar. */}
+      {!list && (
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-[2px] opacity-80"
@@ -276,8 +293,26 @@ export function PageHeader({
             'linear-gradient(90deg, transparent, var(--page-header-accent), transparent)',
         }}
       />
+      )}
 
-      {setup ? (
+      {list ? (
+        <div className="flex h-full items-center justify-between gap-3 px-4">
+          {/* One line at 13px: the object's icon in one colour (the object
+              model carries no colour, objectstack#35547), its name, its kind. */}
+          <div ref={textRef} className="flex min-w-0 flex-1 items-center gap-2">
+            {icon && (
+              <span className="flex shrink-0 text-muted-foreground [&_svg]:h-4 [&_svg]:w-4" data-testid="page-header-icon">
+                {icon}
+              </span>
+            )}
+            <h1 className="min-w-0 max-w-full shrink-0 truncate text-[13px] font-semibold leading-5 text-foreground">
+              {title}
+            </h1>
+            {badge}
+          </div>
+          {trailing}
+        </div>
+      ) : setup ? (
         <div className="flex justify-between items-center gap-3 py-3 px-4 sm:px-6">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {icon && <IconTile size="setup">{icon}</IconTile>}
@@ -313,7 +348,10 @@ export function PageHeader({
               `border-box` a min-height there would count that row's padding. */}
           <div ref={textRef} className="flex items-center gap-2.5 min-w-0 flex-1 min-h-9">
             {icon && <IconTile size="row">{icon}</IconTile>}
-            <h1 className="min-w-0 max-w-full sm:max-w-[60%] shrink-0 text-base sm:text-lg font-semibold tracking-tight text-foreground truncate leading-tight">
+            {/* The 60 % cap keeps room for the description beside the title;
+                the compact form draws none, so its title takes the whole row
+                (objectstack#35446). */}
+            <h1 className={cn('min-w-0 max-w-full shrink-0 text-base sm:text-lg font-semibold tracking-tight text-foreground truncate leading-tight', !compact && 'sm:max-w-[60%]')}>
               {title}
             </h1>
             {badge}

@@ -24,8 +24,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * in `packages/plugin-list/src/listToolbarRow.ts`, by name), the 「In a queue」
  * toggle's and the Filter button's class strings and the phone touch-target
  * classes from plugin-list, the switcher's own classes from app-shell's
- * `objectViewTitleSwitcher.tsx` (which draws no record count beside the name,
- * objectstack#34603), and the phone title's wrapper from
+ * `objectViewTitleSwitcher.tsx` (the trigger now draws the view type's icon
+ * and the record count beside the name, objectstack#35548), and the phone
+ * title's wrapper from
  * `ObjectView.tsx`, compiled with the installed `tailwindcss`. Change a class
  * in any of them and what this file measures changes with it.
  *
@@ -98,7 +99,7 @@ const ROW = Object.fromEntries(ROW_NAMES.map((n) => [n, constant(rowSrc, ROW_FIL
 const switcherSrc = read(SWITCHER_FILE);
 const objectViewSrc = read(OBJECT_VIEW_FILE);
 const SWITCHER = {
-  phoneTitle: tagClass(objectViewSrc, OBJECT_VIEW_FILE, 'data-testid="list-phone-title"', ['min-w-0', 'font-semibold']),
+  phoneTitle: tagClass(objectViewSrc, OBJECT_VIEW_FILE, 'data-testid="list-phone-title"', ['min-w-0', 'max-sm:font-semibold']),
   trigger: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher"', ['min-w-0', 'max-sm:min-h-11']),
 };
 // The switcher's outer span is the first element of its return.
@@ -111,9 +112,18 @@ const SWITCHER_OUTER = (() => {
 const BUTTON_BASE = 'inline-flex items-center justify-center whitespace-nowrap';
 const QUEUE = `${BUTTON_BASE} ${tagClass(listSrc, LIST_FILE, 'data-testid="queue-sitting-filter"', ['shrink-0', 'h-7'])}`;
 const PHONE_TOUCH_TARGET = constant(read(TOUCH_FILE), TOUCH_FILE, 'PHONE_TOUCH_TARGET');
-const ICON_BUTTON = `${BUTTON_BASE} ${tagClass(listSrc, LIST_FILE, 'data-testid="toolbar-filter-trigger"', ['h-7', 'min-w-7'])} ${PHONE_TOUCH_TARGET}`;
+// The Filter / Sort / Options triggers draw from one constant (objectstack#35548);
+// below `sm` they are icons, their text labels `hidden sm:inline`.
+const TEXT_TRIGGER = constant(rowSrc, ROW_FILE, 'TOOLBAR_TEXT_TRIGGER');
+if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="toolbar-filter-trigger"/.test(listSrc)) {
+  throw new Error(`${LIST_FILE}: the Filter trigger no longer draws from TOOLBAR_TEXT_TRIGGER + PHONE_TOUCH_TARGET`);
+}
+const ICON_BUTTON = `${BUTTON_BASE} ${TEXT_TRIGGER} ${PHONE_TOUCH_TARGET}`;
 const ICON = 'h-3.5 w-3.5';
-const CHEVRON = 'h-4 w-4 shrink-0';
+// The trigger's own children (objectstack#35548): type icon → name → count → caret.
+const TYPE_ICON = 'flex shrink-0 h-4 w-4';
+const COUNT = 'shrink-0 font-normal tabular-nums';
+const CARET = 'h-3.5 w-3.5 shrink-0';
 const CHIP = 'h-7 w-24 shrink-0';
 
 /** The classes the row uses, with the phone additions or (`phone: false`) without them. */
@@ -136,7 +146,7 @@ function fixture(label: string, { chips = 0, phone = true } = {}): string {
   <div class="${c.left}">
     <div id="leading" class="${c.leading}">
       <span class="${SWITCHER.phoneTitle}"><span class="flex min-w-0"><span class="${SWITCHER_OUTER}">
-        <button id="trigger" class="${SWITCHER.trigger}"><span id="label" class="truncate">${label}</span><span class="${CHEVRON}"></span></button>
+        <button id="trigger" class="${SWITCHER.trigger}"><span class="${TYPE_ICON}"></span><span id="label" class="truncate">${label}</span><span class="${COUNT}">1,284</span><span class="${CARET}"></span></button>
       </span></span></span>
     </div>
     ${chips > 0 ? `<div id="chips" class="${c.filters}"><div class="flex items-center gap-1">${Array.from({ length: chips }, () => `<span class="${CHIP}"></span>`).join('')}</div></div>` : ''}
@@ -153,7 +163,9 @@ const CANDIDATES = [
   QUEUE,
   ICON_BUTTON,
   ICON,
-  CHEVRON,
+  TYPE_ICON,
+  COUNT,
+  CARET,
   CHIP,
   'truncate flex min-w-0 items-center gap-1',
 ]

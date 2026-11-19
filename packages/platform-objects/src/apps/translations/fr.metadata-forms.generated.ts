@@ -989,6 +989,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Paramètres",
         helpText: "Les noms que les phrases peuvent remplir (par ex. state) : le corps lève { code, params: { state } }, et un espace réservé {{ state }} en affiche la valeur. Absent : les phrases sont du texte brut"
       },
+      texts: {
+        label: "Textes",
+        helpText: "Les phrases que le hook écrit dans les enregistrements, indexées par la clé snake_case que son code demande avec ctx.text (par ex. follow_up_subject). Le hook reçoit le message déclaré dans la langue de l’organisation, traduit, avec le message déclaré comme repli. Pour un corps JavaScript (L2) ou un gestionnaire ; refusé sur un corps expression"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "La phrase que le hook écrit lorsque son code demande cette clé. Texte brut, sauf si l’entrée déclare des params : un espace réservé {{ name }} reçoit alors un paramètre déclaré"
+      },
+      "texts.params": {
+        label: "Paramètres",
+        helpText: "Les noms que la phrase peut remplir (par ex. lead) : le code demande ctx.text(key, { lead }), et un espace réservé {{ lead }} en affiche la valeur. Absent : la phrase est du texte brut"
+      },
       handler: {
         label: "Gestionnaire",
         helpText: "Nom de la fonction de gestion (obsolète — préférez `body`)"

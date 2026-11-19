@@ -248,7 +248,7 @@ export const SelectionPageBar: React.FC<SelectionPageBarProps> = ({
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="list-selection-bar">
       <span
-        className="shrink-0 text-base sm:text-lg font-semibold tracking-tight tabular-nums"
+        className="shrink-0 text-[13px] font-semibold leading-5 tabular-nums"
         data-testid="list-selection-count"
       >
         {allMatchingSelected
