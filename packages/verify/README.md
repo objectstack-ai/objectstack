@@ -68,8 +68,17 @@ broke the example app" — it's "a valid primitive your app uses, but the exampl
 don't exercise, silently breaks at runtime." Point this at *your* app.
 
 > Posture: development / in-memory. The harness forces `NODE_ENV=development` to
-> provision a known dev admin and uses an in-memory database. It never touches a
-> real database or production data.
+> provision a known dev admin, and its own database is an in-memory one it
+> creates for the run. Datasources the app declares are connected the way
+> `objectstack dev` connects them, so reads of an object bound to one reach that
+> datasource. Verify's own writes do not: every derived write family leaves an
+> object on an external datasource out, even one whose write gate is open
+> (`external.allowWrites` and the object's `external.writable`), and reports it
+> `skipped` as `external datasource "<name>" (writes allowed | read-only): not
+> exercised`. A write the app itself makes there (its seed, or a hook or flow
+> that one of verify's writes fires) goes where the app sends it, as under
+> `objectstack dev`; only the `--flow` run refuses every write routed away
+> from the in-memory database.
 
 ## CLI (zero-config)
 
