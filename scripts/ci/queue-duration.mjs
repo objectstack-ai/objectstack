@@ -278,6 +278,9 @@ export async function listQueueRuns(api, repo, since, until) {
       got.push(...rows);
       if (rows.length < 100) break;
     }
+    // A short page that does not throw is still a short listing: rows under
+    // the slice's own total_count refuse, never read as a smaller queue.
+    if (got.length < total) throw new Error(`the slice ${iso(a)}..${iso(b)} listed ${got.length} of its ${total} runs -- NOT MEASURED rather than a truncated reading`);
     out.push(...got);
   }
   // A run listed in two slices (a boundary second) is one run.
@@ -467,7 +470,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'percentile and window parsing': 6,
   'grouping by head SHA: green, red, cancelled, running, unlisted': 9,
   'verdict: the median budget, the p90 alarm, the sample floor, report-only': 6,
-  'listing: the adaptive split, de-dup across slices, and the refusals': 5,
+  'listing: the adaptive split, de-dup across slices, and the refusals': 6,
   'critical run: the slowest jobs of the run that finished last': 4,
   'budget file: the tracked file, and malformed shapes refused': 7,
   'card: files once, refreshes the oldest, refuses an unfinished scan': 10,
@@ -591,6 +594,8 @@ async function selfTest() {
       return { total_count: 300, workflow_runs: mkRuns(100, 0) };
     };
     t(B, 'a page that cannot be read fails the whole listing, never a shorter one', await throwsAsync(() => listQueueRuns(dies, 'o/r', since, until), 'HTTP 502'));
+    const short = async (p) => ({ total_count: 300, workflow_runs: /[?&]page=1(&|$)/.test(p) ? mkRuns(100, 0) : mkRuns(40, 100) });
+    t(B, 'a short page under total_count refuses, never a shorter listing', await throwsAsync(() => listQueueRuns(short, 'o/r', since, until), 'listed 140 of its 300 runs'));
   }
 
   // ── critical jobs
