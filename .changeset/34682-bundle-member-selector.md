@@ -27,7 +27,11 @@ For a bundle that only stores a non-canonical row (a package-less `fr-FR` row wi
 
 The plain read, `/layers` and the execution read now ask every layer for the canonical member when no member is named. They take the registry's bare-name answer only when it is that member. The base-address fallback serves only the base's canonical member, and an exact address (`?package=`) replaces another package's item only with the holder's item at the addressed member. So each of these arrangements answers 404 on every door naming no member, the same as `?member=en-US` and `/published`, before and after a restart.
 
-A bundle that ships or stores its canonical member is served exactly as before. So is any named member, and so is every type with no members. A non-canonical member is still read with its own selector, for example `?member=fr-FR`, which the Studio list already links to for each member.
+A bundle that ships or stores its canonical member keeps its status and served body, and so does any named member. Three more answers move:
+
+- `/layers` naming no member, where the canonical member is stored over a package that ships only another member: `code` goes from that member's body to `null`, as `/layers?member=en-US` already answered. Status and `effective` do not move.
+- For a type with no members, `/layers?package=X`, where X holds nothing of the name and the only holder is disabled: `code` goes from the disabled holder's artifact to `null`. A disabled package holds no name.
+- `?package=X` naming no member, where X does not hold the name and the environment stores it only in a non-canonical member: the read was refused `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming the environment) once a restart had hydrated the row. It now answers the `404` that `?member=en-US` already answered, on the plain read and `/layers`. A non-canonical member is still read with its own selector, for example `?member=fr-FR`, which the Studio list already links to for each member.
 
 **Reverses two statements of the 18.6.0 note** for the arrangement where base A ships `email_template` `welcome` in `fr-FR` only and dependent D, which declares A, stores `en-US`:
 

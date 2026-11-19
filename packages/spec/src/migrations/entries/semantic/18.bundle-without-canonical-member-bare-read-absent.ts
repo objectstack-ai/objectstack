@@ -26,7 +26,11 @@ export const entry: SemanticMigration = {
     + 'another member and a dependent that declares it stores the canonical member, naming no package (the base\'s '
     + 'other member was served); (3) ?package=X where X ships no canonical member while another package ships it (a '
     + 'dependent, or a disabled holder, which the read naming no package re-addresses to X): X\'s other member was '
-    + 'served. ?member=CANONICAL, a named non-canonical member and /published do not move',
+    + 'served. Two more answers move with them: /layers naming no member, where the canonical member is stored over a '
+    + 'package that ships only another member, reports code null where it reported that member\'s body (status and '
+    + 'effective do not move); and ?package=X naming no member, where X does not hold the name and the environment '
+    + 'stores it only in a non-canonical member, answers 404 where it was refused 409 after a restart. '
+    + '?member=CANONICAL, a named non-canonical member and /published do not move',
   replacement:
     'Name the member: GET /api/v1/meta/TYPE/NAME?member=MEMBER (for example ?member=fr-FR), with ?package= where the '
     + 'address needs it, serves that member, as before.',
