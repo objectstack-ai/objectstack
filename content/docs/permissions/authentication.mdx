@@ -607,6 +607,19 @@ the callback redirects with `error=account_not_linked`. The platform identity pr
 (`objectstack-cloud`) is the one exception, and an unlinked provider never re-links
 itself. See [Linking to an existing account](/docs/permissions/sso#linking-to-an-existing-account).
 
+A sign-in that would create a new account through a social provider is judged by the
+deployment's audience posture. Under `email_domain`, and under `open` while email
+verification is in force (the default; only the deployment can declare it off), the
+account is created only when the provider reports the address verified. Otherwise the
+sign-in is refused `403 SELF_REGISTRATION_CLOSED` (the callback redirects with
+`error=SELF_REGISTRATION_CLOSED`), as it is under `invite_only`, and nothing is written:
+no account, no session, no membership. A pending invitation addressed to the person does
+not change this, because it is matched by the same address; once the provider verifies
+the address, the next sign-in is admitted. The rule covers every provider in
+`socialProviders`, a provider added later included. Identity providers an operator
+registers (`oidcProviders` entries and SSO providers) are not affected, and neither is
+the first account of a fresh install.
+
 ---
 
 ## Enterprise Authentication Hardening (ADR-0069)
