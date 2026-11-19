@@ -1484,6 +1484,82 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
   });
 });
 
+/** The admin audit rows a removal writes (`writeAdminAudit`, action `delete`); an add's row is `create`. */
+const removalAuditRows = (s: Awaited<ReturnType<typeof stage>>): any[] =>
+  ((s.engine.tables.get('sys_audit_log') ?? []) as any[]).filter((r) => r.action === 'delete');
+
+describe('[#34404] admin/remove-sso-user writes an admin audit row for a removal that committed', () => {
+  it('a removal the host took writes one delete row naming the admin, the person and the decision', async () => {
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.typo@exmaple.com');
+
+    const res = await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row('audit.typo@exmaple.com')).toBeUndefined();
+    const rows = removalAuditRows(s);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'delete',
+      user_id: s.ids.admin,
+      actor: s.ids.admin,
+      object_name: 'sys_user',
+      record_id: id,
+    });
+    expect(JSON.parse(rows[0].metadata)).toEqual({ event: 'user.admin_removed_pending', hostNotified: true });
+  });
+
+  it('a removal with no host wired writes the row with hostNotified false', async () => {
+    const s = await managedStage({ host: 'none' });
+    const id = await addPending(s, 'audit.nohost@example.com');
+
+    expect((await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    const rows = removalAuditRows(s);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].metadata)).toEqual({ event: 'user.admin_removed_pending', hostNotified: false });
+  });
+
+  it('CONTROL: a host that cannot be reached refuses the removal with 503 and no row is written', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.unreachable@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(503);
+    expect(v.code).toBe('SERVICE_UNAVAILABLE');
+    expect(s.row('audit.unreachable@example.com')).toBeDefined();
+    expect(removalAuditRows(s)).toHaveLength(0);
+  });
+
+  it('CONTROL: a host refusal and a person who is not pending write no row', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new EnvironmentUserHostRefusal(409, 'RESOURCE_CONFLICT', 'An organization owner cannot be removed here.');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.refused@example.com');
+
+    const refused = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+    expect(refused.status, refused.text).toBe(409);
+    expect(refused.code).toBe('RESOURCE_CONFLICT');
+    expect(s.row('audit.refused@example.com')).toBeDefined();
+
+    const notPending = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member }, s.bearers.admin));
+    expect(notPending.status, notPending.text).toBe(409);
+    expect(notPending.code).toBe('RESOURCE_CONFLICT');
+
+    expect(removalAuditRows(s)).toHaveLength(0);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup → Users: Unlock is offered and works without the admin plugin
 // ─────────────────────────────────────────────────────────────────────────────

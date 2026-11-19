@@ -9,44 +9,68 @@ import { Field, FieldType, isMultiValueField } from '@objectstack/spec/data';
 // costing 1 × TS2835 plus one TS7006 per callback parameter in the file.
 import { deriveCrudCases, fixtureBody, laterBy, uniqueFields, vary } from './derive.js';
 
-describe('deriveCrudCases — federated (external) objects (ADR-0015)', () => {
-  it('blocks a read-only external object so verify never probe-inserts it', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: false } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders' }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toMatch(/external read-only/);
+// Verify writes only to its ephemeral store: an object on an external
+// datasource is blocked whatever its write gate says, and the reason names the
+// gate's state. The boot-level proof that no write reaches such a datasource is
+// `verify.external-datasource-no-writes.test.ts`.
+describe('deriveCrudCases — objects on an external datasource are not exercised (ADR-0015)', () => {
+  const external = (dsExternal: Record<string, unknown>, objExternal: Record<string, unknown> | undefined) => ({
+    datasources: [{ name: 'wh', schemaMode: 'external', external: dsExternal }],
+    objects: [
+      {
+        name: 'wh_order',
+        datasource: 'wh',
+        ...(objExternal ? { external: objExternal } : {}),
+        fields: { amount: { type: 'number' } },
+      },
+    ],
+  });
+  const caseOf = (config: any) => deriveCrudCases(config).find((x) => x.object === 'wh_order');
+
+  it('blocks a read-only external object and names it read-only', () => {
+    const c = caseOf(external({ allowWrites: false }, { remoteName: 'orders' }));
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+    expect(c?.body).toBeUndefined();
   });
 
-  it('blocks when the object opts in but the datasource does not', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: false } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', writable: true }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toMatch(/external read-only/);
+  it('blocks when the object opts in but the datasource does not, and names it read-only', () => {
+    const c = caseOf(external({ allowWrites: false }, { remoteName: 'orders', writable: true }));
+    expect(c?.blocked).toContain('(read-only): not exercised');
   });
 
-  it('does NOT block a fully write-opted-in external object (datasource + object)', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: true } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', writable: true }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toBeFalsy();
+  it('blocks a fully write-opted-in external object (datasource + object) and names its gate open', () => {
+    const c = caseOf(external({ allowWrites: true }, { remoteName: 'orders', writable: true }));
+    expect(c?.blocked).toContain('external datasource "wh" (writes allowed): not exercised');
+    expect(c?.body).toBeUndefined();
   });
 
-  it('leaves managed objects unaffected', () => {
-    const config = { objects: [{ name: 'task', fields: { title: { type: 'text' } } }] };
-    const c = deriveCrudCases(config).find((x) => x.object === 'task');
-    expect(c?.blocked).toBeFalsy();
+  it('blocks an object bound to an external datasource by its schemaMode alone', () => {
+    const c = caseOf(external({ allowWrites: true }, undefined));
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+  });
+
+  it('a required relation to an external object is blocked too, so nothing is written for it', () => {
+    const config = external({ allowWrites: true }, { remoteName: 'orders', writable: true });
+    config.objects.push({
+      name: 'wh_note',
+      fields: { order: { type: 'lookup', reference: 'wh_order', required: true } },
+    } as any);
+    expect(deriveCrudCases(config).find((x) => x.object === 'wh_note')?.blocked).toContain(
+      'required relational target "wh_order"',
+    );
+  });
+
+  it('leaves managed objects unaffected, including one on a declared managed datasource', () => {
+    const config = {
+      datasources: [{ name: 'side', schemaMode: 'managed' }],
+      objects: [
+        { name: 'task', fields: { title: { type: 'text' } } },
+        { name: 'side_task', datasource: 'side', fields: { title: { type: 'text' } } },
+      ],
+    };
+    const cases = deriveCrudCases(config);
+    expect(cases.find((x) => x.object === 'task')?.blocked).toBeFalsy();
+    expect(cases.find((x) => x.object === 'side_task')?.blocked).toBeFalsy();
   });
 });
 

@@ -11,11 +11,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { analyzeRelationshipTraversals, parseCelToAst } from '@objectstack/formula';
+import { analyzeRelationshipTraversals, collectCelRootIdentifiers, parseCelToAst } from '@objectstack/formula';
 import {
   callsReceiverMethod,
   formulaReadsInRequiredVisibleWhen,
   predicateSource,
+  readsOsRoot,
   referenceReadsInRequiredVisibleWhen,
   type FieldReader,
   type TraversalReader,
@@ -60,37 +61,54 @@ const readFields: FieldReader = (source, root) => {
   return a ? { bare: a.bareFields, through: new Set(a.traversals.keys()) } : null;
 };
 const callsCan = (source: string) => callsReceiverMethod(parseCelToAst(source), 'can');
+const readsOs = (source: string) => readsOsRoot(collectCelRootIdentifiers, source);
 
 const SIBLINGS: Record<string, Record<string, unknown>> = {
   account: { type: 'lookup', reference: 'account' },
   amount: { type: 'number' },
   stage: { type: 'select' },
   risk: { type: 'formula', expression: "record.amount > 100 ? 'high' : 'low'" },
+  mine: { type: 'formula', expression: "current_user.id == 'u1'" },
   tier_name: { type: 'formula', expression: 'record.account.tier' },
   tier_risk: { type: 'formula', expression: "record.tier_name == 'gold' ? 'high' : 'low'" },
   stage_label: { type: 'formula', expression: 'label(record.stage)' },
   can_edit: { type: 'formula', expression: "current_user.can('account', 'edit')" },
+  org_flag: { type: 'formula', expression: "os.org.id == 'acme'" },
+  org_risk: { type: 'formula', expression: "record.org_flag ? 'high' : 'low'" },
+  org_tier: { type: 'formula', expression: "record.org_flag && record.tier_name == 'gold'" },
 };
 
-const formulaReads = (def: Record<string, unknown>) => formulaReadsInRequiredVisibleWhen(def, SIBLINGS, readFields, callsCan);
+const formulaReads = (def: Record<string, unknown>) =>
+  formulaReadsInRequiredVisibleWhen(def, SIBLINGS, readFields, callsCan, readsOs);
+const NONE = { writePath: [], formOnly: [] };
 
 describe('requiredVisibleWhenReference — the formula advisory (ADR-0113 D1, as amended)', () => {
-  it('names a formula a required field\'s visibleWhen reads; one the server computes is not unservable', () => {
-    expect(formulaReads({ required: true, visibleWhen: "record.risk == 'high'" })).toEqual({ formulas: ['risk'], unservable: [] });
+  it('draws nothing for a formula the form computes: the form and the server judge the same value', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.risk == 'high'" })).toEqual(NONE);
+    expect(formulaReads({ required: true, visibleWhen: 'record.mine' })).toEqual(NONE);
   });
 
-  it('marks a formula over a formula that reads through a reference, at any depth', () => {
+  it('marks a formula over a formula that reads through a reference, at any depth, as one the server cannot compute', () => {
     expect(formulaReads({ required: true, visibleWhen: "record.tier_risk == 'high'" }))
-      .toEqual({ formulas: ['tier_risk'], unservable: ['tier_risk'] });
+      .toEqual({ writePath: ['tier_risk'], formOnly: [] });
   });
 
-  it('marks a formula that calls label() or current_user.can()', () => {
-    expect(formulaReads({ required: true, visibleWhen: "record.stage_label == 'Won' || record.can_edit" }))
-      .toEqual({ formulas: ['stage_label', 'can_edit'], unservable: ['stage_label', 'can_edit'] });
+  it('marks a formula that calls label() or current_user.can(), and names only those beside a computable one', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.stage_label == 'Won' || record.can_edit || record.risk == 'high'" }))
+      .toEqual({ writePath: ['stage_label', 'can_edit'], formOnly: [] });
+  });
+
+  it('marks a formula that reads `os`, at any depth, as one only the form cannot compute', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.org_flag || record.org_risk == 'high'" }))
+      .toEqual({ writePath: [], formOnly: ['org_flag', 'org_risk'] });
+  });
+
+  it('lets a mark the server shares outrank `os` at any depth', () => {
+    expect(formulaReads({ required: true, visibleWhen: 'record.org_tier' })).toEqual({ writePath: ['org_tier'], formOnly: [] });
   });
 
   it('draws nothing for a field that is not required, or a predicate reading no formula', () => {
-    expect(formulaReads({ visibleWhen: "record.risk == 'high'" })).toEqual({ formulas: [], unservable: [] });
-    expect(formulaReads({ required: true, visibleWhen: 'record.amount > 5' })).toEqual({ formulas: [], unservable: [] });
+    expect(formulaReads({ visibleWhen: "record.tier_risk == 'high'" })).toEqual(NONE);
+    expect(formulaReads({ required: true, visibleWhen: 'record.amount > 5' })).toEqual(NONE);
   });
 });

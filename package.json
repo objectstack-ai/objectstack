@@ -84,7 +84,7 @@
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:issue-citations": "node scripts/check-issue-citations.mjs --self-test",
     "check:pm-record-recognisers": "node scripts/pm/record-recognisers.mjs --self-test && node scripts/pm/check-owed-reviews.mjs --self-test && node scripts/pm/mailbox-open.mjs --self-test && node scripts/pm/fleet-roster.mjs --self-test",
-    "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
+    "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test && node scripts/pm/card-pick.mjs --self-test",
     "check:pm-write-pace": "node scripts/pm/write-pace.mjs --self-test",
     "check:pm-fleet-token": "node scripts/pm/fleet-token.mjs --self-test",
     "check:pm-issue-create": "node scripts/pm/issue-create.mjs --self-test",

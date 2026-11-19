@@ -72,6 +72,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Doit changer de mot de passe",
         help: "Lorsque cette option est activée, l’utilisateur doit changer son mot de passe avant de pouvoir continuer. Activée lorsqu’un administrateur crée ou importe le compte, ou en réinitialise le mot de passe ; gérée par le système."
       },
+      dev_seed_credential: {
+        label: "Identifiant d'amorçage de développement",
+        help: "Défini sur un compte créé par l'amorçage de développement. Tant que son mot de passe est encore celui de l'amorçage, un serveur de production refuse sa connexion et toute nouvelle session ; os user set-password définit un nouveau mot de passe et l'efface. Géré par le système ; jamais renvoyé en lecture."
+      },
       mfa_required_at: {
         label: "MFA exigée le",
         help: "Date à laquelle la MFA obligatoire s’est appliquée pour la première fois à cet utilisateur (point de départ du délai de grâce). Sert de base à mfa_required ; géré par le système."
@@ -279,6 +283,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "Définir le mot de passe",

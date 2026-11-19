@@ -179,7 +179,7 @@
  *       hold state legal
  *       ONLY with a machine-readable exit: `Restart-when: closed <owner/repo>#N`
  *       (fired by the same unlock scan as `Blocked-by:`, and since #10403 over
- *       the same TWO channels — body OR comment, the H4/H14 contract; a
+ *       the same TWO channels — body OR comment, the H4 contract; a
  *       comment-parked exit fired and sat unnoticed ~2 days under the old
  *       body-only read) or a one-line executable predicate. A hold nothing can fire
  *       is indistinguishable from an abandoned card. ⚠️ A `closed …#N` exit
@@ -217,10 +217,13 @@
  *       review ACCEPT, so ready = reviewed by construction; a reviewed PR
  *       that left the merge queue (or never entered it) with nobody handling
  *       it would otherwise wait silently forever. Patrol input, not a gate.
- *   H13 a card carrying `domain:*` with NO pm-state label, aged past one
+ *   H13 a card carrying `area:*` with NO pm-state label, aged past one
  *       sweep cycle — the half-annotated shape the protocol's own
  *       single-label writes produce by design, which the triage sweep's
- *       disjunct ③ ("有 domain:* 无 pm-state") exists to heal hourly. In that
+ *       disjunct ③ ("`area:*` 无 pm-state") exists to heal hourly. `area:*` is
+ *       the routing label triage's first touch writes; a `domain:*` label
+ *       routes nothing (file ownership is derived from the paths a change
+ *       touches), so a card carrying only one is out of H13's scope. In that
  *       shape the card is invisible to every seat's candidate query (routing
  *       landed, the state machine never did), and it is ALSO invisible to
  *       every label-scoped listing in this sweep — the shape is defined by
@@ -233,43 +236,16 @@
  *       when the card's own title/body self-declares P0/data-integrity: for
  *       that class the emergency-triage channel (immediate triage subagent)
  *       is the mandated move, never the hourly Routine.
- *   H14 `pm:blocking` cache incoherence, in BOTH directions, read off the
- *       `Blocked-by:` reverse index this sweep already has the bodies for.
- *       `pm:blocking` is not a state a seat sets: the state model makes it a
- *       CACHE the triage sweep derives from that index (「分诊 sweep 自
- *       `Blocked-by:` 索引推导的缓存,⛔ 不手工挂」), and the lane selection
- *       order ranks it second only to `priority:p0`. A cache with a ranking
- *       consumer and no coherence check drifts in two different ways, and
- *       each lies differently: a card carrying the label that NOTHING targets
- *       is boosted past fresher work on the authority of a dependency that
- *       does not exist (worse than an absent label — it lies with authority),
- *       while a card that IS targeted and does NOT carry it is a real
- *       unblocker the selection order cannot see. Report-only, and pointedly
- *       so: the producer is the triage sweep's derivation pass, so the remedy
- *       is always a derivation that runs, never a label written from here.
- *       The index it reads is the UNION of both channels (body ∪ comment),
- *       for the same reason H4 reads both — and here the cost of reading one
- *       was measured: #9465 and #9968 were reported stale while their
- *       dependents (#9709/#9828 and #9969/#9652) stated the wait in comments.
- *       That is the 「量具错位」 the 2026-08-19 ruling on #9948 named — 「修量
- *       具而非追假 stale」 — and both shapes are regression pins now. The two
- *       directions treat an INCOMPLETE index differently on purpose: stale is
- *       a claim about absent evidence and is suspended when any gated comment
- *       fetch failed, while missing is a claim about evidence in hand and
- *       cannot be manufactured by reading more. See the predicate.
- *       Both directions were non-empty at the reading this item landed on
- *       (2026-08-19, 234 open cards, 17 `Blocked-by:` body lines): ONE stale
- *       card and FIVE missing ones, with not a single coherent pairing on the
- *       board — the cache had no reader checking it and had drifted to 0%
- *       agreement with the index it is derived from.
- *   H15 the oldest UNCLAIMED `pm:blocking` card and its age — one row, no
- *       threshold, selection-order compliance made visible (maintainer,
- *       2026-08-19: 「然后车道项目经理应该优先处理 blocking」). Where H14 asks
- *       whether the cache is TRUE, H15 asks whether anyone acted on it: a
- *       lane that keeps taking fresher picks past an unclaimed blocking card
- *       now says so on the anchor, by name. Deliberately not an alarm and
- *       deliberately unconditional — see the rationale on the predicate for
- *       why this one carries no threshold constant.
+ *   H14, H15 — RETIRED with the `pm:blocking` label. They audited a label
+ *       CACHE derived from the `Blocked-by:` reverse index (H14) and the
+ *       order that consumed it (H15). The label left the vocabulary: the
+ *       blocking relation has ONE source, the line-start `Blocked-by:`
+ *       lines, and no label is typed for it — so there is no cache left to
+ *       be incoherent and no rank left to comply with. ⛔ The two codes are
+ *       never reused: an archived anchor row or a disposition citing one
+ *       keeps meaning what it meant. What the relation OWES is read off the
+ *       same index by H78–H80, and what ENDS a block by H19 and H77 — see
+ *       「The blocking relation, read from the lines」 below.
  *   H16 an OPEN, non-draft PR sitting in a MERGE CONFLICT
  *       (`mergeable_state` = `dirty`) past the threshold — the one board state
  *       no instrument here could express before it (devx incident,
@@ -280,7 +256,7 @@
  *       "the queue is handling it" (H12's own reading, correct there and
  *       exactly wrong here). The measured specimen hung ~4h with nobody aware.
  *       The incident's lesson, verbatim: 「一个无法表达某状态的仪器,会把它报成
- *       它能表达的最近状态。」 — which is what H1–H15 were doing to this state.
+ *       它能表达的最近状态。」 — which is what every earlier item did to this state.
  *       Two consequences shape the item. It is the only one needing a per-PR
  *       GET (`mergeable_state` is absent from the `/pulls` LIST payload and
  *       lives on the single-PR endpoint alone), taken for CANDIDATES only and
@@ -352,7 +328,7 @@
  *       ⭐ The card's reading three — 「`list_issues` 只能按 label / state / since
  *       过滤，不返回正文检索」 — is true of that MCP tool and FALSE of this
  *       script's REST reader, which lists every open card AND already fetches
- *       the comment channel to build H14's reverse index. So ④ is ONE LOOKUP
+ *       the comment channel to build the reverse index. So ④ is ONE LOOKUP
  *       over an index this file already has, not a new channel. That sentence
  *       is written here so the next reader does not re-file the card.
  *
@@ -363,9 +339,9 @@
  *         - POPULATION. Dependent BODIES come from the unscoped open-issue
  *           listing (every open card in this repo, bounded by
  *           `OPEN_LISTING_PAGE_CEILING`); dependent COMMENTS come only from
- *           open `pm:blocked` / `pm:blocking` cards whose body is clean
+ *           open `pm:blocked` cards whose body is clean
  *           (`needsBlockedByComments`). A card that parks the line in a
- *           comment and carries neither label is OUTSIDE the read, and a
+ *           comment and does not carry that label is OUTSIDE the read, and a
  *           cross-repo dependent is dropped by `buildBlockingIndex` by
  *           construction. The rendered scope line says exactly this rather
  *           than widening the read, which would be a different index.
@@ -400,7 +376,7 @@
  *       label-APPLICATION event, and every triage answer (whatever it decides)
  *       bumps `updated_at`, so a stale reading means nothing touched the card
  *       since some triage pass — which is exactly the failure this item exists
- *       to name. Report-only and NOT loud, like H14–H16: the remedy is the
+ *       to name. Report-only and NOT loud, like H16: the remedy is the
  *       triage Routine's next fire, never a label written here.
  *
  * ## H19 — the question that ENDS a block
@@ -409,9 +385,9 @@
  *       PR target, MERGED: the issues API answers an abandoned PR `closed` too,
  *       and a PR that never merged landed nothing, so it founds no row and
  *       withholds a full discharge (#27925) — the
- *       block has outlived its blocker. Two items already read that line and
- *       NEITHER expires a block: H4 asks whether the line EXISTS, H14 asks the
- *       REVERSE index (does anything target THIS card). Nothing asked whether
+ *       block has outlived its blocker. H4 already read that line and does
+ *       NOT expire a block: it asks whether the line EXISTS, and the reverse
+ *       index asks what targets THIS card. Nothing asked whether
  *       the issue the line NAMES is still open, so an expired block sat in
  *       complete silence with a well-formed line, a correct label and no row
  *       anywhere. Two measured instances, both found by READING and neither by
@@ -458,7 +434,7 @@
  *       dispatch call never made, 74 minutes `pm:dispatched` with nobody on it
  *       until a patrol tick compared branch heads. Every adjacent row declines
  *       it for a reason of its own — H2 wants a MISSING claim comment and this
- *       one is complete, H4/H14 want `Blocked-by:`, H9 wants a hold, H8 wants
+ *       one is complete, H4 wants `Blocked-by:`, H9 wants a hold, H8 wants
  *       a merged PR and nothing here ever ran — so the shape had no reader.
  *       ⛔ The key is NO REF AT ALL and never "no PR yet": a dev inside a long
  *       build legitimately has a ref and no PR for over an hour (measured
@@ -673,6 +649,47 @@
  *       rather than trusting a seat to remember it mid-re-park.
  *       FREE: the same resolutions H19 and H26 already hold, asked a third
  *       question — which CHANNEL each target arrived in.
+ *
+ * ## The blocking relation, read from the lines — H77–H81
+ *
+ * The `Blocked-by:` line is the ONLY source of a block. No label carries the
+ * relation (H14/H15's `pm:blocking` cache is retired), so everything a block
+ * owes is read from the lines themselves — the resolutions H19 already holds,
+ * and the reverse index instruction ④ already builds. All five are FREE: no
+ * request, no listing and no summary clause of their own.
+ *
+ *   H77 an open `pm:blocked` card whose line names NO OPEN TARGET and that
+ *       H19 does not already report: the line names no card or PR at all,
+ *       or every target it names is a PR that closed UNMERGED. H4 is silent
+ *       (a line exists) and H19 is silent (nothing merged or closed as
+ *       done), so the card waits on nothing nameable and no close can ever
+ *       release it. A block is a wait on an open card or an unmerged PR; a
+ *       wait on the maintainer's own action, on his product choice or on a
+ *       platform release is a DIFFERENT state, and the row names all three.
+ *   H78 a BLOCKER graded BELOW a card it blocks. A blocker takes the highest
+ *       grade among its own and the open cards it blocks. The row sits on
+ *       the blocker and names the reads that decide who acts: a grade the
+ *       fleet wrote is raised by triage, unless its same-stroke comment
+ *       opens `Ruling-ref: priority:pN` (set on the maintainer's word); that
+ *       grade and one a person set by hand are ⛔ not moved and are reported
+ *       to the maintainer.
+ *   H79 a HOLD MISMATCH: a blocker is `pm:on-hold` while a card it blocks is
+ *       not, or the reverse. By default the blocked card follows its blocker
+ *       onto hold, unless the maintainer said otherwise on the card; the
+ *       reverse direction has no default and is reported as such.
+ *   H80 MUTUAL BLOCKS and CYCLES: cards whose lines wait on each other. Each
+ *       reads as a well-formed block with an open target, so every other
+ *       row is silent on it — and no close can release any of them.
+ *   H81 a card in the decision box (`needs-user-decision`) with no ruling
+ *       recorded, open past `DECISION_UNANSWERED_STALE_DAYS`. The list the
+ *       daily scan puts in front of the maintainer; a RULED card still in
+ *       the box is H73's, never this row's.
+ *
+ * (b) of the same family — a block whose every target has closed (a PR:
+ * merged) — is H19, unchanged in what it reads. This script does not write:
+ * the row is the candidate, and the daily scan returns the card to
+ * `pm:queue` with one comment after the installable check, or rewrites the
+ * line to the next real blocker.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -1897,7 +1914,7 @@ export function h3QueueAndDispatched(issue) {
 }
 
 // ---------------------------------------------------------------------------
-// The `Blocked-by:` COMMENT channel — read by H4 and by the H14 index alike.
+// The `Blocked-by:` COMMENT channel — read by H4 and by the reverse index alike.
 //
 // Since #10403 the comment channel is no longer `Blocked-by:`-only: H9's
 // `Restart-when:` reads it too, through its own gated fallback in the sweep
@@ -1928,8 +1945,8 @@ export function h3QueueAndDispatched(issue) {
 // Reading the whole first page instead errs in ONE direction, and it is the
 // safe one. Extra evidence can only ADD `Blocked-by:` edges: it can clear an
 // H4 row (the duty really was discharged, in the other channel) and it can
-// clear an H14 stale row (something really is waiting), which is the
-// recalibration #9948 ruled for. What it cannot do is invent a card's silence.
+// add an edge to the reverse index (something really is waiting), which is
+// the recalibration #9948 ruled for. What it cannot do is invent a card's silence.
 // The residual cost is a genuinely OBSOLETE comment edge — a line written, then
 // the body rewritten to drop the dependency — which needs the source card to
 // still be open, still labelled, and still body-clean; in that state the source
@@ -1940,7 +1957,7 @@ export function h3QueueAndDispatched(issue) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// DECORATED DIRECTIVE LINES — the shared anchor for `Blocked-by:` (H4, H14)
+// DECORATED DIRECTIVE LINES — the shared anchor for `Blocked-by:` (H4, the index)
 // and `Restart-when:` (H9). #10102, ruled option C on 2026-08-20.
 //
 // ## What the old anchors required, and the two harms that cost
@@ -1948,7 +1965,7 @@ export function h3QueueAndDispatched(issue) {
 // Both directives are machine-readable lines written by hand IN MARKDOWN, so
 // authors code-format them: 「`Restart-when: …`」 is the natural spelling for a
 // line whose whole purpose is that a machine greps it. The original anchors
-// (`^\s*` for H9, `^[ \t]*` for H4/H14) accept only whitespace before the key,
+// (`^\s*` for H9, `^[ \t]*` for H4 and the index) accept only whitespace before the key,
 // and a backtick is not whitespace — so a DECORATED directive read as an
 // ABSENT one. Measured twice on 2026-08-20, once on each predicate, failing in
 // OPPOSITE directions:
@@ -2143,10 +2160,10 @@ export function hasBlockedByLine(text) {
  *
  *   - `pm:blocked` — the population H4 judges, and the edge SOURCES the index
  *     is missing (a seat parks the line in a comment; the body stays clean).
- *   - `pm:blocking` — the population H14's stale direction judges. Their own
- *     comments matter as index sources too: a `pm:blocking` card that is
- *     itself waiting on another `pm:blocking` card contributes the very edge
- *     that defends that other card from a stale verdict.
+ *
+ * ONE state. The retired `pm:blocking` label used to be a second arm here,
+ * for a stale-cache verdict that no longer exists; with it gone the gate is
+ * exactly H4's population.
  *
  * A card whose body already carries the line is never fetched: its duty is
  * discharged in the channel the machinery already reads, and the census bound
@@ -2155,8 +2172,7 @@ export function hasBlockedByLine(text) {
  */
 export function needsBlockedByComments(issue) {
   if (hasBlockedByLine(issue?.body)) return false;
-  const labels = labelNames(issue ?? {});
-  return labels.includes('pm:blocked') || labels.includes('pm:blocking');
+  return labelNames(issue ?? {}).includes('pm:blocked');
 }
 
 /**
@@ -2221,7 +2237,7 @@ export function commentBlockedByTargets(commentBodies) {
 // An anchored sentence naming `#N` is a CANDIDATE. The clause names candidates
 // and their state and stops: it never says the card is unblocked, it writes no
 // label, and the remedy stays the one H4 always had — write the line. Same
-// posture H14 holds for `pm:blocking` and H19 for a released block, and the
+// posture H19 holds for a released block, and the
 // exit code is untouched: a completed sweep still exits 0 whether it found 0
 // or 40 half-states.
 //
@@ -2245,7 +2261,7 @@ export function commentBlockedByTargets(commentBodies) {
  *
  * Two shapes are deliberately ABSENT. `Blocked-by` is the DIRECTIVE, and H4
  * fires only when it is missing from both channels, so it can never be a prose
- * candidate. Bare `blocking` is the LABEL `pm:blocking` being discussed far
+ * candidate. Bare `blocking` is the retired LABEL `pm:blocking` being discussed far
  * more often than a block being stated — five such lines on #16184 alone at
  * the measured reading — and admitting it would fill the clause with refs to
  * cards nobody is waiting on.
@@ -2484,13 +2500,10 @@ export function proseBlockerClause(candidates, heldBack = 0) {
  *     channel could not be read instead of asserting that it is empty.
  *   - `string[]` — read. Both channels judged, for real.
  *
- * The unreadable case fires where H14's stale direction goes QUIET on the same
- * failure, and the asymmetry is deliberate, not an inconsistency. H4's remedy
- * is "add a line" — idempotent, cheap, and harmless if a comment already had
- * one. H14-stale's remedy is "drop a label the selection order depends on" —
- * destructive, and the measured false positive this whole fallback exists to
- * end. An unreadable reading must surface on the cheap side and must never
- * drive the expensive one.
+ * The unreadable case FIRES, deliberately. H4's remedy is "add a line" —
+ * idempotent, cheap, and harmless if a comment already had one — so an
+ * unreadable reading surfaces on the cheap side. It must never drive a
+ * destructive one.
  */
 export function h4BlockedNoBlockedBy(issue, commentBodies, proseCandidates, proseHeldBack = 0) {
   if (!labelNames(issue).includes('pm:blocked')) return null;
@@ -3158,7 +3171,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // Same shape as H4 (the label's machine half is a written line): the same
 // decorated-directive anchor, and — since #10403 — the same channel contract:
 //
-//   H4 / H14  `Blocked-by:`     body OR comment  (since PR #10075)
+//   H4        `Blocked-by:`     body OR comment  (since PR #10075)
 //   H9        `Restart-when:`   body OR comment  (since #10403)
 //
 // H9 was body-only on purpose while the unlock machinery was: a condition
@@ -3580,7 +3593,7 @@ export function h9OnHoldNoRestartWhen(issue, commentBodies, isTracked = () => fa
     `Add or repair the line first. Closing is the LAST resort and applies only to a card that ` +
     `genuinely has no fireable exit: such a card is closed \`not planned\` with reason + ` +
     `provenance in the closing comment (type:Bug holds re-route instead — see the state model's ` +
-    `Bug branch). Channel: like \`Blocked-by:\` (H4/H14), a \`Restart-when:\` line counts from ` +
+    `Bug branch). Channel: like \`Blocked-by:\` (H4), a \`Restart-when:\` line counts from ` +
     `the body OR a comment — either channel discharges the duty, and the unlock scan reads both ` +
     `(#10403 closed the old body-only gap).`
   );
@@ -3768,8 +3781,9 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// H13 — domain:* without any pm-state label, aged past one sweep cycle
-// (maintainer-reported incident, 2026-08-19).
+// H13 — area:* without any pm-state label, aged past one sweep cycle
+// (maintainer-reported incident, 2026-08-19; read `domain:*` until the
+// area labels replaced it as triage's routing label).
 // ---------------------------------------------------------------------------
 
 /**
@@ -3777,9 +3791,9 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
  * triage sweep's disjunct ③: any of these makes the card visible to a named
  * reader (queue view, lane view, unlock scan, decision inbox, finding
  * grading round, epic index, seat registry), so their absence — with routing
- * already present — is the invisible half-annotated shape. `pm:blocking` is
- * deliberately NOT here: it is a derived priority cache, not a state, and a
- * card carrying only it is exactly as invisible to candidate queries.
+ * already present — is the invisible half-annotated shape. The retired
+ * `pm:blocking` label is deliberately NOT here: it was never a state, and a
+ * card still carrying only it is exactly as invisible to candidate queries.
  */
 export const PM_STATE_LABELS = [
   'pm:queue',
@@ -3810,7 +3824,7 @@ export const PM_STATE_LABELS = [
 export const TRACKING_ANCHOR_LABEL = 'tracking';
 
 /**
- * Labels whose NORMAL shape is domain-without-pm-state, excluded by the
+ * Labels whose NORMAL shape is area-without-pm-state, excluded by the
  * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
  * report the protocol's design as a defect.
  */
@@ -3821,14 +3835,14 @@ export const H13_EXEMPT_LABELS = [TRACKING_ANCHOR_LABEL, 'status:parked', 'qa-ru
  * disjunct ③ heals exactly this shape every round, so a card still in it
  * after 2h has survived at least one full healing round it should not have —
  * the alarm reads a failure of the healing loop, never routine intake
- * latency (a just-landed domain label sits here only for the sweep's own
+ * latency (a just-landed area label sits here only for the sweep's own
  * ~2-minute settle window, two orders of magnitude under the threshold).
  * Age reads `updated_at`: it needs no timeline fetch, and every healing
  * write would bump it, so a stale `updated_at` in this shape means nothing
  * touched the card at all. The measured specimen sat ~26h; at 2h it would
  * have been flagged a day earlier.
  */
-export const DOMAIN_HALF_STATE_STALE_HOURS = 2;
+export const AREA_HALF_STATE_STALE_HOURS = 2;
 
 /**
  * The prefix H13 stamps on a self-declared-P0 row. Exported because a SECOND
@@ -3859,23 +3873,23 @@ export function h13SelfDeclaredP0(issue) {
  * `updated_at` flags rather than reads as fresh (#4690 direction, same as
  * H10/H11/H12).
  */
-export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
+export function h13AreaWithoutPmState(issue, nowMs = Date.now()) {
   const labels = labelNames(issue);
-  if (!labels.some((l) => l.startsWith('domain:'))) return null;
+  if (!labels.some((l) => l.startsWith('area:'))) return null;
   if (labels.some((l) => PM_STATE_LABELS.includes(l))) return null;
   if (labels.some((l) => H13_EXEMPT_LABELS.includes(l))) return null;
   const updated = Date.parse(issue.updated_at ?? '');
   const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
-  if (ageHours !== null && ageHours <= DOMAIN_HALF_STATE_STALE_HOURS) return null;
+  if (ageHours !== null && ageHours <= AREA_HALF_STATE_STALE_HOURS) return null;
   const reading =
     ageHours === null
       ? 'an unreadable `updated_at` (which must not read as fresh)'
-      : `~${Math.round(ageHours)}h without activity (threshold ${DOMAIN_HALF_STATE_STALE_HOURS}h)`;
+      : `~${Math.round(ageHours)}h without activity (threshold ${AREA_HALF_STATE_STALE_HOURS}h)`;
   const base =
-    `\`domain:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
+    `\`area:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
     `never did, so the card is invisible to every seat's candidate query. A half-state older ` +
     `than one sweep cycle is a defect of the healing loop (triage sweep disjunct ③), not ` +
-    `inventory: pair the domain label with its pm-state in one write, oldest first.`;
+    `inventory: pair the area label with its pm-state in one write, oldest first.`;
   if (!h13SelfDeclaredP0(issue)) return base;
   return (
     `${P0_SUSPECT_MARKER} the card's own title/body self-declares P0/data-integrity, and for that ` +
@@ -3885,16 +3899,19 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// H14 + H15 — the `pm:blocking` cache and the order that consumes it
-// (maintainer-approved 2026-08-19, verbatim: 「同意」).
+// The `Blocked-by:` reverse index — the ONE structure every relation row reads.
 //
-// Both items read ONE structure, built once per sweep from bodies the unscoped
-// pass already fetched: the `Blocked-by:` reverse index. Everything above is a
-// predicate over a single card; these two are the first that need the whole
-// open set, because incoherence is a relation between two cards and "oldest"
-// is a relation among many. That is a shape difference, not a contract change
-// — they stay pure functions over listings the caller supplies, so the
-// self-test drives them offline exactly like H1–H13.
+// Built once per sweep from bodies the unscoped pass already fetched, plus the
+// gated comment fallback. Everything above is a predicate over a single card;
+// the rows fed from here are the first that need the whole open set, because a
+// block is a relation between two cards. That is a shape difference, not a
+// contract change — the builder and its readers stay pure functions over
+// listings the caller supplies, so the self-test drives them offline exactly
+// like H1–H13.
+//
+// H14 and H15 lived here and are RETIRED with the `pm:blocking` label they
+// audited: the relation has one source, the lines parsed below, and no label
+// is typed for it. The readers that remain are instruction ④ and H78–H80.
 // ---------------------------------------------------------------------------
 
 /**
@@ -3977,11 +3994,11 @@ export function blockedByTargets(body) {
  * repo name) is kept; a bare `#N` is local by definition.
  *
  * Self-references are dropped too: a card cannot be its own unblocker, and
- * counting one would make it permanently `pm:blocking`-worthy on its own say-so.
+ * counting one would read as a one-card cycle on the card's own say-so.
  *
  * @param {{ number: number, body?: string }[]} issues — OPEN issues only. The
  *   index's whole meaning is "open cards that are waiting", so the caller's
- *   listing is what bounds it; a closed dependent must not hold a label alive.
+ *   listing is what bounds it; a closed dependent is not waiting on anything.
  * ## Two channels, UNIONED — never a priority order (#10061)
  *
  * `options.comments` supplies, per source card number, the comment bodies the
@@ -4025,7 +4042,7 @@ export function buildBlockingIndex(issues, options = {}) {
 }
 
 /**
- * How many dependent card numbers a missing-cache row names before it counts
+ * How many dependent card numbers a relation row names before it counts
  * the rest. The row exists to be ACTED on — a reader wants to see who is
  * waiting — but the markdown renderer writes into a body with a hard cap and
  * a fold, and an unbounded fan-out list is the one row that could push others
@@ -4034,275 +4051,352 @@ export function buildBlockingIndex(issues, options = {}) {
  */
 export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 
+// ---------------------------------------------------------------------------
+// H78 + H79 + H80 — what the `Blocked-by:` reverse index says about the cards
+// it relates (#35259).
+//
+// The blocking relation has ONE source, the line-start `Blocked-by:` lines,
+// and no label is typed for it: the `pm:blocking` cache this section used to
+// audit (H14, H15) is retired with its label. What the relation OWES is read
+// straight off the index instead, three ways:
+//
+//   H78  a blocker graded BELOW a card it blocks — a blocker takes the
+//        highest grade among its own and the open cards it blocks;
+//   H79  a HOLD MISMATCH — a blocker on `pm:on-hold` while a card it blocks
+//        is not, or the reverse;
+//   H80  MUTUAL BLOCKS and CYCLES — cards that wait on each other, which no
+//        close can ever release.
+//
+// All three are relations between cards, so they need the whole open set and
+// read ONE structure, built once per sweep from bodies the unscoped pass
+// already fetched plus the gated comment fallback. They stay pure functions
+// over listings the caller supplies, and none adds a request.
+//
+// SCOPE, said once for the three and repeated on every row: the index holds
+// THIS REPO's edges. `buildBlockingIndex` drops a cross-repo ref by
+// construction, so a blocker or a dependent living in a sibling repo is
+// outside these rows — unread, ⛔ not absent. An index with unread comment
+// threads can only be MISSING edges, and each row here is a claim about edges
+// IN HAND, so a fallback shortfall suspends none of them.
+//
+// Report-only, like everything here: the daily reconciliation fire reads the
+// rows and acts under `references/state-machine.md`. ⛔ No label, grade or
+// comment is written from this script.
+// ---------------------------------------------------------------------------
+
 /**
- * The `repo:*` labels a card carries — the SEAM predicate H14's stale
- * direction declines on (#13975).
+ * The grade labels, highest first. A card's grade is the highest rung it
+ * carries; a card carrying none is ungraded and sits below every rung.
  *
- * Exported and pinned for the reason every scoping policy in this file is: a
- * policy that decides what gets JUDGED AT ALL is where a silent hole would
- * live. The spelling is `censusLanesOf`'s, deliberately — one reading of the
- * `repo:*` family, so the two rows cannot come to disagree about what a repo
- * lane is.
- *
- * ⚠️ SOUND, not COMPLETE, and the surviving rows say so. The ruled predicate
- * (#13975) is "carries any `repo:*` label", which catches the cards whose
- * off-repo audience is DECLARED. It is not a test for "has an off-repo
- * audience": measured on the 2026-08-31 board, 67 open cards name a
- * sibling-repo issue (`objectui#N` / `cloud#N` / `hotcrm#N`) and only 9 of
- * them carry a `repo:*` label — and the two cards this row's own filing
- * recorded off-repo waiters for (#13439, #13568) carry none. Widening it (to
- * "the body mentions another repo", say) is a DIFFERENT predicate and needs
- * its own ruling; narrowing it is one too. Both are why this is a named
- * function rather than an inline `.some()`.
+ * One spelling of the ladder: H67's read order pins itself equal to it in the
+ * self-test, so the rank a dispatching seat reads and the rank a blocker
+ * inherits cannot drift apart.
  */
-export function seamRepoLabels(issue) {
-  return labelNames(issue ?? {}).filter((l) => /^repo:/u.test(l));
+export const GRADE_LADDER = Object.freeze(['priority:p0', 'priority:p1', 'priority:p2', 'priority:p3']);
+
+/**
+ * Cards that by rule take NO grade — a generated anchor and a seat-registry
+ * post. An ungraded card of either kind that something waits on is not a
+ * grading gap, so H78 stays silent on it.
+ */
+export const GRADELESS_CARD_LABELS = Object.freeze([TRACKING_ANCHOR_LABEL, 'pm:seat']);
+
+/**
+ * The rung a card's grade sits on (0 = the top), or null when it carries no
+ * grade label — or when its labels could not be read, which is ⛔ never read
+ * as a grade.
+ */
+export function gradeRung(issue) {
+  if (!Array.isArray(issue?.labels)) return null;
+  const labels = labelNames(issue);
+  const at = GRADE_LADDER.findIndex((l) => labels.includes(l));
+  return at === -1 ? null : at;
 }
 
 /**
- * H14 — null when the cache agrees with the index, else the finding sentence.
+ * dependent card number -> the LOCAL card numbers its `Blocked-by:` lines
+ * name: the reverse index, inverted. ⛔ No second parser and no second read —
+ * the edges are `buildBlockingIndex`'s own, so the two directions can never
+ * disagree about what a line says.
  *
- * ## The two directions do NOT owe the index the same completeness (#10061)
- *
- * They make opposite claims, so an INCOMPLETE index endangers exactly one:
- *
- *   - STALE ("nothing targets it") is a claim about ABSENT evidence. Every
- *     edge the sweep failed to read is a card that might be pointing at this
- *     one, so an index with any unread source cannot support the claim at all.
- *     `options.indexComplete === false` therefore silences this direction —
- *     unreadable evidence is not absent evidence (#4690), and the remedy this
- *     row prescribes (drop a label the selection order ranks second only to
- *     `priority:p0`) is destructive enough that a guess is worse than silence.
- *     The summary line's `comment fallback read on X of Y` is what states the
- *     gap, exactly as H16's and H17's `read X of Y` do for theirs.
- *   - MISSING ("targeted, but the label never landed") is a claim about
- *     evidence IN HAND. Reading more sources can only ADD edges, never remove
- *     one, so an incomplete index cannot manufacture this row. It stays live
- *     regardless — going quiet there would trade a real finding for nothing.
- *
- * This is the recalibration #9948 ruled for on 2026-08-19 (「修量具而非追假
- * stale」): the measured false stales #9465 and #9968 were both cards whose
- * dependents state the wait in a COMMENT, and both are pinned in the self-test.
- *
- * ## STALE is also repo-local, and the row says so (#10139)
- *
- * `buildBlockingIndex` only ever scans THIS repo's open-issue listing, so
- * `indexComplete` measures whether the comment fallback read every candidate
- * — it says nothing about sibling repos. A dependent living in `objectui` or
- * `cloud` with a `Blocked-by:` line naming this card is invisible to the
- * index by construction, not by any read failure, so `indexComplete` cannot
- * gate it and never claims to. The STALE sentence therefore does not read as
- * exhaustive over "no dependent anywhere" — only "no dependent in this
- * repo" — and its remedy is conditional on a cross-repo check rather than an
- * instruction to drop the label outright: `Blocked-by:` edges are
- * protocol-legal across repos (contract-first splits use them routinely),
- * and #7917 / objectui#4356 is a live one this row would otherwise have
- * instructed a reader to sever.
- *
- * ## …and on a SEAM card it declines outright (#13975)
- *
- * Naming the scope was not enough. The row's instruction is still imperative,
- * and the class it is most often wrong about is the one the protocol creates
- * ON PURPOSE: a seam card is kept in THIS repo, carrying `repo:cloud` /
- * `repo:objectui` / `repo:hotcrm`, precisely so a sibling repo's work can
- * depend on it. For exactly those cards "no open card here points at me" is
- * not weak evidence of absence — it is the reading the index is structurally
- * unable to make, and the filing round measured the cost: 4 of 5 stale rows
- * stood on cards other repos were, on the record, waiting for.
- *
- * So `seamRepoLabels(issue)` non-empty DECLINES: the row is still emitted, and
- * it says it is declining and why. Emitted rather than suppressed, on two
- * measurements rather than taste:
- *
- *   - Dropping it silently would make the seam cards INVISIBLE to the patrol —
- *     a card that no row mentions reads as a coherent one, which is the second
- *     defect, not the fix. H27 already holds this shape for the same reason
- *     (an UNJUDGED dispatch is reported out loud, "not confirmed healthy").
- *   - The finding COUNT is unchanged by the swap, so a decline cannot quiet
- *     the summary sentence the way a suppression would.
- *
- * The row carries `UNJUDGED_MARKER`, which is the mechanical half of that
- * visibility rather than a label on it: unjudged rows sort ahead of judged ones
- * so the markdown body's size trim can never be what removes them (#11218,
- * where the trim ate 199 rows while the header promised they were kept). An
- * emitted decline the trim can drop is the suppression this row rejects,
- * arriving one budget overrun later.
- *
- * ⚠️ H32's decline is the OTHER shape and this row deliberately does not copy
- * it: there, a seat on a lane this board cannot count returns `null` and the
- * summary's coverage pair carries the disclosure — correct, because the seat
- * is out of the POPULATION. A seam card is in this row's population (it holds
- * the label this row exists to judge); it is the EVIDENCE that is unreadable.
- *
- * ⛔ The decline is scoped to the stale direction alone. MISSING (the add
- * direction) stays untouched on a seam card, and must: a cross-repo edge the
- * index cannot see can only make that direction under-label, which is the
- * status quo and harms nobody.
- *
- * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
- * @param {{ indexComplete?: boolean, ownerRepo?: string }} [options] —
- *   `indexComplete` is `false` when any gated comment fetch failed, i.e. the
- *   index is known to be missing edges. `ownerRepo` is the swept `owner/repo`,
- *   defaulted like `buildBlockingIndex`'s and read for one purpose only: to
- *   tell a seam label naming ANOTHER repo from one naming this one.
+ * @returns {Map<number, number[]>} each list ascending.
  */
-export function h14BlockingCacheIncoherent(issue, index, options = {}) {
-  const carries = labelNames(issue).includes('pm:blocking');
-  const dependents = index?.get?.(issue.number) ?? [];
-  const indexComplete = options.indexComplete ?? true;
-  if (carries && dependents.length === 0) {
-    if (!indexComplete) return null;
-    const seam = seamRepoLabels(issue);
-    if (seam.length > 0) {
-      const bareRepo = String(options.ownerRepo ?? OWNER_REPO)
-        .split('/')
-        .pop();
-      const named = seam.map((l) => `\`${l}\``).join(', ');
-      // The over-covered edge, named rather than narrowed away. `repo:objectstack`
-      // is not in the label ledger's seam family (`ensure-pm-labels.sh` creates
-      // `repo:objectui` / `repo:cloud` / `repo:hotcrm`, each described as 「Seam
-      // card: cross-repo ordering with X is the substance」) but it exists on the
-      // board and 4 open cards carried it on 2026-08-31. A label naming the SWEPT
-      // repo cannot make this sweep's index blind, so declining on it is
-      // conservative — and the row says that rather than asserting an off-repo
-      // audience it has no evidence for. Kept literal because the ruled predicate
-      // is "any `repo:*` label"; narrowing it is a predicate change and belongs to
-      // whoever rules on it, not to this function.
-      const conservative =
-        seam.every((l) => l.slice('repo:'.length) === bareRepo)
-          ? ` ⚠️ ${named} names the SWEPT repo, so this decline is CONSERVATIVE rather than ` +
-            'structural — the ruled predicate is "any `repo:*` label" (#13975) and this is its ' +
-            'over-covered edge, left literal rather than narrowed here.'
-          : '';
-      return (
-        // The UNJUDGED rank, not decoration: it is what keeps this row ahead of
-        // the markdown body's size trim (#11218). A decline the trim can eat is
-        // a seam card the patrol silently stops mentioning — the same defect as
-        // suppressing the row outright, arriving later and less visibly.
-        `${UNJUDGED_MARKER} ` +
-        '`pm:blocking` carried while no open card in THIS REPO targets it with a `Blocked-by:` line ' +
-        `— body OR comment — and this row DECLINES to judge the label: the card carries ${named}, a ` +
-        'seam label whose whole meaning is that the ordering this card belongs to lives in another ' +
-        'repo (label ledger: 「Seam card: cross-repo ordering with X is the substance」), and the ' +
-        'protocol keeps such a card HERE precisely so a sibling repo can depend on it.' +
-        conservative +
-        ' The strip this row would otherwise prescribe rests on ABSENCE of evidence, and for this ' +
-        'card the evidence is not absent, it is UNREADABLE (#4690): `buildBlockingIndex` scans this ' +
-        'repo\'s open listing only, `Blocked-by:` edges are protocol-legal across repos, and a ' +
-        'sibling repo\'s card waiting on this one is invisible to the index BY CONSTRUCTION, not by ' +
-        'any read failure — ⛔ no re-run resolves it, and there is no cross-repo `Blocked-by:` ' +
-        'reader in the fleet to resolve it with. ⇒ UNJUDGED: neither a coherent cache nor a stale ' +
-        'one. The stakes are why this declines rather than guessing — `pm:blocking` ranks second ' +
-        'only to `priority:p0` in lane selection, so a wrong strip starves the sibling that is ' +
-        'waiting, while a wrong KEEP only over-ranks one card. Report-only: the remedy is a ' +
-        'cross-repo `Blocked-by:` read by hand before the triage sweep\'s derivation pass touches ' +
-        'this card, never a label written from this script — and ⛔ never a hand-applied or ' +
-        'hand-stripped `pm:blocking` either, in any direction: the label is the sweep\'s derived ' +
-        'cache (「⛔ 不手工挂」).'
-      );
+export function blockersByDependent(index) {
+  const out = new Map();
+  for (const [target, dependents] of index ?? []) {
+    for (const dependent of dependents ?? []) {
+      const named = out.get(dependent) ?? [];
+      if (!named.includes(target)) named.push(target);
+      out.set(dependent, named);
     }
-    return (
-      '`pm:blocking` carried while no open card in THIS REPO — the only board this sweep indexes ' +
-      '— targets it with a `Blocked-by:` line, body OR comment, judged against the two-channel ' +
-      'index — a stale derived cache, scoped to THIS REPO ONLY: ' +
-      'no dependent found in this repo; cross-repo dependents are not swept, so this is not a claim ' +
-      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. ' +
-      '⚠️ This card carries NO `repo:*` label, which is why the seam decline (#13975) did not ' +
-      'apply — and that absence is not evidence of an in-repo-only audience: measured 2026-08-31, ' +
-      '58 of the 67 open cards naming a sibling-repo issue carry no `repo:*` label. The label ' +
-      'is not a state a seat sets: the triage sweep derives it from the `Blocked-by:` reverse index, ' +
-      'and the lane selection order ranks it second only to `priority:p0`. So a stale one is worse ' +
-      'than an absent one — it boosts a card nothing depends on, with authority. Report-only: verify ' +
-      'cross-repo dependents before the triage sweep\'s derivation pass drops the label (or the ' +
-      'missing `Blocked-by:` line landing on the card that really is waiting), never a label written ' +
-      'from this script.'
-    );
   }
-  if (!carries && dependents.length > 0) {
-    const shown = dependents.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
-    const named = shown.map((n) => `#${n}`).join(', ');
-    const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
-    return (
-      `targeted by ${dependents.length} open card(s)' \`Blocked-by:\` line, body or comment ` +
-      `(${named}${more}), but ` +
-      'NOT carrying `pm:blocking` — a real unblocker the selection order cannot see. The label is ' +
-      'the derived cache that makes a card outrank everything but `priority:p0`; without it this ' +
-      'card competes on age alone while the cards waiting on it cannot start. Report-only: the ' +
-      'remedy is the triage sweep\'s derivation pass applying the label, never a hand-applied one.'
-    );
+  for (const named of out.values()) named.sort((a, b) => a - b);
+  return out;
+}
+
+const INDEX_SCOPE_NOTE =
+  ' Scope: THIS repo\'s open cards only — a card in a sibling repo that names this one, or that ' +
+  'this one names, is not read here (unread, not absent).';
+
+/**
+ * H78 — null when the card is graded at least as high as every open card that
+ * waits on it, else the finding sentence. The row sits on the BLOCKER, the
+ * card whose grade moves.
+ *
+ * ## Why the row names a read instead of making it
+ *
+ * A grade the maintainer set by hand is not moved; the scan reports it to him
+ * instead. Which kind the current grade is lives in that label's last
+ * `labeled` event (written through a GitHub App or by a bot actor ⇒ the
+ * fleet's; anything else ⇒ a person's) AND, for a fleet-written grade, in the
+ * fleet comment of the same stroke: one whose line opens
+ * `Ruling-ref: priority:pN` marks a grade the fleet wrote on the maintainer's
+ * word, which is hand-set too (`references/filing-gate.md`; `label-write.mjs`
+ * refuses to move it). Those are a per-card event read and a comments read
+ * this sweep does not buy for any row, so it detects none of this. The
+ * sentence names both reads and all THREE outcomes rather than guessing one —
+ * the fleet's own grade is raised by triage, a grade on his word and a grade a
+ * person set are ⛔ not moved and go to his report — so the row is correct
+ * whichever the grade turns out to be, and nothing here moves a grade.
+ *
+ * An UNGRADED blocker is reported too (it sits below every rung), except the
+ * kinds `GRADELESS_CARD_LABELS` names. A dependent whose grade cannot be read
+ * contributes nothing: unreadable is not a grade.
+ *
+ * @param {object} issue — an OPEN issue, the candidate blocker.
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @param {Map<number, object>} openByNumber — the open listing the index was
+ *   built from, by card number.
+ */
+export function h78BlockerBelowBlockedGrade(issue, index, openByNumber) {
+  if (!issue || issue.pull_request || !Array.isArray(issue.labels)) return null;
+  const dependents = index?.get?.(issue.number) ?? [];
+  if (dependents.length === 0) return null;
+  const labels = labelNames(issue);
+  const own = gradeRung(issue);
+  if (own === null && GRADELESS_CARD_LABELS.some((l) => labels.includes(l))) return null;
+  const above = [];
+  for (const number of dependents) {
+    const rung = gradeRung(openByNumber?.get?.(number));
+    if (rung === null) continue;
+    if (own === null || rung < own) above.push({ number, rung });
   }
-  return null;
+  if (above.length === 0) return null;
+  above.sort((a, b) => a.rung - b.rung || a.number - b.number);
+  const shown = above.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+  const named = shown.map((d) => `#${d.number} (\`${GRADE_LADDER[d.rung]}\`)`).join(', ');
+  const more = above.length > shown.length ? ` +${above.length - shown.length} more` : '';
+  const top = GRADE_LADDER[above[0].rung];
+  const carried = own === null ? 'no grade label' : `\`${GRADE_LADDER[own]}\``;
+  return (
+    `${carried} on a card that ${dependents.length} open card(s) name in a \`Blocked-by:\` line, ` +
+    `graded BELOW ${above.length} of them: ${named}${more}. A blocker takes the highest grade among ` +
+    `its own and the open cards it blocks, a Feature included, so this card's grade is \`${top}\`. ` +
+    'Report-only, and the grade is not this script\'s to move, nor read here: read the last `labeled` ' +
+    'event of the current grade label first. Written through a GitHub App or by a bot actor, it is the ' +
+    'fleet\'s — triage raises it and leaves one comment — unless the fleet comment of the same stroke ' +
+    'opens `Ruling-ref: priority:pN` with that grade (a comments read): then the fleet wrote it on the ' +
+    'maintainer\'s word, and it is hand-set too. Set by a person or on his word, it is the maintainer\'s ' +
+    'hand-set grade: ⛔ not moved, and this row is what the daily scan reports to him, not triage\'s to raise.' +
+    INDEX_SCOPE_NOTE
+  );
 }
 
 /**
- * H15 — the oldest open, UNASSIGNED `pm:blocking` card, or null.
+ * H79 — null when the card's hold state agrees with the open cards it waits
+ * on, else the finding sentence. The row sits on the BLOCKED card: by default
+ * that is the card that moves.
  *
- * ## No threshold constant, deliberately
+ * Two directions, and they are not symmetric:
  *
- * Every other aged item here (H10/H11/H12/H13) answers "has this been
- * abandoned?", and a threshold is what turns silence into an alarm. This row
- * answers a different question — "is the lane taking blocking cards first?" —
- * and the honest answer is a NUMBER, every run, for the reader to judge. A
- * threshold would re-introduce exactly the judgement call the row exists to
- * hand over, and would go quiet on the days the board is worst behaved but
- * still under it. So: unconditional, one row, no constant. Nothing reddens
- * (nothing in this file ever does).
+ *   - a blocker is `pm:on-hold` and this card is not — the default is stated
+ *     by rule: the blocked card follows its blocker onto hold, unless the
+ *     maintainer said otherwise on the card;
+ *   - this card is `pm:on-hold` and NONE of the open cards it waits on is —
+ *     reported with no default, because which side is stale is a reading of
+ *     the hold comment, not of two labels. A held card with at least one held
+ *     blocker is consistent and silent, whatever its other blockers are.
  *
- * ## The age is the CARD's, not the label's, and says so
+ * A blocker that is closed, in another repo, or whose labels could not be read
+ * is not judged here (a closed one is H19's subject).
  *
- * `created_at`, the same quantity the selection order's own within-rank
- * tie-break reads (同级按卡龄). The label's age would be the sharper number
- * and is not available: it lives in a per-card timeline fetch this sweep
- * deliberately never makes for THIS population (the H2 comment fetch is one
- * exception and is confined to candidates; H59 buys a timeline page, and is
- * confined to the handful of cards a merged PR's body names without a keyword).
- * Reporting card age and NAMING it as card age
- * beats reporting a number whose meaning the reader has to guess.
- *
- * An unreadable `created_at` sorts as maximally old rather than being skipped
- * — the #4690 direction the whole file keeps: a value that cannot be read must
- * surface, never quietly drop out of a "the oldest is…" claim.
- *
- * @param {object[]} issues — the open listing.
- * @returns {{ issue: object, message: string } | null}
+ * @param {object} issue — an OPEN issue, the candidate blocked card.
+ * @param {number[]|undefined} blockers — its entry in `blockersByDependent`.
+ * @param {Map<number, object>} openByNumber — the open listing, by card number.
  */
-export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
-  const candidates = [];
-  let blockingTotal = 0;
-  for (const issue of issues ?? []) {
-    if (!labelNames(issue).includes('pm:blocking')) continue;
-    blockingTotal++;
-    if ((issue.assignees ?? []).length > 0) continue;
-    const created = Date.parse(issue.created_at ?? '');
-    candidates.push({
+export function h79HoldMismatch(issue, blockers, openByNumber) {
+  if (!issue || issue.pull_request || !Array.isArray(issue.labels)) return null;
+  const open = (blockers ?? [])
+    .map((number) => openByNumber?.get?.(number))
+    .filter((blocker) => blocker && Array.isArray(blocker.labels));
+  if (open.length === 0) return null;
+  const onHold = (card) => labelNames(card).includes('pm:on-hold');
+  const held = open.filter(onHold);
+  const name = (cards) => {
+    const shown = cards.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+    const more = cards.length > shown.length ? ` +${cards.length - shown.length} more` : '';
+    return `${shown.map((card) => `#${card.number}`).join(', ')}${more}`;
+  };
+  if (!onHold(issue)) {
+    if (held.length === 0) return null;
+    return (
+      `HOLD MISMATCH: this card is not \`pm:on-hold\` while ${held.length} open card(s) its ` +
+      `\`Blocked-by:\` line names ${held.length === 1 ? 'is' : 'are'} (${name(held)}). A blocker and the ` +
+      'cards it blocks hold together: by default the blocked card follows its blocker onto hold — ' +
+      '`pm:on-hold` with its own machine-fireable `Restart-when:` line — unless the maintainer said ' +
+      'otherwise on the card. Report-only: the daily scan reports it, ⛔ never a label written from ' +
+      'this script.' +
+      INDEX_SCOPE_NOTE
+    );
+  }
+  if (held.length > 0) return null;
+  return (
+    `HOLD MISMATCH, the reverse way: this card is \`pm:on-hold\` while none of the ${open.length} open ` +
+    `card(s) its \`Blocked-by:\` line names is (${name(open)}). Either the hold or the line is out of ` +
+    'date, and two labels cannot say which: read the hold comment. ⛔ No default in this direction — ' +
+    'the daily scan reports it, and the maintainer\'s word on the card decides.' +
+    INDEX_SCOPE_NOTE
+  );
+}
+
+/**
+ * The mutual blocks and cycles among the indexed `Blocked-by:` edges: one
+ * entry per group of two or more cards that each (transitively) wait on every
+ * other one — a strongly connected group of the waits-on graph.
+ *
+ * A group is reported ONCE, with the shortest cycle through its lowest card
+ * spelled out, rather than once per rotation or per member: the same cycle
+ * read from each of its cards is one finding, and a row per reading would bury
+ * it under its own copies.
+ *
+ * Iterative on purpose — no recursion to exhaust on a long chain — and total:
+ * a self-reference never reaches the index, so a group has two members at
+ * least.
+ *
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @returns {{ members: number[], path: number[] }[]} `members` ascending;
+ *   `path` starts and ends at `members[0]`, each step reading "waits on".
+ *   Groups ascending by their lowest member.
+ */
+export function blockingCycles(index) {
+  const waitsOn = blockersByDependent(index);
+  const nodes = [...waitsOn.keys()].sort((a, b) => a - b);
+  const order = new Map();
+  const low = new Map();
+  const onStack = new Set();
+  const stack = [];
+  const groups = [];
+  let counter = 0;
+  for (const root of nodes) {
+    if (order.has(root)) continue;
+    const work = [{ node: root, next: 0 }];
+    order.set(root, counter);
+    low.set(root, counter);
+    counter++;
+    stack.push(root);
+    onStack.add(root);
+    while (work.length > 0) {
+      const frame = work[work.length - 1];
+      const edges = waitsOn.get(frame.node) ?? [];
+      if (frame.next < edges.length) {
+        const to = edges[frame.next++];
+        // A target nothing waits FROM has no outgoing edge and sits on no cycle.
+        if (!waitsOn.has(to)) continue;
+        if (!order.has(to)) {
+          order.set(to, counter);
+          low.set(to, counter);
+          counter++;
+          stack.push(to);
+          onStack.add(to);
+          work.push({ node: to, next: 0 });
+        } else if (onStack.has(to)) {
+          low.set(frame.node, Math.min(low.get(frame.node), order.get(to)));
+        }
+        continue;
+      }
+      work.pop();
+      if (work.length > 0) {
+        const parent = work[work.length - 1].node;
+        low.set(parent, Math.min(low.get(parent), low.get(frame.node)));
+      }
+      if (low.get(frame.node) === order.get(frame.node)) {
+        const members = [];
+        for (;;) {
+          const member = stack.pop();
+          onStack.delete(member);
+          members.push(member);
+          if (member === frame.node) break;
+        }
+        if (members.length > 1) groups.push(members.sort((a, b) => a - b));
+      }
+    }
+  }
+  groups.sort((a, b) => a[0] - b[0]);
+  return groups.map((members) => {
+    // The shortest cycle through the lowest member, inside the group only.
+    const inside = new Set(members);
+    const start = members[0];
+    const from = new Map();
+    const queue = [start];
+    let closed = null;
+    for (let head = 0; head < queue.length && closed === null; head++) {
+      const at = queue[head];
+      for (const to of waitsOn.get(at) ?? []) {
+        if (!inside.has(to)) continue;
+        if (to === start) {
+          closed = at;
+          break;
+        }
+        if (from.has(to)) continue;
+        from.set(to, at);
+        queue.push(to);
+      }
+    }
+    const path = [start];
+    for (let at = closed; at !== null && at !== start; at = from.get(at)) path.push(at);
+    // Walked back from the closing card, so everything after the start is reversed.
+    return { members, path: [start, ...path.slice(1).reverse(), start] };
+  });
+}
+
+/**
+ * H80 — one row per group `blockingCycles` finds, attached to the group's
+ * lowest-numbered card so it links, sorts and truncates like every other row.
+ *
+ * Every member of a group has an outgoing edge, so each is a DEPENDENT and is
+ * in the open listing the index was built from; the lowest one is the row's
+ * subject. A two-card group is named a mutual block, a larger one a cycle.
+ *
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @param {Map<number, object>} openByNumber — the open listing, by card number.
+ * @returns {{ issue: object, message: string }[]}
+ */
+export function h80BlockingCycleRows(index, openByNumber) {
+  const rows = [];
+  for (const { members, path } of blockingCycles(index)) {
+    const issue = members.map((number) => openByNumber?.get?.(number)).find(Boolean);
+    if (!issue) continue;
+    const shown = members.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+    const more = members.length > shown.length ? ` +${members.length - shown.length} more` : '';
+    const chain = path.map((number) => `#${number}`).join(' → ');
+    const head =
+      members.length === 2
+        ? `MUTUAL BLOCK: #${members[0]} and #${members[1]} each name the other in a \`Blocked-by:\` line`
+        : `BLOCKING CYCLE among ${members.length} open cards (${shown.map((n) => `#${n}`).join(', ')}${more})`;
+    rows.push({
       issue,
-      ageHours: Number.isFinite(created) ? (nowMs - created) / 3_600_000 : null,
+      message:
+        `${head} — ${chain}, each arrow reading 「waits on」. No close can release a card in it: every ` +
+        'one waits on a card that waits on it, so each reads as a well-formed block with an open ' +
+        'target. One of these lines is not a real wait. Cards the fleet files for one topic block each ' +
+        'other only when they edit the same file, and an order of preference is a list on the epic, ' +
+        '⛔ not a `Blocked-by:` chain. Report-only: the daily scan reports it and the owning seat ' +
+        'removes or re-points the line that is not a wait, ⛔ never a label written from this script.' +
+        INDEX_SCOPE_NOTE,
     });
   }
-  if (candidates.length === 0) return null;
-  candidates.sort(
-    (a, b) =>
-      (b.ageHours ?? Infinity) - (a.ageHours ?? Infinity) || a.issue.number - b.issue.number,
-  );
-  const [oldest] = candidates;
-  const age =
-    oldest.ageHours === null
-      ? 'an unreadable `created_at` (sorted as maximally old — a timestamp that cannot be read must ' +
-        'surface, never drop out of an "oldest is…" claim)'
-      : `open ~${Math.round(oldest.ageHours)}h`;
-  return {
-    issue: oldest.issue,
-    message:
-      `oldest UNCLAIMED \`pm:blocking\` card: ${age}, ${candidates.length} of ${blockingTotal} open ` +
-      '`pm:blocking` card(s) unassigned. The lane selection order puts `pm:blocking` second only to ' +
-      '`priority:p0`, so an unclaimed one aging while fresher cards are picked is selection-order ' +
-      'drift — visible here by name instead of only in a seat\'s memory. Age is the CARD\'s ' +
-      '(`created_at`, the same quantity the order\'s within-rank tie-break reads), not the label\'s: ' +
-      'that would need a per-card timeline fetch this sweep never makes for this population. ' +
-      'Visibility row — no ' +
-      'threshold, it reports unconditionally, and like everything here it is patrol input, not a verdict.',
-  };
+  return rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -4343,7 +4437,7 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
  *
  * ⛔ It must not be "fixed" by dating the conflict from a per-PR timeline
  * fetch. That is an extra request per candidate to sharpen a report-only row,
- * and this sweep declines that trade everywhere else it arises — H15 declines
+ * and this sweep declines that trade everywhere else it arises — H11 declines
  * it by name for the age of a label. The proxy is named in the finding text so
  * the reader knows which quantity they are being shown.
  *
@@ -4355,7 +4449,7 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
  * overlap, push — and a lane PM's landing window turns over far faster than
  * that. 2h leaves a normal resolution a full window while catching the
  * measured incident (~4h unnoticed) at roughly half its life. It matches
- * `DOMAIN_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
+ * `AREA_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
  * by coincidence: both measure a loop that should already have turned over,
  * not intake latency.
  */
@@ -4788,10 +4882,10 @@ export function h17IndexRows(entries, isTracked) {
 // The full rationale, the measured unrunnability it answers and the two halves
 // of its incompleteness are in the file header. What lives here is the ruling's
 // own bytes, the gathering pass, and the one thing a reader must not get wrong:
-// this section asks the REVERSE question H14 asks, over the SAME index. H14
-// asks whether a card carrying `pm:blocking` is targeted by anything; ④ asks
+// this section reads the SAME index the relation rows (H78–H80) read. They
+// ask what a blocker and the cards it blocks owe each other; ④ asks
 // which cards in the DECISION inbox are targeted by anything. Same edges, two
-// populations — so there is exactly one index, and no second parser for the
+// questions — so there is exactly one index, and no second parser for the
 // line (`buildBlockingIndex` stays the only builder, `blockedByTargets` the
 // only parser it uses).
 // ---------------------------------------------------------------------------
@@ -4814,7 +4908,7 @@ export const INSTRUCTION_FOUR_RULING =
  *
  * No request of its own and no second listing: `issues` is the unscoped
  * open-issue listing the sweep already holds, and `index` is the very
- * `buildBlockingIndex` map H14 is judged against. ④ costs this patrol one
+ * `buildBlockingIndex` map H78–H80 read. ④ costs this patrol one
  * `Map.get` per decision card.
  *
  * The inbox label is `DECISION_INBOX_LABEL`, deliberately NOT a second
@@ -4892,14 +4986,14 @@ function readTrackedFiles() {
 
 /**
  * H18 threshold — one triage-Routine cycle, the same reasoning as
- * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
+ * `AREA_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
  * question on every `pm:retriage` card each fire (SKILL.md, 「`pm:retriage` 每
  * fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」), so a card
  * still carrying the label after 2h has survived at least one answer pass it
  * should not have. Age is read from `updated_at` rather than a per-card
  * timeline fetch for the label-APPLICATION event: this sweep makes that fetch
  * for no item (H13's same proxy choice, for the same reason — see
- * `h13DomainWithoutPmState`), and every triage write on the card (whatever
+ * `h13AreaWithoutPmState`), and every triage write on the card (whatever
  * the answer) bumps `updated_at`, so a stale reading here means nothing
  * touched the card since any triage pass at all, which is exactly the failure
  * this item exists to name.
@@ -4944,9 +5038,9 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 // ---------------------------------------------------------------------------
 // H19 — a block that OUTLIVED its blocker.
 //
-// The one question about a block that nothing here asked. Two items already
-// read the `Blocked-by:` line and NEITHER expires a block: H4 asks whether the
-// line EXISTS, H14 asks the REVERSE index (does anything target THIS card).
+// The one question about a block that nothing here asked. H4 already read
+// the `Blocked-by:` line and does NOT expire a block: it asks whether the
+// line EXISTS, and the reverse index asks what targets THIS card.
 // The question that actually ENDS a block — is the issue it names still open?
 // — had no reader at all, so a block outlives its blocker in complete silence:
 // well-formed line, correct label, no row anywhere.
@@ -4992,7 +5086,7 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 // 械、零判断)」), and neither is a thing this file could perform: they read the
 // card's conversion-comment history and its merged-PR timeline. So this row
 // surfaces the CANDIDATE and the unlock sweep releases it. ⛔ Never a label
-// written from this script — the same posture H14 holds for `pm:blocking`.
+// written from this script.
 // ---------------------------------------------------------------------------
 
 /**
@@ -5540,7 +5634,10 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
             'all, so this is ⛔ NOT reported as a full discharge: unread is not closed and it is not ' +
             'absent either (#4690), and a RE-PARK is exactly the shape that parks a LIVE blocker in a ' +
             'comment (#11747).'
-          : ' Every target it names is closed: nothing this card declared a wait on is still running.';
+          : ' Every target it names is closed: nothing this card declared a wait on is still running. ' +
+            'That is the FULL discharge the daily scan acts on: after the installable check it returns ' +
+            'the card to `pm:queue` with one comment, or rewrites the line to the next real blocker ' +
+            'when one remains.';
     const alsoUnresolved =
       unresolved.length === 0
         ? ''
@@ -5549,8 +5646,8 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
     return (
       `\`pm:blocked\` while ${closed.length} of ${judgedCount} \`Blocked-by:\` target(s) — ${carrier} — ` +
       `${closed.length === 1 ? 'is' : 'are'} CLOSED (${namedTargets(closed)}): the block has ` +
-      'outlived its blocker. Nothing else here asks this question — H4 asks whether the line EXISTS, H14 ' +
-      'asks the REVERSE index — so an expired block sits with a well-formed line, a correct label and no ' +
+      'outlived its blocker. Nothing else here asks this question — H4 asks only whether the line EXISTS ' +
+      '— so an expired block sits with a well-formed line, a correct label and no ' +
       'row anywhere: one measured card sat ~4.5h past its blocker\'s close and was found only by a human ' +
       'walking the graph, another was released only by a manual triage pass.' +
       rest +
@@ -5616,7 +5713,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
 // The adjacent rows each decline it, for a good reason of its own:
 //   H2   assignee with NO claim comment — here the claim comment is present
 //        and complete, which is exactly the point.
-//   H4 / H14  `Blocked-by:` — not a blocked card.
+//   H4   `Blocked-by:` — not a blocked card.
 //   H9   `pm:on-hold` without `Restart-when:` — not held.
 //   H8   a MERGED PR while still dispatched — nothing merged; nothing ran.
 // Nothing asked whether a card labelled `pm:dispatched` is actually BEING
@@ -6085,7 +6182,7 @@ export function h20DispatchedNoBranchRef(issue, claim, refStates, nowMs = Date.n
 
   const remedy =
     ' Report-only: the remedy is a DISPATCH or a withdrawn claim, ⛔ never a label written from this ' +
-    'script — the same posture H14 holds for `pm:blocking` and H19 for a released block.';
+    'script — the same posture H19 holds for a released block.';
 
   if (unreadable.length > 0) {
     return (
@@ -6386,18 +6483,19 @@ export function h21NegatedClosingKeyword(pr) {
 
 /**
  * The `pm:*` labels that are STATE CLAIMS, and therefore residue on a closed
- * card. Exactly the five the #10688 census measured.
+ * card. The #10688 census measured five; the fifth, `pm:blocking`, left this
+ * set when the label was RETIRED — a retired label has no reader, this one
+ * included, and what is left of it on the board goes with the label object
+ * (a separate, deliberate PM act: see `ensure-pm-labels.sh`).
  *
  * ⚠️ This is deliberately NOT `PM_STATE_LABELS` (H13's), and the two must not
  * be unified on the strength of the similar name. H13 asks "does any label make
  * this card visible to a named reader?", so its list carries `finding`,
- * `needs-user-decision`, `pm:epic` and `pm:seat` and deliberately OMITS
- * `pm:blocking`. H22 asks a different question — "does this label CLAIM work is
- * in flight?" — and the answers diverge in both directions: `pm:blocking` is
- * such a claim (it is what the lane selection order ranks on) while `finding`
- * and `needs-user-decision` are perfectly good states for a closed card to have
- * ended in. Sharing one list would make H22 report every closed finding card on
- * the board and miss the blocking-cache residue entirely.
+ * `needs-user-decision`, `pm:epic` and `pm:seat`. H22 asks a different
+ * question — "does this label CLAIM work is in flight?" — and the answers
+ * diverge: `finding` and `needs-user-decision` are perfectly good states for a
+ * closed card to have ended in. Sharing one list would make H22 report every
+ * closed finding card on the board.
  *
  * Three `pm:*` labels are excluded here because they are not claims that work
  * is in flight:
@@ -6416,7 +6514,6 @@ export const PM_RESIDUE_LABELS = [
   'pm:queue',
   'pm:blocked',
   'pm:on-hold',
-  'pm:blocking',
   // `pm:awaiting-maintainer` is residue on a closed card for the same reason
   // `pm:on-hold` is: it claims an action is still OWED. It joins the set with
   // the state itself (#11196 fix 5) rather than waiting for a census the way
@@ -6830,14 +6927,13 @@ export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
  *                          and `pm:seat`, none of which is a position on the
  *                          work state machine.
  *   `PM_RESIDUE_LABELS`    (H22) "does this label CLAIM work is in flight?" —
- *                          so it carries `pm:blocking` (a derived priority
- *                          cache, not a state) and drops `needs-user-decision`
- *                          (a fine state to close in).
+ *                          so it drops `needs-user-decision` (a fine state
+ *                          to close in).
  *   `PM_EXCLUSIVE_STATE_LABELS` (H29) "is this a position the card can be
  *                          IN, such that two of them contradict?" — identity
  *                          stickers (`pm:seat`, `pm:epic`) legally coexist
- *                          with any state and are out; `pm:blocking` and
- *                          `pm:retriage` are annotations ON a state and are
+ *                          with any state and are out; `pm:retriage` is an
+ *                          annotation ON a state and is
  *                          out; `finding` is a card KIND rather than a
  *                          position and is out. `needs-user-decision` is IN,
  *                          because a card awaiting a ruling is somewhere, and
@@ -7616,6 +7712,109 @@ export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, owner
     'documentation. Remedy: rewrite the body line to name the live blocker (the comment stays as ' +
     'history), so the next reader — human or sweep — finds the current wait in the canonical ' +
     'home. ⛔ Report-only: never a body or a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H77 — a `pm:blocked` card whose `Blocked-by:` line names NO OPEN TARGET.
+//
+// The gap between H4 and H19. H4 asks whether a line EXISTS and is silent the
+// moment one does; H19 asks whether a target has closed — for a PR, merged —
+// and founds nothing on anything else. Between them sits a card that carries a
+// line and waits on nothing nameable:
+//
+//   - the line names no card or PR at all (a sentence after the key, or only
+//     the card's own number) — a value with no ref resolves to an EMPTY target
+//     set, which both rows read as "nothing to say";
+//   - every target it names is a PR that closed UNMERGED — H19 rightly refuses
+//     to read an abandoned PR as a release, so the card sits behind a PR that
+//     will never merge.
+//
+// Either way no close will ever fire the unlock, and every row here was silent
+// on it. A block is a wait on an OPEN card or an UNMERGED PR and the line is
+// its only source, so a line that names neither is the half-state.
+//
+// FREE: the resolutions and the comment bodies the liveness loop already holds.
+// ⛔ It never double-reports. A card with no line is H4's, and a card with a
+// closed-as-done or unreadable judged target is H19's: this row asks both
+// first and stands down for either, by calling them rather than re-deriving
+// what they would say.
+// ---------------------------------------------------------------------------
+
+/**
+ * H77 — null when the line names an open target, or when H4 or H19 already
+ * owns the card; else the finding sentence.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ key: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', unmerged?: boolean }[]} resolutions —
+ *   this card's targets, resolved: H19's own input.
+ * @param {string[]|null|undefined} commentBodies — as gathered for the liveness
+ *   read. `null` is a thread that could not be read, and the row says so
+ *   rather than asserting the comment channel is empty.
+ * @param {string} [ownerRepo] — as for H19: the repo the resolutions were
+ *   keyed against.
+ */
+export function h77BlockNamesNoOpenTarget(issue, resolutions, commentBodies, ownerRepo = OWNER_REPO) {
+  if (!needsBlockerLiveness(issue)) return null;
+  // No line in either channel is H4's row, with H4's remedy.
+  if (h4BlockedNoBlockedBy(issue, commentBodies) !== null) return null;
+  const rows = resolutions ?? [];
+  if (rows.some((r) => r?.state === 'open')) return null;
+  // A closed-as-done or an unreadable judged target is H19's row.
+  if (h19BlockOutlivedBlocker(issue, rows, ownerRepo) !== null) return null;
+
+  // What is left carries a line, names nothing open, and nothing it names
+  // closed as done or went unread — so every target its authoritative carrier
+  // states is a PR that closed UNMERGED, or it states none. The carrier split
+  // is H19's own, so the two agree on which targets that carrier names.
+  const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
+  const carries = (r) => bodyKeys.size === 0 || bodyKeys.has(r.key);
+  const judged = rows.filter(carries);
+  const archive = rows.filter((r) => !carries(r));
+  // A body that names targets none of which was resolved is a reading this
+  // predicate was not handed (the sweep always resolves the body's own set):
+  // silence, the direction that never invents a verdict.
+  if (rows.length > 0 && judged.length === 0) return null;
+
+  const where = hasBlockedByLine(issue?.body) ? 'its body' : 'a comment';
+  const what =
+    judged.length === 0
+      ? `the line is there (in ${where}) and names no card or PR other than this card itself — ` +
+        'nothing after the key is a reference to another card'
+      : `every target it names is a PR that closed UNMERGED (${namedTargets(judged)}) — an abandoned PR ` +
+        'lands nothing, so its close is never a release, and it will never merge';
+  const unreadArchive = archive.filter((r) => r.state === 'unresolved');
+  const archiveNote =
+    archive.length === 0
+      ? ''
+      : ` A further ${archive.length} target(s) reach this card only through the comment archive ` +
+        `(${namedTargets(archive)}): none of them is open` +
+        (unreadArchive.length > 0
+          ? `, and ${unreadArchive.length} could not be read this sweep — unread, not closed`
+          : '') +
+        '. The body states its own set, so they change nothing here.';
+  const threadNote =
+    commentBodies === null
+      ? ' ⚠️ This card\'s comment thread could NOT be read this sweep, so a target parked in a comment ' +
+        'is unread, not absent: the row reports what the body says.'
+      : '';
+  return (
+    `\`pm:blocked\` and its \`Blocked-by:\` line names NO OPEN TARGET: ${what}. So the card waits on ` +
+    'nothing nameable and no close can ever release it — H4 is silent because a line exists, and H19 ' +
+    'because nothing it names closed as done. A block is a wait on an OPEN card or an UNMERGED PR, and ' +
+    'the line is its only source.' +
+    archiveNote +
+    threadNote +
+    ' Remedy, by what the card is really waiting for: another card or PR ⇒ rewrite the line to name ' +
+    'it; the maintainer\'s own action ⇒ `pm:awaiting-maintainer` with a `Maintainer-action:` line; his ' +
+    'product choice ⇒ the decision box, with options and a recommendation; a platform release ⇒ ' +
+    '`pm:on-hold` with a `Restart-when:` line; nothing any more ⇒ back to `pm:queue`. Report-only: the ' +
+    'daily scan reports it and the owning seat makes the move, ⛔ never a label or a line written from ' +
+    'this script.'
   );
 }
 
@@ -9057,8 +9256,8 @@ export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
  * this row UNDER-reports: a seat whose post was silently bumped by a label write
  * reads as fresher than it is and goes unreported. Named rather than fixed,
  * because the alternative — a per-post timeline fetch on every seat, every sweep
- * — is a per-card event read this file declines everywhere else (H15, H16 and
- * H35 all refuse the same shape by name), and the residual error is one label
+ * — is a per-card event read this file declines everywhere else (H16 and
+ * H35 both refuse the same shape by name), and the residual error is one label
  * write on a surface whose labels are essentially static.
  *
  * @param {{ updated_at?: string }} seat
@@ -11485,7 +11684,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
 // ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body carries a
-// `## 维护者速读` section of its own — the six-line DRAFT, written before the
+// `## 维护者速读` section of its own — the four-line DRAFT, written before the
 // review happened, under the SAME heading — and reading it as the brief would
 // let the half this row exists to find satisfy itself. So this row reads
 // comment threads and nothing else, and the sentence says so where a reader
@@ -11676,7 +11875,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
 //
 // ## The rule this row patrols
 //
-// The seat's record on a governed PR — the six-line 维护者速读 with 席位意见
+// The seat's record on a governed PR — the four-line 维护者速读 with 席位意见
 // filled, then `## 席位核对` with the six-item check — is a PRECONDITION of
 // the maintainer being asked to look: before `pr_ready` on Tier H and before
 // a Tier S PR is queued, that record exists on the PR for the head the
@@ -14790,7 +14989,7 @@ export function h58QueuedRulingRow(issue, commentBodies) {
 // status (#17374): a failed read is UNJUDGED and counted.
 //
 // ⚠️ This is the FIRST per-card timeline fetch in this file, and the rows that
-// decline one by name (H11/H15's label age, H18/H13's `updated_at` proxy,
+// decline one by name (H11's label age, H18/H13's `updated_at` proxy,
 // H55's entry instant) still decline it — their
 // notes are narrowed to say so rather than deleted. The fetch is bought here
 // for a population that is at most a handful of cards a sweep, never for the
@@ -15499,6 +15698,24 @@ export function ruledRecords(body) {
 }
 
 /**
+ * The ruling record that GOVERNS a body: the one with the newest readable
+ * stamp, else the first record written; null when the body carries none.
+ *
+ * ONE spelling of that rule, read by H73 (is the governing ruling's exit owed?)
+ * and by H81 (is there a governing ruling at all?), so the two rows cannot come
+ * to disagree about which ruling a card is under.
+ *
+ * @param {string} body
+ * @returns {{ id: string, at: number|null } | null}
+ */
+export function governingRuledRecord(body) {
+  const records = ruledRecords(body);
+  if (records.length === 0) return null;
+  const stamped = records.filter((r) => r.at !== null);
+  return stamped.length > 0 ? stamped.reduce((a, r) => (r.at > a.at ? r : a)) : records[0];
+}
+
+/**
  * Is this ruling id named on the body's `Prior rulings on this card:` line, or
  * on the list lines directly under it? Fences stripped, like the record itself.
  */
@@ -15538,10 +15755,8 @@ export function h73SpeaksAbout(issue) {
  */
 export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
   if (!h73SpeaksAbout(issue)) return null;
-  const records = ruledRecords(issue.body);
-  if (records.length === 0) return null;
-  const stamped = records.filter((r) => r.at !== null);
-  const governing = stamped.length > 0 ? stamped.reduce((a, r) => (r.at > a.at ? r : a)) : records[0];
+  const governing = governingRuledRecord(issue.body);
+  if (!governing) return null;
   if (priorRulingNamesId(issue.body, governing.id)) return null;
   const ageHours = governing.at === null ? null : (nowMs - governing.at) / 3_600_000;
   if (ageHours !== null && ageHours <= RULED_IN_BOX_STALE_HOURS) return null;
@@ -15565,6 +15780,99 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
     '--mailbox-keys` prints it). Report-only: ⛔ never a label written from this script. Boundaries: a ' +
     'card that re-entered the box naming this ruling on its `Prior rulings on this card:` line is clean ' +
     'here; a card moved OUT of the box with no ruling id is the dispatch-time 决策复读\'s, not this row\'s.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H81 — a question in the decision box that nobody has answered.
+//
+// A card waiting on the maintainer's product choice goes where he reads
+// decisions — `needs-user-decision`, with options and a recommendation — and
+// ⛔ never parks under `pm:blocked` or `pm:awaiting-maintainer`. The other half
+// of that rule is this row: the daily scan LISTS the questions that have been
+// open more than `DECISION_UNANSWERED_STALE_DAYS`, so a question does not sit
+// in the box unseen because nothing ever re-surfaces it.
+//
+// The population is H73's, read the other way. H73 reports a card that HAS a
+// governing ruling and is still in the box (the exit is owed by a lane seat);
+// this row reports a card that has NONE (the answer is owed by the maintainer).
+// One shared reader decides which ruling governs (`governingRuledRecord`), so
+// a card is exactly one of the two and never both. A card that re-entered the
+// box with a NEW question — its `Prior rulings on this card:` line names the
+// earlier ruling — is unanswered again, and is this row's.
+//
+// ## Which age, and why it is the card's
+//
+// When a card ENTERED the box is the instant its label was applied, which
+// lives in a per-card event read this sweep buys for no row of this kind (H11
+// and H18 decline the same read by name). So the age is counted from the
+// card's `created_at` — and, for a re-entered card, from the newest earlier
+// ruling its body records, which is a floor on the re-entry. The error
+// direction is stated on the row: a card filed long before it entered the box
+// reads OLDER than its question is. That over-reports in one shape and
+// under-reports in none, and the row prints the last-touched time beside the
+// age so a reader can see the shape at a glance.
+//
+// ⛔ `updated_at` is deliberately NOT the clock: any comment bumps it, so a
+// question that a seat nudges every other day would never list — the silence
+// this row exists to end. An unreadable age FIRES, never reads as fresh.
+//
+// FREE — one label read, one body read and two timestamps on a row the
+// unscoped listing already holds. Report-only: ⛔ no seat answers for the
+// maintainer and no script moves the card. Band `stall`.
+// ---------------------------------------------------------------------------
+
+/** H81's threshold, in days: how long a question may sit unanswered unlisted. */
+export const DECISION_UNANSWERED_STALE_DAYS = 3;
+
+/**
+ * H81 — null when the card is not an unanswered question past the threshold,
+ * else the finding sentence.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body, and the card it is about is the row's own
+ * link.
+ *
+ * @param {object} issue — a row of the unscoped open listing.
+ */
+export function h81DecisionUnanswered(issue, nowMs = Date.now()) {
+  if (!h73SpeaksAbout(issue)) return null;
+  const governing = governingRuledRecord(issue.body);
+  // A governing ruling is an ANSWER: what the card owes then is its exit, H73's row.
+  const reentered = governing !== null && priorRulingNamesId(issue.body, governing.id);
+  if (governing !== null && !reentered) return null;
+
+  const created = Date.parse(issue.created_at ?? '');
+  const floors = [created, reentered ? governing.at : null].filter((at) => Number.isFinite(at));
+  const since = floors.length > 0 ? Math.max(...floors) : null;
+  const ageDays = since === null ? null : (nowMs - since) / 86_400_000;
+  if (ageDays !== null && ageDays <= DECISION_UNANSWERED_STALE_DAYS) return null;
+
+  const countedFrom =
+    reentered && Number.isFinite(governing.at) && since === governing.at
+      ? 'counted from the newest earlier ruling its `Prior rulings on this card:` line names — the card ' +
+        're-entered the box with a new question after it'
+      : 'counted from the day the card was filed';
+  const age =
+    ageDays === null
+      ? 'for a time this sweep could not read (no readable `created_at` — an unreadable age must not ' +
+        'read as fresh)'
+      : `~${Math.floor(ageDays)} day(s) (threshold ${DECISION_UNANSWERED_STALE_DAYS}), ${countedFrom}`;
+  const touched = Date.parse(issue.updated_at ?? '');
+  const lastTouched = Number.isFinite(touched)
+    ? `last touched ~${Math.max(0, Math.round((nowMs - touched) / 3_600_000))}h ago`
+    : 'last-touched time unreadable';
+  return (
+    `\`${DECISION_INBOX_LABEL}\` and no ruling recorded on the card: this question has been open ${age}; ` +
+    `${lastTouched}. The age is the CARD's, not the label's: when a card entered the box lives in a ` +
+    'per-card event read this sweep does not buy, so a card filed long before it entered the box reads ' +
+    'older than its question is — the last-touched time rides beside it for that reason. The answer is ' +
+    'the maintainer\'s alone: ⛔ no seat answers for him and no script moves the card. What a seat owes ' +
+    'is the path to him — the card in the decision box with its options and a recommendation, and the ' +
+    'decision thread the coordinator opens for it; the daily scan lists this row to him. Report-only: ' +
+    '⛔ never a label written from this script. Boundaries: a card whose body carries a governing ' +
+    `\`${RULED_LINE_KEY}:\` record is ANSWERED and is H73's, never this row's; a closed card and a pull ` +
+    'request are out.'
   );
 }
 
@@ -18012,7 +18320,6 @@ export const H67_QUOTE_LIMIT = 220;
  */
 export const H67_SELECTION_ORDER_LABELS = Object.freeze([
   'priority:p0',
-  'pm:blocking',
   'priority:p1',
   'priority:p2',
   'priority:p3',
@@ -18966,11 +19273,10 @@ export function summaryLine(counts, findingCount) {
   const candidates = counts.conflictCandidates ?? 0;
   const held = counts.holdProbed ?? 0;
   const holdCandidates = counts.holdCandidates ?? 0;
-  // The third `read X of Y` pair, and the one with a consequence the other two
-  // do not have: a shortfall here does not merely leave rows out, it SILENCES
-  // H14's stale direction (see the predicate). A reader seeing a quiet stale
-  // section needs this number to tell "the cache is coherent" from "the sweep
-  // declined to judge it".
+  // The third `read X of Y` pair. A shortfall here leaves EDGES out of the
+  // reverse index: every relation row (H78–H80, instruction ④) is a claim about
+  // edges in hand, so none is suspended — but a reader needs this number to tell
+  // "no card waits on it" from "the thread that says so was not read".
   const fbProbed = counts.fallbackProbed ?? 0;
   const fbCandidates = counts.fallbackCandidates ?? 0;
   // H9's pair (#10403), same shape as H17's over the same fetches but for the
@@ -19062,7 +19368,7 @@ export function summaryLine(counts, findingCount) {
   const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
-    `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
+    `issue(s) in the unscoped pass (H13, H18, H78–H81), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     // H8's window disclosure (#13499). The TRUNCATED half is the load-bearing
@@ -19145,7 +19451,7 @@ export function summaryLine(counts, findingCount) {
     } ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
-    `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
+    `${fbProbed < fbCandidates ? ' — the reverse index is MISSING the edges those threads carry (H78–H80 and instruction ④ read edges in hand)' : ''}. ` +
     `\`Restart-when:\` hold comments read on ${rwProbed} of ${rwCandidates} H9 candidate(s)` +
     `${rwProbed < rwCandidates ? " — each unread thread fires its own card's H9 row, never dropped" : ''}. ` +
     `Awaiting-maintainer entries (H55): ${awaitingLegacy} open \`${AWAITING_MAINTAINER_LABEL}\` card(s) last ` +
@@ -19593,7 +19899,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h23Window', "H23's commit window is a"],
   ['openListings', 'The open listings (H1–H18 inventory, H13 unscoped pass, open PRs) is an '],
   ['h17Holds', 'Hold comments read on '],
-  ['h14Fallback', '`Blocked-by:` comment fallback read on '],
+  ['blockedByFallback', '`Blocked-by:` comment fallback read on '],
   ['h9Restart', '`Restart-when:` hold comments read on '],
   ['h55Awaiting', 'Awaiting-maintainer entries (H55): '],
   ['h74Audit', 'First-touch audits (H74): '],
@@ -19803,7 +20109,7 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
  * population is the maintainer's answer queue (1–9 cards across the boards this
  * was measured on), so the ceiling this section keeps is the PER-ROW dependent
  * cap, and it reuses `BLOCKING_DEPENDENT_LIST_CAP` rather than inventing a
- * second number for the same fan-out H14 already bounds.
+ * second number for the same fan-out H78–H80 already bound.
  *
  * @param {{ rows: Array<{ issue: object, dependents: number[] }>, inbox?: number,
  *   unmeasured?: number }} [inventory] — from `decisionDependentIndex`, plus
@@ -19824,7 +20130,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
       `\`${DECISION_INBOX_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
       `names, and ⛔ no priority label is written for it. The standing instruction this ` +
       `discharges, verbatim: 「${INSTRUCTION_FOUR_RULING}」 It is one lookup over the same ` +
-      `reverse index H14 is judged against — no second channel and no second parser (#17968).`,
+      `reverse index the blocking-relation rows read — no second channel and no second parser (#17968).`,
     '',
   );
 
@@ -19858,9 +20164,9 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
     `MEASURED: the flag count alone is a number that ran, and therefore reads as complete.`;
   const scope =
     `Population scope: dependent BODIES are read from every open issue in this repo (the ` +
-    `unscoped listing); dependent COMMENTS only from open \`pm:blocked\` / \`pm:blocking\` cards ` +
+    `unscoped listing); dependent COMMENTS only from open \`pm:blocked\` cards ` +
     `whose body carries no \`Blocked-by:\` line. A dependent that states the wait in a comment ` +
-    `and carries neither label, and any dependent in a sibling repo, is outside this reading — ` +
+    `and does not carry that label, and any dependent in a sibling repo, is outside this reading — ` +
     `unread, not absent.`;
 
   head.push('', ...(markdown ? [`_${count}_`, '', `_${notMeasured}_`, '', `_${scope}_`] : [`  ${count}`, `  ${notMeasured}`, `  ${scope}`]));
@@ -20070,7 +20376,9 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *             the only reader able to tell a stripped gate from an ungated
  *             card cannot be the row that arrival order eats.
  *   stall     the card is stopped and no later sweep frees it: a block that
- *             outlived or mis-names its blocker (H19/H26/H28), a dispatch that
+ *             outlived or mis-names its blocker (H19/H26/H28), one that names
+ *             no open target or waits in a cycle (H77/H80), a question the
+ *             maintainer has not answered (H81), a dispatch that
  *             never reached a branch or whose claimant is gone (H20/H27/H33),
  *             a PR that cannot land (H12/H16/H36), a governed PR that nobody
  *             was asked to look at (H43), a seat or lane not moving
@@ -20079,8 +20387,9 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *   state     the board contradicts itself on a live card, and the repair is
  *             on the board: label pairs, claim shapes, aged states.
  *   inventory triage's own examples of the class gate rows outrank — the
- *             `pm:blocking` cache (H14/H15), the seat-sticker pair (H5/H6),
- *             the important-parked list (H11). ⚖️ Closed-card residue (H22)
+ *             seat-sticker pair (H5/H6), the important-parked list (H11).
+ *             The `pm:blocking` cache pair (H14/H15) was a third example
+ *             and is retired with its label. ⚖️ Closed-card residue (H22)
  *             was triage's fourth example and is no longer here at all: since
  *             #14072 it files no row, so it is a reserved-section reading
  *             rather than the lowest-ranked row family.
@@ -20435,8 +20744,6 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H5: 'inventory',
   H6: 'inventory',
   H11: 'inventory',
-  H14: 'inventory',
-  H15: 'inventory',
   // H72 is `inventory`: a census of one mailbox's recent off-table bells. Nothing
   // is stopped (not `stall`), and no write on the board repairs a sent comment
   // (not `state`) — the repair is the next bell, spelled from the table.
@@ -20446,6 +20753,19 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // owner the ruling makes it name is missing, and the repair is one relay
   // `assign` on the board. ⛔ Not `stall`: an unowned PR can still land.
   H76: 'state',
+
+  // The blocking relation, read from the `Blocked-by:` lines. H77 and H80 are
+  // `stall`, H19's band for H19's reason: a block no later sweep frees — the
+  // line names no open target, or the cards wait on each other. H78 and H79
+  // are `state`: the board contradicts itself across two live cards (a blocker
+  // graded below what it blocks, a hold on one side only) and the repair is
+  // one write on the board. H81 is `stall`: the question moves only when the
+  // maintainer answers it.
+  H77: 'stall',
+  H78: 'state',
+  H79: 'state',
+  H80: 'stall',
+  H81: 'stall',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -20468,11 +20788,18 @@ function familyNumber(code) {
 
 /**
  * The ledger's own render ceiling, in the tradition of every other cap in this
- * file. The registry holds far fewer families than this, so the cap can only
+ * file. The registry holds fewer families than this, so the cap can only
  * ever bite on a run carrying a crowd of UNREGISTERED codes — which sort into
  * the protected band above and therefore render before the cap can reach them.
+ *
+ * RAISED 64 → 72 with the blocking-relation rows (H77–H81): the registry had
+ * grown to 63 of 64 and five new families less the two retired ones (H14/H15)
+ * make 66, which a cap of 64 would have let TRIM REGISTERED families — the one
+ * thing the sentence above promises it cannot do. The pin 「the registry still
+ * fits inside the ledger ROW CAP」 is what caught it. The worst case was
+ * re-measured at the new cap; see `FAMILY_LEDGER_WORST_CASE_BYTES`.
  */
-export const FAMILY_LEDGER_ROW_CAP = 64;
+export const FAMILY_LEDGER_ROW_CAP = 72;
 
 /** Families named inline in the trim callout before it degrades to a count. */
 export const FAMILY_LEDGER_CALLOUT_CAP = 12;
@@ -20483,7 +20810,7 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  * worst case and measures it, never left as a claim. The arithmetic:
  *
  *   heading + intro prose         ~1.1 KB, fixed
- *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
+ *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (72) × ~48 B ≈ 3.5 KB
  *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
  *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
  *   computed-0 line               ≤ registry size (38) × ~8 B + prose
@@ -20493,7 +20820,9 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  * #14072 removed H22, 38 with H45/H46 — the ROW CAP below, not the registry
  * size, is what bounds the table, so the measured figure still stands),
  * 3,754 B with enough unregistered
- * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
+ * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. Re-measured in bytes when the
+ * cap rose 64 → 72: 3,025 B and 3,435 B on the 63-family registry at cap 64,
+ * 3,101 B and 3,777 B on the 66-family registry at cap 72. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
  * and reserved out of that budget, so the headroom between the budget and
  * `ISSUE_BODY_LIMIT` is untouched by it. ⚠️ Those two measured figures were
@@ -23341,7 +23670,7 @@ async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
 }
 
 /**
- * The unscoped listing H13 needs: the domain-without-pm-state shape is
+ * The unscoped listing H13 needs: the area-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
  * queries hides it from a label-scoped sweep too. The same
@@ -24582,10 +24911,10 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const unscoped = await listAllOpenIssues(stats);
   for (const issue of unscoped) {
     seenUnscoped.set(issue.number, issue);
-    const halfState = h13DomainWithoutPmState(issue);
+    const halfState = h13AreaWithoutPmState(issue);
     if (halfState) findings.push([issue, 'H13', halfState]);
     // H18 — same population: `pm:retriage` can coexist with a label this
-    // sweep's label pages never fetch (e.g. `pm:blocking`) or with none at
+    // sweep's label pages never fetch (e.g. `needs-user-decision`) or with none at
     // all, so only the unscoped listing is guaranteed to see every carrier.
     const retriageAged = h18RetriageAged(issue);
     if (retriageAged) findings.push([issue, 'H18', retriageAged]);
@@ -24603,6 +24932,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // a row this listing already holds — no request, no thread.
     const ruledInBox = h73RuledCardStillInBox(issue);
     if (ruledInBox) findings.push([issue, 'H73', ruledInBox]);
+    // H81 — the same decision card with NO answer yet, on this listing for
+    // H62's reason. One label read, one body read and two timestamps on a row
+    // this listing already holds — no request, no thread. A card is H73's or
+    // this row's, never both: one reader decides which ruling governs.
+    const unanswered = h81DecisionUnanswered(issue);
+    if (unanswered) findings.push([issue, 'H81', unanswered]);
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
@@ -24617,48 +24952,52 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (seamless) findings.push([issue, 'H68', seamless]);
   }
 
-  // H14 + H15 — the same unscoped listing, read a second way. It is the right
-  // population for BOTH halves and neither label page could substitute: a
-  // `pm:blocking` card need carry no other label (so the label pages above can
-  // miss the subject), and the `Blocked-by:` lines that judge it are written by
-  // cards of any label at all (so they can miss the evidence). No extra fetch:
-  // the bodies are already in hand, which is exactly the "derived from the same
-  // body reads the sweep already performs" this pair was specified as.
+  // The `Blocked-by:` reverse index — the same unscoped listing, read a second
+  // way. It is the right population and no label page could substitute: the
+  // lines are written by cards of any label at all, so a label-scoped listing
+  // can miss the evidence. No extra listing: the bodies are already in hand.
   //
-  // …with ONE fetching pass in front of it, and it has to be here rather than
-  // in the label loop above: `pm:blocking` is not one of the labels that loop
-  // lists, so those cards are first visible in this listing. The gate is the
-  // same one H4 used, the cache is the same, and a card already gathered above
-  // is a no-op — so the union of the two passes is still at most one request
-  // per card.
+  // …with ONE fetching pass in front of it, for the comment channel. The gate
+  // is the same one H4 used and the cache is the same, so a card the label loop
+  // already gathered is a no-op here — this pass only pays for a `pm:blocked`
+  // card the label pages did not hand over, and the union of the two passes is
+  // still at most one request per card.
   for (const issue of unscoped) {
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
   }
   // Total failure is the transport, not a board where no card parks the line
   // in a comment — the same #4690 judgement H16 and H17 make, and the same
   // predicate, deliberately shared rather than re-derived. A PARTIAL shortfall
-  // is a bounded gap: it stays, and it costs H14's stale direction (below)
-  // plus a summary-line clause, rather than the sweep.
+  // is a bounded gap: it stays, and it costs the index the edges those threads
+  // carry plus a summary-line clause, rather than the sweep.
   if (h16DetailPassUnreadable(stats.fallbackCandidates, stats.fallbackProbed)) {
     throw lastFallbackError;
   }
 
   const blockingIndex = buildBlockingIndex(unscoped, { comments: fallback.comments });
-  const indexComplete = fallback.unreadable.size === 0;
   // Instruction ④ (#17968) — the SAME index, asked the decision box's question.
   // Here rather than beside the renderer because this is where both inputs are
   // in hand: the unscoped open listing and the index it just fed. No request,
-  // no second parser, and no widening of what H14 reads.
+  // no second parser, and no widening of what the index reads.
   if (decisions) Object.assign(decisions, decisionDependentIndex(unscoped, blockingIndex));
-  for (const issue of unscoped) {
-    const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex, { indexComplete });
-    if (incoherent) findings.push([issue, 'H14', incoherent]);
-  }
 
-  // One row, attached to the card it names — so it links, sorts and truncates
-  // exactly like every other row and neither renderer needs a special case.
-  const oldestBlocking = h15OldestUnclaimedBlocking(unscoped);
-  if (oldestBlocking) findings.push([oldestBlocking.issue, 'H15', oldestBlocking.message]);
+  // H78 + H79 + H80 — the same index a third time, asked what a blocker and the
+  // cards it blocks owe each other. `seenUnscoped` is the open listing the
+  // index was built from, by number, so every lookup below is a `Map.get`: no
+  // request. An index short of some comment threads is short of EDGES, and each
+  // of these rows is a claim about edges in hand, so none is suspended for it.
+  const waitsOn = blockersByDependent(blockingIndex);
+  for (const issue of unscoped) {
+    const underGraded = h78BlockerBelowBlockedGrade(issue, blockingIndex, seenUnscoped);
+    if (underGraded) findings.push([issue, 'H78', underGraded]);
+    const holdMismatch = h79HoldMismatch(issue, waitsOn.get(issue.number), seenUnscoped);
+    if (holdMismatch) findings.push([issue, 'H79', holdMismatch]);
+  }
+  // One row per group, attached to its lowest-numbered card — so it links,
+  // sorts and truncates exactly like every other row.
+  for (const cycle of h80BlockingCycleRows(blockingIndex, seenUnscoped)) {
+    findings.push([cycle.issue, 'H80', cycle.message]);
+  }
 
   // H20 — the dispatched card nobody is working. Two reads, both bounded by
   // the `pm:dispatched` population rather than the board:
@@ -25267,6 +25606,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // which is the write to fix. Both fire on one card, deliberately.
     const staleBody = h28StaleBodyBlockerLine(issue, resolutions, fallbackFor(issue));
     if (staleBody) findings.push([issue, 'H28', staleBody]);
+    // H77 — the same resolutions, asked the question H4 and H19 leave between
+    // them: a line exists, and does it name anything OPEN? It stands down for
+    // either of those rows, so a card is reported under exactly one of the three.
+    const noOpenTarget = h77BlockNamesNoOpenTarget(issue, resolutions, fallbackFor(issue));
+    if (noOpenTarget) findings.push([issue, 'H77', noOpenTarget]);
   }
   // Distinct targets, which is the unit the cache and the request count are
   // in — and the word is in the summary sentence so the number cannot be read
@@ -25907,6 +26251,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // beside its positive twin, the threshold boundary, the governing stamp, the
   // re-entry line, the owing seat, the live record shapes, the text, the band.
   'H73 ruled card in the decision box': 25,
+  // Registered with the blocking-relation rows, pin AT the count: for
+  // each of H77–H81 the firing case beside the control that silences it, the
+  // stand-down for the neighbouring row (H4/H19 for H77, H73 for H81), the
+  // unreadable inputs, the text, the band and the wiring; H19's full-discharge
+  // sentence both ways; the grade ladder; the cycle finder over rings, chains
+  // and a 4000-card ring; and the retirement of H14/H15 read off the registry.
+  'H77-H81 blocking relation read from the lines': 102,
   // Registered with the first-touch audit row, pin just under the count: the
   // firing case with both record shapes as its positive controls, the body
   // channel, every exemption beside a non-exempt twin, the population edges,
@@ -25995,8 +26346,7 @@ async function selfTest() {
   const h10row = (...args) => String(h10StaleUnclaimedP0(...args) ?? '');
   const h11row = (...args) => String(h11ImportantParked(...args) ?? '');
   const h12row = (...args) => String(h12OrphanLanding(...args) ?? '');
-  const h13row = (...args) => String(h13DomainWithoutPmState(...args) ?? '');
-  const h14row = (...args) => String(h14BlockingCacheIncoherent(...args) ?? '');
+  const h13row = (...args) => String(h13AreaWithoutPmState(...args) ?? '');
   const h16row = (...args) => String(h16StuckMergeConflict(...args) ?? '');
   const h18row = (...args) => String(h18RetriageAged(...args) ?? '');
   const h19row = (...args) => String(h19BlockOutlivedBlocker(...args) ?? '');
@@ -26073,9 +26423,11 @@ async function selfTest() {
 
   // The gathering policy — what gets READ AT ALL.
   t('gate: a body-clean pm:blocked card is a candidate', needsBlockedByComments(issue(['pm:blocked'], [], 'no line here')), true);
-  t('gate: a body-clean pm:blocking card is a candidate', needsBlockedByComments(issue(['pm:blocking'], [], 'no line here')), true);
+  // ⛔ The retired `pm:blocking` label is no arm of the gate any more: a card
+  // still carrying it buys no fetch on its strength.
+  t('gate: a body-clean card carrying only the RETIRED pm:blocking label is NOT a candidate', needsBlockedByComments(issue(['pm:blocking'], [], 'no line here')), false);
+  t('gate: …while the same card ALSO carrying pm:blocked still is — the gate reads one label', needsBlockedByComments(issue(['pm:blocking', 'pm:blocked'], [], 'no line here')), true);
   t('gate: a pm:blocked card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocked'], [], 'Blocked-by: #1')), false);
-  t('gate: a pm:blocking card whose body already carries the line is NOT', needsBlockedByComments(issue(['pm:blocking'], [], 'Blocked-by: #1')), false);
   t('gate: an ordinary queued card buys no fetch', needsBlockedByComments(issue(['pm:queue'], [], 'no line here')), false);
   t('gate: an on-hold card buys no fetch from THIS item', needsBlockedByComments(issue(['pm:on-hold'], [], 'no line here')), false);
   t('gate: a missing issue does not crash', needsBlockedByComments(undefined), false);
@@ -26924,7 +27276,7 @@ async function selfTest() {
   t('H22: a not_planned close is residue too', h22labels(closedCard(['pm:queue'], 'not_planned')), 'pm:queue');
   t('H22: a missing state_reason changes nothing it selects', h22labels({ ...closedCard(['pm:queue']), state_reason: null }), 'pm:queue');
   t('H22: …and can no longer print the string undefined, having no prose to print it in', h22labels({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'), false);
-  t('H22: several residue labels are all returned', h22labels(closedCard(['pm:blocked', 'pm:blocking'])), 'pm:blocked,pm:blocking');
+  t('H22: several residue labels are all returned', h22labels(closedCard(['pm:blocked', 'pm:on-hold'])), 'pm:blocked,pm:on-hold');
   // ⛔ The strip imperative is GONE, and this is the pin that keeps a
   // well-meaning restoration from bringing it back: 批 #13 refused that write by
   // name (⛔ 不为存量补写), so the predicate must not be able to prescribe it.
@@ -26956,13 +27308,15 @@ async function selfTest() {
   // live carriers to census when it was created, and admitting it at creation
   // is what keeps the state from accruing the residue this row exists to catch
   // before anyone thinks to measure it (#11196 fix 5).
-  t('H22: the residue set is the census five + the newly ruled state', PM_RESIDUE_LABELS.join(','), 'pm:dispatched,pm:queue,pm:blocked,pm:on-hold,pm:blocking,pm:awaiting-maintainer');
+  t('H22: the residue set is the four census labels still in the vocabulary + the newly ruled state', PM_RESIDUE_LABELS.join(','), 'pm:dispatched,pm:queue,pm:blocked,pm:on-hold,pm:awaiting-maintainer');
   // …and the two similarly-named sets stay APART: H13's carries `finding`, this
-  // one carries `pm:blocking`, and unifying them would break both items.
+  // one does not, and unifying them would break both items.
   t('H22: the residue set is NOT H13\'s visibility set', PM_RESIDUE_LABELS.join(',') === PM_STATE_LABELS.join(','), false);
   t('H22: …H13\'s set carries `finding`, which is a fine state to close in', PM_STATE_LABELS.includes('finding'), true);
   t('H22: …and this one does not', PM_RESIDUE_LABELS.includes('finding'), false);
-  t('H22: …while `pm:blocking` is residue here and absent from H13\'s', PM_RESIDUE_LABELS.includes('pm:blocking') && !PM_STATE_LABELS.includes('pm:blocking'), true);
+  // The census's fifth label is RETIRED: no set reads it, this one included.
+  t('H22: …and the RETIRED `pm:blocking` is in neither set', PM_RESIDUE_LABELS.includes('pm:blocking') || PM_STATE_LABELS.includes('pm:blocking'), false);
+  t('H22: …so a closed card carrying only that retired label is clean', h22ClosedCardPmResidue(closedCard(['pm:blocking'])), null);
   for (const label of PM_RESIDUE_LABELS) {
     t(`H22: \`${label}\` on a closed card is residue`, h22labels(closedCard([label])), label);
   }
@@ -27228,11 +27582,11 @@ async function selfTest() {
   t('H9: the manual row carries no unparsed hedge', h9row(hold('Restart-when: manual — reason')).includes('cannot parse'), false);
   t('H9: …but does still demote closing', h9row(hold('Restart-when: manual — reason')).includes('Closing is the LAST resort'), true);
   // The channel contract, stated in the row itself — two channels since
-  // #10403, symmetric with H4/H14. An undocumented difference between two
+  // #10403, symmetric with H4. An undocumented difference between two
   // adjacent rules is how the last two half-states on that lane were made,
   // and an undocumented SAMENESS would repeat it in mirror image.
   t('H9: the row states the two-channel contract', h9NoLine.includes('body OR a comment'), true);
-  t('H9: …and names the predicates it now matches', h9NoLine.includes('H4/H14'), true);
+  t('H9: …and names the predicate it now matches', h9NoLine.includes('like `Blocked-by:` (H4)'), true);
   t('H9: …and the manual row states it too', h9row(hold('Restart-when: manual — x')).includes('body OR a comment'), true);
 
   // -- H9's COMMENT channel (#10403) -----------------------------------------
@@ -27527,78 +27881,83 @@ async function selfTest() {
   t('H12: missing draft field is out of scope', h12OrphanLanding({ auto_merge: null, updated_at: hoursAgo(50) }, NOW), null);
   t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
 
-  // -- H13: domain:* without any pm-state label, aged (2026-08-19 incident) --
-  const domainCard = (labels, updatedAt, extra = {}) => ({
+  // -- H13: area:* without any pm-state label, aged (2026-08-19 incident) --
+  const labelledCard = (labels, updatedAt, extra = {}) => ({
     ...issue(labels),
     updated_at: updatedAt,
     ...extra,
   });
-  t('H13: aged domain card with no pm-state -> finding', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
-  t('H13: …and the finding names the threshold', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
-  t('H13: …and blames the healing loop, not inventory', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
-  t('H13: pm:queue pairs the domain label -> clean', h13DomainWithoutPmState(domainCard(['domain:engine-core', 'pm:queue'], hoursAgo(26)), NOW), null);
-  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:spec', 'needs-user-decision'], hoursAgo(200)), NOW), null);
-  t('H13: finding is a state (the grading round reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:cli', 'finding'], hoursAgo(200)), NOW), null);
-  // `pm:blocking` is a derived priority cache, not a state — a card carrying
+  t('H13: aged area card with no pm-state -> finding', typeof h13AreaWithoutPmState(labelledCard(['area:data', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
+  t('H13: …and the finding names the threshold', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes(`${AREA_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: pm:queue pairs the area label -> clean', h13AreaWithoutPmState(labelledCard(['area:data', 'pm:queue'], hoursAgo(26)), NOW), null);
+  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13AreaWithoutPmState(labelledCard(['area:build', 'needs-user-decision'], hoursAgo(200)), NOW), null);
+  t('H13: finding is a state (the grading round reads it) -> clean', h13AreaWithoutPmState(labelledCard(['area:package', 'finding'], hoursAgo(200)), NOW), null);
+  // The retired `pm:blocking` label was never a state — a card still carrying
   // only it is exactly as invisible to candidate queries, so it still flags.
-  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13DomainWithoutPmState(domainCard(['domain:services', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
-  t('H13: status:parked exemption (its normal shape IS this one)', h13DomainWithoutPmState(domainCard(['domain:services', 'status:parked'], hoursAgo(200)), NOW), null);
-  t('H13: tracking exemption', h13DomainWithoutPmState(domainCard(['domain:devx', 'tracking'], hoursAgo(200)), NOW), null);
-  t('H13: qa-run exemption', h13DomainWithoutPmState(domainCard(['domain:cli', 'qa-run'], hoursAgo(200)), NOW), null);
-  t('H13: no domain label is out of scope however bare', h13DomainWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
-  t('H13: fresh half-state is intake latency, not a finding', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(1)), NOW), null);
-  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(DOMAIN_HALF_STATE_STALE_HOURS)), NOW), null);
+  t('H13: the retired pm:blocking label alone is NOT a state -> still a finding', typeof h13AreaWithoutPmState(labelledCard(['area:workflow', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
+  t('H13: status:parked exemption (its normal shape IS this one)', h13AreaWithoutPmState(labelledCard(['area:workflow', 'status:parked'], hoursAgo(200)), NOW), null);
+  t('H13: tracking exemption', h13AreaWithoutPmState(labelledCard(['area:fleet', 'tracking'], hoursAgo(200)), NOW), null);
+  t('H13: qa-run exemption', h13AreaWithoutPmState(labelledCard(['area:package', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: no area label is out of scope however bare', h13AreaWithoutPmState(labelledCard(['bug'], hoursAgo(200)), NOW), null);
+  // The routing reading moved from `domain:*` to `area:*`: a card carrying
+  // only the old lane label is unrouted (the sweep's ① owns it), not H13's.
+  t('H13: ⛔ a domain:* label alone routes nothing -> out of scope', h13AreaWithoutPmState(labelledCard(['domain:skills', 'bug'], hoursAgo(200)), NOW), null);
+  t('H13: …while the same card with an area:* is the finding', typeof h13AreaWithoutPmState(labelledCard(['domain:skills', 'area:fleet', 'bug'], hoursAgo(200)), NOW), 'string');
+  t('H13: the row names area:*', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('`area:*`'), true);
+  t('H13: …and never domain:*', h13row(labelledCard(['area:data'], hoursAgo(26)), NOW).includes('domain'), false);
+  t('H13: fresh half-state is intake latency, not a finding', h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(1)), NOW), null);
+  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(AREA_HALF_STATE_STALE_HOURS)), NOW), null);
   // #4690 in miniature, same as H10/H11/H12: unreadable must not read as fresh.
-  t('H13: unreadable updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], 'not-a-date'), NOW), 'string');
-  t('H13: absent updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], undefined), NOW), 'string');
+  t('H13: unreadable updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(labelledCard(['area:data'], 'not-a-date'), NOW), 'string');
+  t('H13: absent updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(labelledCard(['area:data'], undefined), NOW), 'string');
   // The louder line — the measured card carried its trigger in its own body.
   const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
-  t('H13: body self-declaring P0 -> louder line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
-  t('H13: …which prescribes the emergency-triage channel', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: body self-declaring P0 -> louder line', h13row(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13row(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
   t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
   t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
   // Strip reuse (H7 reading 4): quoting the token in backticks is not a
   // self-declaration, and `P0` inside a word is not the token.
   t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
-  t('H13: a quiet body stays on the base line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+  t('H13: a quiet body stays on the base line', h13row(labelledCard(['area:data'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
   // -- H18: `pm:retriage` aged past one triage cycle (2026-08-19/20 ruling) --
-  // Reuses `domainCard` — a generic (labels, updated_at, extra) issue builder,
-  // not a domain-specific one despite the name.
-  t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and the finding names the threshold', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
-  t('H18: …and names the coexisting standing label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
-  t('H18: multiple coexisting labels are all named', h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  // Reuses `labelledCard` — the generic (labels, updated_at, extra) issue builder.
+  t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and the finding names the threshold', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
+  t('H18: …and names the coexisting standing label', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
+  t('H18: multiple coexisting labels are all named', h18row(labelledCard(['pm:retriage', 'pm:blocked', 'pm:on-hold'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(labelledCard(['pm:retriage', 'pm:blocked', 'pm:on-hold'], hoursAgo(3)), NOW).includes('`pm:on-hold`'), true);
   // The label is a QUESTION put to the triage seat, not a request to re-grade
   // (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」):
   // the row says the question is unanswered, and the remedy is to answer what
   // the objection comment asks and drop the label in the same write.
-  t('H18: the row reads the label as an unanswered question', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
-  t('H18: …and the remedy is answer + drop the label in the same write', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
-  t('H18: …and an answer that needs the maintainer still drops the label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
+  t('H18: the row reads the label as an unanswered question', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
+  t('H18: …and the remedy is answer + drop the label in the same write', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
+  t('H18: …and an answer that needs the maintainer still drops the label', h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
   // The retired re-grade vocabulary is gone from BOTH row shapes.
-  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
-  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
+  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
   // Under-threshold: fresh objection is normal intake latency, not a finding.
-  t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
-  t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
+  t('H18: retriage under the threshold -> clean', h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
+  t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
   // No `pm:retriage` label at all is out of scope, however old.
-  t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(domainCard(['pm:queue'], hoursAgo(200)), NOW), null);
+  t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(labelledCard(['pm:queue'], hoursAgo(200)), NOW), null);
   // The disputed-target variant: `pm:retriage` alone, no coexisting `pm:*`.
-  t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
-  t('H18: …and names the disputed-target note', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
-  t('H18: …and does not claim a coexisting label it does not have', h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
+  t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(labelledCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and names the disputed-target note', h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: …and does not claim a coexisting label it does not have', h18row(labelledCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
   // A non-`pm:*` label (e.g. `domain:*`) never counts as the coexisting label.
-  t('H18: a domain: label is not counted as a coexisting pm:* label', h18row(domainCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: a domain: label is not counted as a coexisting pm:* label', h18row(labelledCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
   // #4690 in miniature, same as H10–H13: unreadable must not read as fresh.
-  t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
-  t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], undefined), NOW), 'string');
-  // Report-only, ordinary row in both media — never loud (H14–H16's own
+  t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(labelledCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
+  t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(labelledCard(['pm:retriage'], undefined), NOW), 'string');
+  // Report-only, ordinary row in both media — never loud (H16's own
   // property, and the card's explicit requirement for this item).
-  t('H18: not a loud finding', isLoudFinding(h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: not a loud finding', isLoudFinding(h18RetriageAged(labelledCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
 
-  // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
+  // -- The `Blocked-by:` parser and the reverse index (2026-08-19) -----------
   // The fixtures below are REAL lines from the 2026-08-19 census of this board
   // (234 open cards, 17 `Blocked-by:` body lines), so the parser is pinned
   // against the shapes seats actually write rather than against invented ones.
@@ -27647,7 +28006,7 @@ async function selfTest() {
   // it does the sweeper starts indexing its own report.
   t(
     'blockedByTargets: a rendered finding row does not parse as a Blocked-by line',
-    numbersOf(blockedByTargets('- **H14** [#5](https://example.test/5) — targeted by 1 open card(s)\' `Blocked-by:` body line (#7)')),
+    numbersOf(blockedByTargets('- **H78** [#5](https://example.test/5) — `priority:p3` on a card that 1 open card(s) name in a `Blocked-by:` line, graded BELOW 1 of them: #7 (`priority:p1`).')),
     '',
   );
   // Deliberately NOT stripped, unlike H7/H8/H13: this models a machine reader
@@ -27710,55 +28069,16 @@ async function selfTest() {
   t('index: an absent comments map leaves the body reading untouched', buildBlockingIndex([carded(10, [], 'Blocked-by: #5')], { repo: 'objectstack-ai/objectstack' }).get(5).join(','), '10');
   t('index: an empty comment list for a card is harmless', idxc([carded(10, [], 'Blocked-by: #5')], [[10, []]]).get(5).join(','), '10');
 
-  // Direction A — the label carried with nothing targeting it.
-  t('H14-A: pm:blocking with nothing targeting it -> finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'pm:blocking']), idx([])), 'string');
-  t('H14-A: …and it names the stale-cache reading', h14row(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
-  t('H14-A: …and prescribes the derivation pass, never a label from here', h14row(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
-  t('H14-A: …and says why stale is worse than absent', h14row(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
-  // The repo-boundary wording (#10139): STALE reads as "no dependent in this
-  // repo", never as exhaustive over the population, and the remedy is
-  // conditional on a cross-repo check rather than an outright drop.
-  t('H14-A: …names the repo boundary', h14row(carded(7276, ['pm:blocking']), idx([])).includes('no dependent found in this repo'), true);
-  t('H14-A: …and says cross-repo dependents are not swept', h14row(carded(7276, ['pm:blocking']), idx([])).includes('cross-repo dependents are not swept'), true);
-  t('H14-A: …and the remedy is conditional on verifying cross-repo dependents', h14row(carded(7276, ['pm:blocking']), idx([])).includes('verify cross-repo dependents before'), true);
-  // The negative: the old exhaustive phrasing ("the full two-channel index",
-  // instructing an unconditional drop) must be gone — it is what would have
-  // told a reader to sever the live #7917 / objectui#4356 edge.
-  t('H14-A: …and the old exhaustive phrasing is GONE', h14row(carded(7276, ['pm:blocking']), idx([])).includes('full two-channel index'), false);
-  // The negative for direction A: the label is EARNED, so nothing to report.
-  t(
-    'H14-A: pm:blocking with a real dependent -> clean',
-    h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), idx([carded(10, [], 'Blocked-by: #5')])),
-    null,
-  );
-
-  // Direction B — targeted, but the cache never landed.
-  const missingIdx = idx([carded(9650, ['pm:queue'], 'Blocked-by: #9832')]);
-  t('H14-B: targeted without pm:blocking -> finding', typeof h14BlockingCacheIncoherent(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), missingIdx), 'string');
-  t('H14-B: …and it names the waiting card', h14row(carded(9832, ['pm:dispatched']), missingIdx).includes('#9650'), true);
-  t('H14-B: …and calls it an invisible unblocker', h14row(carded(9832, ['pm:dispatched']), missingIdx).includes('selection order cannot see'), true);
-  // The negative for direction B: no label and nobody waiting is the ordinary
-  // shape of ~230 of this board's ~234 open cards. It must be silent, or the
-  // row means nothing.
-  t('H14-B: no label and nothing targeting it -> clean', h14BlockingCacheIncoherent(carded(4321, ['pm:queue', 'domain:cli']), idx([])), null);
-  // The cross-repo consequence, end to end: #7917's objectui blocker must not
-  // manufacture a direction-B row against this repo's #4356.
-  t(
-    'H14-B: a cross-repo blocker does not flag the local card of that number',
-    h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), idx([carded(7917, [], 'Blocked-by: objectstack-ai/objectui#4356')])),
-    null,
-  );
-  // Fan-out cap: named, then counted.
+  // Fan-out and the measured boards — pins on the INDEX itself. They used to be
+  // read through the `pm:blocking` cache rows (H14/H15, retired with the label);
+  // the edges they prove are what H78–H80 and instruction ④ read now.
   const manyDeps = idx(Array.from({ length: 7 }, (_, i) => carded(100 + i, [], 'Blocked-by: #5')));
-  t('H14-B: a large fan-out names the cap and counts the rest', h14row(carded(5, ['pm:queue']), manyDeps).includes(`+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`), true);
-  t('H14-B: …and reports the true total, not the capped one', h14row(carded(5, ['pm:queue']), manyDeps).includes('targeted by 7 open card(s)'), true);
-  t('H14: a missing index does not crash and reads as untargeted', h14BlockingCacheIncoherent(carded(5, ['pm:blocking']), undefined) !== null, true);
+  const targetedBy = (index, number) => (index.get(number) ?? []).join(',');
+  t('index: a large fan-out lists every dependent, in listing order', targetedBy(manyDeps, 5), '100,101,102,103,104,105,106');
+  t('index: a missing listing reads as an empty index for any reader', buildBlockingIndex(undefined).get(5), undefined);
 
-  // Reverse verification against the LIVE board, 2026-08-19 (234 open cards).
-  // Predicted before running: direction A fires on #7276 (the board's only
-  // `pm:blocking` card, targeted by nothing), direction B fires on the five
-  // targeted-but-unlabeled cards. Both held. Not one coherent pairing existed
-  // at that reading — the cache had drifted to 0% agreement with its index.
+  // The LIVE board, 2026-08-19 (234 open cards): eight body lines, one of them
+  // cross-repo and one naming two targets.
   const liveBodies = [
     carded(9849, ['pm:queue'], 'Blocked-by: #9823'),
     carded(9784, ['pm:queue'], 'Blocked-by: #9689 (the relocation it needs is the same edit).'),
@@ -27770,30 +28090,25 @@ async function selfTest() {
     carded(2657, ['pm:blocked'], 'Blocked-by: #6234\nBlocked-by: #6245'),
   ];
   const liveIdx = idx(liveBodies);
-  t('H14 reverse-verify: #7276 (the board\'s only pm:blocking card) -> stale finding', typeof h14BlockingCacheIncoherent(carded(7276, ['pm:queue', 'domain:devx', 'pm:blocking']), liveIdx), 'string');
-  t('H14 reverse-verify: #9832 (targeted by #9650, unlabeled) -> missing finding naming #9650', h14row(carded(9832, ['bug', 'pm:dispatched', 'domain:cli']), liveIdx).includes('#9650'), true);
-  t('H14 reverse-verify: #9919 (targeted by #9249, unlabeled) -> missing finding', typeof h14BlockingCacheIncoherent(carded(9919, ['pm:queue', 'repo:cloud']), liveIdx), 'string');
-  // …and the four measured NON-findings from the same reading, which is what
-  // makes the six above readable as signal rather than as a predicate that
-  // flags everything: a dependent card, a closed target's dependent, the
-  // cross-repo number, and an ordinary untouched card.
-  t('H14 reverse-verify: #9650 (a waiting card, not an unblocker) -> clean', h14BlockingCacheIncoherent(carded(9650, ['pm:queue']), liveIdx), null);
-  t('H14 reverse-verify: local #4356 (the objectui blocker\'s number) -> clean', h14BlockingCacheIncoherent(carded(4356, ['pm:queue']), liveIdx), null);
-  t('H14 reverse-verify: #2657 (blocked on two CLOSED cards) -> clean', h14BlockingCacheIncoherent(carded(2657, ['pm:blocked']), liveIdx), null);
-  t('H14 reverse-verify: an ordinary open card -> clean', h14BlockingCacheIncoherent(carded(9913, ['pm:queue', 'repo:cloud']), liveIdx), null);
+  t('index reverse-verify: #9832 is targeted by #9650', targetedBy(liveIdx, 9832), '9650');
+  t('index reverse-verify: #9919 is targeted by #9249', targetedBy(liveIdx, 9919), '9249');
+  t('index reverse-verify: a waiting card is not itself a target', liveIdx.has(9650), false);
+  t('index reverse-verify: the cross-repo blocker creates no local #4356 entry', liveIdx.has(4356), false);
+  t('index reverse-verify: a two-line card targets both', `${targetedBy(liveIdx, 6234)}|${targetedBy(liveIdx, 6245)}`, '2657|2657');
+  t('index reverse-verify: eight local targets in all, the cross-repo line excluded', liveIdx.size, 8);
 
-  // -- H14 + the comment channel: the two MEASURED false stales (#10061) -----
+  // -- The comment channel: the two MEASURED missing edges (#10061) -----------
   //
-  // Both were reported stale on 2026-08-19 by a body-only index while their
-  // dependents stated the wait in comments. The comment bodies below are the
-  // real ones from those threads, trimmed to the load-bearing lines. These are
-  // regression pins: a body-only index makes each of the two "-> stale" rows
-  // pass and each of the two "-> clean" rows fail.
+  // Both targets read as waited-on-by-nobody on 2026-08-19 against a body-only
+  // index, while their dependents stated the wait in comments. The comment
+  // bodies below are the real ones from those threads, trimmed to the
+  // load-bearing lines. These are regression pins: a body-only index makes
+  // each of the two union rows fail.
   const falseStaleSources = [
-    // #9465 (epic, `pm:blocking`): both dependents are body-clean.
+    // #9465 (an epic): both dependents are body-clean.
     carded(9709, ['pm:blocked'], 'Card body: add the console-injection guard to release.yml.'),
     carded(9828, ['pm:blocked'], 'Card body: cut-rc.yml points a curator at an expired deadline.'),
-    // #9968 (decision card, `pm:blocking`): same shape.
+    // #9968 (a decision card): same shape.
     carded(9969, ['pm:blocked'], 'Card body: consumerless vendor `/admin/` surface posture.'),
     carded(9652, ['pm:blocked'], 'Card body: set-role veto tension in the same vendor-admin family.'),
   ];
@@ -27808,174 +28123,24 @@ async function selfTest() {
     repo: 'objectstack-ai/objectstack',
     comments: falseStaleComments,
   });
-  const epic9465 = carded(9465, ['domain:devx', 'pm:epic', 'pm:blocking']);
-  const decision9968 = carded(9968, ['pm:decision', 'pm:blocking']);
-  // The defect, pinned: this is what the body-only index reported.
-  t('H14 false-stale: #9465 reads STALE against a body-only index', h14row(epic9465, bodyOnlyIdx).includes('stale derived cache'), true);
-  t('H14 false-stale: #9968 reads STALE against a body-only index', h14row(decision9968, bodyOnlyIdx).includes('stale derived cache'), true);
-  // The fix: the same two cards against the two-channel index.
-  t('H14 false-stale: #9465 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(epic9465, unionIdx), null);
-  t('H14 false-stale: #9968 is CLEAN once comment edges are read', h14BlockingCacheIncoherent(decision9968, unionIdx), null);
-  t('H14 false-stale: …because #9709 and #9828 both point at #9465', unionIdx.get(9465).join(','), '9709,9828');
-  t('H14 false-stale: …and #9969 and #9652 both point at #9968', unionIdx.get(9968).join(','), '9969,9652');
-  // Direction B rides the same union: a comment-only edge is enough to call a
-  // card an invisible unblocker.
-  t('H14-B: a comment-only edge produces a missing-cache row', h14row(carded(9465, ['domain:devx']), unionIdx).includes('#9709'), true);
-  t('H14-B: …and the sentence names the channel pair', h14row(carded(9465, ['domain:devx']), unionIdx).includes('body or comment'), true);
-  t('H14-A: …the stale sentence names both channels too', h14row(epic9465, bodyOnlyIdx).includes('body OR comment'), true);
-
-  // -- H14 under an INCOMPLETE index (a gated comment fetch failed) ----------
-  //
-  // Asymmetric on purpose: stale is a claim about ABSENT evidence and must not
-  // be made from an index known to be missing edges (#4690); missing is a
-  // claim about evidence in hand, which reading more sources can only add to.
-  t('H14-A: stale is SUSPENDED when the index is known incomplete', h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: false }), null);
-  t('H14-A: …and still fires when the index is complete', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx, { indexComplete: true }), 'string');
-  t('H14-A: …and completeness defaults to true for body-only callers', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx), 'string');
-  t('H14-B: missing SURVIVES an incomplete index', h14row(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false }).includes('#9709'), true);
-  t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
-
-  // -- H14: the SEAM DECLINE on the stale direction (#13975) -----------------
-  //
-  // ⚠️ NAMING, because the two vocabularies are inverted and a case written
-  // under the wrong one pins the wrong direction: the cases above call STALE
-  // "H14-A" and MISSING "H14-B", while the filing card #13975 calls the strip
-  // "direction B". The ruling is about the STRIP under either name, so these
-  // cases say `seam` and name the direction in words.
-  //
-  // The fixtures are the real cards the defect was measured on (2026-08-31, 5
-  // stale rows): #12931 carries `repo:cloud` and declines; #13439 sits in the
-  // SAME position carrying no `repo:*` label and still fires — which is the
-  // predicate's measured under-coverage, since that card's own filing records
-  // cloud#1451 waiting on it.
-  const seamIdx = idx([]);
-  const seamCard = carded(12931, ['pm:queue', 'repo:cloud', 'pm:blocking']);
-  const nonSeamCard = carded(13439, ['bug', 'priority:p1', 'pm:queue', 'domain:spec', 'pm:blocking']);
-  const swept = { ownerRepo: 'objectstack-ai/objectstack' };
-
-  // The predicate, alone: one reading of the `repo:*` family, `censusLanesOf`'s.
-  t('H14 seam: the predicate reads the repo:* family', seamRepoLabels(seamCard).join(','), 'repo:cloud');
-  t('H14 seam: …and is empty on a card carrying none', seamRepoLabels(nonSeamCard).length, 0);
-  t('H14 seam: …and a domain lane is not a repo lane', seamRepoLabels(carded(1, ['domain:spec', 'pm:blocking'])).length, 0);
-  t('H14 seam: …and more than one repo label is all of them', seamRepoLabels(carded(1, ['repo:cloud', 'domain:spec', 'repo:hotcrm'])).join(','), 'repo:cloud,repo:hotcrm');
-  t('H14 seam: …and a missing issue does not crash', seamRepoLabels(undefined).length, 0);
-
-  // The decline: EMITTED, never suppressed (the row is the seam card's only
-  // trace in the report — H32's silent `foreign` return is the other shape,
-  // and it belongs to a row whose POPULATION is out of scope, not one whose
-  // evidence is unreadable).
-  t('H14 seam: a seam card in the stale position still EMITS a row', typeof h14BlockingCacheIncoherent(seamCard, seamIdx, swept), 'string');
-  t('H14 seam: …and the row declines rather than accusing', h14row(seamCard, seamIdx, swept).includes('DECLINES to judge'), true);
-  t('H14 seam: …and names the label it declined on', h14row(seamCard, seamIdx, swept).includes('`repo:cloud`'), true);
-  t('H14 seam: …and says the evidence is UNREADABLE, not absent', h14row(seamCard, seamIdx, swept).includes('UNREADABLE'), true);
-  t('H14 seam: …and that no re-run resolves it', h14row(seamCard, seamIdx, swept).includes('no re-run resolves it'), true);
-  t('H14 seam: …and reads as UNJUDGED, never as a stale cache', h14row(seamCard, seamIdx, swept).includes('stale derived cache'), false);
-  t('H14 seam: …so it never prescribes the strip', h14row(seamCard, seamIdx, swept).includes('drops the label'), false);
-  t('H14 seam: …and forbids the hand-strip as well as the hand-apply', h14row(seamCard, seamIdx, swept).includes('hand-stripped'), true);
-  // The trim-order rank, which is what makes "emitted" mean "still there in the
-  // rendered body" (#11218). Without it a decline is a suppression on a delay.
-  t('H14 seam: …and the row carries the UNJUDGED rank', isUnjudgedFinding(h14row(seamCard, seamIdx, swept)), true);
-  t('H14 seam: …while the ordinary stale row does NOT (it made a determination)', isUnjudgedFinding(h14row(nonSeamCard, seamIdx, swept)), false);
-  // Report-only and never loud, the H14–H16 property the decline must not break.
-  t('H14 seam: …and the decline is not a loud finding', isLoudFinding(h14row(seamCard, seamIdx, swept)), false);
-  // The card's own re-check (`grep -E "H14 .*carried while no open"`) has to
-  // keep listing BOTH shapes, or the seam cards vanish from the one-liner the
-  // filing seat used to find them.
-  t('H14 seam: …and the row head still answers the card\'s re-check grep', /carried while no open/u.test(h14row(seamCard, seamIdx, swept)), true);
-
-  // The paired negative: the same position, no `repo:*` label -> still fires.
-  t('H14 seam: a NON-seam card in the same position still fires', h14row(nonSeamCard, seamIdx, swept).includes('stale derived cache'), true);
-  t('H14 seam: …and its row names its own scope', h14row(nonSeamCard, seamIdx, swept).includes('no dependent found in this repo'), true);
-  t('H14 seam: …and says the missing label is NOT evidence of an in-repo audience', h14row(nonSeamCard, seamIdx, swept).includes('58 of the 67'), true);
-
-  // An earned label is clean whether or not the card is a seam: the decline
-  // fires on the stale position only, never on the population.
-  t('H14 seam: a seam card with a real in-repo dependent -> clean', h14BlockingCacheIncoherent(seamCard, idx([carded(10, [], 'Blocked-by: #12931')]), swept), null);
-  // Suspension outranks the decline: an index known incomplete silences the
-  // whole direction, unchanged by this row.
-  t('H14 seam: an incomplete index still silences the direction outright', h14BlockingCacheIncoherent(seamCard, seamIdx, { ...swept, indexComplete: false }), null);
-
-  // ⛔ The ADD direction is untouched on a seam card, and byte-identically so:
-  // a cross-repo edge the index cannot see can only make THAT direction
-  // under-label, which is the status quo and starves nobody.
-  const addIdx = idx([carded(9249, ['pm:queue'], 'Blocked-by: #9919')]);
-  t('H14 seam: the ADD direction still fires on a seam card', h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept).includes('#9249'), true);
-  t(
-    'H14 seam: …and its sentence is byte-identical to the same card without the label',
-    h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept),
-    h14row(carded(9919, ['pm:queue']), addIdx, swept),
-  );
-
-  // The over-covered edge, pinned rather than narrowed. `repo:objectstack` is
-  // not in the label ledger's seam family but 4 open cards carried it on
-  // 2026-08-31, and the ruled predicate is "any `repo:*` label" — so it
-  // declines, and SAYS the decline is conservative rather than asserting an
-  // off-repo audience it cannot see.
-  const ownRepoCard = carded(1, ['pm:queue', 'repo:objectstack', 'pm:blocking']);
-  t('H14 seam: a label naming the swept repo declines too (the predicate is literal)', h14row(ownRepoCard, seamIdx, swept).includes('DECLINES to judge'), true);
-  t('H14 seam: …and says that decline is CONSERVATIVE', h14row(ownRepoCard, seamIdx, swept).includes('CONSERVATIVE'), true);
-  t('H14 seam: …while a sibling label claims nothing conservative', h14row(seamCard, seamIdx, swept).includes('CONSERVATIVE'), false);
-  // …and the reading follows the SWEPT repo rather than a hardcoded name, so a
-  // copy of this patrol installed in a sibling repo reads its own board.
-  t('H14 seam: …the conservative reading follows the swept repo', h14row(seamCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), true);
-  t('H14 seam: …and a seam label there is still structural', h14row(ownRepoCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), false);
+  // The defect, pinned: this is what the body-only index held.
+  t('index union: a body-only index sees NEITHER measured target', `${bodyOnlyIdx.has(9465)}/${bodyOnlyIdx.has(9968)}`, 'false/false');
+  // The fix: the same sources against the two-channel index.
+  t('index union: #9709 and #9828 both point at #9465 once comment edges are read', targetedBy(unionIdx, 9465), '9709,9828');
+  t('index union: …and #9969 and #9652 both point at #9968', targetedBy(unionIdx, 9968), '9969,9652');
 
   // The summary line carries the third `read X of Y` pair, and says out loud
-  // when the shortfall cost H14 its stale direction.
+  // what a shortfall costs: edges, never a suspended row.
   const fbCounts = (fallbackProbed, fallbackCandidates) => ({
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     fallbackProbed, fallbackCandidates,
   });
-  t('summary: the fallback pair is reported', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('comment fallback read on 24 of 26 candidate(s)'), true);
-  t('summary: a shortfall announces the suspended stale direction', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('stale direction is SUSPENDED'), true);
-  t('summary: a complete pass says nothing about suspension', saidBy('h14Fallback', summaryLine(fbCounts(26, 26), 3)).includes('SUSPENDED'), false);
-  t('summary: absent fallback counts still render a sentence', saidBy('h14Fallback', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('comment fallback read on 0 of 0'), true);
-
-  // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
-  const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
-    ...issue(['pm:blocking', 'pm:queue'], assignees),
-    number,
-    created_at: created,
-  });
-
-  t('H15: the oldest unclaimed card is the one reported', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(2) }), blockingCard(20, { created: daysAgo(9) }), blockingCard(30, { created: daysAgo(5) })], NOW).issue.number, 20);
-  t('H15: …and the row states the age in hours', h15OldestUnclaimedBlocking([blockingCard(20, { created: hoursAgo(220) })], NOW).message.includes('open ~220h'), true);
-  t('H15: …and names the selection-order rank it exists to police', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('second only to'), true);
-  t('H15: …and declares the age is the CARD\'s, not the label\'s', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes("Age is the CARD's"), true);
-  t('H15: …and declares itself thresholdless visibility, not an alarm', h15OldestUnclaimedBlocking([blockingCard(20)], NOW).message.includes('no threshold'), true);
-  t('H15: the count separates unclaimed from the total', h15OldestUnclaimedBlocking([blockingCard(10), blockingCard(20, { assignees: ['os-help'] }), blockingCard(30, { assignees: ['os-help'] })], NOW).message.includes('1 of 3 open'), true);
-  // The two "no row" shapes the card names.
-  t('H15: every pm:blocking card assigned -> no row', h15OldestUnclaimedBlocking([blockingCard(10, { assignees: ['os-help'] }), blockingCard(20, { assignees: ['os-warren'] })], NOW), null);
-  t('H15: no pm:blocking card at all -> no row', h15OldestUnclaimedBlocking([{ ...issue(['pm:queue']), number: 10, created_at: daysAgo(30) }], NOW), null);
-  t('H15: an empty listing -> no row', h15OldestUnclaimedBlocking([], NOW), null);
-  t('H15: a missing listing -> no row', h15OldestUnclaimedBlocking(undefined, NOW), null);
-  // #4690 direction, restated for an ORDERING rather than a threshold: a
-  // timestamp that cannot be read must not quietly drop out of a claim about
-  // which card is oldest.
-  t('H15: unreadable created_at sorts as maximally old', h15OldestUnclaimedBlocking([blockingCard(10, { created: daysAgo(9) }), blockingCard(20, { created: 'not-a-date' })], NOW).issue.number, 20);
-  t('H15: …and the row says so rather than printing a number', h15OldestUnclaimedBlocking([blockingCard(20, { created: 'not-a-date' })], NOW).message.includes('unreadable `created_at`'), true);
-  // Built without the fixture helper on purpose: its `created = daysAgo(3)`
-  // default fills an `undefined`, so passing one through it tests the default
-  // rather than the absent field (measured — this case was green against a
-  // 3-day-old card before the fixture was written out longhand).
-  t('H15: absent created_at is unreadable too', h15OldestUnclaimedBlocking([{ ...issue(['pm:blocking']), number: 20 }], NOW).message.includes('unreadable `created_at`'), true);
-  // Stable output run to run: equal ages break by issue number, so the anchor
-  // body does not churn between two equally-old cards.
-  t('H15: equal ages break by issue number', h15OldestUnclaimedBlocking([blockingCard(30, { created: daysAgo(4) }), blockingCard(12, { created: daysAgo(4) })], NOW).issue.number, 12);
-
-  // Reverse verification against the LIVE board, 2026-08-19. Predicted before
-  // running: NULL — the board's only `pm:blocking` card (#7276) is assigned to
-  // `os-project-manager`, which is the card's own "all-assigned -> no row"
-  // shape, measured rather than invented. Then the same card with the assignee
-  // removed, to prove the null is the board's state and not a dead predicate.
-  const live7276 = (assignees) => ({
-    ...issue(['pm:queue', 'domain:devx', 'pm:blocking'], assignees),
-    number: 7276,
-    created_at: '2026-08-10T04:30:43Z',
-  });
-  t('H15 reverse-verify: the live board (only blocking card assigned) -> no row', h15OldestUnclaimedBlocking([live7276(['os-project-manager'])], Date.parse('2026-08-19T09:00:00Z')), null);
-  t('H15 reverse-verify: …the same card unassigned DOES produce the row', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).issue.number, 7276);
-  t('H15 reverse-verify: …and its measured age', h15OldestUnclaimedBlocking([live7276([])], Date.parse('2026-08-19T09:00:00Z')).message.includes('open ~220h'), true);
+  t('summary: the fallback pair is reported', saidBy('blockedByFallback', summaryLine(fbCounts(24, 26), 3)).includes('comment fallback read on 24 of 26 candidate(s)'), true);
+  t('summary: a shortfall says the index is MISSING edges', saidBy('blockedByFallback', summaryLine(fbCounts(24, 26), 3)).includes('the reverse index is MISSING the edges those threads carry'), true);
+  t('summary: a complete pass says nothing about missing edges', saidBy('blockedByFallback', summaryLine(fbCounts(26, 26), 3)).includes('MISSING'), false);
+  t('summary: absent fallback counts still render a sentence', saidBy('blockedByFallback', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('comment fallback read on 0 of 0'), true);
+  // ⛔ No clause anywhere still speaks for the retired cache rows.
+  t('summary: no clause names the retired H14 or a suspended direction', /H14|SUSPENDED/u.test(summaryLine(fbCounts(24, 26), 3)), false);
 
   // -- H19: a block that outlived its blocker (2026-08-20) -------------------
   // The two measured instances are the fixtures, and they are DIFFERENT
@@ -28020,7 +28185,7 @@ async function selfTest() {
   // The gathering gate.
   t('H19 gate: an open pm:blocked card is in scope', needsBlockerLiveness(blockedCard(1, 'Blocked-by: #2')), true);
   t('H19 gate: a Blocked-by line WITHOUT the label is out of scope', needsBlockerLiveness(blockedCard(1, 'Blocked-by: #2', ['pm:queue'])), false);
-  t('H19 gate: a pm:blocking card is out of scope (that is H14\'s population)', needsBlockerLiveness(blockedCard(1, '', ['pm:blocking'])), false);
+  t('H19 gate: a card carrying only the retired pm:blocking label is out of scope', needsBlockerLiveness(blockedCard(1, '', ['pm:blocking'])), false);
   t('H19 gate: a missing issue does not crash', needsBlockerLiveness(undefined), false);
 
   // The predicate. Resolutions are what the sweep resolved, so the offline
@@ -28053,7 +28218,8 @@ async function selfTest() {
   t('H19: …and names the target', expired10112Row.includes('`#10126`'), true);
   t('H19: …with the close timestamp, so the latency is readable off the row', expired10112Row.includes('closed 2026-08-20T09:03:37Z'), true);
   t('H19: …and says the block outlived its blocker', expired10112Row.includes('outlived its blocker'), true);
-  t('H19: …and says nothing else here asks this question', expired10112Row.includes('H4 asks whether the line EXISTS'), true);
+  t('H19: …and says nothing else here asks this question', expired10112Row.includes('H4 asks only whether the line EXISTS'), true);
+  t('H19: ⛔ …and no longer cites the retired cache row as a second reader', expired10112Row.includes('H14'), false);
   t('H19: …and hands the release to the unlock sweep\'s double-checks', expired10112Row.includes('放行双查'), true);
   t('H19: …naming double-check ① (most recent conversion comment)', expired10112Row.includes('MOST RECENT conversion comment'), true);
   t('H19: …and double-check ② (a newer merged PR refuses release)', expired10112Row.includes('MERGED PR newer than that conversion comment'), true);
@@ -28158,7 +28324,7 @@ async function selfTest() {
   t('H19: the target list is capped at the render budget', manyClosed.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
   t('H19: …and the count is the full one, not the shown one', manyClosed.includes('7 of 7'), true);
 
-  // Report-only, ordinary row in both media — never loud, like H14–H16/H18.
+  // Report-only, ordinary row in both media — never loud, like H16/H18.
   t('H19: not a loud finding', isLoudFinding(expired10112), false);
 
   // -- H19: the two MEASURED instances, byte-for-byte ------------------------
@@ -28286,7 +28452,7 @@ async function selfTest() {
   // ⛔ The precedence rule must not reach the DISCOVERY union that H26 and H28
   // read: both still see the comment-borne target on the live #11333 shape.
   t('H19 precedence: ⛔ H28 is unaffected on the live shape (no spent body line)', h28StaleBodyBlockerLine(live11333, live11333Targets, [LIVE_11333_COMMENT], REPO_OS), null);
-  t('H19 precedence: ⛔ and H26 still reads the full union', typeof h26BlockOnIndefiniteTarget(live11333, [target(13457, 'open', { labels: ['pm:blocking'] }), target(13458, 'open', { labels: ['pm:blocked'] })]), 'string');
+  t('H19 precedence: ⛔ and H26 still reads the full union', typeof h26BlockOnIndefiniteTarget(live11333, [target(13457, 'open', { labels: ['pm:queue'] }), target(13458, 'open', { labels: ['pm:blocked'] })]), 'string');
 
   // -- BATTERY: H19 founds every verdict on the set it JUDGES (#18379) -------
   //
@@ -29092,7 +29258,7 @@ async function selfTest() {
   t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
   t('⛔ H63: `finding` beside a `domain:*` alone is still ungraded — routing is not a grade', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills'])), null);
   t('H63 control: …and adding a priority to that card fires it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills', 'priority:p2'])), 'string');
-  t('⛔ H63: `pm:blocking` is not a grade either — it is a derived cache', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocking'])), null);
+  t('⛔ H63: the retired `pm:blocking` label is not a grade either', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocking'])), null);
   t('⛔ H63: nor is `pm:retriage`, an annotation ON a state', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:retriage'])), null);
   t('⛔ H63: a `pm:seat` post is NEVER judged, whatever else it carries', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:seat', 'priority:p1'])), null);
   t('H63 control: …and the identical card without `pm:seat` fires, so it is the seat post that silenced it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'priority:p1'])), 'string');
@@ -29117,7 +29283,7 @@ async function selfTest() {
 
   // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
   t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
-  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13DomainWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'domain:skills']), updated_at: daysAgo(9) }, NOW), null);
+  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13AreaWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'area:fleet']), updated_at: daysAgo(9) }, NOW), null);
   t('H63: H22\'s residue set drops the marker — a fine state to close in', PM_RESIDUE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63: H29\'s exclusivity set drops it too — a card KIND, ⛔ not a position', PM_EXCLUSIVE_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63 control: …and H29 stays silent on a carrier with exactly one position', h29PmStateExclusivity(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])), null);
@@ -29356,6 +29522,173 @@ async function selfTest() {
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
   b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
+
+  // -- H77–H81: the blocking relation, read from the `Blocked-by:` lines.
+  //    Every firing case sits beside the control that would make it FAIL: the
+  //    same card with the one fact changed is silent, so no case here can pass
+  //    by a predicate that fires on everything — or on nothing.
+  const BATTERY_REL = 'H77-H81 blocking relation read from the lines';
+  const relIdx = (cards, comments) =>
+    buildBlockingIndex(cards, { repo: REPO_OS, ...(comments ? { comments: new Map(comments) } : {}) });
+  const byNo = (cards) => new Map(cards.map((c) => [c.number, c]));
+  const graded = (number, rung, more = [], body = '') =>
+    carded(number, [...(rung ? [`priority:${rung}`] : []), ...more], body);
+
+  // H77 — a line exists, and names nothing open. H4 and H19 each stand down
+  // for it on purpose; the cases pin that it stands down for THEM.
+  const unmergedPr = (n) => target(n, 'closed', { unmerged: true });
+  const h77 = (...args) => h77BlockNamesNoOpenTarget(...args);
+  const row77 = (...args) => String(h77BlockNamesNoOpenTarget(...args) ?? '');
+  const noRef77 = blockedCard(1, 'Blocked-by: the next platform release');
+  b(BATTERY_REL, 'H77 fires: a `Blocked-by:` line that names no card or PR', typeof h77(noRef77, [], [], REPO_OS), 'string');
+  b(BATTERY_REL, 'H77 row: the head, where the line sits, and what it names', ['names NO OPEN TARGET', 'in its body', 'names no card or PR other than this card itself'].every((x) => row77(noRef77, [], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, 'H77 row: the remedy names each real state by what the card waits for', ['`pm:awaiting-maintainer` with a `Maintainer-action:` line', 'the decision box, with options and a recommendation', '`pm:on-hold` with a `Restart-when:` line', 'back to `pm:queue`'].every((x) => row77(noRef77, [], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, '⛔ H77 control: the same card naming an OPEN target is silent', h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open')], [], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77: NO line at all is H4\'s row, never both', `${h77(blockedCard(1, 'waiting on upstream'), [], ['triage note'], REPO_OS)}/${typeof h4BlockedNoBlockedBy(blockedCard(1, 'waiting on upstream'), ['triage note'])}`, 'null/string');
+  b(BATTERY_REL, '⛔ H77: a target closed as done is H19\'s row, never both', `${h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], [], REPO_OS)}/${typeof h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS)}`, 'null/string');
+  b(BATTERY_REL, '⛔ H77: an UNREADABLE judged target is H19\'s UNJUDGED row', h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' })], [], REPO_OS), null);
+  b(BATTERY_REL, 'H77 fires: every target is a PR that closed UNMERGED — the gap H19 leaves by design', `${typeof h77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], [], REPO_OS)}/${h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], REPO_OS)}`, 'string/null');
+  b(BATTERY_REL, 'H77 row: …and names the abandoned PR as closed UNMERGED', ['`#2` (closed UNMERGED)', 'it will never merge'].every((x) => row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, '⛔ H77 control: one unmerged PR beside one OPEN target is silent', h77(blockedCard(1, 'Blocked-by: #2, #3'), [unmergedPr(2), target(3, 'open')], [], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77 control: a LIVE blocker parked in a comment beside a body of unmerged PRs is silent — the re-park shape', h77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'open')], ['Blocked-by: #3'], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77: resolutions that do not cover the body\'s own targets are not judged', h77(blockedCard(1, 'Blocked-by: #2'), [target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), null);
+  b(BATTERY_REL, 'H77: a line naming only the card ITSELF names nothing', row77(blockedCard(500, 'Blocked-by: #500'), blockerTargetsFor(blockedCard(500, 'Blocked-by: #500'), [], REPO_OS), [], REPO_OS).includes('other than this card itself'), true);
+  b(BATTERY_REL, '⛔ H77: the label gate — the same line without `pm:blocked` is out of scope', h77(blockedCard(1, 'Blocked-by: the next platform release', ['pm:queue']), [], [], REPO_OS), null);
+  b(BATTERY_REL, 'H77: a line parked in a COMMENT is named as such', row77(blockedCard(1, 'no line here'), [], ['Blocked-by: an upstream fix, no card yet'], REPO_OS).includes('in a comment'), true);
+  b(BATTERY_REL, 'H77: an UNREADABLE thread still fires on the body line, and says the thread was not read', row77(noRef77, [], null, REPO_OS).includes('comment thread could NOT be read'), true);
+  b(BATTERY_REL, '⛔ H77 control: …and a thread that WAS read carries no such clause', row77(noRef77, [], [], REPO_OS).includes('could NOT be read'), false);
+  b(BATTERY_REL, 'H77: archive-only targets beside a body of unmerged PRs are NAMED, never judged', ['only through the comment archive', '`#3` (closed)', 'none of them is open'].every((x) => row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, 'H77: …and one of them that could not be read is said to be unread, not closed', row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'unresolved', { detail: 'HTTP 404' })], ['Blocked-by: #3'], REPO_OS).includes('1 could not be read this sweep — unread, not closed'), true);
+  b(BATTERY_REL, 'H77: a missing issue and absent inputs do not crash', `${h77(undefined)}/${typeof h77(noRef77, undefined, undefined)}`, 'null/string');
+  b(BATTERY_REL, 'H77: report-only and quiet — never loud, never the UNJUDGED rank', `${isLoudFinding(row77(noRef77, [], [], REPO_OS))}/${isUnjudgedFinding(row77(noRef77, [], null, REPO_OS))}/${row77(noRef77, [], [], REPO_OS).includes('never a label or a line written from this script')}`, 'false/false/true');
+  b(BATTERY_REL, 'H77 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H77')}/${familyRegistryCoverage().emitted.includes('H77')}`, 'stall/true');
+
+  // (b) — every target closed as done: H19, which this script reports and does
+  // not act on. The row names the act the rule gives the daily scan.
+  b(BATTERY_REL, 'H19 full discharge: the row names the daily scan\'s release back to `pm:queue`', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS).includes('it returns the card to `pm:queue` with one comment, or rewrites the line to the next real blocker'), true);
+  b(BATTERY_REL, '⛔ H19 control: a PARTIAL discharge names no such release', h19row(blockedCard(1, 'Blocked-by: #2, #3'), [target(2, 'closed'), target(3, 'open')], REPO_OS).includes('returns the card to `pm:queue`'), false);
+  b(BATTERY_REL, '⛔ H19 control: …nor does a discharge a PR closed UNMERGED withholds', h19row(blockedCard(1, 'Blocked-by: #2, #3'), [target(2, 'closed'), unmergedPr(3)], REPO_OS).includes('returns the card to `pm:queue`'), false);
+  b(BATTERY_REL, 'H19 full discharge: …and the release is still not this script\'s to make', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS).includes('never a label written from this script'), true);
+
+  // H78 — the grade ladder, then the row.
+  b(BATTERY_REL, 'H78 ladder: a grade label reads as its rung, the top one first', [gradeRung(graded(1, 'p0')), gradeRung(graded(1, 'p3')), gradeRung(carded(1, ['priority:p2', 'priority:p1']))].join(), '0,3,1');
+  b(BATTERY_REL, 'H78 ladder: no grade label is NULL, and so are unreadable labels — never a rung', [gradeRung(carded(1, ['pm:queue'])), gradeRung({ number: 1 }), gradeRung(undefined)].join(), ',,');
+  const cards78 = [graded(5, 'p3'), graded(10, 'p1', ['pm:blocked'], 'Blocked-by: #5'), graded(11, 'p2', ['pm:blocked'], 'Blocked-by: #5')];
+  const h78 = (card, cards = cards78, comments) => h78BlockerBelowBlockedGrade(card, relIdx(cards, comments), byNo(cards));
+  const row78 = (...args) => String(h78(...args) ?? '');
+  b(BATTERY_REL, 'H78 fires: a p3 blocker under a p1 card it blocks', typeof h78(cards78[0]), 'string');
+  b(BATTERY_REL, 'H78 row: its own grade, the higher dependents highest first, and the grade it takes', ['`priority:p3` on a card that 2 open card(s) name', 'graded BELOW 2 of them: #10 (`priority:p1`), #11 (`priority:p2`)', "this card's grade is `priority:p1`"].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, 'H78 row: names the read that decides who acts — the fleet\'s grade is raised, a hand-set one ⛔ not moved', ['last `labeled` event', 'triage raises it', 'hand-set grade', '⛔ not moved', 'reports to him'].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, 'H78 row: a fleet-written grade whose same-stroke comment opens `Ruling-ref: priority:pN` is hand-set too — routed to his report, not raised — and the row names the comments read it does not make', ['the fleet comment of the same stroke', 'opens `Ruling-ref: priority:pN` with that grade (a comments read)', 'hand-set too', 'Set by a person or on his word', 'not triage\'s to raise', 'nor read here'].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, '⛔ H78 control: the same blocker graded p1 is silent', h78(graded(5, 'p1'), [graded(5, 'p1'), cards78[1], cards78[2]]), null);
+  b(BATTERY_REL, '⛔ H78: a blocker graded ABOVE everything it blocks is silent', h78(graded(5, 'p0'), [graded(5, 'p0'), cards78[1], cards78[2]]), null);
+  b(BATTERY_REL, 'H78: only the dependents graded ABOVE are named', `${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('graded BELOW 1 of them: #10 (`priority:p1`).')}/${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('#11 (')}`, 'true/false');
+  b(BATTERY_REL, 'H78: an UNGRADED blocker sits below every rung', row78(carded(5, ['pm:queue']), [carded(5, ['pm:queue']), cards78[2]]).includes('no grade label on a card that 1 open card(s) name'), true);
+  b(BATTERY_REL, '⛔ H78: …except a generated anchor and a seat post, which take no grade', `${h78(carded(5, ['tracking']), [carded(5, ['tracking']), cards78[1]])}/${h78(carded(5, ['pm:seat']), [carded(5, ['pm:seat']), cards78[1]])}`, 'null/null');
+  b(BATTERY_REL, 'H78 control: …while an anchor that DOES carry a lower grade is reported like any card', typeof h78(carded(5, ['tracking', 'priority:p3']), [carded(5, ['tracking', 'priority:p3']), cards78[1]]), 'string');
+  b(BATTERY_REL, '⛔ H78: an UNGRADED dependent contributes nothing', h78(cards78[0], [cards78[0], carded(10, ['pm:blocked'], 'Blocked-by: #5')]), null);
+  b(BATTERY_REL, '⛔ H78: a card nothing waits on is silent, whatever its grade', h78(graded(99, 'p3'), [...cards78, graded(99, 'p3')]), null);
+  b(BATTERY_REL, '⛔ H78: unreadable labels on the blocker are never read as ungraded', h78BlockerBelowBlockedGrade({ number: 5 }, relIdx(cards78), byNo(cards78)), null);
+  b(BATTERY_REL, 'H78: a COMMENT-borne edge counts like a body one', typeof h78(cards78[0], [cards78[0], graded(10, 'p1', ['pm:blocked'], 'no line here')], [[10, ['Blocked-by: #5']]]), 'string');
+  b(BATTERY_REL, '⛔ H78: a cross-repo line founds nothing here — the index holds this repo\'s edges', h78(cards78[0], [cards78[0], graded(10, 'p0', ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5')]), null);
+  b(BATTERY_REL, 'H78 row: …and every row says that scope', row78(cards78[0]).includes('THIS repo\'s open cards only'), true);
+  const fan78 = [graded(5, 'p3'), ...Array.from({ length: 7 }, (_, i) => graded(100 + i, 'p0', ['pm:blocked'], 'Blocked-by: #5'))];
+  b(BATTERY_REL, 'H78: a large fan-out names the cap and counts the rest', [`graded BELOW 7 of them`, `+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`].every((x) => row78(fan78[0], fan78).includes(x)), true);
+  b(BATTERY_REL, 'H78: a missing index and a PR row do not crash or fire', `${h78BlockerBelowBlockedGrade(cards78[0], undefined, undefined)}/${h78BlockerBelowBlockedGrade({ ...cards78[0], pull_request: {} }, relIdx(cards78), byNo(cards78))}`, 'null/null');
+  b(BATTERY_REL, 'H78 band: registered as `state`, the sweep pushes it, and it is not loud', `${familyBand('H78')}/${familyRegistryCoverage().emitted.includes('H78')}/${isLoudFinding(row78(cards78[0]))}`, 'state/true/false');
+
+  // H79 — a hold on one side of a block only.
+  const h79 = (card, cards, comments) => h79HoldMismatch(card, blockersByDependent(relIdx(cards, comments)).get(card.number), byNo(cards));
+  const row79 = (...args) => String(h79(...args) ?? '');
+  const held5 = carded(5, ['pm:on-hold'], 'Restart-when: closed #1');
+  const queued5 = carded(5, ['pm:queue']);
+  const dep79 = carded(10, ['pm:blocked'], 'Blocked-by: #5');
+  const heldDep79 = carded(10, ['pm:on-hold'], 'Blocked-by: #5\nRestart-when: closed #5');
+  b(BATTERY_REL, 'H79 inverse index: each dependent lists the local cards it names, ascending', JSON.stringify([...blockersByDependent(relIdx([carded(10, [], 'Blocked-by: #7, #5'), carded(11, [], 'Blocked-by: #5')]))]), '[[10,[5,7]],[11,[5]]]');
+  b(BATTERY_REL, 'H79 inverse index: a missing index is an empty map', blockersByDependent(undefined).size, 0);
+  b(BATTERY_REL, 'H79 fires: the blocker is on hold and the card it blocks is not', typeof h79(dep79, [held5, dep79]), 'string');
+  b(BATTERY_REL, 'H79 row: states the default — the blocked card follows its blocker onto hold', ['HOLD MISMATCH: this card is not `pm:on-hold`', '(#5)', 'the blocked card follows its blocker onto hold', 'unless the maintainer said otherwise on the card'].every((x) => row79(dep79, [held5, dep79]).includes(x)), true);
+  b(BATTERY_REL, '⛔ H79 control: BOTH on hold is consistent', h79(heldDep79, [held5, heldDep79]), null);
+  b(BATTERY_REL, '⛔ H79 control: NEITHER on hold is silent', h79(dep79, [queued5, dep79]), null);
+  b(BATTERY_REL, 'H79 fires the REVERSE way: the blocked card is on hold and none of its open blockers is', ['HOLD MISMATCH, the reverse way', '(#5)', 'No default in this direction'].every((x) => row79(heldDep79, [queued5, heldDep79]).includes(x)), true);
+  const dep79two = carded(10, ['pm:blocked'], 'Blocked-by: #5, #6');
+  b(BATTERY_REL, 'H79: one held blocker among several is enough, and only IT is named', `${row79(dep79two, [held5, carded(6, ['pm:queue']), dep79two]).includes('1 open card(s) its `Blocked-by:` line names is (#5)')}/${row79(dep79two, [held5, carded(6, ['pm:queue']), dep79two]).includes('#6')}`, 'true/false');
+  b(BATTERY_REL, '⛔ H79: a held card with at least ONE held blocker is consistent', h79({ ...dep79two, labels: [{ name: 'pm:on-hold' }] }, [held5, carded(6, ['pm:queue']), { ...dep79two, labels: [{ name: 'pm:on-hold' }] }]), null);
+  b(BATTERY_REL, '⛔ H79: a CLOSED blocker is not in the open listing and founds nothing (that is H19\'s)', h79(dep79, [dep79]), null);
+  b(BATTERY_REL, '⛔ H79: a card that names no local card is silent — no line, or a cross-repo one', `${h79(carded(10, ['pm:queue']), [held5, carded(10, ['pm:queue'])])}/${h79(carded(10, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5'), [held5, carded(10, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5')])}`, 'null/null');
+  b(BATTERY_REL, '⛔ H79: unreadable labels are never read as not-held — on the card or on its blocker', `${h79HoldMismatch({ number: 10 }, [5], byNo([held5]))}/${h79HoldMismatch(dep79, [5], byNo([{ number: 5 }]))}`, 'null/null');
+  b(BATTERY_REL, 'H79: a COMMENT-borne edge counts like a body one', typeof h79(carded(10, ['pm:blocked'], 'no line here'), [held5, carded(10, ['pm:blocked'], 'no line here')], [[10, ['Blocked-by: #5']]]), 'string');
+  b(BATTERY_REL, 'H79 band: registered as `state`, the sweep pushes it, and it is not loud', `${familyBand('H79')}/${familyRegistryCoverage().emitted.includes('H79')}/${isLoudFinding(row79(dep79, [held5, dep79]))}`, 'state/true/false');
+
+  // H80 — cards that wait on each other.
+  const wait = (number, on) => carded(number, ['pm:blocked'], on.length ? `Blocked-by: ${on.map((n) => `#${n}`).join(', ')}` : 'no line here');
+  const cyc = (cards, comments) => JSON.stringify(blockingCycles(relIdx(cards, comments)));
+  const mutual80 = [wait(1, [2]), wait(2, [1])];
+  const ring80 = [wait(1, [2]), wait(2, [3]), wait(3, [1])];
+  b(BATTERY_REL, 'H80 cycles: a mutual block is ONE group of two, with its path', cyc(mutual80), '[{"members":[1,2],"path":[1,2,1]}]');
+  b(BATTERY_REL, 'H80 cycles: a three-card ring is ONE group, reported once, path spelled in waits-on order', cyc(ring80), '[{"members":[1,2,3],"path":[1,2,3,1]}]');
+  b(BATTERY_REL, '⛔ H80 control: a plain chain is no cycle', cyc([wait(1, [2]), wait(2, [3]), wait(3, [])]), '[]');
+  b(BATTERY_REL, '⛔ H80 control: the same ring with ONE line removed is no cycle', cyc([wait(1, [2]), wait(2, [3]), wait(3, [])]) === cyc(ring80), false);
+  b(BATTERY_REL, 'H80 cycles: a card that waits INTO a ring is not a member of it', cyc([...ring80, wait(4, [1])]), '[{"members":[1,2,3],"path":[1,2,3,1]}]');
+  b(BATTERY_REL, 'H80 cycles: two disjoint groups are two entries, lowest member first', cyc([wait(8, [7]), wait(7, [8]), ...mutual80]), '[{"members":[1,2],"path":[1,2,1]},{"members":[7,8],"path":[7,8,7]}]');
+  b(BATTERY_REL, '⛔ H80: a self-reference never reaches the index, so it is never a cycle', cyc([wait(5, [5])]), '[]');
+  b(BATTERY_REL, 'H80 cycles: the SHORTEST cycle through the lowest card is the one spelled', cyc([wait(1, [2]), wait(2, [3, 1]), wait(3, [1])]), '[{"members":[1,2,3],"path":[1,2,1]}]');
+  b(BATTERY_REL, 'H80 cycles: a COMMENT-borne edge closes a cycle like a body one', cyc([wait(1, [2]), wait(2, [])], [[2, ['Blocked-by: #1']]]), '[{"members":[1,2],"path":[1,2,1]}]');
+  b(BATTERY_REL, '⛔ H80: a cross-repo line of the same number closes nothing', cyc([wait(1, [2]), carded(2, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#1')]), '[]');
+  const long80 = Array.from({ length: 4000 }, (_, i) => wait(i + 1, [i === 3999 ? 1 : i + 2]));
+  b(BATTERY_REL, 'H80 cycles: a 4000-card ring is found without exhausting the stack', `${blockingCycles(relIdx(long80)).length}/${blockingCycles(relIdx(long80))[0]?.members.length}/${blockingCycles(relIdx(long80))[0]?.path.length}`, '1/4000/4001');
+  b(BATTERY_REL, 'H80 cycles: a missing index is no cycle', blockingCycles(undefined).length, 0);
+  const rows80 = (cards) => h80BlockingCycleRows(relIdx(cards), byNo(cards));
+  // Through a wrapper, like every row text in this suite: a predicate that goes
+  // quiet must turn its cases RED, never abort the run on a `.message` of undefined.
+  const msg80 = (cards, at = 0) => String(rows80(cards)[at]?.message ?? '');
+  b(BATTERY_REL, 'H80 rows: ONE row per group, on its lowest-numbered card', rows80([wait(8, [7]), wait(7, [8]), ...ring80]).map((r) => r.issue.number).join(), '1,7');
+  b(BATTERY_REL, 'H80 row: a pair is named a MUTUAL BLOCK, both cards and the path', ['MUTUAL BLOCK: #1 and #2 each name the other', '#1 → #2 → #1'].every((x) => msg80(mutual80).includes(x)), true);
+  b(BATTERY_REL, 'H80 row: a larger group is named a CYCLE, with its size, members and path', ['BLOCKING CYCLE among 3 open cards (#1, #2, #3)', '#1 → #2 → #3 → #1'].every((x) => msg80(ring80).includes(x)), true);
+  b(BATTERY_REL, 'H80 row: says what a block between fleet cards may be — the same file, never a preference order', ['only when they edit the same file', 'a list on the epic', 'No close can release a card in it'].every((x) => msg80(ring80).includes(x)), true);
+  b(BATTERY_REL, '⛔ H80 control: no cycle, no row', rows80([wait(1, [2]), wait(2, [])]).length, 0);
+  b(BATTERY_REL, 'H80 rows: a missing index and a missing listing do not crash', `${h80BlockingCycleRows(undefined, undefined).length}/${h80BlockingCycleRows(relIdx(mutual80), undefined).length}`, '0/0');
+  b(BATTERY_REL, 'H80 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H80')}/${familyRegistryCoverage().emitted.includes('H80')}/${isLoudFinding(msg80(mutual80))}`, 'stall/true/false');
+
+  // H81 — a question in the decision box with no answer. One governing-record
+  // reader with H73, so a card is exactly one row's.
+  const NOW81 = Date.parse('2026-11-19T12:00:00Z');
+  const card81 = (extra = {}) => ({
+    number: 35001,
+    state: 'open',
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'priority:p2' }],
+    body: '## 维护者速读\n\n- 问题:…',
+    created_at: '2026-11-15T12:00:00Z',
+    updated_at: '2026-11-18T12:00:00Z',
+    ...extra,
+  });
+  const h81 = (extra = {}, nowMs = NOW81) => h81DecisionUnanswered(card81(extra), nowMs);
+  const row81 = (extra = {}, nowMs = NOW81) => String(h81(extra, nowMs) ?? '');
+  const RULED81 = 'Ruled: 6566731522 · letter A · 2026-11-15T00:00Z';
+  b(BATTERY_REL, 'H81 fires: a decision card with no ruling, open four days', typeof h81(), 'string');
+  b(BATTERY_REL, 'H81 row: the age, the threshold, what it is counted from and the last touch', ['open ~4 day(s) (threshold 3)', 'counted from the day the card was filed', 'last touched ~24h ago'].every((x) => row81().includes(x)), true);
+  b(BATTERY_REL, 'H81 constants: three days', DECISION_UNANSWERED_STALE_DAYS, 3);
+  b(BATTERY_REL, '⭐ H81: the threshold boundary — exactly three days is silent, a minute past it fires', [h81({ created_at: '2026-11-16T12:00:00Z' }), typeof h81({ created_at: '2026-11-16T11:59:00Z' })].join(), ',string');
+  b(BATTERY_REL, '⛔ H81 control: the same card without the decision label is silent', h81({ labels: [{ name: 'pm:queue' }, { name: 'priority:p2' }] }), null);
+  b(BATTERY_REL, '⛔ H81: a card whose body carries a governing `Ruled:` record is ANSWERED — H73\'s row, never both', `${h81({ body: `${RULED81}\n\nthe question` })}/${typeof h73RuledCardStillInBox(card81({ body: `${RULED81}\n\nthe question` }), NOW81)}`, 'null/string');
+  b(BATTERY_REL, '⛔ H81: …and conversely the unanswered card is never H73\'s', h73RuledCardStillInBox(card81(), NOW81), null);
+  b(BATTERY_REL, 'H81: a card that RE-ENTERED the box is unanswered again, counted from the earlier ruling', ['open ~4 day(s)', 'counted from the newest earlier ruling its `Prior rulings on this card:` line names'].every((x) => row81({ created_at: '2026-10-01T00:00:00Z', body: `${RULED81}\n\nPrior rulings on this card: 6566731522 — letter A ruled the old question; this is a new one.` }).includes(x)), true);
+  b(BATTERY_REL, '⛔ H81 control: …and a re-entry under three days old is silent, however old the card', h81({ created_at: '2026-10-01T00:00:00Z', body: 'Ruled: 6566731522 · letter A · 2026-11-18T00:00Z\n\nPrior rulings on this card: 6566731522 — a new question.' }), null);
+  b(BATTERY_REL, 'H81: a `Ruled:` line inside a FENCE is a citation — the card is still unanswered', typeof h81({ body: `quoting another card:\n\`\`\`\n${RULED81}\n\`\`\`\n` }), 'string');
+  b(BATTERY_REL, 'H81: an unreadable `created_at` FIRES, never reads as fresh', row81({ created_at: 'not-a-date' }).includes('for a time this sweep could not read'), true);
+  b(BATTERY_REL, 'H81: an absent `created_at` likewise', typeof h81({ created_at: undefined }), 'string');
+  b(BATTERY_REL, 'H81: an unreadable `updated_at` is said, not guessed', row81({ updated_at: undefined }).includes('last-touched time unreadable'), true);
+  b(BATTERY_REL, '⛔ H81: `updated_at` is NOT the clock — a card nudged an hour ago still lists', row81({ updated_at: '2026-11-19T11:00:00Z' }).includes('last touched ~1h ago'), true);
+  b(BATTERY_REL, '⛔ H81: a CLOSED card, a PR row and unreadable labels are all out', [h81({ state: 'closed' }), h81({ pull_request: {} }), h81({ labels: undefined }), h81DecisionUnanswered(undefined)].join(), ',,,');
+  b(BATTERY_REL, 'H81 row: the answer is the maintainer\'s alone, and the script moves nothing', ['no seat answers for him and no script moves the card', 'the decision thread the coordinator opens for it', 'never a label written from this script'].every((x) => row81().includes(x)), true);
+  b(BATTERY_REL, 'H81 governing record: the newest readable stamp governs, for H73 and H81 alike', `${governingRuledRecord('Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z')?.id}/${governingRuledRecord('Ruled: 6400000001 · letter B\nRuled: 6566731522 · letter A')?.id}/${governingRuledRecord('no record here')}`, '6566731522/6400000001/null');
+  b(BATTERY_REL, 'H81 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H81')}/${familyRegistryCoverage().emitted.includes('H81')}/${isLoudFinding(row81())}`, 'stall/true/false');
+
+  // The retirement, pinned from the registry side, and the rows' shared text rule.
+  b(BATTERY_REL, '⛔ retired: H14 and H15 sit in no band and no sweep line pushes them', `${familyBand('H14')}/${familyBand('H15')}/${familyRegistryCoverage().emitted.includes('H14')}/${familyRegistryCoverage().emitted.includes('H15')}`, `${UNREGISTERED_FAMILY_BAND}/${UNREGISTERED_FAMILY_BAND}/false/false`);
+  b(BATTERY_REL, 'registry: no code is left unregistered, and none is registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
+  b(BATTERY_REL, '⛔ text: no new row carries an angle bracket the body sanitizer could eat', [row77(noRef77, [], null, REPO_OS), row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), row78(cards78[0]), row79(dep79, [held5, dep79]), row79(heldDep79, [queued5, heldDep79]), msg80(mutual80), msg80(ring80), row81(), row81({ created_at: 'not-a-date' })].some((row) => row.length === 0 || /[<>]/u.test(row)), false);
+  b(BATTERY_REL, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY_REL) && SELF_TEST_BATTERIES[BATTERY_REL] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H74: an open `pm:queue` / `pm:blocked` card with no triage audit record in
   //    either channel. One card WITH an audit comment and one WITHOUT, as the
@@ -29951,7 +30284,7 @@ async function selfTest() {
 
   // -- H16 incident fixture: PR #9826, the measured specimen -----------------
   // The devx incident this item exists for: a conflict that hung ~4h while
-  // auto-merge was armed, and not one of H1–H15 could express the state.
+  // auto-merge was armed, and not one of the earlier rows could express the state.
   //
   // ⚠️ The `dirty` reading is the INCIDENT's, recorded on the card — not a
   // live reading. Measured again here on 2026-08-19 while implementing H16,
@@ -30238,7 +30571,7 @@ async function selfTest() {
   t('markdown: …and is NOT sorted above the loud band', renderMarkdown([h19Row, loudRow], counts).indexOf('#900') < renderMarkdown([h19Row, loudRow], counts).indexOf('#10112'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
   t('summaryLine: names what was READ, not only what was found', saidBy('head', summaryLine(counts, 0)).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
-  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', saidBy('head', summaryLine(counts, 0)).includes('unscoped pass (H13–H15, H18)'), true);
+  t('summaryLine: the unscoped-pass clause names every row that reads it', saidBy('head', summaryLine(counts, 0)).includes('unscoped pass (H13, H18, H78–H81)'), true);
   // H16's pair is the row-granular half of the same #4690 property: a detail
   // pass that read NOTHING must not be indistinguishable from a board with no
   // conflicts, so the sentence carries `read X of Y` rather than only findings.
@@ -30409,8 +30742,8 @@ async function selfTest() {
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
   // going quietly unsorted.
-  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW)), true);
-  t('loudness: H13\'s base line is not', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW)), false);
+  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(26), p0Body), NOW)), true);
+  t('loudness: H13\'s base line is not', isLoudFinding(h13AreaWithoutPmState(labelledCard(['area:data'], hoursAgo(26)), NOW)), false);
 
   // Fold discipline: loud first, issue-number order within each band.
   const mixed = renderMarkdown([quietRow, loudRow, finding(100, 'H1', '`pm:dispatched` with no assignee')], counts);
@@ -30422,20 +30755,22 @@ async function selfTest() {
   t('markdown: the literal marker leads the body (no angle brackets to sanitize)', mixed.startsWith('os-half-state-sweep'), true);
   t('markdown: the body carries no HTML-comment marker the sanitizer could eat', mixed.includes('<!--'), false);
 
-  // H14/H15 rows are ordinary rows in BOTH media — the property the card asked
-  // for, and the reason H15 attaches its one summary row to the card it names
-  // instead of inventing a rowless shape neither renderer knows how to place.
-  const h14Row = finding(7276, 'H14', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])));
-  const h15Row = finding(7276, 'H15', h15OldestUnclaimedBlocking([blockingCard(7276)], NOW).message);
-  t('plain: an H14 row renders in the standard two-line shape', renderPlain([h14Row], counts).startsWith('  H14 #7276 `pm:blocking` carried while'), true);
-  t('plain: …and carries the card URL on the second line', renderPlain([h14Row], counts).includes('\n     https://example.test/7276'), true);
-  t('plain: an H15 row renders the same way', renderPlain([h15Row], counts).startsWith('  H15 #7276 oldest UNCLAIMED'), true);
-  t('markdown: an H14 row renders as a link row like every other', renderMarkdown([h14Row], counts).includes('- **H14** [#7276](https://example.test/7276) — '), true);
-  t('markdown: an H15 row renders as a link row like every other', renderMarkdown([h15Row], counts).includes('- **H15** [#7276](https://example.test/7276) — '), true);
+  // H78/H80 rows are ordinary rows in BOTH media — and H80 attaches its one
+  // row per cycle to a card it names instead of inventing a rowless shape
+  // neither renderer knows how to place.
+  const relPair = [carded(7276, ['priority:p3']), carded(7300, ['priority:p1', 'pm:blocked'], 'Blocked-by: #7276')];
+  const h78Row = finding(7276, 'H78', String(h78BlockerBelowBlockedGrade(relPair[0], idx(relPair), new Map(relPair.map((c) => [c.number, c]))) ?? ''));
+  const cyclePair = [carded(7276, ['pm:blocked'], 'Blocked-by: #7300'), carded(7300, ['pm:blocked'], 'Blocked-by: #7276')];
+  const h80Row = finding(7276, 'H80', String(h80BlockingCycleRows(idx(cyclePair), new Map(cyclePair.map((c) => [c.number, c])))[0]?.message ?? ''));
+  t('plain: an H78 row renders in the standard two-line shape', renderPlain([h78Row], counts).startsWith('  H78 #7276 `priority:p3` on a card that'), true);
+  t('plain: …and carries the card URL on the second line', renderPlain([h78Row], counts).includes('\n     https://example.test/7276'), true);
+  t('plain: an H80 row renders the same way', renderPlain([h80Row], counts).startsWith('  H80 #7276 MUTUAL BLOCK'), true);
+  t('markdown: an H78 row renders as a link row like every other', renderMarkdown([h78Row], counts).includes('- **H78** [#7276](https://example.test/7276) — '), true);
+  t('markdown: an H80 row renders as a link row like every other', renderMarkdown([h80Row], counts).includes('- **H80** [#7276](https://example.test/7276) — '), true);
   // Neither is loud: the P0-SUSPECT band is H13's self-declared-emergency
-  // class, and a coherence or visibility row must never outrank it at the fold.
-  t('loudness: an H14 row is not loud', isLoudFinding(h14Row[2]), false);
-  t('loudness: an H15 row is not loud', isLoudFinding(h15Row[2]), false);
+  // class, and a relation row must never outrank it at the fold.
+  t('loudness: an H78 row is not loud', isLoudFinding(h78Row[2]), false);
+  t('loudness: an H80 row is not loud', isLoudFinding(h80Row[2]), false);
 
   // H16 is an ordinary row in BOTH media too — report-only and NOT loud, as
   // the card requires: the P0-SUSPECT band stays H13's self-declared-emergency
@@ -30446,10 +30781,10 @@ async function selfTest() {
   t('markdown: an H16 row renders as a link row like every other', renderMarkdown([h16Row], counts).includes('- **H16** [#9826](https://example.test/9826) — '), true);
   t('loudness: an H16 row is not loud', isLoudFinding(h16Row[2]), false);
   t('markdown: a loud H13 row still sorts above an H16 row', renderMarkdown([h16Row, loudRow], counts).indexOf('#900') < renderMarkdown([h16Row, loudRow], counts).indexOf('#9826'), true);
-  t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
+  t('markdown: a loud H13 row still sorts above an H78 row', renderMarkdown([h78Row, loudRow], counts).indexOf('#900') < renderMarkdown([h78Row, loudRow], counts).indexOf('#7276'), true);
 
   // H18 is an ordinary row in BOTH media too — report-only and NOT loud, the
-  // same property H14–H16 pin and the card's explicit requirement here.
+  // same property H16 pins and the card's explicit requirement here.
   const h18Msg = h18RetriageAged({ ...issue(['pm:retriage', 'pm:queue']), updated_at: hoursAgo(3) }, NOW);
   const h18Row = finding(6001, 'H18', h18Msg);
   t('plain: an H18 row renders in the standard two-line shape', renderPlain([h18Row], counts).startsWith('  H18 #6001 `pm:retriage` carried alongside'), true);
@@ -30752,7 +31087,7 @@ async function selfTest() {
   // The section discharges a ruling that was measured UNRUNNABLE on the triage
   // seat's own tool surface, so these cases pin the two properties that make it
   // runnable HERE and honest anywhere: it reads the index the patrol already
-  // builds for H14 (both channels, one parser), and NEITHER of its two numbers
+  // builds for the relation rows (both channels, one parser), and NEITHER of its two numbers
   // can go missing — the flag count alone is the false green the card predicted.
   const decisionCard = (number) =>
     carded(number, ['needs-user-decision'], '', { html_url: `https://example.test/${number}` });
@@ -30810,7 +31145,7 @@ async function selfTest() {
   t('④ loss: …and forbids citing the flag count alone', mdBox.includes('Cite BOTH numbers or write NOT MEASURED'), true);
 
   // (e) The cap: named few, counted all, overflow announced. The ceiling is
-  // `BLOCKING_DEPENDENT_LIST_CAP` — H14's, for the same fan-out — rather than a
+  // `BLOCKING_DEPENDENT_LIST_CAP` — the relation rows', for the same fan-out — rather than a
   // second constant for the same question.
   const manyDecisionDeps = decisionBox([
     decisionCard(16348),
@@ -30836,7 +31171,8 @@ async function selfTest() {
   t('④ posture: report-only, derived at READ TIME', mdBox.includes('derived at READ TIME'), true);
   t('④ posture: …and it writes no priority label', mdBox.includes('no priority label is written for it'), true);
   t('④ scope: the section declares which BODIES it read', mdBox.includes('dependent BODIES are read from every open issue in this repo'), true);
-  t('④ scope: …and the narrower COMMENT population', mdBox.includes('dependent COMMENTS only from open `pm:blocked` / `pm:blocking` cards'), true);
+  t('④ scope: …and the narrower COMMENT population', mdBox.includes('dependent COMMENTS only from open `pm:blocked` cards whose body carries no'), true);
+  t('④ scope: ⛔ the retired label is no part of that population', mdBox.includes('pm:blocking'), false);
   t('④ scope: …and calls the remainder unread, never absent', mdBox.includes('unread, not absent'), true);
 
   // Absent inventory -> byte-identical to the report this script already prints.
@@ -30901,7 +31237,7 @@ async function selfTest() {
   const bandRank = (name) => HALF_STATE_FAMILY_BANDS.find((band) => band.name === name).rank;
   t('#13947 band: the `gate` band is still declared, first in rank, with no live member', bandRank('gate') === 0 && !Object.values(HALF_STATE_FAMILY_BAND).includes('gate'), true);
   t('#13947 band: …and the retired gate rows carry no band', `${familyBand('H31')}/${familyBand('H35')}`, `${UNREGISTERED_FAMILY_BAND}/${UNREGISTERED_FAMILY_BAND}`);
-  t("#13947 band: H14/H15/H5 are inventory — triage's own examples", `${familyBand('H14')}/${familyBand('H15')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
+  t("#13947 band: H11/H6/H5 are inventory — triage's own examples", `${familyBand('H11')}/${familyBand('H6')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
   // ⚖️ #14072: H22 was triage's fourth inventory example and has left the
   // registry entirely, because it emits no row for a band to govern. Pinned in
   // BOTH directions — unregistered here, and absent from the table below — so
@@ -30910,7 +31246,7 @@ async function selfTest() {
   t('#13947 band: …and is not in the table at all', 'H22' in HALF_STATE_FAMILY_BAND, false);
   t('#13947 band: ⭐ the gate band outranks the inventory band', bandRank('gate') < bandRank('inventory'), true);
   t('#13947 band: …and outranks the stall band', bandRank('gate') < bandRank('stall'), true);
-  t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H14'), true);
+  t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H11'), true);
   t('#13947 band: an unknown code is NAMED unregistered, never dropped', familyBand('H99'), UNREGISTERED_FAMILY_BAND);
   t('#13947 band: …and is PROTECTED, sorting above the ordinary bands', familyRank('H99') < familyRank('H19'), true);
   t('#13947 band: …but never above the gate band', bandRank('gate') < familyRank('H99'), true);
@@ -30918,12 +31254,12 @@ async function selfTest() {
 
   // ③ The ledger's accounting, asserted directly — including the contract that
   // `renderedCount` is a PREFIX of the SORTED rows, not a set membership test.
-  const led = familyLedger([finding(1, 'H14', 'a'), finding(2, 'H14', 'b'), finding(3, 'H12', 'c')], 2);
+  const led = familyLedger([finding(1, 'H11', 'a'), finding(2, 'H11', 'b'), finding(3, 'H12', 'c')], 2);
   t('#13947 ledger: computed counts every row', led.computed, 3);
   t('#13947 ledger: rendered counts the prefix that survived', led.rendered, 2);
-  t('#13947 ledger: the per-family split is exact, the higher band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H12:1/0,H14:2/2');
+  t('#13947 ledger: the per-family split is exact, the higher band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H12:1/0,H11:2/2');
   t('#13947 ledger: …and the trimmed set names only the short families', led.trimmed.map((e) => e.code).join(','), 'H12');
-  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H14') || led.silent.includes('H12'), false);
+  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H11') || led.silent.includes('H12'), false);
   // ⚖️ #14072: a code with no band is not silent either — it is not a row
   // family at all, so the ledger must never list it as "computed 0 rows".
   t('#13947 ledger: ⚖️ a folded family is absent from the ledger entirely', led.silent.includes('H22'), false);
@@ -30933,7 +31269,7 @@ async function selfTest() {
   // inventory flood arrives FIRST and carries the LOWER card numbers, so under
   // the flat positional trim the severe row was among the omitted. (The fixture
   // family is a `stall` row now that the gate band has no live member.)
-  const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H14', 'the `pm:blocking` cache disagrees with the live blocker set — '.repeat(2)));
+  const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H11', 'an important card is parked with no exit anyone is watching — '.repeat(2)));
   const lateGateRow = finding(99999, 'H12', 'the delivering PR cannot land while the card reads dispatched');
   const ranked = renderMarkdown([...inventoryFlood, lateGateRow], counts);
   t('#13947 order: the flood really does trigger the trim', ranked.includes('further row(s) omitted'), true);
@@ -30944,7 +31280,7 @@ async function selfTest() {
   // the sort key — the bare form stayed green with the gate row gone).
   t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
   t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H12` | stall | 1 | 1 |'), true);
-  t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H14` | inventory | 900 |'), true);
+  t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H11` | inventory | 900 |'), true);
   t('#13947 order: the body still fits the render budget', bodyBytes(ranked) <= MARKDOWN_BODY_BUDGET, true);
   t('#13947 order: …and the measured cap', bodyBytes(ranked) <= ISSUE_BODY_LIMIT, true);
   // The loud and unjudged bands still outrank the family bands: an inventory
@@ -31388,8 +31724,8 @@ async function selfTest() {
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
   // The readers the new state joins — each pinned in BOTH directions, so
   // the vocabulary cannot be half-added (the defect class this family is about).
-  t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
-  t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
+  t('vocabulary: H13 treats awaiting as a real state -> clean', h13AreaWithoutPmState(labelledCard(['area:fleet', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
+  t('vocabulary: …while the same card without it is still H13', typeof h13AreaWithoutPmState(labelledCard(['area:fleet'], hoursAgo(200)), NOW), 'string');
   t('vocabulary: H22 counts awaiting as residue on a closed card', h22labels(closedCard([AWAITING_MAINTAINER_LABEL])), AWAITING_MAINTAINER_LABEL);
   t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
@@ -31428,7 +31764,7 @@ async function selfTest() {
   t('H29: …H13\'s carries `finding`, which is a card KIND, not a position', PM_STATE_LABELS.includes('finding') && !PM_EXCLUSIVE_STATE_LABELS.includes('finding'), true);
   t('H29: …and the identity stickers legally coexist with a state', PM_EXCLUSIVE_STATE_LABELS.includes('pm:seat') || PM_EXCLUSIVE_STATE_LABELS.includes('pm:epic'), false);
   t('H29: the exclusivity set is NOT H22\'s residue set', PM_EXCLUSIVE_STATE_LABELS.join(',') === PM_RESIDUE_LABELS.join(','), false);
-  t('H29: …pm:blocking is an annotation ON a state, so it is not exclusive', PM_RESIDUE_LABELS.includes('pm:blocking') && !PM_EXCLUSIVE_STATE_LABELS.includes('pm:blocking'), true);
+  t('H29: …and the retired pm:blocking label is in neither set', PM_RESIDUE_LABELS.includes('pm:blocking') || PM_EXCLUSIVE_STATE_LABELS.includes('pm:blocking'), false);
   t('H29: …while needs-user-decision is a position, so it IS exclusive', PM_EXCLUSIVE_STATE_LABELS.includes('needs-user-decision') && !PM_RESIDUE_LABELS.includes('needs-user-decision'), true);
   // The two pairs this card was filed on.
   t('H29: pm:queue + needs-user-decision -> finding', typeof h29(['pm:queue', 'needs-user-decision']), 'string');
@@ -32116,7 +32452,7 @@ async function selfTest() {
   t('H28 gate: …while the liveness gate reads it anyway', needsBlockerLivenessComments(reparked), true);
   t('H28 gate: the liveness gate is the label alone, body-clean or not', needsBlockerLivenessComments(blockedCard(1, 'no line here')), true);
   t('H28 gate: a card without the label buys no liveness fetch', needsBlockerLivenessComments(blockedCard(1, 'Blocked-by: #2', ['pm:queue'])), false);
-  t('H28 gate: a pm:blocking card is out of scope here too', needsBlockerLivenessComments(blockedCard(1, '', ['pm:blocking'])), false);
+  t('H28 gate: a card carrying only the retired pm:blocking label is out of scope here too', needsBlockerLivenessComments(blockedCard(1, '', ['pm:blocking'])), false);
   t('H28 gate: a missing issue does not crash', needsBlockerLivenessComments(undefined), false);
 
   // REVERSE VERIFICATION, both legs, over the recorded bytes.
@@ -34193,7 +34529,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
   const LABEL48 = GOVERNED_PR_AWAITING_MERGE_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
-  // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
+  // ⚠️ The fixture BODY always carries the dev's four-line draft under the SAME
   // `## 维护者速读` heading the comment marker reads, so every case below that
   // fires with no brief COMMENT is simultaneously the "a draft in the body does
   // not satisfy the brief half" case.
@@ -34202,7 +34538,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     state: 'open',
     draft: true,
     labels: labels.map((name) => ({ name })),
-    body: '## 维护者速读\n改了什么:dev 的六行草稿,不是评审后的最终速读。',
+    body: '## 维护者速读\n用户能看到什么变化:dev 的四行草稿,不是评审后的最终速读。',
     ...extra,
   });
   const h48row = (...args) => String(h48GovernedVerdictWithoutBrief(...args) ?? '');
@@ -34340,7 +34676,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     user: { login: 'objectstack-fleet[bot]' },
     requested_reviewers: (extra.requested ?? ['hotlong']).map((login) => ({ login })),
     assignees: (extra.assigned ?? []).map((login) => ({ login })),
-    body: '## 维护者速读\n改了什么:dev 的六行草稿。',
+    body: '## 维护者速读\n用户能看到什么变化:dev 的四行草稿。',
     ...(extra.fields ?? {}),
   });
   const RECORD69 = '## 席位核对\n\nACCEPT · domain:skills seat 2 · head `7cc88889`';
@@ -35701,7 +36037,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H57 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H57 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H57 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H14'), true);
+  t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H11'), true);
 
   // -- H58 — a `pm:queue` card whose own text declares it a RULING (#17417) ---
   // ⛔ The self-test never touches GitHub. Every heading below is a spelling
@@ -35867,7 +36203,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H58 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H58 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H58 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H14'), true);
+  t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H11'), true);
 
   // -- H59 — the merged PR whose closing linkage mis-states a card (#17466) ---
   // ⛔ The self-test never touches GitHub. The two fixtures carry the two
@@ -36047,7 +36383,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H59 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H59 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H59 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H59 band: …and it outranks an inventory row', familyRank('H59') < familyRank('H14'), true);
+  t('H59 band: …and it outranks an inventory row', familyRank('H59') < familyRank('H11'), true);
 
   // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
   t('H59 adjacency: H7 is silent — the false-close body carries no `Part of`+keyword clash', h7PartOfWithClosingKeyword(pr59FalseClose), null);
@@ -36844,7 +37180,9 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, '⭐ H67 order: a HUMAN account whose body opens with a seat signature is the fleet\'s — it stays behind the older fleet card', order67([{ ...PAIR67[1], body: SIGNED67 }, PAIR67[0]], 2), '21,22');
   b(BATTERY67, 'H67 order: …while the same human card with the signature off its first line is still reached first', order67([{ ...PAIR67[1], body: `A user report.\n\n${SIGNED67}` }, PAIR67[0]], 2), '22,21');
   b(BATTERY67, 'H67 order: every App author is the fleet\'s (`github-actions[bot]` too), and an unreadable author ⛔ is never promoted', order67([{ ...PAIR67[1], user: { login: 'github-actions[bot]', type: 'Bot' } }, { ...PAIR67[1], number: 24, user: undefined }, PAIR67[0]], 3), '21,22,24');
-  b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
+  b(BATTERY67, '⛔ H67 order: the retired `pm:blocking` label is NO rank — a p1 card is read before a card carrying only it', order67([{ number: 8, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '8,9');
+  b(BATTERY67, 'H67 order: …and beside an ungraded card it is ordered by age alone, exactly like one', order67([{ number: 8, created_at: '2026-09-11T00:00:00Z', labels: [] }, { number: 9, created_at: '2026-09-12T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '8,9');
+  b(BATTERY67, 'H67 order: the label legs ARE the grade ladder — one spelling, no rank that is not a grade', H67_SELECTION_ORDER_LABELS.join(','), GRADE_LADDER.join(','));
   b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
   b(BATTERY67, 'H67 cap: the rest are DEFERRED, ⛔ not dropped silently', h67ReadOrder(CAND67, 2).deferred.map((i) => i.number).join(','), '1,4');
   b(BATTERY67, 'H67 cap: read + deferred always account for the whole set', h67ReadOrder(CAND67, 2).read.length + h67ReadOrder(CAND67, 2).deferred.length, CAND67.length);
@@ -36855,7 +37193,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 cap: an empty candidate set is not a crash', `${h67ReadOrder([], 10).read.length}:${h67ReadOrder([], 10).deferred.length}`, '0:0');
   b(BATTERY67, 'H67 cap: a non-array is not a crash either', h67ReadOrder(undefined, 10).read.length, 0);
   b(BATTERY67, 'H67 cap: the plan is PURE — the caller\'s array is not reordered under it', (() => { const input = [...CAND67]; h67ReadOrder(input, 2); return input.map((i) => i.number).join(','); })(), '1,2,3,4');
-  b(BATTERY67, 'H67 cap: the selection-order legs are frozen and partial BY DECLARATION', Object.isFrozen(H67_SELECTION_ORDER_LABELS) && H67_SELECTION_ORDER_LABELS.length, 5);
+  b(BATTERY67, 'H67 cap: the selection-order legs are frozen and partial BY DECLARATION', Object.isFrozen(H67_SELECTION_ORDER_LABELS) && H67_SELECTION_ORDER_LABELS.length, 4);
 
   // THE PASS ITSELF, read off this file's source — the two properties no
   // in-process call can observe.

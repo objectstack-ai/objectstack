@@ -395,8 +395,8 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * else `userDeactivated`). Read per call, so a host wired after boot is
    * still found. A typed `EnvironmentUserHostRefusal` refuses the operation
    * (a refused add is taken back out); any other failure refuses a
-   * deactivation (`503`) and is reported on an add, a reactivation or a
-   * removal as `host: { notified: false, reason }`, which it never undoes.
+   * deactivation or a removal (`503`) and is reported on an add or a
+   * reactivation as `host: { notified: false, reason }`, which it never undoes.
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 

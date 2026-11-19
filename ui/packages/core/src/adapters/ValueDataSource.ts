@@ -473,6 +473,39 @@ function comparandEquals(value: unknown, target: unknown): boolean {
 }
 
 /**
+ * The refusal for a nested relation constraint, one sentence for both
+ * dialects: the object arm meets `{ rel: { field: value } }` as a non-operator
+ * key in {@link matchesDollarOperator}, and the AST arm meets its lowered
+ * `['rel', '=', { field: value }]` in {@link matchesComparisonNode}.
+ */
+function nestedRelationRefusalReason(field: string, key: string): string {
+  return `filter condition on field '${field}' carries the non-operator key `
+    + `'${key}'; the in-memory matcher does not descend into a nested `
+    + `relation constraint`;
+}
+
+/**
+ * The first key of an AST comparand that is a nested relation condition, or
+ * `undefined` when it is not one. The shape is the one `convertFiltersToAST`
+ * lowers to `[rel, '=', condition]`: a non-empty PLAIN object with no `$` key.
+ *
+ * Plain means prototype `Object.prototype` or `null`, the test the spec's
+ * filter walk uses to tell filter structure from data. A class instance is
+ * data even when it carries its own non-`$` keys: a moment or luxon date, or a
+ * decimal object, under `>` / `<` compares through its `valueOf` in the switch
+ * below and is not refused as a relation.
+ * A `Date` has no own keys, so it is never one either.
+ */
+function nestedRelationComparandKey(target: unknown): string | undefined {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return undefined;
+  const proto = Object.getPrototypeOf(target) as object | null;
+  if (proto !== Object.prototype && proto !== null) return undefined;
+  const keys = Object.keys(target);
+  if (keys.length === 0 || keys.some((key) => key.startsWith('$'))) return undefined;
+  return keys[0];
+}
+
+/**
  * Evaluate ONE comparison node — `[field, operator]` or `[field, operator, value]`.
  *
  * The operator is canonicalized through the spec's own
@@ -520,6 +553,17 @@ function matchesComparisonNode(
   // everywhere else an array was already refused above.
   if (Array.isArray(rawTarget) && rawTarget.some(isFieldReferenceComparand)) {
     return refuseListMemberFieldReference(refusals, field, String(rawOperator));
+  }
+
+  // The nested-relation node `['rel', '=', { field: value }]`, which
+  // `convertFiltersToAST` lowers `{ rel: { field: value } }` to. This matcher
+  // does not descend into relations, and without this arm `=` compared the
+  // condition object by reference: no row matched and nothing was logged, while
+  // the object form of the same filter is refused by name. Checked for every
+  // operator that reads the slot, so `!=` cannot answer it as every row.
+  const nestedKey = nestedRelationComparandKey(rawTarget);
+  if (nestedKey !== undefined && !AST_NO_COMPARAND_OPERATORS.has(operator)) {
+    return refuseFilterNode(refusals, nestedRelationRefusalReason(field, nestedKey));
   }
 
   // objectui#8515 — a `{ $field }` reference as the WHOLE comparand. Resolved
@@ -924,12 +968,7 @@ function matchesDollarOperator(
         );
       }
       if (!operator.startsWith('$')) {
-        return refuseFilterNode(
-          refusals,
-          `filter condition on field '${field}' carries the non-operator key `
-          + `'${operator}'; the in-memory matcher does not descend into a nested `
-          + `relation constraint`,
-        );
+        return refuseFilterNode(refusals, nestedRelationRefusalReason(field, operator));
       }
       return refuseFilterNode(
         refusals,

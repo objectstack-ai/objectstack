@@ -1660,8 +1660,20 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   /** Dynamic data binding for filter options */
   optionsFrom: GlobalFilterOptionsFromSchema.optional().describe('Dynamic filter options from object').meta({ title: 'Options From' }),
 
-  /** Default filter value */
-  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value').meta({ title: 'Default Value' }),
+  /**
+   * Default filter value. On a `type: 'date'` filter it is held to three
+   * spellings by {@link checkGlobalFilterDateDefaultValue}: a preset name, an
+   * ISO date, or a date-macro token.
+   *
+   * On any other filter, a text filter above all, it may be the period-key
+   * placeholder `{current_iso_week}` (`PERIOD_KEY_TOKENS` in
+   * `@objectstack/spec/data`), resolved each time the dashboard opens to the
+   * current ISO week's key (`2026-W47`, in the workspace time zone): the
+   * filter bar shows that key, editable, and it filters a text column keyed
+   * by ISO week. A literal key (`'2026-W47'`) stays a fixed default. A date
+   * filter refuses the placeholder, because a week key is not a date.
+   */
+  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value. On a date filter: a preset name, an ISO date or a date-macro token. On a text filter keyed by ISO week, `{current_iso_week}` resolves to the current week key (e.g. `2026-W47`) each time the dashboard opens').meta({ title: 'Default Value' }),
 
   /** Filter application scope */
   scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope').meta({ title: 'Scope' }),

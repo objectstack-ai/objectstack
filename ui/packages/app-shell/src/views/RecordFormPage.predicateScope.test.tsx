@@ -10,9 +10,10 @@
  * objectui#6493 — the field-visibility gate on the record form page binds the
  * roots this tier declares.
  *
- * This is the call site, not the seam: the page filters `objectDef.fields` by
- * their declared visibility keys and hands the surviving names to `ObjectForm`
- * as `schema.fields`, which is what these tests read.
+ * Since objectstack#35249 the page's field list reads the static `hidden` only,
+ * and the form judges `visibleWhen` under the scope the page's
+ * `ExpressionProvider` publishes. So these tests read that published scope and
+ * the form's verdict over it (`formShows`); the roots must be bound there.
  *
  * ⚠️ FIXTURE SPELLING, objectui#6514. These gates were authored on `visible`
  * when this file was written, because that was the key the page then read.
@@ -27,7 +28,7 @@
  * data })` built beside — not from — the `ExpressionProvider` this same page
  * mounts around the form. `current_user`, `ctx.user`, `os.user` and `features`
  * were unbound in it, and an unbound root fails OPEN, so every gate below
- * rendered its field for everyone. Each `not.toContain` here was `toContain`
+ * rendered its field for everyone. Each hidden verdict here was a shown one
  * before the fix.
  *
  * Note what is NOT being tested: the error path. A CEL predicate over an
@@ -42,12 +43,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+// Not on the `@object-ui/react` barrel: the SAME module instance the provider publishes through.
+import { usePredicateScope } from '../../../react/src/hooks/useExpression';
+import { resolveFieldRuleState } from '@object-ui/core';
 import { RecordFormPage } from './RecordFormPage';
 
 const h = React.createElement;
 
-const { formSchemas, getAuthConfig, authState } = vi.hoisted(() => ({
+const { formSchemas, getAuthConfig, authState, publishedScopes } = vi.hoisted(() => ({
   formSchemas: [] as any[],
+  publishedScopes: [] as Record<string, unknown>[],
   getAuthConfig: vi.fn(async () => ({ features: {} as Record<string, unknown> })),
   authState: {
     user: null as Record<string, unknown> | null,
@@ -75,6 +80,7 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ObjectForm: ({ schema }: any) => {
     formSchemas.push(schema);
+    publishedScopes.push(usePredicateScope());
     return h('div', { 'data-testid': 'object-form' });
   },
 }));
@@ -125,6 +131,25 @@ function renderPage() {
  */
 const lastFields = (): string[] => formSchemas[formSchemas.length - 1].fields;
 
+/**
+ * Whether the FORM draws `field` under the scope the page's provider publishes.
+ * Since objectstack#35249 the page's list reads the static `hidden` only and the
+ * form judges `visibleWhen`, through `resolveFieldRuleState`, with that scope —
+ * so the roots this file measures must be bound THERE. A fault fails OPEN, so a
+ * shown field is also read for `faulted`.
+ */
+const formShows = (field: keyof typeof CONTACTS.fields): boolean => {
+  const st = resolveFieldRuleState(
+    { visibleWhen: (CONTACTS.fields[field] as any).visibleWhen },
+    {},
+    {},
+    undefined,
+    publishedScopes[publishedScopes.length - 1],
+  );
+  if (st.faults.visibleWhen !== undefined) throw new Error(`visibleWhen of '${field}' faulted: ${String(st.faults.visibleWhen)}`);
+  return st.visible;
+};
+
 beforeEach(() => {
   metadataState.objects = [CONTACTS];
   metadataState.loading = false;
@@ -141,11 +166,11 @@ describe('objectui#6493 — a current_user field gate hides the field on the rec
     renderPage();
 
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-    // Ungated fields are unaffected — the filter still lets everything else by.
-    expect(lastFields()).toContain('name');
-    // Was `toContain` before the fix: `current_user` was not in the bag, the
+    // Listed: the list reads `hidden` only.
+    expect(lastFields()).toEqual(expect.arrayContaining(['name', 'commission']));
+    // Was visible before objectui#6493: `current_user` was not in the bag, the
     // predicate faulted, and the fault read as "visible".
-    expect(lastFields()).not.toContain('commission');
+    expect(formShows('commission')).toBe(false);
   });
 
   it('grants it to a user the rule admits', async () => {
@@ -154,6 +179,7 @@ describe('objectui#6493 — a current_user field gate hides the field on the rec
 
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
     expect(lastFields()).toContain('commission');
+    expect(formShows('commission')).toBe(true);
   });
 
   it('honours the ctx.user and os.user spellings of the same object (ADR-0068 D1)', async () => {
@@ -161,8 +187,8 @@ describe('objectui#6493 — a current_user field gate hides the field on the rec
     renderPage();
 
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-    expect(lastFields()).not.toContain('escalate_to');
-    expect(lastFields()).not.toContain('owner_note');
+    expect(formShows('escalate_to')).toBe(false);
+    expect(formShows('owner_note')).toBe(false);
 
     cleanup();
     formSchemas.length = 0;
@@ -170,8 +196,8 @@ describe('objectui#6493 — a current_user field gate hides the field on the rec
     renderPage();
 
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-    expect(lastFields()).toContain('escalate_to');
-    expect(lastFields()).toContain('owner_note');
+    expect(formShows('escalate_to')).toBe(true);
+    expect(formShows('owner_note')).toBe(true);
   });
 });
 
@@ -184,7 +210,8 @@ describe('objectui#6493 — a features field gate is live on the record form pag
     // `features` is `{}` and the predicate faults open, which is the same
     // answer the defect gave.
     await waitFor(() => expect(getAuthConfig).toHaveBeenCalled());
-    await waitFor(() => expect(lastFields()).not.toContain('org_switcher'));
+    await waitFor(() => expect(formShows('org_switcher')).toBe(false));
+    expect(lastFields()).toContain('org_switcher');
   });
 
   it('shows the field when the deployment flag is on', async () => {
@@ -192,6 +219,6 @@ describe('objectui#6493 — a features field gate is live on the record form pag
     renderPage();
 
     await waitFor(() => expect(getAuthConfig).toHaveBeenCalled());
-    await waitFor(() => expect(lastFields()).toContain('org_switcher'));
+    await waitFor(() => expect(formShows('org_switcher')).toBe(true));
   });
 });

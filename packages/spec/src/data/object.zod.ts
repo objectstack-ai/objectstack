@@ -2255,14 +2255,15 @@ function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown
  *    number of rows, never an amount, so a currency on it is wrong whichever
  *    reader sees it (the analytics layer relays both a `fixed` code and a
  *    `record` pointer for any field type);
- *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of a
- *    stored home amount only (#33659): a child field some
- *    `homeAmount.field` on the child object names. Such a field is "a
- *    `dynamic`-mode currency field" (ADR-0144 D8 rule 5), every row of it is
- *    in the organization's home currency (`localization.currency`), so its
- *    total is too, and the Console's roll-up faces draw a `dynamic` summary in
- *    that currency, as a metric tile over the same home field does. Whether the
- *    child field is a home field needs the child object, so this door lets a
+ *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of an
+ *    amount in the home currency only: a child `currency` field in `dynamic`
+ *    mode (#33659 admitted a stored home amount, "a `dynamic`-mode currency
+ *    field" by ADR-0144 D8 rule 5; seat ruling record 7000258793 admits every
+ *    such field). Every row of it is in the organization's home currency
+ *    (`localization.currency`), so its total is too, and the Console's roll-up
+ *    faces draw a `dynamic` summary in that currency, as a metric tile over the
+ *    same field does. Whether the child field is such an amount needs the
+ *    child object, so this door lets a
  *    `dynamic` roll-up through only when its `summaryOperations` names a child
  *    object and field, and `defineStack`'s cross-reference pass judges the
  *    rest (`collectRecordCurrencyPathErrors`, stack.zod.ts). A `dynamic`
@@ -2304,9 +2305,9 @@ function refuseUnadmittedSummaryCurrency(
       'A roll-up carries a currency in three cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
       + 'one currency; `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
       + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
-      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up a '
-      + 'stored home amount, a child field that a `homeAmount.field` on the child object names, which is in the '
-      + 'organization\'s home currency.';
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up an '
+      + 'amount in the organization\'s home currency, a child `currency` field in `dynamic` mode (a stored home amount '
+      + 'included).';
     if (ops?.function === 'count') {
       ctx.addIssue({
         code: 'custom',
@@ -2320,8 +2321,9 @@ function refuseUnadmittedSummaryCurrency(
     if (mode === 'dynamic') {
       const namesChild = ops !== undefined && typeof ops.object === 'string' && typeof ops.field === 'string';
       const named = (config as { defaultCurrency?: unknown }).defaultCurrency;
-      // [#33659] The admitted `dynamic` roll-up reads a stored home amount; the
-      // child object says whether it does, so the stack pass judges that half.
+      // [#33659] The admitted `dynamic` roll-up reads an amount in the home
+      // currency; the child object says whether it does, so the stack pass
+      // judges that half.
       if (namesChild && named === undefined) continue;
       ctx.addIssue({
         code: 'custom',
@@ -2331,8 +2333,8 @@ function refuseUnadmittedSummaryCurrency(
             ? ` with \`defaultCurrency: '${String(named)}'\`. \`dynamic\` reads no \`defaultCurrency\`, and metadata never `
               + 'names the home currency: delete `defaultCurrency`, or declare `currencyMode: \'fixed\'` if every amount '
               + 'it reads is in that one currency. '
-            : ' with no `summaryOperations` naming a child field, so it rolls up no stored home amount that would put it '
-              + 'in the organization\'s home currency: delete `currencyConfig`, or declare the roll-up. ')
+            : ' with no `summaryOperations` naming a child field, so it rolls up no amount in the organization\'s home '
+              + 'currency that would put it there: delete `currencyConfig`, or declare the roll-up. ')
           + admitted,
       });
       continue;

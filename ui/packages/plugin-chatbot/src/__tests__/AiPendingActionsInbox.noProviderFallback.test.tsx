@@ -39,7 +39,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import type { PendingActionRow } from '@objectstack/spec/contracts';
 import { AiPendingActionsInbox } from '../AiPendingActionsInbox';
 
@@ -83,6 +83,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * The desktop face. Below `md` the same rows are also drawn as phone cards
+ * (objectstack#35449); happy-dom applies no stylesheet, so both faces are in
+ * the DOM here, and a single-match lookup on a row's text reads the table.
+ */
+const tableFace = () => within(screen.getByRole('table'));
+
 /** Every key the component reads, in the spelling it reads them. */
 const KEYS = [
   'detail.justNow', 'detail.minutesAgo', 'detail.hoursAgo', 'detail.daysAgo',
@@ -105,7 +112,7 @@ const KEYS = [
 describe('AiPendingActionsInbox with no I18nProvider (objectui#7173)', () => {
   it('reads English from the defaults map, never a raw key', async () => {
     render(<AiPendingActionsInbox pollInterval={0} />);
-    await waitFor(() => expect(screen.getByText('just now')).toBeTruthy());
+    await waitFor(() => expect(tableFace().getByText('just now')).toBeTruthy());
 
     expect(screen.getByText('AI Approvals')).toBeTruthy();
     expect(
@@ -120,11 +127,11 @@ describe('AiPendingActionsInbox with no I18nProvider (objectui#7173)', () => {
 
   it('interpolates {{count}} on the fallback path — no literal braces', async () => {
     render(<AiPendingActionsInbox pollInterval={0} />);
-    await waitFor(() => expect(screen.getByText('just now')).toBeTruthy());
+    await waitFor(() => expect(tableFace().getByText('just now')).toBeTruthy());
 
-    expect(screen.getByText('1m ago')).toBeTruthy();
-    expect(screen.getByText('3h ago')).toBeTruthy();
-    expect(screen.getByText('20d ago')).toBeTruthy();
+    expect(tableFace().getByText('1m ago')).toBeTruthy();
+    expect(tableFace().getByText('3h ago')).toBeTruthy();
+    expect(tableFace().getByText('20d ago')).toBeTruthy();
     expect(screen.queryByText(/\{\{\s*(count|id|message|tool|object)\s*\}\}/)).toBeNull();
   });
 
@@ -144,7 +151,7 @@ describe('AiPendingActionsInbox with no I18nProvider (objectui#7173)', () => {
 
   it('opens the reject dialog with English copy and an interpolation-free placeholder', async () => {
     render(<AiPendingActionsInbox pollInterval={0} />);
-    await waitFor(() => expect(screen.getByText('just now')).toBeTruthy());
+    await waitFor(() => expect(tableFace().getByText('just now')).toBeTruthy());
 
     fireEvent.click(screen.getAllByText('Reject')[0]);
 
@@ -154,5 +161,67 @@ describe('AiPendingActionsInbox with no I18nProvider (objectui#7173)', () => {
     ).toBeTruthy();
     expect(screen.getByText('Cancel')).toBeTruthy();
     for (const k of KEYS) expect(screen.queryByText(k)).toBeNull();
+  });
+});
+
+describe('AiPendingActionsInbox at phone width: the stacked cards and the full-width drawer (objectstack#35449)', () => {
+  // The geometry is measured in Chromium by `ui/e2e/ai-approvals-inbox-phone-35449.spec.ts`
+  // (happy-dom has no layout engine). This half pins what a DOM can say: which
+  // face each breakpoint draws, what a card says first, and that every
+  // decision on a card and in the drawer reaches the same handlers.
+  const IDS = ['aaaaaaaa1111', 'bbbbbbbb2222', 'cccccccc3333', 'dddddddd4444'];
+
+  it('draws the table from `md` up and one card per action below it', async () => {
+    render(<AiPendingActionsInbox pollInterval={0} />);
+    const cards = await screen.findByTestId('ai-inbox-cards');
+
+    expect(cards.className.split(/\s+/)).toContain('md:hidden');
+    const tableBox = screen.getByRole('table').closest('.rounded-md.border') as HTMLElement;
+    expect(tableBox.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'md:block']));
+    expect(within(cards).queryByRole('table')).toBeNull();
+    for (const id of IDS) expect(within(cards).getByTestId(`ai-inbox-card-${id}`)).toBeTruthy();
+  });
+
+  it('leads each card with what the action does; the tool name follows it', async () => {
+    render(<AiPendingActionsInbox pollInterval={0} />);
+    const card = await screen.findByTestId(`ai-inbox-card-${IDS[0]}`);
+
+    const action = within(card).getByText('delete');
+    const tool = within(card).getByText('action_delete_task');
+    expect(card.textContent?.startsWith('delete'), card.textContent ?? '').toBe(true);
+    expect(action.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(card).getByText('just now')).toBeTruthy();
+  });
+
+  it('decides from a card: Approve posts the decision, Reject opens the reason dialog', async () => {
+    render(<AiPendingActionsInbox pollInterval={0} />);
+    fireEvent.click(await screen.findByTestId(`ai-inbox-card-approve-${IDS[1]}`));
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url).endsWith(`/pending-actions/${IDS[1]}/approve`) && (init as RequestInit | undefined)?.method === 'POST',
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(screen.getByTestId(`ai-inbox-card-reject-${IDS[2]}`));
+    expect(await screen.findByText('Reject this action?')).toBeTruthy();
+  });
+
+  it('opens the drawer from a card at full width, its decision buttons free to wrap', async () => {
+    render(<AiPendingActionsInbox pollInterval={0} />);
+    fireEvent.click(await screen.findByTestId(`ai-inbox-card-view-${IDS[0]}`));
+
+    const drawer = await screen.findByRole('dialog');
+    const cls = drawer.className.split(/\s+/);
+    // `cn` merges the component's `w-full` over the primitive's `w-3/4`.
+    expect(cls).toContain('w-full');
+    expect(cls).not.toContain('w-3/4');
+    expect(cls).toContain('sm:max-w-[560px]');
+    const approve = within(drawer).getByText('Approve & Execute').closest('button') as HTMLElement;
+    expect((approve.parentElement as HTMLElement).className.split(/\s+/)).toContain('flex-wrap');
+    expect(within(drawer).getByText('Reject').closest('button')).toBeTruthy();
   });
 });
