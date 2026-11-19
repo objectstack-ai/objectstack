@@ -42,7 +42,7 @@
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
 - ③ 恒查(席位自读同):SQL 可下推处新增 id 物化或应用内 join 而无因由 ⇒ 记发现(AGENTS.md)。
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
-- 独立性对与低风险臂读的 `Security-touching:` 行,取值同见 `--template`;子代理记采纳它的席位。
+- 独立性对、`Security-touching:`、`Rule-change-verified:` 行取值见 `--template`;子代理记采纳席位。
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
 - 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
   ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。

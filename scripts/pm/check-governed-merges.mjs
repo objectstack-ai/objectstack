@@ -115,7 +115,14 @@
  * governs, a row with none governs every repository in `GOVERNED_REPOS`, and
  * the `workflows` row lists `objectstack`, `objectui` and `cloud` — the two
  * ruled, plus cloud because its own table already carries the row, so the
- * central audit and cloud's table agree.
+ * central audit and cloud's table agree. `hotcrm` joined the row on 2026-11-19
+ * (card #35321, item 4): the audit mirror, so a merged hotcrm workflow change
+ * produces a row in this sweep. `objectos` and `mobile` stay out.
+ *
+ * The same card scoped four rows to objectstack alone — the guard instruments
+ * (`guard-register`, `guard-queue`, `guard-records`, `guard-tiers`): this file,
+ * the queue guard, the record recognisers and the tier constants live in this
+ * repository and nowhere else.
  *
  * Consequence for every reader: the register's question has a repository in
  * it. `governedPathsIn(paths, repo)`, `governedTierFor`, `testVerdict` and
@@ -421,7 +428,9 @@
  * them. What moved is the LANDING each row waits for, carried as `tier` on the
  * row and derived per PR by `governedTierFor`:
  *
- *   H  人合 — every register row except objectstack's `.claude/**`, and the split
+ *   H  人合 — every register row except objectstack's `.claude/**` where its
+ *      declaration split holds (section "The `.claude/**` row splits by
+ *      declaration" below), and the split
  *      rows where their reading says S (today: `docs/adr/**`,
  *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
  *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
@@ -430,13 +439,16 @@
  *      below): the maintainer's hand, or
  *      an authorized APPROVED review by `GOVERNED_APPROVERS` and then the
  *      owning seat lands it. The tier ruling left this landing as it was; the
- *      list itself grew by one row on 2026-10-13. The `.claude/**` row of every
+ *      list itself grew by one row on 2026-10-13 and by the four guard
+ *      instruments on 2026-11-19 (card #35321, item 1: the files that DECIDE a
+ *      landing are not landed by the seats they judge). The `.claude/**` row of every
  *      repository but objectstack lands here too (#25199): its `tierRepos` names
  *      objectstack alone, because no other repository's own queue guard has a
  *      Tier S arm (objectui's, measured, refuses `.claude/**` without an
  *      authorized approval; cloud's, objectos' and hotcrm's are unread and fail
  *      closed to H).
- *   S  席内达档 L2 审核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
+ *   S  席内达档 L2 审核落地 — objectstack's `.claude/**` tree, since 2026-11-19 only where the
+ *      pull request declares it changes no fleet rule and the record verifies that: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
  *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
@@ -451,10 +463,51 @@
  * and the whole PR is Tier H; an empty or ungoverned list answers H (fail
  * closed — the tier of nothing is never the cheaper one), and the tier is
  * recomputed on the LIFTED slice, since a certified regeneration under
- * `skills/**` can be the only Tier H hit in a diff. `.claude/settings.json` is
- * the permission set itself and lands under Tier S by the amendment; the
- * auto-mode classifier still refuses AI writes to it, so the maintainer's hand
- * stays its writer and the tier removes only the approval click.
+ * `skills/**` can be the only Tier H hit in a diff. `.claude/settings*.json` and
+ * `.claude/hooks/**` — the permission set and the hooks that enforce it — landed
+ * under Tier S by the 2026-09-18 amendment and are Tier H by path again since
+ * 2026-11-19 (next section).
+ *
+ * ## The `.claude/**` row splits by declaration (maintainer ruling 2026-11-19, card #35321)
+ *
+ * The maintainer, in the review-split discussion thread: 03:17Z 「北极星、AGENTS.md、
+ * 改车队规则的技能条文（谁能做什么、怎么定级、怎么合并）也需要fable 吧」, then 04:24Z
+ * 「1+2+4」 — whose point 1 returns fleet RULE TEXT to him, overriding the
+ * 2026-09-18 ruling above where it handed all of `.claude/**` to the seats — and
+ * 04:30Z 「「已裁定的照抄只核对、不再审」 同意」. Rule text is what an agent may do
+ * without him (merge, bypass checks, change repository settings), what gets done
+ * and in what order (grading, dispatch, scope), and what must go to him
+ * (decisions, maintainer actions). Process steps, scripts, wording, slimming and
+ * file moves stay with the reviewer.
+ *
+ * A path list cannot tell the two apart, so the pull request DECLARES and the
+ * reviewer VERIFIES. The row keeps `tier: S` — the landing it has when both
+ * hold — and carries `ruleChange`; `applyRuleChangeSplit` runs last in the
+ * chain and answers Tier H unless:
+ *
+ *   1. no changed path is `.claude/settings*.json` or under `.claude/hooks/`
+ *      (`RULE_CHANGE_TIER_H_PATHS` — always Tier H, whatever is declared);
+ *   2. the PR body carries ONE bare line-start `Rule-change: none`, or
+ *      `Rule-change: ruled` with ONE bare `Ruling-ref:` line quoting the
+ *      maintainer's words, their source and time;
+ *   3. the PASS `## Contract review` record for the current head carries
+ *      `Rule-change-verified:` with the SAME value.
+ *
+ * A missing line, `Rule-change: yes`, a quoted, fenced or doubled line, or a
+ * record that does not verify is Tier H. ⛔ Fail closed: a caller of
+ * `governedTierFor` or `testVerdict` that hands in no reading of the pull
+ * (`--test`, `--branch`) gets Tier H; the record is staged like the low-risk
+ * arm's (`pending`, read, asked again), and the queue guard — whose own record
+ * leg judges the record — says so (`RULE_CHANGE_RECORD_LEG_DEFERRED`) and
+ * enforces 3 there. `ui/.claude/**` and every other repository's `.claude/**`
+ * are Tier H as before.
+ *
+ * ⛔ Two readers do NOT chain the split and still read the raw row's Tier S:
+ * the relay's review-request plan (`fleet-write/execute.mjs`) and the
+ * half-states patrol's landing row, both through `landingTierOf` on the
+ * matched slice. Neither decides a landing — the queue guard does — so a
+ * `Rule-change: yes` pull is refused at the queue but is not auto-routed to
+ * the maintainer by the relay; CODEOWNERS routes the settings and hooks paths.
  *
  * Published `skills/**` stays a Tier H ROW: the 2026-09-18 seat did not propose
  * moving it, and no row moved since. What moved on 2026-11-14 is a READING on
@@ -1348,7 +1401,8 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * that declares no `repos` key carries the default; `surfaceRepos` is the one
  * reader of that default. The `workflows` row is scoped to the two public
  * repositories the ruling 「两仓加治理行」 names plus `cloud`, whose own table
- * already carries the same row: `objectos` and `hotcrm` are NOT governed by
+ * already carries the same row, plus `hotcrm` since 2026-11-19 (the audit
+ * mirror, card #35321): `objectos` and `mobile` are NOT governed by
  * it — no ruling names them, and a new gate defaults to no. Every reader of
  * this table therefore asks for ONE repository (`governedPathsIn(paths,
  * repo)`), and a call that names none is refused, never answered for "all".
@@ -1359,7 +1413,14 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * and `governedSurfacesFor` hands every matcher the tier for its repository.
  * The `claude-tree` row's Tier S holds in objectstack alone: the tier is the
  * landing the repository's own queue guard enforces, and only objectstack's
- * has a Tier S arm (#25199).
+ * has a Tier S arm (#25199). That row also carries `ruleChange`: its Tier S is
+ * the landing it has when the pull request's declaration and the record hold
+ * (header section "The `.claude/**` row splits by declaration"), and every
+ * reader that decides a landing chains `applyRuleChangeSplit`.
+ *
+ * The four `guard-*` rows are the instruments that decide a landing — this
+ * file, the queue guard, the record recognisers, the tier constants — exact
+ * paths, Tier H, scoped to objectstack (2026-11-19, card #35321).
  *
  * The six `ui-*` rows are objectui's own register, carried under `ui/` now
  * that objectui's tree is this repository's `ui/` workspace (#25677, #25712):

@@ -462,6 +462,28 @@
  * revival of the retired sha pin — it is the RECORD's own identity test, and it
  * applies to nothing but this tier.
  *
+ * ### The `.claude/**` declaration split on this leg (maintainer ruling 2026-11-19, card #35321)
+ *
+ * Since 「1+2+4」 (point 1: fleet rule text lands by the maintainer) the `.claude/**`
+ * row is Tier S only on a DECLARED pull request with a VERIFYING record — the
+ * register's header section "The `.claude/**` row splits by declaration" has the
+ * ruling and the rule. What this leg does with it:
+ *
+ *   - the tier read hands the PR body in (`readLowRiskTier`, the read the head
+ *     already costs) and says its own record leg judges the record
+ *     (`RULE_CHANGE_RECORD_LEG_DEFERRED`): `Rule-change: none`, or `ruled` with
+ *     its `Ruling-ref:`, is Tier S; a missing line, `yes`, a settings file or a
+ *     hook is Tier H and waits for the authorized approval like any Tier H row;
+ *   - the record leg then requires, on top of stands + PASS, a
+ *     `Rule-change-verified:` line equal to the declared value
+ *     (`ruleChangeRecordVerdict`), and a record carried across a head move must
+ *     not have crossed a `.claude/**` hunk (`ruleChangeCarryRefusal`);
+ *   - the four guard instruments and this guard's own workflow file are plain
+ *     Tier H rows of the register, so nothing here names them;
+ *   - the `pull_request` early-warning leg reads no body, so it names such a
+ *     diff "Tier H UNTIL the PR body is read" (`declarationUnread`) and never
+ *     reddens; `CODEOWNERS` must carry a line for each always-Tier-H path.
+ *
  * ## The FOURTH leg: the SIZE line (#19036, maintainer ruling 2026-09-18)
  *
  * Everything above is keyed on PATHS or on a LABEL. On 2026-09-18 the
@@ -562,6 +584,37 @@
  * payload carries `additions` / `deletions` for free; a forecast there is a
  * one-line maintainer decision, not taken here.)
  *
+ * ## The FIFTH leg: a declared NARROWING (maintainer ruling 2026-11-19, card #35321)
+ *
+ * The maintainer, 03:17Z in the review-split discussion thread, verbatim:
+ * 「spec：收紧作者能写的东西（会让现有应用报错），也需要fable 吧？」, confirmed by
+ * 「1+2+4」 at 04:24Z. A change that narrows what an author may write breaks
+ * applications that exist, so it lands like Tier H whatever paths it touches.
+ *
+ * A path cannot say "narrowing"; the DECLARATION does. On `merge_group`, for
+ * every queued pull request, this leg reads the PR body and every
+ * `.changeset/*.md` the queued commit carries, line by line with the fleet's
+ * two readers (`readClause2Line`, `readMetadataProtocolLine`): a line reading
+ * `Metadata-protocol: narrowed`, or a `Clause-②:` line with the `(narrowing)`
+ * arm on either value, is a declared narrowing. `added`, `semantic`, `none`
+ * and a bare `Clause-②:` declare none and cost one pull read, already memoized
+ * (`oncePerPull`) when another leg read it.
+ *
+ * A declared narrowing is REFUSED until BOTH halves are on record:
+ *
+ *   - the human half — an authorized APPROVED review (the predicate of the
+ *     governed leg, reused when that leg already read it), or the maintainer's
+ *     own enqueue from an authorized account, which the 2026-10-26 ruling made
+ *     the same act for every landing this file judges;
+ *   - the record half — a `## Contract review` record on the current head that
+ *     stands at its tier and reads PASS, located on the narrowing face
+ *     (`reviewFace` with the declaration texts handed in).
+ *
+ * ⛔ Fail closed: an unreadable pull, changeset, review list or thread is a
+ * refusal on its own code, and a near-arm spelling (`(narrowed)`) counts as
+ * declared. ⛔ Not read: a narrowing nobody declared — that stays the contract
+ * review's finding. `pull_request` leg: silent, like the SIZE leg.
+ *
  * ## Exit codes — the refusal is impossible to read as clean
  *
  *   0  CLEAR    — nothing governed in the diff (no API call was made), or every
@@ -604,13 +657,20 @@
  *                 pull read failed, or the object carries no pair), or the merge
  *                 group names no pull request to read it from. Split from 8 the
  *                 way 4 is split from 3.
+ *  10  REFUSED  — a queued pull request DECLARES a narrowing (its body or a
+ *                 changeset) and lacks the authorized approval or enqueue, the
+ *                 PASS contract review on its head, or both. The NARROWED leg.
+ *  11  REFUSED  — the NARROWED leg could not READ a queued pull request, a
+ *                 changeset it carries, its review list or its record threads,
+ *                 or the merge group names no pull request. Split from 10 the
+ *                 same way.
  *   1  CANNOT RUN — unusable event payload, unsupported event, unreadable git.
  *                 Still non-zero, still red: this file has no green that means
  *                 "did not look".
  *
- *   ⭐ TWO legs, ONE exit, and the precedence is pinned: every leg's block is
+ *   ⭐ THREE predicates, ONE exit, and the precedence is pinned: every leg's block is
  *   always printed, and the code is the GOVERNED leg's when it refuses, else
- *   the SIZE leg's (`groupExitCode`). The governed refusal sits on top because
+ *   the SIZE leg's, else the NARROWED leg's (`groupExitCode`). The governed refusal sits on top because
  *   its remedy is the stricter one; the size refusal's remedy (an authorized
  *   approval, or a human merge) is the same terminal as Tier H — a group that
  *   is both governed-unsatisfied and oversized prints both limbs and exits 3.
