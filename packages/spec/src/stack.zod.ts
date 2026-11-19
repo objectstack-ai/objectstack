@@ -4551,7 +4551,7 @@ const LOOKUP_AUTOFILL_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(['lookup
 const LOOKUP_AUTOFILL_INHERENTLY_MULTI_TYPES: ReadonlySet<string> = new Set(['multiselect', 'checkboxes', 'tags']);
 /** A `formula` source's value type, from its `returnType`. */
 const LOOKUP_AUTOFILL_FORMULA_VALUE_TYPE: Readonly<Record<string, string>> = {
-  number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date',
+  number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date', percent: 'percent',
 };
 
 /**

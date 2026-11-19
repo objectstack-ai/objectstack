@@ -65,10 +65,10 @@ function stubEngine() {
   );
 }
 
-function Harness({ onDef }: { onDef: (def: Record<string, unknown>) => void }) {
+function Harness({ onDef, returnType = 'number' }: { onDef: (def: Record<string, unknown>) => void; returnType?: string }) {
   const [fields, setFields] = React.useState<Record<string, Record<string, unknown>>>({
     est_hours: { type: 'number' },
-    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType: 'number' },
+    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType },
   });
   React.useEffect(() => {
     onDef(fields.f_total);
@@ -89,10 +89,10 @@ function Harness({ onDef }: { onDef: (def: Record<string, unknown>) => void }) {
   );
 }
 
-function renderFormula() {
+function renderFormula(returnType?: string) {
   stubEngine();
   const defs: Array<Record<string, unknown>> = [];
-  render(<Harness onDef={(def) => defs.push(def)} />);
+  render(<Harness onDef={(def) => defs.push(def)} returnType={returnType} />);
   const box = screen.getByText('Formula (CEL)').parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
   const latest = () => defs.at(-1)!;
   return { box, latest };
@@ -122,5 +122,29 @@ describe('ObjectFieldInspector — a broken formula keeps the stored returnType 
     const { box, latest } = renderFormula();
     fireEvent.change(box, { target: { value: 'record.est_hours + record.est_hours' } });
     await waitFor(() => expect(latest().returnType).toBeUndefined(), { timeout: 3000 });
+  });
+});
+
+describe('ObjectFieldInspector — a declared percent survives a number verdict (objectstack#35047)', () => {
+  it('an edit the engine proves `number` keeps `percent`: nothing infers a percentage', async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('a verdict that is not `number` still stamps over it', async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: "'hours: ' + string(record.est_hours)" } });
+    await waitFor(() => expect(latest().returnType).toBe('text'), { timeout: 3000 });
+  });
+
+  it('CONTROL — a declared `number` takes the `number` verdict, as before', async () => {
+    const { box, latest } = renderFormula();
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('number');
   });
 });

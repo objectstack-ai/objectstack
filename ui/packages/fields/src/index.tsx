@@ -2901,6 +2901,19 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
     return <CurrencyCellRenderer value={value} field={field} dependentValues={dependentValues} />;
   }
 
+  // A declared PERCENT is a ratio (objectstack#35047): the spec reads it
+  // "as a `percent` field reads its stored value", so it is drawn by the
+  // percent cell itself, as the percent field it reads like. The cell asks
+  // `resolveFieldScale` by the field's `type`, so the type handed over is
+  // `percent`: a formula's own type has no absent-`scale` row, and an
+  // undeclared width would fall to `formatPercent`'s private default while
+  // the form face read `0`. Everything else is this formula's own — `scale`,
+  // the `max` that says whole-percent storage, `percentDisplay`.
+  // ⛔ No second percent formatter here.
+  if (valueType === 'percent') {
+    return <PercentCellRenderer value={value} field={{ ...(field as object), type: 'percent' } as CellRendererProps['field']} />;
+  }
+
   // A declared BOOLEAN reads the locale's Yes / No word (objectui#11748), the
   // word `BooleanField`'s read-only branch and the form face draw, and not
   // `BooleanCellRenderer`'s checkbox: a box has no text to agree with the
