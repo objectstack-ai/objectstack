@@ -1644,7 +1644,22 @@ export const CEILINGS = new Map([
   // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
   // Lowered 190 → 189 (#35259, item 5): the line on writing and removing the retired
   // blocking-cache label left with the label (lowering is always legitimate). Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
+  // Raised 189 → 193 by the effort-by-shape rules (card #35270) — an ORDINARY raise, ⛔ not a
+  // cross-file move. The 〈派发〉 effort lines go from five to fourteen: `xhigh` only for a build
+  // expected to run unattended for over 30 minutes or a card type a measurement record shows
+  // gains on; L2 review, four-axis analysis, ADR and the read-only diff review of a high-severity
+  // advisory fix stay `xhigh`; an epic child card and a p1 go by the card's own difficulty and a
+  // category never raises a level; security is graded by consequence, not by label (a `high`
+  // build plus that `xhigh` diff review for high severity, `high` for medium, a `security` card
+  // that is no advisory fix by difficulty, a regression test per fix, one analysis per shared
+  // mechanism); no session changes effort mid-session; unsure ⇒ `high`; the helper-subagent
+  // floors; effort values come from this repo's own measurements. Ruling of record: the
+  // maintainer, 2026-11-19, verbatim and untranslated: 「立卡修改skills」 after the effort review,
+  // with 「安全修复只有高风险的才需要 xhigh 吧」 on security; quoted in the body of card #35270
+  // (filing gate ③), claim comment 7014658145. Authorized under ruling record 6184799323
+  // (letter B). Measured against the 184-line file on main: +9 lines (184 → 193); the standing
+  // headroom of 5 pays 5 of them and the row moves +4. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 193],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
