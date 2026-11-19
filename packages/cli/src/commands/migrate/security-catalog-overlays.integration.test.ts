@@ -58,6 +58,9 @@ import MigrateSecurityCatalogOverlays from './security-catalog-overlays.js';
 import '@objectstack/runtime';
 import '@objectstack/metadata-protocol';
 import '@objectstack/platform-objects/plugin';
+import '@objectstack/rest';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
