@@ -265,7 +265,7 @@ describe('the account app names the page', () => {
  * and `organization_admin` reaches it through its `'*'` row.
  */
 describe('the caller\'s grant on sys_notification_preference decides whether the page writes', () => {
-  function served(objects: MePermissionsAuthenticatedResponse['objects'], positions: string[]): MePermissionsAuthenticatedResponse {
+  function served(objects: Record<string, Record<string, boolean>>, positions: string[]): MePermissionsAuthenticatedResponse {
     return {
       authenticated: true,
       userId: 'alice',
