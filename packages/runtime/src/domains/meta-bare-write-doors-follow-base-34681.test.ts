@@ -216,6 +216,35 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
             expect(await bareRead(b, 'w_del')).toEqual([200, 'addon en', WD]);
         });
 
+        const versionedPair = async (name: string) => {
+            await layPair(b.engine, name, WA, WD);
+            for (const subject of ['v1', 'v2']) {
+                expect((await saveOf(b, name, subject, { packageId: WA })).resolved).toMatchObject({ success: true });
+            }
+            expect((await saveOf(b, name, 'addon v1', { packageId: WD })).resolved).toMatchObject({ success: true });
+        };
+
+        it('the diff naming no package compares the base\'s versions, as ?package=<base> does', async () => {
+            await versionedPair('df_mail');
+            const bare = await settle(b.protocol.diffMetaItem({ type: 'email_template', name: 'df_mail' }));
+            const named = await settle(b.protocol.diffMetaItem({ type: 'email_template', name: 'df_mail', packageId: WA }));
+            expect(bare.resolved, JSON.stringify(bare)).toBeDefined();
+            expect(bare).toEqual(named);
+            expect(JSON.stringify(bare.resolved.changed)).toContain('v2');
+            expect(JSON.stringify(bare.resolved)).not.toContain('addon');
+        });
+
+        it('the rollback naming no package restores the base\'s row to the base\'s own version, as ?package=<base> does', async () => {
+            await versionedPair('rb_mail');
+            const versions = ((await b.engine.find('sys_metadata_history', { where: { type: 'email_template', name: 'rb_mail' }, context: { isSystem: true } } as any)) as any[])
+                .filter((row) => JSON.parse(String(row.metadata)).subject === 'v1').map((row) => Number(row.version));
+            expect(versions.length, 'one stored version of the base\'s v1').toBe(1);
+            const rolled = await settle(b.protocol.rollbackMetaItem({ type: 'email_template', name: 'rb_mail', toVersion: versions[0] }));
+            expect(rolled.resolved, JSON.stringify(rolled)).toMatchObject({ success: true });
+            expect(await rowsOf(b.engine, 'rb_mail')).toEqual([`active:${WD}:addon v1`, `active:${WA}:v1`]);
+            expect(await bareRead(b, 'rb_mail')).toEqual([200, 'v1', WA]);
+        });
+
         it('a read-only base: the bare save and draft save answer what ?package=<base> answers, never 409 naming both', async () => {
             await layPair(b.engine, 'ro_mail', A, D);
             expect(await bareRead(b, 'ro_mail')).toEqual([200, 'base en', A]);

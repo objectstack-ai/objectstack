@@ -3215,9 +3215,10 @@ export function disabledHoldersOnlyRefusal(
  * `/layers` and the execution read, since the read half of #34441 cell 2).
  * "A write resolves its address exactly as the read at the same address
  * resolves it", so the bare save (publish and draft mode), the bare delete
- * and draft discard, the bare per-item publish and the bare history read
- * answer as the same request naming that base does, and every dependent's
- * row stays where it is, read and written at its own `?package=`.
+ * and draft discard, the bare per-item publish, and the bare history, diff
+ * and rollback (through `historySlotOf`) answer as the same request naming
+ * that base does, and every dependent's row stays where it is, read and
+ * written at its own `?package=`.
  *
  * Asked only where those doors would refuse naming two or more packages, and
  * answered over the item's ACTIVE rows at `member`, as the read judges them:
@@ -3234,7 +3235,8 @@ export function disabledHoldersOnlyRefusal(
  *
  * FROM (`main` 8596c80eda): each of those doors refused `409
  * RESOURCE_CONFLICT` naming the base and the dependent while the read
- * naming no package served the base's row (`200`).
+ * naming no package served the base's row (`200`); the diff and the rollback
+ * refused the same way (measured on branch head 90d943c7f5).
  */
 export async function packagelessRowHeldBaseAddress(
     host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,

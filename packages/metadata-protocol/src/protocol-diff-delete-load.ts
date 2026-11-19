@@ -79,7 +79,7 @@ function rowSlotOf(row: { package_id?: unknown }): string | null {
 
 export class ProtocolDiffDeleteLoadFacet {
     /** The body of `ObjectStackProtocolImplementation#diffMetaItem`; the method's docblock there is its contract. */
-    static async diffMetaItem(host: Pick<ProtocolHost, 'diffMetaItem' | 'engine' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'findServedOverlayRow' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>, request: {
+    static async diffMetaItem(host: Pick<ProtocolHost, 'declinesStoredRow' | 'diffMetaItem' | 'engine' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'findServedOverlayRow' | 'packagelessAddress' | 'readItemActiveRows' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>, request: {
             type: string;
             name: string;
             fromVersion?: number;

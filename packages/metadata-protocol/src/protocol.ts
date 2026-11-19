@@ -4272,11 +4272,11 @@ export class ObjectStackProtocolImplementation implements
      * (`rowHeldBaseAddressOf`) are no ambiguity here, as the registry names
      * the base the one holder there; {@link getMetaItemLayered} reads the
      * base's stack, as the plain read serves the base's row. Beside a
-     * package-less row they are still refused (#33210). The writes naming no
-     * package are not moved: the save, delete, publish, draft and history
-     * doors still refuse the same rows naming base and dependent, so here the
-     * view loads where the save it then sends is refused (a follow-up card
-     * judges whether the writes follow the base).
+     * package-less row they are still refused (#33210). [#34681] The writes
+     * naming no package follow the same base
+     * (`packagelessRowHeldBaseAddress`): the save, delete, draft discard,
+     * publish, history, diff and rollback doors act on the base's row, so the
+     * view loads where the save it then sends lands.
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;

@@ -278,15 +278,11 @@ export class ProtocolHistoryAndPublishFacet {
         // holders' rows hold is refused naming both when no package is named,
         // and `?package=` reads that holder's versions alone. A name one slot
         // holds, named bare, reads its whole log as before.
-        // [#34681] …except a name whose rows at the member the read naming no
-        // package serves at the row-held base: its versions are the base's,
-        // read as `?package=` naming that base reads them
-        // ({@link packagelessRowHeldBaseAddress}).
-        const packageId = request.packageId
-            ?? await packagelessRowHeldBaseAddress(host, singularType, request.name, member);
+        // [#34681] A row-held base's name, named bare, reads that base's
+        // versions, as `?package=` naming it does ({@link historySlotOf}).
         const slot = await historySlotOf(host, {
             type: singularType, name: request.name, ...memberOption(member),
-            ...(packageId !== undefined ? { packageId } : {}),
+            ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
         });
         // [ADR-0131 D6] The environment's change log; a legacy
         // organization-scoped history row is not read.
