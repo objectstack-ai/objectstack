@@ -30,13 +30,13 @@ in `language: 'js'` (an `expression` body has no I/O) with
 
 - `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false the action is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. A bare field ref in either (`done` for `record.done`) fails `os validate`.
-- `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
+- `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate or a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
 - `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
 - `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
 - `resultDialog` — a one-shot dialog that shows the server answer in place of the success toast (so no `successMessage`; `outcomeMessages` is refused beside it): `{ title?, description?, acknowledge?, format?, fields? }`. `fields: [{ path, label?, format? }]`, `path` a dot path into `result.data` (omitted: the whole answer as JSON); `format` is one of `qrcode`, `code-list`, `secret`, `text`, `json`, or `table` with `columns: [{ path, label?, format? }]` (one row per element of the array at `path`, one cell per column; required with `table` and refused beside any other format). The dialog-level `format` (default `json`) and a cell's (default `text`) take every format but `table`. A `text` or `code-list` cell draws the value with no copy control; a `secret` or `qrcode` cell keeps its own.
-- `successMessage` / `errorMessage` — toast copy; without `successMessage` the UI shows a generic "Action completed" toast.
+- `successMessage` / `errorMessage` — toast copy; without `successMessage` the UI shows a generic "Action completed".
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`); the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
@@ -168,6 +168,7 @@ import { defineAction } from '@objectstack/spec/ui';
 export const PrintA3Action = defineAction({
   name: 'crm_print_a3',
   label: 'Print Summary Sheet (A3)',
+  objectName: 'lead',
   type: 'url',
   target: '/print/a3?id=${record.id}',   // interpolated at click
   openIn: 'new-tab',
@@ -213,7 +214,7 @@ placeholder and widget come from the object metadata
 (`widget` only while the param keeps or restates the field's `type`; a param
 that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
-pre-fills from the selected row in `list_item` contexts.
+pre-fills from the selected row in `list_item`.
 
 **An action that adds a child line sets its price.** `lookupAutofill` fills only
 the form and the grid, and a stored `expression` reads only its own row, so a
