@@ -362,8 +362,8 @@ These are wired on the **graph**, not in node config:
   (SKILL.md § Failure routing): the refusal takes it and the decision answers
   normally. Without one, `POST …/approve` (or `/reject`) answers
   `500 RESUME_FAILED`: the decision stands (`finalized: true`), the run is
-  stranded, and the body carries `innerRefusal` (`{ code, message }`) and
-  `userMessage`, the hook's declared sentence to show the approver.
+  stranded, and the body may carry `innerRefusal` (`{ code, message }`) and
+  `userMessage`, the hook's declared sentence for the approver.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise.
 
