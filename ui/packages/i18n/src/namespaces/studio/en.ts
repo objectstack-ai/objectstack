@@ -2799,6 +2799,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.operation': 'Operation',
   'engine.studio.access.explain.run': 'Explain',
   'engine.studio.access.explain.running': 'Explaining…',
+  'engine.studio.access.explain.needObject': 'Choose an object first',
   'engine.studio.access.explain.allowedLine': '{operation} on “{object}” is ALLOWED for this principal.',
   'engine.studio.access.explain.deniedLine': '{operation} on “{object}” is DENIED for this principal.',
   'engine.studio.access.explain.principal': 'Principal',
