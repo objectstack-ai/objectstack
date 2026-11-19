@@ -96,6 +96,8 @@ export const de: TranslationData = {
         nav_settings_hub: { label: 'Alle Einstellungen' },
         nav_settings_localization: { label: 'Lokalisierung' },
         nav_exchange_rates: { label: 'Wechselkurse' },
+        nav_work_calendars: { label: 'Arbeitskalender' },
+        nav_work_calendar_exceptions: { label: 'Kalenderausnahmen' },
         nav_settings_company: { label: 'Unternehmen' },
         nav_settings_mail: { label: 'E-Mail-Versand' },
         nav_settings_sms: { label: 'SMS-Versand' },

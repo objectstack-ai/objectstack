@@ -4422,5 +4422,128 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_work_calendar: {
+    label: "Calendrier de travail",
+    pluralLabel: "Calendriers de travail",
+    description: "Calendriers de travail : les horaires hebdomadaires, le fuseau horaire dans lequel ils s’appliquent et jusqu’à quand les jours fériés sont tenus à jour. Les échéances comptées en temps ouvré les lisent.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "Code machine par lequel les formules, les escalades d’approbation et les packages désignent ce calendrier, par ex. cn_standard : lettres minuscules, chiffres et traits de soulignement."
+      },
+      name: {
+        label: "Nom"
+      },
+      timezone: {
+        label: "Fuseau horaire",
+        help: "Fuseau horaire IANA dans lequel s’appliquent les plages de travail, par ex. Asia/Shanghai. Laissé vide à la création, il reprend le fuseau horaire par défaut de l’organisation (Paramètres → Localisation)."
+      },
+      is_default: {
+        label: "Par défaut",
+        help: "Le calendrier utilisé par une échéance qui n’en désigne aucun. Un par organisation."
+      },
+      maintained_from: {
+        label: "Tenu à jour depuis",
+        help: "Première date à partir de laquelle les jours fériés et les jours de récupération sont saisis. Un calcul qui exige une date antérieure est refusé."
+      },
+      maintained_through: {
+        label: "Tenu à jour jusqu’au",
+        help: "Dernière date jusqu’à laquelle les jours fériés et les jours de récupération sont saisis. Un calcul qui exige une date ultérieure est refusé : saisissez les jours fériés de l’année suivante, puis reportez cette date."
+      },
+      monday_periods: {
+        label: "Lundi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      tuesday_periods: {
+        label: "Mardi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      wednesday_periods: {
+        label: "Mercredi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      thursday_periods: {
+        label: "Jeudi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      friday_periods: {
+        label: "Vendredi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      saturday_periods: {
+        label: "Samedi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      sunday_periods: {
+        label: "Dimanche",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Tous",
+        emptyState: {
+          title: "Aucun calendrier de travail pour le moment",
+          message: "Ajoutez un calendrier avec ses horaires hebdomadaires et marquez-en un comme calendrier par défaut, puis saisissez ses jours fériés et ses jours de récupération."
+        }
+      },
+      needs_maintenance: {
+        label: "À mettre à jour",
+        emptyState: {
+          title: "Tous les calendriers sont tenus à jour à l’avance",
+          message: "Un calendrier apparaît ici lorsque ses jours fériés s’arrêtent dans les 60 prochains jours ; les échéances au-delà de cette date sont refusées."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Le code doit commencer par une lettre minuscule et ne contenir que des lettres minuscules, des chiffres et des traits de soulignement, par ex. cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Exception de calendrier",
+    pluralLabel: "Exceptions de calendrier",
+    description: "Dérogations datées à un calendrier de travail : jours fériés, jours de récupération et fermetures. Un jour travaillé porte ses plages de travail complètes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendrier"
+      },
+      date: {
+        label: "Date"
+      },
+      kind: {
+        label: "Type",
+        help: "Jour chômé : toute la date est chômée. Jour travaillé : la date est travaillée selon les plages ci-dessous, par ex. un jour de récupération.",
+        options: {
+          off: "Jour chômé",
+          on: "Jour travaillé"
+        }
+      },
+      periods: {
+        label: "Plages",
+        help: "Pour un jour travaillé, les plages de travail complètes de cette date, au format HH:mm-HH:mm séparées par des virgules (09:00-12:00, 13:00-18:00) ; elles ne sont jamais reprises du jour de la semaine. Laissez vide pour un jour chômé."
+      },
+      note: {
+        label: "Note",
+        help: "Ce qu’est la date, par ex. la fête nationale ou un jour de récupération pour la fête du Printemps."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Tous",
+        emptyState: {
+          title: "Aucune exception de calendrier pour le moment",
+          message: "Ajoutez une ligne par jour férié ou jour de récupération, ou importez-en une année depuis un fichier."
+        }
+      }
+    }
   }
 };

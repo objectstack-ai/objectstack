@@ -95,6 +95,8 @@ export const ko: TranslationData = {
         nav_settings_hub: { label: '전체 설정' },
         nav_settings_localization: { label: '현지화' },
         nav_exchange_rates: { label: '환율' },
+        nav_work_calendars: { label: '근무 캘린더' },
+        nav_work_calendar_exceptions: { label: '캘린더 예외' },
         nav_settings_company: { label: '회사' },
         nav_settings_mail: { label: '메일 전송' },
         nav_settings_sms: { label: 'SMS 전송' },

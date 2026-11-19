@@ -89,6 +89,8 @@ export const zhCN: TranslationData = {
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
         nav_exchange_rates: { label: '汇率' },
+        nav_work_calendars: { label: '工作日历' },
+        nav_work_calendar_exceptions: { label: '日历例外' },
         nav_settings_company: { label: '公司' },
         nav_settings_mail: { label: '邮件投递' },
         nav_settings_sms: { label: '短信投递' },

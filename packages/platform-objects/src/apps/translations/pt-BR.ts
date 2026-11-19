@@ -96,6 +96,8 @@ export const ptBR: TranslationData = {
         nav_settings_hub: { label: 'Todas as configurações' },
         nav_settings_localization: { label: 'Localização' },
         nav_exchange_rates: { label: 'Taxas de câmbio' },
+        nav_work_calendars: { label: 'Calendários de trabalho' },
+        nav_work_calendar_exceptions: { label: 'Exceções de calendário' },
         nav_settings_company: { label: 'Empresa' },
         nav_settings_mail: { label: 'Envio de e-mail' },
         nav_settings_sms: { label: 'Envio de SMS' },
