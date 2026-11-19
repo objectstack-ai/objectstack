@@ -90,7 +90,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
       { name: 'sys_organization', builds: 'a tenant or company-settings object', reach: 'every row carries `organization_id`; data API read and update' },
       { name: 'sys_business_unit', builds: 'a department or org-chart tree', reach: 'the app seeds its rows; hierarchy scopes read it; data API' },
       { name: 'sys_team', builds: 'a teams or groups table', reach: 'approvers and sharing recipients name a team; data API read' },
-      { name: 'sys_user_position', builds: 'a user-to-role assignment table', reach: 'positions the app\'s permission sets grant; data API' },
+      { name: 'sys_user_position', builds: 'a user-to-position assignment table', reach: 'positions the app\'s permission sets grant; data API' },
     ],
   },
   {

@@ -24,7 +24,7 @@ a seed) without declaring it.
 | `sys_organization` | every boot | a tenant or company-settings object | every row carries `organization_id`; data API read and update |
 | `sys_business_unit` | every boot | a department or org-chart tree | the app seeds its rows; hierarchy scopes read it; data API |
 | `sys_team` | every boot | a teams or groups table | approvers and sharing recipients name a team; data API read |
-| `sys_user_position` | every boot | a user-to-role assignment table | positions the app's permission sets grant; data API |
+| `sys_user_position` | every boot | a user-to-position assignment table | positions the app's permission sets grant; data API |
 
 ### Files, comments and history
 
