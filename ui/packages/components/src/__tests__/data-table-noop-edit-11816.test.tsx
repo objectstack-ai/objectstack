@@ -29,6 +29,9 @@ import { renderComponent } from './test-utils';
 // Registers the renderers at module scope, NOT inside a `beforeAll`
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010/#3021).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 /** A host-injected editor pair: a multi-value picker and a discrete select. */
 const renderCellEditor = ({ column, stage, commit }: any) => {
