@@ -24,7 +24,7 @@ a seed) without declaring it.
 | `sys_organization` | every boot | a tenant or company-settings object | every row carries `organization_id`; data API read and update |
 | `sys_business_unit` | every boot | a department or org-chart tree | the app seeds its rows; hierarchy scopes read it; data API |
 | `sys_team` | every boot | a teams or groups table | approvers and sharing recipients name a team; data API read |
-| `sys_user_position` | every boot | a user-to-position assignment table | positions the app's permission sets grant; data API |
+| `sys_user_position` | every boot | a user-to-position assignment table | positions that distribute the app's permission sets; data API |
 
 ### Files, comments and history
 
@@ -44,8 +44,8 @@ a seed) without declaring it.
 | `sys_notification` | every boot | a notifications table | the flow `notify` node, `@mention` and assignment emit rows; data API read |
 | `sys_inbox_message` | every boot (`messaging`) | a per-user inbox with read state | the in-app delivery of a notification; the Console bell reads it; data API read |
 | `sys_email` | every boot | an outbound-mail log | every email sent is logged here; templates are `emailTemplates` on the stack; data API read |
-| `sys_mailbox` | `requires: ['mailbox']` | an inbound-mail setup table | Setup declares mailboxes; data API read |
-| `sys_mail_message` | `requires: ['mailbox']` | an inbound-mail mirror | `mailAssociation: true` on an email field links messages to records; data API read |
+| `sys_mailbox` | `requires: ['mailbox']` | an inbound-mailbox table | engine-owned; data API read for `manage_mailboxes` holders. `requires: ['mailbox']` mounts the objects and the ingest seam and syncs nothing: rows exist only where the host composes the mailbox service with an IMAP account source (no Setup entry) |
+| `sys_mail_message` | `requires: ['mailbox']` | an inbound-mail mirror | rows arrive only from the host's IMAP sync (the `sys_mailbox` row); `mailAssociation: true` on an email field links messages to records; data API read |
 
 ### Money, imports and approvals
 
@@ -79,9 +79,10 @@ a seed) without declaring it.
 ## Value domains: declare, never hand-roll
 
 A `text` field whose value is a code from a published standard declares
-`valueDomain`; the write path refuses a non-member, and Setup, forms and
-filters pick from the standard. A field named as in the second column
-without the domain is an `os lint` warning.
+`valueDomain`: the write path refuses a non-member. Forms pick the currency
+code from ISO 4217; a time zone or a country is typed into a plain text
+input, and no list or filter reads the domain. A field named as in the
+second column without the domain is an `os lint` warning.
 
 | `valueDomain` | Field names that should declare it | What you would otherwise build | Example |
 |:--|:--|:--|:--|
@@ -137,8 +138,8 @@ platform" here.
 
 | Concept | Rule |
 |:--|:--|
-| Party master data: customers, suppliers, contacts | one app owns each entity; another app matches its records by the key contract (tax id, email), one way, with no platform party object |
-| Item master data: materials, products, plants | the owning app's object is reused by key; the platform ships no item object |
+| Party master data: customers, suppliers, contacts | one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way, with no platform party object |
+| Item master data: materials, products, plants | the owning app's object is reused by key (material number, plant code); the platform ships no item object |
 
 ## Planned: carded, not shipped
 

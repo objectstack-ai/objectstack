@@ -1182,7 +1182,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the attribution column\'s THIRD case (#12645)': 13,
   'the --test pre-arm predicate (#9550)': 31,
   'the generator co-edit fence (#11084), pinned in BOTH directions': 10,
-  'the #11705 generator-owned rows inside `skills/**`': 23,
+  'the #11705 generator-owned rows inside `skills/**`': 25,
   '#11705 end to end, against the REAL generator': 7,
   "the live battery's prerequisite, and the floor it was misread as": 17,
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
@@ -8899,6 +8899,30 @@ async function selfTest() {
   assert('a-hand-authored-skills-file-is-not-registered-and-is-never-consulted-against-a-generator',
     generatedExceptionFor(handAuthored) === null && generatedExceptionFor('skills/objectstack-ui/references/plugin-hooks.md') === null &&
       generatedExceptionFor('skills/objectstack-ui/references/_index.mdx') === null);
+  // The second file the skill-refs generator writes: the platform catalog, a
+  // page whose names are derived and whose prose is authored IN THE GENERATOR'S
+  // OWN TREE. The candidate admits exactly that filename under `references/`;
+  // a sibling spelling, a different folder or another extension is hand-authored
+  // content and never reaches the generator.
+  const platformCatalog = 'skills/objectstack-project/references/platform-catalog.md';
+  assert('the-platform-catalog-routes-to-the-skill-refs-generator-and-its-near-misses-stay-governed',
+    generatedExceptionFor(platformCatalog) === skillRefs &&
+      generatedExceptionFor('skills/objectstack-project/platform-catalog.md') === null &&
+      generatedExceptionFor('skills/objectstack-project/references/platform-catalog.mdx') === null &&
+      generatedExceptionFor('skills/objectstack-project/references/platform-catalogue.md') === null &&
+      generatedExceptionFor('skills/objectstack-project/references/platform-catalog.md.bak') === null);
+  // The catalog's prose source location is pinned: the generator imports it
+  // from a module under its own trusted prefix, so the text the page carries
+  // is authored where the row's `trustedGeneratorPrefixes` already fences
+  // co-edits, and nowhere else.
+  const generatorSource = readFileSync(resolve(repoRoot, 'packages/spec', skillRefs.verify.script), 'utf8');
+  const catalogImport = /from '(\.\/lib\/platform-catalog)'/.exec(generatorSource)?.[1] ?? null;
+  const catalogModule = catalogImport === null ? null : `packages/spec/scripts/${catalogImport.slice(2)}.ts`;
+  assert('the-catalogs-prose-source-is-a-module-under-the-generators-trusted-prefix',
+    catalogModule !== null && existsSync(resolve(repoRoot, catalogModule)) &&
+      skillRefs.trustedGeneratorPrefixes.some((prefix) => catalogModule.startsWith(prefix)) &&
+      /export const PROSE\b/.test(readFileSync(resolve(repoRoot, catalogModule), 'utf8')),
+    JSON.stringify({ catalogModule, prefixes: skillRefs.trustedGeneratorPrefixes }));
 
   // Ruled case A — a genuine generated file passes.
   const genuine = sinkGeneratorVerdict({ path: genIndex, entry: skillRefs, run: cleanRun });

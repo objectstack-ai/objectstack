@@ -2051,19 +2051,20 @@ export const CEILINGS = new Map([
   // platform catalog before adding an object, a field or a flow; use what the
   // platform ships; a missing capability a second app would copy is a platform
   // card, built meanwhile under a `PLATFORM-CANDIDATE` marker — and §5 step 4
-  // sweeps those markers beside the `PLATFORM-GAP` tests. Authorised by the
-  // ruling of record that orders this text into the file: the maintainer's
-  // 「同意」 on the skills platform-first analysis and then 「立卡 p1」 on the
-  // card that carries exactly this scope (ruling record 7000955097 on the
-  // shared-master-data decision, 2026-11-19). PAID DOWN FIRST by two same-file
-  // restatement cuts, 142 bytes: §2's "Unsure whether a check exists? Inject the
-  // defect and run the command: if it fails, the platform checks it." (home:
-  // §2's retire sentence, which states the same technique) and §0's "and read
-  // it from there afterwards" (home: the same sentence's "Record the answer ...
-  // once"). `wc -c` = 11977 bytes, stamp line 20 -> ceil(11957 / 4) = 2990
-  // tokens, zero headroom, ceiling +89, pinned AT the measurement. Raise path:
-  // the standing ruling (2026-10-27, verbatim and untranslated)
-  // 「A:先削重复,余额按实测提高」, recognised per ruling record 6513306068.
+  // sweeps those markers beside the `PLATFORM-GAP` tests. The SCOPE is the
+  // card's — the maintainer graded it 「立卡 p1」 (2026-11-19) after the skills
+  // platform-first analysis; no ruling orders the wording, and none is cited
+  // for it. The AUTHORITY for the raise is the standing path alone, on its own
+  // form: PAID DOWN FIRST by two same-file cuts, 142 bytes — §2's "Unsure
+  // whether a check exists? Inject the defect and run the command: if it fails,
+  // the platform checks it." (its technique survives in §2's retire sentence;
+  // the aside for an author unsure a check exists does not) and §0's "and read
+  // it from there afterwards" (restated by the same sentence's "Record the
+  // answer ... once") — then the measured remainder: `wc -c` = 11977 bytes,
+  // stamp line 20 -> ceil(11957 / 4) = 2990 tokens, zero headroom, ceiling +89,
+  // pinned AT the measurement. Raise path: the standing ruling (2026-10-27,
+  // verbatim and untranslated) 「A:先削重复,余额按实测提高」, recognised per
+  // ruling record 6513306068.
   ['skills/objectstack-project/SKILL.md', 2990],
 ]);
 

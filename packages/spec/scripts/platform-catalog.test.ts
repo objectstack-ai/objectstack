@@ -33,8 +33,10 @@ import {
   CAPABILITY_ROWS,
   PLANNED_ROWS,
   PLATFORM_CATALOG_PATH,
+  PROSE,
   VALUE_DOMAIN_ROWS,
   catalogProblems,
+  handWrittenBytes,
   renderPlatformCatalog,
 } from './lib/platform-catalog';
 
@@ -158,6 +160,49 @@ describe('catalogProblems — refuses a wrong row, passes a right one', () => {
     // render asks catalogProblems() first and refuses on any problem.
     const src = fs.readFileSync(path.resolve(HERE, 'lib/platform-catalog.ts'), 'utf-8');
     expect(src).toMatch(/const problems = catalogProblems\(\);\s*if \(problems\.length > 0\) \{\s*throw/);
+  });
+});
+
+describe('pricing — the hand-written text is ratcheted, shrink-only', () => {
+  // The page is generator-owned for `check-skills-token-ratchet` (its bytes
+  // are a function of this module and the contract package), so no CEILINGS
+  // row prices it there. Its prose is still customer context every project
+  // reads before it builds, and the author who can pay is the one editing
+  // this module — so the ceiling lives here, over the hand-written part only
+  // (`handWrittenBytes`: paragraphs, titles, both prose columns, descriptions,
+  // the "Not owned" and "Planned" rows), in the ratchet's own measure,
+  // ceil(utf8 bytes / 4). The derived names, packages, editions and boot
+  // flags are not counted, so a token the spec adds costs one description.
+  //
+  // Shrink-only: lower the number when text is cut. Raising it follows the
+  // ratchet header's path — cut restated text first, then raise by the
+  // measured remainder under the standing ruling it names — with the
+  // arithmetic in the PR body, and pinned AT the measurement.
+  //   6331 bytes -> ceil(6331 / 4) = 1583 (2026-11-19, the PR that adds the page)
+  const HAND_WRITTEN_CEILING_TOKENS = 1583;
+
+  it('measures every hand-written string the page carries and nothing derived', () => {
+    const page = renderPlatformCatalog();
+    for (const line of Object.values(PROSE).flat()) expect(page).toContain(line);
+    for (const row of allRows) {
+      expect(page).toContain(row.builds);
+      expect(page).toContain(row.reach);
+    }
+    // A derived cell is not priced: the owning package is on the page but in no hand-written string.
+    expect(page).toContain('| `sys_user` | ');
+    expect(Object.values(PROSE).flat().join('\n')).not.toContain('plugin-security');
+  });
+
+  it(`keeps the hand-written text at or under ${HAND_WRITTEN_CEILING_TOKENS} tokens`, () => {
+    const tokens = Math.ceil(handWrittenBytes() / 4);
+    expect(tokens, `hand-written text is ${tokens} tokens; the ceiling is shrink-only — cut text, or raise it by the ratchet's path`).toBeLessThanOrEqual(HAND_WRITTEN_CEILING_TOKENS);
+  });
+
+  it('counts bytes, so a longer description moves the measure', () => {
+    const before = handWrittenBytes();
+    const longer = { ...CAPABILITY_ROWS, ai: `${CAPABILITY_ROWS.ai} and more` };
+    expect(Object.values(longer).join('').length).toBeGreaterThan(Object.values(CAPABILITY_ROWS).join('').length);
+    expect(before).toBe(handWrittenBytes()); // pure: the same tree measures the same
   });
 });
 

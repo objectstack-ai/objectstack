@@ -90,7 +90,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
       { name: 'sys_organization', builds: 'a tenant or company-settings object', reach: 'every row carries `organization_id`; data API read and update' },
       { name: 'sys_business_unit', builds: 'a department or org-chart tree', reach: 'the app seeds its rows; hierarchy scopes read it; data API' },
       { name: 'sys_team', builds: 'a teams or groups table', reach: 'approvers and sharing recipients name a team; data API read' },
-      { name: 'sys_user_position', builds: 'a user-to-position assignment table', reach: 'positions the app\'s permission sets grant; data API' },
+      { name: 'sys_user_position', builds: 'a user-to-position assignment table', reach: 'positions that distribute the app\'s permission sets; data API' },
     ],
   },
   {
@@ -110,8 +110,8 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
       { name: 'sys_notification', builds: 'a notifications table', reach: 'the flow `notify` node, `@mention` and assignment emit rows; data API read' },
       { name: 'sys_inbox_message', builds: 'a per-user inbox with read state', reach: 'the in-app delivery of a notification; the Console bell reads it; data API read' },
       { name: 'sys_email', builds: 'an outbound-mail log', reach: 'every email sent is logged here; templates are `emailTemplates` on the stack; data API read' },
-      { name: 'sys_mailbox', builds: 'an inbound-mail setup table', reach: 'Setup declares mailboxes; data API read' },
-      { name: 'sys_mail_message', builds: 'an inbound-mail mirror', reach: '`mailAssociation: true` on an email field links messages to records; data API read' },
+      { name: 'sys_mailbox', builds: 'an inbound-mailbox table', reach: 'engine-owned; data API read for `manage_mailboxes` holders. `requires: [\'mailbox\']` mounts the objects and the ingest seam and syncs nothing: rows exist only where the host composes the mailbox service with an IMAP account source (no Setup entry)' },
+      { name: 'sys_mail_message', builds: 'an inbound-mail mirror', reach: 'rows arrive only from the host\'s IMAP sync (the `sys_mailbox` row); `mailAssociation: true` on an email field links messages to records; data API read' },
     ],
   },
   {
@@ -190,8 +190,8 @@ export const CAPABILITY_ROWS: Readonly<Record<string, string>> = Object.freeze({
 
 /** Master data each suite keeps, matched across suites by key contract. */
 export const NOT_PLATFORM_ROWS: readonly { readonly concept: string; readonly rule: string }[] = [
-  { concept: 'Party master data: customers, suppliers, contacts', rule: 'one app owns each entity; another app matches its records by the key contract (tax id, email), one way, with no platform party object' },
-  { concept: 'Item master data: materials, products, plants', rule: 'the owning app\'s object is reused by key; the platform ships no item object' },
+  { concept: 'Party master data: customers, suppliers, contacts', rule: 'one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way, with no platform party object' },
+  { concept: 'Item master data: materials, products, plants', rule: 'the owning app\'s object is reused by key (material number, plant code); the platform ships no item object' },
 ];
 
 /** Carded, not shipped. Each row is **not available**; the shipping PR moves it into the main table. Capped at a few rows. */
@@ -207,6 +207,74 @@ export const PLANNED_ROWS: readonly { readonly concept: string; readonly state: 
     link: 'https://github.com/objectstack-ai/objectstack/issues/35340',
   },
 ];
+
+/**
+ * The page's hand-written paragraphs, one array per section, in page order.
+ * Hoisted out of the renderer so that {@link handWrittenBytes} can price them
+ * with the rows: every byte an author can add to the page is in this file,
+ * and the test pins a shrink-only ceiling over the sum.
+ */
+export const PROSE = Object.freeze({
+  banner: [
+    '> **Auto-generated** — do not edit. Maintainers regenerate this in the',
+    '> framework repo with `pnpm --filter @objectstack/spec gen:skill-refs`',
+    '> (not runnable in an installed app). Names come from `@objectstack/spec`;',
+    '> the prose columns are authored beside the generator.',
+  ],
+  intro: [
+    'Read this before adding an object, a field or a flow (objectstack-project §0,',
+    'question 3). If the platform ships it, use it. `list_objects` over MCP hides',
+    'system objects, so this page, not the runtime, is where to look.',
+  ],
+  objects: [
+    '"Data API" means the generic `/api/v1/data/OBJECT` routes, as the object',
+    'declares them; "read" means get and list only. A `sys_` object is referenced',
+    'by name from the app\'s metadata (a `user` field, an action\'s `objectName`,',
+    'a seed) without declaring it.',
+  ],
+  valueDomains: [
+    'A `text` field whose value is a code from a published standard declares',
+    '`valueDomain`: the write path refuses a non-member. Forms pick the currency',
+    'code from ISO 4217; a time zone or a country is typed into a plain text',
+    'input, and no list or filter reads the domain. A field named as in the',
+    'second column without the domain is an `os lint` warning.',
+  ],
+  capabilities: [
+    'Each token mounts a service plugin; a token marked "every boot" is mounted',
+    'whether or not the stack lists it. Declare what the app uses instead of',
+    'building the service (objectstack-platform teaches the switch).',
+  ],
+  notOwned: [
+    'These stay in each app. "Check the platform first" never means "wait for the',
+    'platform" here.',
+  ],
+  planned: [
+    'Each row is **not available**: nothing below can be declared or installed',
+    'today. The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:`',
+    'with the link (objectstack-project §0, question 3). The PR that ships a row',
+    'moves it into the tables above.',
+  ],
+});
+
+/**
+ * UTF-8 bytes of everything an author writes into the page: the paragraphs
+ * above, the group titles and both prose columns of every object row, the
+ * value-domain and capability descriptions, and the "Not owned" and "Planned"
+ * rows. The names, the "Mounted by" column, editions and boot flags are
+ * derived from the contract package and are not counted: a token the spec
+ * adds costs the author one description line, nothing else.
+ */
+export function handWrittenBytes(): number {
+  const parts: string[] = [
+    ...Object.values(PROSE).flat(),
+    ...APP_FACING_OBJECT_GROUPS.flatMap((g) => [g.title, ...g.rows.flatMap((r) => [r.builds, r.reach])]),
+    ...Object.values(VALUE_DOMAIN_ROWS).flatMap((r) => [r.builds, r.example]),
+    ...Object.values(CAPABILITY_ROWS),
+    ...NOT_PLATFORM_ROWS.flatMap((r) => [r.concept, r.rule]),
+    ...PLANNED_ROWS.flatMap((r) => [r.concept, r.state]),
+  ];
+  return parts.reduce((sum, text) => sum + Buffer.byteLength(text, 'utf8'), 0);
+}
 
 // ── Guards ───────────────────────────────────────────────────────────────────
 
@@ -305,21 +373,13 @@ export function renderPlatformCatalog(): string {
   const lines: string[] = [
     '# What the platform already ships',
     '',
-    '> **Auto-generated** — do not edit. Maintainers regenerate this in the',
-    '> framework repo with `pnpm --filter @objectstack/spec gen:skill-refs`',
-    '> (not runnable in an installed app). Names come from `@objectstack/spec`;',
-    '> the prose columns are authored beside the generator.',
+    ...PROSE.banner,
     '',
-    'Read this before adding an object, a field or a flow (objectstack-project §0,',
-    'question 3). If the platform ships it, use it. `list_objects` over MCP hides',
-    'system objects, so this page, not the runtime, is where to look.',
+    ...PROSE.intro,
     '',
     '## Platform objects an app would otherwise build',
     '',
-    '"Data API" means the generic `/api/v1/data/OBJECT` routes, as the object',
-    'declares them; "read" means get and list only. A `sys_` object is referenced',
-    'by name from the app\'s metadata (a `user` field, an action\'s `objectName`,',
-    'a seed) without declaring it.',
+    ...PROSE.objects,
     '',
   ];
   for (const group of APP_FACING_OBJECT_GROUPS) {
@@ -333,10 +393,7 @@ export function renderPlatformCatalog(): string {
   lines.push(
     '## Value domains: declare, never hand-roll',
     '',
-    'A `text` field whose value is a code from a published standard declares',
-    '`valueDomain`; the write path refuses a non-member, and Setup, forms and',
-    'filters pick from the standard. A field named as in the second column',
-    'without the domain is an `os lint` warning.',
+    ...PROSE.valueDomains,
     '',
     '| `valueDomain` | Field names that should declare it | What you would otherwise build | Example |',
     '|:--|:--|:--|:--|',
@@ -351,9 +408,7 @@ export function renderPlatformCatalog(): string {
   lines.push(
     '## Capability switches: `requires` on the stack',
     '',
-    'Each token mounts a service plugin; a token marked "every boot" is mounted',
-    'whether or not the stack lists it. Declare what the app uses instead of',
-    'building the service (objectstack-platform teaches the switch).',
+    ...PROSE.capabilities,
     '',
     '| Token | Mounts | Edition | Boot |',
     '|:--|:--|:--|:--|',
@@ -368,8 +423,7 @@ export function renderPlatformCatalog(): string {
   lines.push(
     '## Not owned by the platform',
     '',
-    'These stay in each app. "Check the platform first" never means "wait for the',
-    'platform" here.',
+    ...PROSE.notOwned,
     '',
     '| Concept | Rule |',
     '|:--|:--|',
@@ -380,10 +434,7 @@ export function renderPlatformCatalog(): string {
   lines.push(
     '## Planned: carded, not shipped',
     '',
-    'Each row is **not available**: nothing below can be declared or installed',
-    'today. The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:`',
-    'with the link (objectstack-project §0, question 3). The PR that ships a row',
-    'moves it into the tables above.',
+    ...PROSE.planned,
     '',
     '| Concept | State | Contract |',
     '|:--|:--|:--|',

@@ -39,6 +39,10 @@ or installed and upgraded by customers? Record the answer as one line in the
 project's `AGENTS.md` (`Project kind: own use` or `Project kind: product`).
 Steps marked ★ apply only to a product.
 
+Default to own use, and keep it light: a one-person app changing a label needs
+the edit, the four checks (§2) and a commit. ⛔ Do not ask it for a requirement
+record, a design note or a changeset.
+
 **3. Does the platform ship it?** Before adding an object, a field or a flow,
 read [the platform catalog](./references/platform-catalog.md); use what it
 lists. Absent, and a second app would copy it: file a platform card at
@@ -46,9 +50,6 @@ lists. Absent, and a second app would copy it: file a platform card at
 `// PLATFORM-CANDIDATE: <link>`. Not §3: a defect is never worked around; a
 missing capability may be built and marked.
 
-Default to own use, and keep it light: a one-person app changing a label needs
-the edit, the four checks (§2) and a commit. ⛔ Do not ask it for a requirement
-record, a design note or a changeset.
 Building through MCP with no repository: only §0 and §3 apply.
 
 ## 1 · What to write at each stage
