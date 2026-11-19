@@ -40,18 +40,45 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+/** The objects as their authors stored them (the untranslated layers). */
+const AUTHORED: Record<string, Record<string, unknown>> = {
+  account: { name: 'account', label: 'Account', pluralLabel: 'Accounts', icon: 'Building' },
+  invoice: { name: 'invoice', label: 'Invoice', icon: 'Receipt' },
+  bare_thing: { name: 'bare_thing' },
+  people: { name: 'people', label: 'Person', pluralLabel: 'People' },
+  project: { name: 'project', label: 'Project', pluralLabel: 'Projects' },
+  task: { name: 'task', label: 'Task', pluralLabel: 'Tasks' },
+  packaged_thing: { name: 'packaged_thing', label: 'Widget', pluralLabel: 'Widgets' },
+  unreadable: { name: 'unreadable', label: 'Secret', pluralLabel: 'Secrets' },
+};
+
+/**
+ * The same objects as the metadata list SERVES them to a zh-CN console: every
+ * label translated (objectstack#35101). `project`'s translated plural differs
+ * from its translated label; `task`'s translated plural equals it.
+ */
 const OBJECTS = [
-  { name: 'account', label: 'Account', pluralLabel: 'Accounts', icon: 'Building' },
-  { name: 'invoice', label: 'Invoice', icon: 'Receipt' },
+  { name: 'account', label: '客户', pluralLabel: '客户列表', icon: 'Building' },
+  { name: 'invoice', label: '发票', icon: 'Receipt' },
   { name: 'bare_thing' },
-  { name: 'people', label: 'Person', pluralLabel: 'People' },
+  { name: 'people', label: '人员', pluralLabel: '人员' },
+  { name: 'project', label: '项目', pluralLabel: '项目列表' },
+  { name: 'task', label: '任务', pluralLabel: '任务' },
+  { name: 'packaged_thing', label: '部件', pluralLabel: '部件列表', _packageId: 'com.acme.widgets' },
+  { name: 'unreadable', label: '机密', pluralLabel: '机密列表' },
 ];
+
+const getAuthoredItem = vi.fn(async (type: string, name: string, _options?: { packageId?: string }) => {
+  expect(type).toBe('object');
+  if (name === 'unreadable') throw Object.assign(new Error('Forbidden'), { status: 403 });
+  return AUTHORED[name] ?? null;
+});
 
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    useAdapter: () => ({ getClient: () => ({ meta: { saveItem } }) }),
+    useAdapter: () => ({ getClient: () => ({ meta: { saveItem } }), getAuthoredItem }),
     useMetadata: () => ({ apps: [], objects: OBJECTS, refresh: () => Promise.resolve() }),
   };
 });
@@ -69,7 +96,9 @@ async function createWithAllObjects(): Promise<Array<Record<string, unknown>>> {
   fireEvent.change(screen.getByTestId('app-title-input'), { target: { value: 'Acme CRM' } });
   next(); // → objects
   for (const o of OBJECTS) fireEvent.click(screen.getByTestId(`object-card-${o.name}`));
-  next(); // → navigation, generated from the selected objects
+  next(); // → navigation, generated from the selected objects' authored reads
+  await waitFor(() => expect(screen.getByTestId('wizard-next')).not.toBeDisabled());
+  expect(getAuthoredItem).toHaveBeenCalledTimes(OBJECTS.length);
   next(); // → branding
   fireEvent.click(screen.getByTestId('wizard-complete'));
   await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
@@ -87,6 +116,7 @@ const entryFor = (navigation: Array<Record<string, unknown>>, objectName: string
 
 beforeEach(() => {
   saveItem.mockClear();
+  getAuthoredItem.mockClear();
   localStorage.clear();
 });
 afterEach(() => cleanup());
@@ -111,5 +141,33 @@ describe('objectui#11201 — the wizard’s generated object entries are label-l
   it('CONTROL — a declared plural label inheritance cannot produce is written verbatim', async () => {
     const entry = entryFor(await createWithAllObjects(), 'account');
     expect(entry.label).toBe('Accounts');
+  });
+});
+
+describe('objectstack#35101 — the generated entry’s label is decided from the AUTHORED object, never the served one', () => {
+  it('a zh-CN session stores the authored plural, not the served translation', async () => {
+    const entry = entryFor(await createWithAllObjects(), 'project');
+    expect(entry.label).toBe('Projects');
+  });
+
+  it('a translated plural equal to the translated label does not suppress the authored plural', async () => {
+    const entry = entryFor(await createWithAllObjects(), 'task');
+    expect(entry.label).toBe('Tasks');
+  });
+
+  it('no stored label carries served (translated) text', async () => {
+    const labels = (await createWithAllObjects()).map((e) => e.label).filter((l) => l !== undefined);
+    expect(labels.some((l) => /\p{Script=Han}/u.test(String(l)))).toBe(false);
+  });
+
+  it('a packaged object is read at the package the served object came from', async () => {
+    entryFor(await createWithAllObjects(), 'packaged_thing');
+    expect(getAuthoredItem).toHaveBeenCalledWith('object', 'packaged_thing', { packageId: 'com.acme.widgets' });
+    expect(getAuthoredItem).toHaveBeenCalledWith('object', 'account', {});
+  });
+
+  it('a refused authored read writes no label: the entry inherits, never the served plural', async () => {
+    const entry = entryFor(await createWithAllObjects(), 'unreadable');
+    expect(entry).not.toHaveProperty('label');
   });
 });
