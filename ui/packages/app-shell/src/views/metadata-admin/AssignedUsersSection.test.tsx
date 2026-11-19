@@ -41,11 +41,17 @@ const pickedUsers = [{ id: 'u_new', name: 'New Nora' }];
 // The caller's delegable-scope report, as `useAuth().describeDelegableScope`
 // answers it: none unless a case sets one, as outside a runtime that serves it.
 let delegableRead: () => Promise<DelegableScope | null> = async () => null;
+// The active organization, which the report is resolved in: none unless a case sets one.
+let organizationFixture: { id: string } | null = null;
 vi.mock('@object-ui/auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/auth')>();
   return {
     ...actual,
-    useAuth: () => ({ ...actual.useAuth(), describeDelegableScope: () => delegableRead() }),
+    useAuth: () => ({
+      ...actual.useAuth(),
+      activeOrganization: organizationFixture,
+      describeDelegableScope: () => delegableRead(),
+    }),
   };
 });
 // The section picks its copy by the console locale; English unless a case sets it.
@@ -389,9 +395,10 @@ describe('AssignedUsersSection — a set outside a delegated scope offers no Add
   };
 
   /** Render the set under `report`, and settle both the holders read and the report read. */
+  let lastRerender: (ui: React.ReactElement) => void = () => {};
   async function renderUnder(report: Promise<DelegableScope | null>, permissionSetName = 'showcase_contributor') {
     delegableRead = () => report;
-    render(<AssignedUsersSection permissionSetName={permissionSetName} />);
+    lastRerender = render(<AssignedUsersSection permissionSetName={permissionSetName} />).rerender;
     await act(async () => {
       await report.catch(() => undefined);
     });
@@ -400,6 +407,7 @@ describe('AssignedUsersSection — a set outside a delegated scope offers no Add
 
   afterEach(() => {
     delegableRead = async () => null;
+    organizationFixture = null;
   });
 
   it('a delegate whose scopes allowlist the set elsewhere: no Add and no Remove on the direct grant', async () => {
@@ -437,6 +445,23 @@ describe('AssignedUsersSection — a set outside a delegated scope offers no Add
       data.sys_user_permission_set = saved;
       data.sys_user = savedUsers;
     }
+  });
+
+  it('a report read in another organization narrows nothing once the active organization changes', async () => {
+    organizationFixture = { id: 'org_a' };
+    await renderUnder(Promise.resolve(outsideReport));
+    expect(screen.queryByText('Add user')).toBeNull();
+
+    // Switched to org_b, whose report is still in flight: org_a's is not answered for it.
+    let settleB: (report: DelegableScope | null) => void = () => {};
+    delegableRead = () => new Promise((resolve) => (settleB = resolve));
+    organizationFixture = { id: 'org_b' };
+    lastRerender(<AssignedUsersSection permissionSetName="showcase_contributor" />);
+    expect(screen.getByText('Add user')).toBeTruthy();
+    expect(screen.getAllByLabelText('Remove')).toHaveLength(1);
+
+    await act(async () => settleB(outsideReport));
+    expect(screen.queryByText('Add user')).toBeNull();
   });
 
   it('CONTROL: a delegate one of whose scopes allowlists the set keeps Add and Remove', async () => {

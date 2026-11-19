@@ -403,23 +403,24 @@ export function outsideDelegatedScope(report: DelegableScope | null | undefined,
 /**
  * The caller's delegable-scope report, or `null` while it is read, where no
  * runtime serves it, and where the read fails. Read again when the active
- * organization changes, the organization the server resolves the report in;
- * the reader is held in a ref, never keyed on its identity (ui AGENTS.md #10).
+ * organization changes, the organization the server resolves the report in,
+ * and a report read for another organization is never answered. The reader is
+ * held in a ref, never keyed on its identity (ui AGENTS.md #10).
  */
 function useDelegableScope(
   describe: (() => Promise<DelegableScope | null>) | undefined,
   organizationId: string | null,
 ): DelegableScope | null {
   const describeRef = React.useRef(describe);
-  describeRef.current = describe;
-  const [report, setReport] = React.useState<DelegableScope | null>(null);
+  React.useEffect(() => {
+    describeRef.current = describe;
+  });
+  const [read, setRead] = React.useState<{ organizationId: string | null; report: DelegableScope | null } | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    // A report read for another organization narrows nothing here.
-    setReport(null);
     describeRef.current?.().then(
-      (scope) => {
-        if (!cancelled) setReport(scope);
+      (report) => {
+        if (!cancelled) setRead({ organizationId, report });
       },
       () => {
         /* no report: the controls stay as the affordance gate draws them, and the server decides */
@@ -429,7 +430,7 @@ function useDelegableScope(
       cancelled = true;
     };
   }, [organizationId]);
-  return report;
+  return read !== null && read.organizationId === organizationId ? read.report : null;
 }
 
 export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding: holdingProp }: AssignedUsersSectionProps) {
