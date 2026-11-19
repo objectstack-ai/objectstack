@@ -14,19 +14,34 @@
  * node lands, that the header is drawn once, that no tab strip and no rail
  * exist, the 动态 panel closing the right column (objectstack#34590), and each
  * tier's measures.
+ *
+ * One describe (objectstack#35253) opts each `record:details` stub into
+ * mounting the `DetailView` the real block mounts (`showHeader: false`,
+ * inline edit on), so the approval band it draws is measured on the laid-out
+ * page; every other describe keeps the bare stub.
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
+
+const harness = vi.hoisted(() => ({
+  /** Set by the objectstack#35253 describe: a `record:details` stub mounts `body`. */
+  detailBodies: false,
+  body: null as React.ComponentType | null,
+}));
 
 vi.mock('@object-ui/react', async (importOriginal) => {
   const { DetailsColumnCapContext } = await import('../defaultRecordPage');
-  const Stub = ({ schema }: { schema: any }) => (
-    <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
-      {schema?.properties?.objectName ?? schema?.type}
-    </div>
-  );
+  const Stub = ({ schema }: { schema: any }) => {
+    const Body = harness.detailBodies && schema?.type === 'record:details' ? harness.body : null;
+    return (
+      <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
+        {schema?.properties?.objectName ?? schema?.type}
+        {Body && <Body />}
+      </div>
+    );
+  };
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     SchemaRenderer: Stub,
@@ -37,6 +52,8 @@ import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { relatedDefaultOrderHash } from '../synth/relatedArrangement';
+import { DetailView } from '../DetailView';
+import { InlineEditProvider } from '@object-ui/react';
 
 const page = buildDefaultPageSchema(
   { name: 'lead', label: 'Lead', fields: { name: { name: 'name', type: 'text' } } },
@@ -229,5 +246,110 @@ describe('RecordPageColumns — 动态 last in the right column and the stack (o
     const right = column(container, 'right')!;
     expect(nodesIn(right)).toEqual(['record:related_list', 'record:related_list']);
     expect(right.querySelector('[data-record-timeline-panel]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#35253 — one approval band per record page. The synthesized page
+ * splits its details around a body table (`relatedList: 'primary'`, a
+ * quote's line items), so the details column holds two `record:details`
+ * nodes; each mounts a `DetailView` with its own header suppressed, and each
+ * of those drew the band — "Locked for approval" above the table and again
+ * above the next section. The card's Expected: one lock chip per record page,
+ * however many body sections the synthesized page splits the details into.
+ *
+ * The band stays with the FIRST details part (above the table). The lock
+ * rule itself is untouched: a `lockRecord: false` node still reads as an
+ * editable approval, never as locked, and it too is drawn once.
+ */
+describe('RecordPageColumns — the approval band is drawn once per page (objectstack#35253)', () => {
+  /** What `record:details` mounts: its own header off, inline edit on (`renderers/record-details`). */
+  const Body = () => (
+    <DetailView
+      schema={{ type: 'detail-view', objectName: 'quote', showHeader: false, data: { id: 'Q1', name: 'Q-1' }, sections: [] } as any}
+      inlineEdit
+      recordFromHost
+    />
+  );
+  beforeEach(() => {
+    harness.detailBodies = true;
+    harness.body = Body;
+  });
+  afterEach(() => {
+    harness.detailBodies = false;
+    harness.body = null;
+  });
+
+  const quote = {
+    name: 'quote',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      terms: { type: 'textarea', label: 'Terms', group: 'terms' },
+    },
+  };
+  const SECTIONS = [
+    { label: 'Basic', fields: ['name'] },
+    { label: 'Terms', fields: ['terms'] },
+  ];
+  const LINES = { objectName: 'quote_line_item', relationshipField: 'quote', title: 'Line items', isPrimary: true };
+  const split = buildDefaultPageColumns(buildDefaultPageSchema(quote, { sections: SECTIONS, related: [LINES] }))!;
+  const whole = buildDefaultPageColumns(buildDefaultPageSchema(quote, { sections: SECTIONS }))!;
+
+  const drawPage = (
+    tier: 'wide' | 'two-column' | 'stack',
+    columns: typeof split,
+    approval: { locked?: boolean; approvalPending?: boolean },
+  ) =>
+    render(
+      <InlineEditProvider canEdit={false} {...approval}>
+        <RecordPageColumns tier={tier} columns={columns} />
+      </InlineEditProvider>,
+    );
+
+  it('the split page carries two details parts around the body table', () => {
+    expect(split.details.map((n: any) => n.type)).toEqual(['record:details', 'record:related_list', 'record:details']);
+  });
+
+  for (const tier of ['wide', 'two-column', 'stack'] as const) {
+    it(`${tier}: a locked record split around its body table draws "Locked for approval" once, above the table`, () => {
+      const { container } = drawPage(tier, split, { locked: true });
+      const details = column(container, 'details')!;
+      expect(details.querySelectorAll('[data-node="record:details"]')).toHaveLength(2);
+      const chips = screen.getAllByText('Locked for approval');
+      expect(chips).toHaveLength(1);
+      const table = details.querySelector('[data-node="record:related_list"]')!;
+      expect(chips[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  }
+
+  it('CONTROL: a page with one details part still draws its one chip', () => {
+    const { container } = drawPage('wide', whole, { locked: true });
+    expect(column(container, 'details')!.querySelectorAll('[data-node="record:details"]')).toHaveLength(1);
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: an authored page\'s one details body (no laid-out page around it) still draws its one chip', () => {
+    render(
+      <InlineEditProvider canEdit={false} locked>
+        <Body />
+      </InlineEditProvider>,
+    );
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: a record with no approval running draws no band on the split page', () => {
+    drawPage('wide', split, {});
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('a `lockRecord: false` approval on the split page reads as editable, once — never as locked', () => {
+    render(
+      <InlineEditProvider canEdit approvalPending locked={false}>
+        <RecordPageColumns tier="wide" columns={split} />
+      </InlineEditProvider>,
+    );
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
   });
 });

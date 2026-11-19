@@ -2278,6 +2278,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [#35375] Take an uninstalled package's datasets off the shared
+     * `seed-datasets` list: the owner-keyed merge under the id the install
+     * merged them under, with nothing to put back. Never throws — the
+     * uninstall has already happened; a failure is logged with what it costs.
+     */
+    private withdrawSeedDatasets = async (ctx: PluginContext, manifestId: string): Promise<void> => {
+        try {
+            await this.mergeSeedDatasetsIntoKernel(ctx, [], manifestId);
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but its seed datasets stay on the shared replay list `
+                + 'until the next restart, so an organization founded before then still replays them. '
+                + `Cause: ${err?.message ?? err}`,
+            );
+        }
+    };
+
+    /**
      * Fallback for {@link mergeSeedDatasetsIntoKernel} when the runtime helper is
      * unavailable (older build / mocked module). Same register-once-then-mutate:
      * read the live list through the context's OWN resolver first — a standard
@@ -4160,6 +4178,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // a refused withdrawal, which leaves the package loaded and running.
         // They are bound once for the whole install, under its entry's id.
         if (!withdrawal) await this.unbindArtifactHandlers(ctx, manifestId);
+        // [#35375] …and its seed datasets leave the shared `seed-datasets` list
+        // the per-organization replay reads, so an organization founded before
+        // the next restart replays none of them. The install merged them under
+        // its entry's id (a composed artifact's every package body's under that
+        // one id, {@link applySideEffects}), so one owner-keyed merge with
+        // nothing to put back takes them all off. Never on a refused
+        // withdrawal: the package stays loaded until the restart, its datasets
+        // with it.
+        if (!withdrawal) await this.withdrawSeedDatasets(ctx, manifestId);
         const copies: UninstallCleanupOutcome[] = [];
         for (const memberId of withdrawn) {
             const kept = await this.withdrawObjectCopies(ctx, memberId);

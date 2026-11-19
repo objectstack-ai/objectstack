@@ -6982,34 +6982,47 @@ describe('a `required` field\'s `visibleWhen` the server cannot use to lift the 
     expect(issues[0].message).toContain('`storage.notNull: true`');
   });
 
-  // A formula the predicate reads: a reminder that the server judges it on the
-  // formula value it computes, and a formula the write path cannot compute (a
-  // hop, `label()`, `can`, at any depth) keeps the field required on every write.
-  it('warns when the predicate reads a formula field: the server judges it on the formula it computes', () => {
-    const issues = at(run(order({
+  // A formula the predicate reads draws a warning only when the form cannot
+  // compute it (ADR-0113 D1, as amended): one the form computes is judged on the
+  // same value the server judges, and nothing is warned. A formula the write path
+  // cannot compute either (a hop, `label()`, `can`, at any depth) keeps the field
+  // required on every write; one only the form cannot (`os`) the server computes.
+  it('draws nothing when the predicate reads a formula the form computes: the form and the server agree', () => {
+    expect(at(run(order({
       amount: { type: 'number', label: 'Amount' },
       risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
       po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
-    })), WHERE);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].severity).toBe('warning');
-    expect(issues[0].message).toContain("reads the formula field 'risk'");
-    expect(issues[0].message).toContain('the formula value it computes over the record being written');
-    expect(issues[0].message).not.toContain('counts the field as SHOWN');
+    })), WHERE)).toEqual([]);
   });
 
-  it('…and names the chain when a formula it reads reads through a reference, at any depth', () => {
+  it('draws nothing for a formula over the acting user: both sides compute it for a signed-in writer', () => {
+    expect(at(run(order({
+      mine: { type: 'formula', label: 'Mine', expression: "current_user.id == 'u1'", returnType: 'boolean' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: 'record.mine' },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('warns when a formula it reads reads through a reference, at any depth, and names the chain', () => {
     const issues = at(run(order({
       tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
       risk: { type: 'formula', label: 'Risk', expression: "record.tier_name == 'gold' ? 'high' : 'low'", returnType: 'text' },
       po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
     })), WHERE);
     expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message.startsWith(
+      "Field 'po_number' is `required`, and its `visibleWhen` reads a formula field the form cannot compute",
+    )).toBe(true);
     expect(issues[0].message).toContain("'risk' reads the formula 'tier_name', which reads through 'account'");
     expect(issues[0].message).toContain('counts the field as SHOWN on every write');
+    // The form's half holds for a form that holds a formula plan; a check without one can still part.
+    expect(issues[0].message).toContain('A form that computes the object\'s formulas shows the field and keeps it required');
+    expect(issues[0].message).toContain('a check that holds no formula plan');
+    // Never the retired plain-arm sentence, which contradicted the arm it now rides with.
+    expect(issues[0].message).not.toContain('The form computes the same formula');
   });
 
-  it('…and when a formula it reads calls label()', () => {
+  it('…when a formula it reads calls label()', () => {
     const issues = at(run(order({
       stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
       stage_label: { type: 'formula', label: 'Stage label', expression: 'label(record.stage)', returnType: 'text' },
@@ -7017,6 +7030,52 @@ describe('a `required` field\'s `visibleWhen` the server cannot use to lift the 
     })), WHERE);
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toContain("'stage_label' calls label()");
+  });
+
+  it('…when a formula it reads calls current_user.can(), naming the write that computes it', () => {
+    const issues = at(run(order({
+      can_edit: { type: 'formula', label: 'Can edit', expression: "current_user.can('rws_account', 'edit')", returnType: 'boolean' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: 'record.can_edit' },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'can_edit' calls current_user.can()");
+    expect(issues[0].message).toContain('a write that picks a permission-gated option');
+  });
+
+  it('…when a formula it reads reads `os`: the server computes it and can waive what the form demands', () => {
+    const issues = at(run(order({
+      org_flag: { type: 'formula', label: 'Org', expression: "os.org.id == 'acme' ? 'y' : 'n'", returnType: 'text' },
+      flagged: { type: 'formula', label: 'Flagged', expression: "record.org_flag == 'y'", returnType: 'boolean' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: 'record.flagged' },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'flagged' reads the formula 'org_flag', which reads `os`, which the server computes");
+    expect(issues[0].message).toContain('can waive the field on a record where the form still demands it');
+    expect(issues[0].message).not.toContain('counts the field as SHOWN');
+  });
+
+  it('names only the formulas the form cannot compute when the predicate reads several', () => {
+    const issues = at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high' && record.tier_name == 'gold'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'tier_name' reads through 'account'");
+    expect(issues[0].message).not.toContain("'risk'");
+  });
+
+  it('…and never says the server can waive a field a write-path mark keeps required', () => {
+    const issues = at(run(order({
+      tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
+      org_flag: { type: 'formula', label: 'Org', expression: "os.org.id == 'acme'", returnType: 'boolean' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.tier_name == 'gold' || record.org_flag" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('counts the field as SHOWN on every write');
+    expect(issues[0].message).toContain("'org_flag' reads `os`: the form cannot compute that either");
+    expect(issues[0].message).not.toContain('can waive the field');
   });
 
   it('draws no formula warning on a field that is not required', () => {

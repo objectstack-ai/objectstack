@@ -334,6 +334,7 @@
     "LoggingConfig": "src/system/logging.zod.ts#LoggingConfig (type)",
     "LoggingConfigParsed": "src/system/logging.zod.ts#LoggingConfigParsed (type)",
     "LoggingConfigSchema": "src/system/logging.zod.ts#LoggingConfigSchema (const)",
+    "MCP_DOOR_TOOL_NAMES": "src/system/constants/platform-tool-names.ts#MCP_DOOR_TOOL_NAMES (const)",
     "MCP_FILE_TOOL_NAMES": "src/system/constants/platform-tool-names.ts#MCP_FILE_TOOL_NAMES (const)",
     "METADATA_FORM_REGISTRY": "src/system/metadata-form-registry.ts#METADATA_FORM_REGISTRY (const)",
     "MIGRATION_JOURNAL_KINDS": "src/system/migration.zod.ts#MIGRATION_JOURNAL_KINDS (const)",
