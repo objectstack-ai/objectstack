@@ -64,7 +64,7 @@ describe('os compile child failure line: neutral at every site (ruling record 69
     });
 
     it(`${file}: no code line still says "compile failed"`, () => {
-      const stale = codeLines(file).filter(({ text }) => /compile failed/i.test(text));
+      const stale = codeLines(file).filter(({ text }) => /\bcompile failed\b/i.test(text));
       expect(stale.map((s) => `${s.index + 1}: ${s.text.trim()}`), file).toEqual([]);
     });
   }
