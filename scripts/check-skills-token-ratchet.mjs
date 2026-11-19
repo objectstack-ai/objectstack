@@ -1923,7 +1923,33 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7115 / 4)
   // = 1779 (+29), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1779],
+  // 1779 -> 1873, the cards that teach the object tools' new members: step 4
+  // says `withheldFields` names fields that exist but are hidden (never empty),
+  // and how to ask `aggregate_records` for a top or bottom N; one shared
+  // `truncated` bullet in step 6 answers "how many" from `totalGroups` for
+  // `query_dataset` and `aggregate_records` alike, and says the total is
+  // unknown without it. Same raise path (ruling record 6513306068, letter B).
+  // PAID DOWN FIRST — the per-tool `truncated` restatements cut, the shared
+  // bullet keeping their one home: step 3's "`truncated: true`: more rows
+  // existed than came back. Say the result is partial." and step 4's
+  // "`truncated: true` on its answer means groups were cut off: say so."
+  // Cuts -151 bytes, net +377: 7135 -> 7512 bytes, less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7492 / 4)
+  // = 1873 (+94), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  // 1873 -> 1877, re-measured on the same PR before it landed, after its
+  // contract review (record 6997032414, M1) found the shared bullet telling the
+  // agent a total is unknown on a capped `query_records` page, which states
+  // its own `total`. The bullet now cites `totalGroups` as the pre-cut count and
+  // scopes "unknown" to a `query_dataset` answer without it (`aggregate_records`
+  // always answers it). Same raise path (ruling record 6513306068, letter B);
+  // the restatements were cut on the row's previous measurement and nothing
+  // else in the file restates it. Bullet 215 -> 230 bytes: 7512 -> 7527 bytes,
+  // less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
+  // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1877],
 
   // ── the objectstack-project skill joins the catalog ──
   // A new published process skill: how a change moves through a metadata-app
