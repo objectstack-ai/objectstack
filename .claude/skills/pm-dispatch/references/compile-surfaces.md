@@ -13,7 +13,7 @@
 | 4 | service-analytics filter-normalizer | `packages/services/service-analytics/src/strategies/filter-normalizer.ts:1235`(`lowerAnalyticsWhere`) | analytics / cube 侧 |
 | 5 | `formula` | `packages/formula/src/matches-filter.ts:73`(`matchesFilterCondition`) | RLS 写侧 `check` 与公式求值;JS 两值语义的基准面 |
 | 半面 | objectql `having-filter` | `packages/objectql/src/having-filter.ts:92` / `:98`(`applyHaving` / `matchesHaving`) | 聚合**后**过滤。算半面是因为词表是子集,**但申报义务不打折** —— 它是**唯一没有 conformance 表覆盖的面**(`FILTER_LOGIC_CASES` 不驱动 HAVING 路径),所以漏了它连门禁都不会红 |
-| 已解冻 | `driver-memory` / `driver-mongodb` | `packages/drivers/driver-memory/src/memory-matcher.ts:134`(`checkCondition`)、`packages/drivers/driver-mongodb/src/mongodb-filter.ts:700`(`translateFieldOperators`) | 冻结指令与不在范围的旧判定均已作废,按普通面申报 |
+| 6、7 | `driver-memory` / `driver-mongodb` | `packages/drivers/driver-memory/src/memory-matcher.ts:134`(`checkCondition`)、`packages/drivers/driver-mongodb/src/mongodb-filter.ts:700`(`translateFieldOperators`) | 两个驱动各一面 |
 
 增删一面的那个 PR 顺手改这里,不留给下一次裁决重新数。
 触发增删的四种事件:新驱动、新求值器、某面被合并或退役、冻结状态变化。

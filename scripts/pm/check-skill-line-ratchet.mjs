@@ -430,7 +430,8 @@ export const CEILINGS = new Map([
   // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
   // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
   // line the renaming touched kept its line. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 329],
+  // 329 → 328 (#35215 G-A, current values and quotes out of the skill): the batch row's current values moved out, the retired `target:<major>` label row deleted; landed count.
+  ['.claude/skills/pm-dispatch/SKILL.md', 328],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -473,7 +474,8 @@ export const CEILINGS = new Map([
   // carries the route, the dev names the owed review in its hand-back and never
   // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
+  // 246 → 245 (#35215 G-A, current values and quotes out of the skill): an expired one-time calibration line deleted, quotes and ids trimmed; landed count.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -500,7 +502,15 @@ export const CEILINGS = new Map([
   // Two lines: 开着的卡离手恒落一态 in the cross-state rules, and the hold-lowers-the-grade line
   // (`Restart-grade:`). Every bullet here already sits at its 120-byte minimum, so payment in place
   // would have deleted a ruled clause. Measured delta +2; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
+  // Raised 43 → 50 by the blocking-mechanism rules (#35259): an ORDINARY ruled raise under letter B
+  // (record 6184799323). The ruling of record is that card's body, which quotes the maintainer
+  // verbatim (2026-11-19: 「先立卡改机制，排查现有的卡改状态」, 「可以拆的都同意。」) and orders items 1–4,
+  // 7, 9 and 10 into this file: the hold-match default (+1), the `Blocked-by:` line as the only
+  // source (+1), what the daily scan also reports (+1), the blocker's grade (+1), the
+  // maintainer's-step card and where a card that needs its result points (+2), the product choice
+  // that goes to the decision box (+1). The full-discharge line replaces the old 上游已关 line (±0).
+  // Measured delta +7. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 50],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -617,7 +627,8 @@ export const CEILINGS = new Map([
   // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
   // provenance carrying those two operative quotes (+1). Measured delta +3.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
+  // 63 → 62 (#35215 G-A, current values and quotes out of the skill): the verbatim provenance line deleted; the route it backed stands above it; landed count.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 62],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -649,7 +660,19 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 49],
+  // Raised 49 → 50 by item 11 of the blocking-mechanism card (#35259): ruling records 6998694957
+  // (every decision for the maintainer goes through a ceiling-tier decision thread first; the
+  // seat-tier fallback line is removed) and 6999656302 (that thread runs at effort `xhigh`, `max`
+  // only when he names it). The one fallback line becomes two rule lines. Measured delta +1.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  // Raised 50 → 62 by the four-line maintainer brief (#35298): an ORDINARY ruled raise. The ruling
+  // of record is that card's body, which quotes the maintainer verbatim, 2026-11-19:
+  // 「目前的维护者速读，写的其实不是很好，感觉很多废话，应该从业务的角度写。」, then 「同意」 to the four-line
+  // shape. It orders the decision brief and its worked example into this file: the brief on top and its four
+  // lines (+3), the words it never carries (+1), what stays in the English analysis part (+1), the
+  // worked example (+6) and the blank line that closes its list (+1). Measured delta +12.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 62],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -1206,12 +1229,14 @@ export const CEILINGS = new Map([
   // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
   // paid by that ruling and by nothing else.
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
-  ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
-  ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
+  // readings-queue 89 → 86, readings-channels 76 → 71, readings-write-shapes 84 → 81 (#35215 G-D): stale
+  // platform readings trimmed, the lesson kept; landed counts.
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 86],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 71],
   ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
   ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
   ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
-  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 84],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 81],
   ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
   ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
   ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
@@ -1412,7 +1437,8 @@ export const CEILINGS = new Map([
   // one line, the moving seat — an outgoing account still draining moves to a free
   // seat with its own mailbox, the seat post carries the ownership split, and it posts
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
+  // 100 → 99 (#35215 G-A, current values and quotes out of the skill): the expired pre-filed-children transition line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
   // or shift, startup with the maintainer's authorising line per seat thread (an area
   // thread carries none), the in-area rules as pointers to their owning references, the
@@ -1616,7 +1642,9 @@ export const CEILINGS = new Map([
   // skills」); authorized under ruling record 6184799323 (letter B). Measured:
   // the old line was already 120 B, the added content alone is over 40 B, so the
   // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
+  // Lowered 190 → 189 (#35259, item 5): the line on writing and removing the retired
+  // blocking-cache label left with the label (lowering is always legitimate). Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1679,6 +1707,15 @@ export const CEILINGS = new Map([
   // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
   // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
   // as his. Measured delta +1. Landed count, headroom 0.
+  // 83 → 87 (#35259): an ordinary ruled raise. Rulings of record: the card body (items 6 and 8 —
+  // fleet cards of one topic block each other only when they edit the same file; block only the
+  // part that waits, +2) and scope comment 6998230415 (the five issue-type rules the maintainer
+  // approved with 「同意」: no card for a problem in a feature whose code has not merged, and the
+  // type is set card by card — none on an epic or tracking card, Task for ops and verification,
+  // +2). Measured delta +4. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  // −4 (#35215 G-A, current values and quotes out of the skill): the dated quote block and one maintainer quote deleted; the rules under them stand; landed count.
+  // Merged (#35385 meets #35406): 83 + 4 (#35259) − 4 (#35215 G-A) = 83, measured after the merge.
+  // Landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
@@ -1849,7 +1886,8 @@ export const CEILINGS = new Map([
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
+  // 82 → 81 (#35215 G-A, current values and quotes out of the skill): a provenance line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 81],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
@@ -1939,7 +1977,9 @@ export const CEILINGS = new Map([
   // transcribed verbatim, whose workload names `references/lanes/eval.md`. A
   // NEW file, so this is an added row and no other row moves; set at the
   // landed line count (headroom 0, same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // 45 → 44 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
+  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 44],
   // Merge-queue seat charter (`queue#N`): the neutral cross-lane seat that
   // patrols the queue (the 90-minute stall check, head-ejection causes, flake
   // anchors, flake-victim re-queues, the front-jump under the existing three
@@ -1959,7 +1999,9 @@ export const CEILINGS = new Map([
   // it" interim section lost one line. Ruling of record: the queue card
   // (#33647, filing gate ③), verbatim 「建议有专人来跟进队列吗？这种操作不应该等我」;
   // its order names this widening. Measured delta +2; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 32],
+  // 32 → 31 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
+  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 31],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;
@@ -2037,7 +2079,16 @@ export const CEILINGS = new Map([
   // (+1), one rule line routes the finding to the field (+1) and the JSON
   // template gains it (+1), +3 measured, no restatement in the file to pay with.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/agents/os-dev.md', 405],
+  // 405 → 407 (#35259): an ordinary ruled raise. Rulings of record: comment 6998694957 (item 11 — a
+  // dev run never asks the maintainer directly: it reports `needs_decision` and the seat takes it
+  // to the decision thread, +1) and the card body (item 8 — a `blocked` report names the part that
+  // can go first, +1). Measured delta +2. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  // 407 → 410 (#35298): an ordinary ruled raise. The ruling of record is that card's body (the
+  // maintainer, 2026-11-19, verbatim 「同意」 to the four-line brief). The six-line definition (4
+  // lines) becomes the four-line one with what each line says (4), the words it never carries (+1)
+  // and the two readings that move to the English part (+2). Measured delta +3.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/agents/os-dev.md', 410],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on

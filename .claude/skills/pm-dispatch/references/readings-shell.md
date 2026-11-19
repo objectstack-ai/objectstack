@@ -11,7 +11,7 @@
 - ④:浅检出上的历史读数不可信 —— `merge-base --is-ancestor` 假非祖先、`rev-list --count` 截断。
 - ④ 里最静默的是窗口式 `git log --grep`:回 0 结果、exit 0、无警告,读作该提交从不存在。
 - 同族 `branch -r --contains` 零输出;先 `--deepen` 再判,或走 REST `compare`。
-- ⑤:容器里没有 `gh`,于是 `gh … || echo "none"` 是不可证伪的否定。
+- ⑤:命令可能不存在,于是 `gh … || echo "none"` 是不可证伪的否定。
 - 127 命令不存在与 grep 没命中输出同值 ⇒ 回退分支照打印安心结论而一次都没检查。
 - 安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态。
 - ⛔ 通则:可能不存在的命令上挂回退即不可证伪的否定;PR 与查重核验改走 MCP 工具或 git。

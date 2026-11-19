@@ -11,7 +11,9 @@
  * code ("Metadata never names the home currency"). The object door lets a
  * `dynamic` roll-up through only when it names a child field and no
  * `defaultCurrency`; `defineStack`'s cross-reference pass admits it only when
- * that child field is one some `homeAmount.field` on the child object names.
+ * that child field is an amount in the home currency: a `currency` field in
+ * `dynamic` mode, of which a stored home amount is one (widened from the home
+ * amount alone by seat ruling record 7000258793).
  *
  * The probe shape is HotCRM's PSA phase-0 probe (hotcrm#2316): expenses in
  * their own currencies, each converted at write into `amount_home`, rolled up
@@ -106,7 +108,10 @@ function objectRefusal(input: unknown): string {
 }
 
 const DYNAMIC_PREFIX = "Object 'crm_probe_project' field 'home_expense_total' currencyConfig: `currencyMode: 'dynamic'` on a "
-  + 'summary is admitted only for a roll-up of a stored home amount';
+  + "summary is admitted only for a roll-up of an amount in the organization's home currency";
+
+/** `summaryOperations` rolling `sum(crm_probe_expense.FIELD)` up through `project`. */
+const sumOf = (field: string) => ({ summaryOperations: { object: 'crm_probe_expense', field, function: 'sum', relationshipField: 'project' } });
 
 describe('a roll-up of a stored home amount declares `dynamic`', () => {
   it('admits the probe shape: sum over the home field, `currencyMode: \'dynamic\'`', () => {
@@ -126,13 +131,76 @@ describe('a roll-up of a stored home amount declares `dynamic`', () => {
   });
 });
 
+/**
+ * [Seat ruling record 7000258793, ADR-0144 D8 rule 5 read as written] A plain
+ * `dynamic` amount is in the tenant (home) currency by definition: `dynamic`
+ * "amounts display in the tenant default currency (the `localization.currency`
+ * setting)". So a total of such amounts is too, and the roll-up declares it
+ * the way a roll-up of a stored home amount does. The probe shape is HotCRM's
+ * (hotcrm#2569): a timesheet total over the time entries' plain cost amount.
+ */
+describe('a roll-up of a plain `dynamic` amount declares `dynamic` too', () => {
+  it('admits sum / min / max / avg over a child `currency` field with no `currencyConfig`, which no `homeAmount` names', () => {
+    for (const fn of ['sum', 'min', 'max', 'avg']) {
+      const summaryOperations = { object: 'crm_probe_expense', field: 'note_amount', function: fn, relationshipField: 'project' };
+      expect(() => buildStack([project({ summaryOperations }), expense()]), fn).not.toThrow();
+    }
+    expect(() => buildStack([project({ ...sumOf('note_amount'), currencyConfig: {} }), expense()])).not.toThrow();
+  });
+
+  it('admits one over a child amount declaring `currencyMode: \'dynamic\'`, writable, readonly or computed by an `expression`', () => {
+    for (const def of [
+      { type: 'currency', label: 'Cost', currencyConfig: DYNAMIC },
+      { type: 'currency', label: 'Cost', readonly: true },
+      { type: 'currency', label: 'Cost', expression: 'record.amount_home * 2' },
+    ]) {
+      expect(() => buildStack([project(sumOf('cost_amount')), expense({ cost_amount: def })]), JSON.stringify(def)).not.toThrow();
+    }
+  });
+
+  it('admits one over the readonly plain amount of a child whose record-mode amount declares no `homeAmount`', () => {
+    const noHome = expense({
+      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+    });
+    expect(() => buildStack([project(), noHome])).not.toThrow();
+  });
+
+  it('CONTROL: a summary that declares nothing still has no currency (no published default moves)', () => {
+    const bare = ObjectSchema.parse(project({ ...sumOf('note_amount'), currencyConfig: undefined })) as { fields: Record<string, { currencyConfig?: unknown }> };
+    expect(bare.fields.home_expense_total!.currencyConfig).toBeUndefined();
+    expect(() => buildStack([project({ ...sumOf('note_amount'), currencyConfig: undefined }), expense()])).not.toThrow();
+  });
+});
+
 describe('every other `dynamic` summary stays refused', () => {
-  it('refuses a `dynamic` roll-up over a plain currency field that no `homeAmount` names, naming the home amounts', () => {
-    const summaryOperations = { object: 'crm_probe_expense', field: 'note_amount', function: 'sum', relationshipField: 'project' };
-    const finding = stackRefusal([project({ summaryOperations }), expense()]);
+  it('refuses a `dynamic` roll-up over a `number` field, naming the child\'s amounts in the home currency', () => {
+    const finding = stackRefusal([project(sumOf('rate_used')), expense()]);
     expect(finding.startsWith(DYNAMIC_PREFIX)).toBe(true);
-    expect(finding).toContain("This summary rolls up sum(crm_probe_expense.note_amount), and 'crm_probe_expense.note_amount' is not a stored home amount");
-    expect(finding).toContain("The home amounts of 'crm_probe_expense' are 'amount_home'");
+    expect(finding).toContain(
+      "This summary rolls up sum(crm_probe_expense.rate_used), and 'crm_probe_expense.rate_used' is a 'number' field, "
+        + 'not a `currency` field in `dynamic` mode',
+    );
+    expect(finding).toContain("The amounts of 'crm_probe_expense' in the home currency are 'amount_home', 'note_amount'; roll up one of them");
+  });
+
+  it('refuses one over a `summary` of the child, even one declaring `dynamic` itself: a roll-up of a roll-up is not admitted', () => {
+    const line = {
+      name: 'crm_probe_line', label: 'Line',
+      fields: {
+        expense: { type: 'master_detail', label: 'Expense', reference: 'crm_probe_expense' },
+        cost: { type: 'currency', label: 'Cost' },
+      },
+    };
+    const nested = expense({
+      lines_total: {
+        type: 'summary', label: 'Lines',
+        summaryOperations: { object: 'crm_probe_line', field: 'cost', function: 'sum', relationshipField: 'expense' },
+        currencyConfig: DYNAMIC,
+      },
+    });
+    const finding = stackRefusal([project(sumOf('lines_total')), nested, line]);
+    expect(finding.startsWith(DYNAMIC_PREFIX)).toBe(true);
+    expect(finding).toContain("'crm_probe_expense.lines_total' is a 'summary' field, not a `currency` field in `dynamic` mode");
   });
 
   it('refuses a `dynamic` roll-up over the record-mode amount itself, prescribing its home field', () => {
@@ -143,13 +211,13 @@ describe('every other `dynamic` summary stays refused', () => {
     expect(finding).toContain("Roll up its stored home amount 'crm_probe_expense.amount_home' instead");
   });
 
-  it('refuses a `dynamic` roll-up over a child that stores no home amount', () => {
+  it('refuses a `dynamic` roll-up over a record-mode amount that stores no home amount, prescribing `homeAmount`', () => {
     const plain = expense({
       amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
     });
-    const finding = stackRefusal([project(), plain]);
+    const finding = stackRefusal([project(sumOf('amount')), plain]);
     expect(finding.startsWith(DYNAMIC_PREFIX)).toBe(true);
-    expect(finding).toContain("'crm_probe_expense' stores no home amount");
+    expect(finding).toContain('Roll up a stored home amount of the child instead (declare `homeAmount` on the amount)');
   });
 
   it('refuses a `dynamic` roll-up over a fixed child amount, prescribing that code', () => {
@@ -166,7 +234,10 @@ describe('every other `dynamic` summary stays refused', () => {
       /^`home_expense_total` is a `summary` field of object `crm_probe_project` declaring `currencyMode: 'dynamic'` \(an absent `currencyMode` is `dynamic`\) with no `summaryOperations` naming a child field/,
     );
     expect(message).toContain('A roll-up carries a currency in three cases only');
-    expect(message).toContain("`currencyMode: 'dynamic'` (no `defaultCurrency`) when it rolls up a stored home amount");
+    expect(message).toContain(
+      "`currencyMode: 'dynamic'` (no `defaultCurrency`) when it rolls up an amount in the organization's home currency, "
+        + 'a child `currency` field in `dynamic` mode (a stored home amount included)',
+    );
   });
 
   it('the object refuses a `dynamic` summary that names a `defaultCurrency`: metadata never names the home currency', () => {
@@ -225,33 +296,28 @@ describe('a `homeAmount` makes a home amount only where it is valid as declared'
     return String(refusal!.issues![0]);
   };
 
-  it('refuses a `dynamic` roll-up over a writable plain amount an extension names as a home field', () => {
-    const finding = refusalOf(stackWith(forging('note_amount')));
-    expect(finding.startsWith(DYNAMIC_PREFIX)).toBe(true);
-    expect(finding).toContain("'crm_probe_expense.note_amount' is not a stored home amount");
-    // The forged pointer is not offered as a home amount either.
-    expect(finding).toContain("The home amounts of 'crm_probe_expense' are 'amount_home';");
-  });
-
-  it('refuses one over a `number` field, a `fixed` amount, or a field with an `expression`, each named by an extension', () => {
+  it('a forged `homeAmount` makes no `number` field or `fixed` amount admissible: both stay refused', () => {
     const readonlyFixed = { type: 'currency', label: 'Fixed', readonly: true, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } };
-    const computed = { type: 'currency', label: 'Computed', readonly: true, expression: 'amount * 2' };
-    for (const [target, extra] of [
-      ['rate_used', {}],
-      ['fixed_amount', { fixed_amount: readonlyFixed }],
-      ['computed_amount', { computed_amount: computed }],
+    for (const [target, extra, says] of [
+      ['rate_used', {}, "is a 'number' field"],
+      ['fixed_amount', { fixed_amount: readonlyFixed }, 'is fixed to EUR'],
     ] as const) {
-      const summaryOperations = { object: 'crm_probe_expense', field: target, function: 'sum', relationshipField: 'project' };
-      const finding = refusalOf(stackWith({ ...extra, ...forging(target) }, { summaryOperations }));
+      const finding = refusalOf(stackWith({ ...extra, ...forging(target) }, sumOf(target)));
       expect(finding.startsWith(DYNAMIC_PREFIX), target).toBe(true);
+      expect(finding, target).toContain(says);
     }
   });
 
-  it('refuses one over a home field two amounts claim: one column, two writers', () => {
-    const summaryOperations = { object: 'crm_probe_expense', field: 'amount_home', function: 'sum', relationshipField: 'project' };
-    const finding = refusalOf(stackWith(forging('amount_home'), { summaryOperations }));
-    expect(finding.startsWith(DYNAMIC_PREFIX)).toBe(true);
-    expect(finding).toContain("'crm_probe_expense' stores no home amount");
+  it('a plain `dynamic` amount is admitted whatever a `homeAmount` says of it: writable, computed, or claimed twice', () => {
+    const computed = { type: 'currency', label: 'Computed', readonly: true, expression: 'amount * 2' };
+    for (const [target, extra] of [
+      ['note_amount', {}],
+      ['computed_amount', { computed_amount: computed }],
+      ['amount_home', {}],
+    ] as const) {
+      expect(() => defineStack(stackWith({ ...extra, ...forging(target) }, sumOf(target)) as Parameters<typeof defineStack>[0]), target)
+        .not.toThrow();
+    }
   });
 
   it('CONTROL: an extension declaring a valid home amount on the child is admitted, as an authored one is', () => {
@@ -278,7 +344,7 @@ describe('a `homeAmount` makes a home amount only where it is valid as declared'
 describe('case (d) is worded once', () => {
   it('defineStack prints `recordCurrencyDynamicRollupNotHomeError` for each refused child field', () => {
     const fixedChild = expense({ note_amount: { type: 'currency', label: 'Plain', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } });
-    for (const [field, child] of [['note_amount', expense()], ['note_amount', fixedChild], ['amount', expense()], ['rate_used', expense()]] as const) {
+    for (const [field, child] of [['note_amount', fixedChild], ['amount', expense()], ['rate_used', expense()]] as const) {
       const summaryOperations = { object: 'crm_probe_expense', field, function: 'sum', relationshipField: 'project' };
       const childFields = (child as { fields: Record<string, unknown> }).fields;
       expect(stackRefusal([project({ summaryOperations }), child]), field).toBe(recordCurrencyDynamicRollupNotHomeError(
