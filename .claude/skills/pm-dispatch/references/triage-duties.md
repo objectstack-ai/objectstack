@@ -13,8 +13,8 @@
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
 - 「待维护者」另逐张列 open `needs-user-decision` 与 `pm:awaiting-maintainer` 卡,注入态以来卡龄。
 - UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引 L2 审核新卡数。
-- 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
-- ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
+- 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`area:*`);② `pm:queue` 无 `area:*`(仅多车道仓);
+- ③ `area:*` 无 pm-state;④ `pm:queue`+`area:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
 - 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,谁打都首触;人定的级只补不改。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
@@ -64,7 +64,7 @@
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - 首触复核 area、type(中继 `issue_patch` 写)、级与 `Source:`(核不出即 `fleet`),错即改并留原值。
-- 维护者或外部人立的卡首触补齐(照 `filing-gate.md`);日对账 fire 扫无 `area:*` 的公开卡补齐。
+- 维护者或外部人立的卡首触补齐(照 `filing-gate.md`);日对账扫无 `area:*` 或无 type 的公开卡。
 - 预授权 `Feature` 免裁:`Source: topic` 子卡、北极星路行已断言能力、既裁执行、有先例新键。
 - 余 `fleet` 源者 ⛔ 不派发、不立决策卡、不自动关;分诊每周列单,维护者挑、并专题或关。
 - `Bug` 只修到卡面症状消失、同 PR 文档改成实情并写明未覆盖处;长远序只在其内排形状。

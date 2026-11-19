@@ -217,10 +217,13 @@
  *       review ACCEPT, so ready = reviewed by construction; a reviewed PR
  *       that left the merge queue (or never entered it) with nobody handling
  *       it would otherwise wait silently forever. Patrol input, not a gate.
- *   H13 a card carrying `domain:*` with NO pm-state label, aged past one
+ *   H13 a card carrying `area:*` with NO pm-state label, aged past one
  *       sweep cycle — the half-annotated shape the protocol's own
  *       single-label writes produce by design, which the triage sweep's
- *       disjunct ③ ("有 domain:* 无 pm-state") exists to heal hourly. In that
+ *       disjunct ③ ("`area:*` 无 pm-state") exists to heal hourly. `area:*` is
+ *       the routing label triage's first touch writes; a `domain:*` label
+ *       routes nothing (file ownership is derived from the paths a change
+ *       touches), so a card carrying only one is out of H13's scope. In that
  *       shape the card is invisible to every seat's candidate query (routing
  *       landed, the state machine never did), and it is ALSO invisible to
  *       every label-scoped listing in this sweep — the shape is defined by
@@ -3768,8 +3771,9 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// H13 — domain:* without any pm-state label, aged past one sweep cycle
-// (maintainer-reported incident, 2026-08-19).
+// H13 — area:* without any pm-state label, aged past one sweep cycle
+// (maintainer-reported incident, 2026-08-19; read `domain:*` until the
+// area labels replaced it as triage's routing label).
 // ---------------------------------------------------------------------------
 
 /**
@@ -3810,7 +3814,7 @@ export const PM_STATE_LABELS = [
 export const TRACKING_ANCHOR_LABEL = 'tracking';
 
 /**
- * Labels whose NORMAL shape is domain-without-pm-state, excluded by the
+ * Labels whose NORMAL shape is area-without-pm-state, excluded by the
  * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
  * report the protocol's design as a defect.
  */
@@ -3821,14 +3825,14 @@ export const H13_EXEMPT_LABELS = [TRACKING_ANCHOR_LABEL, 'status:parked', 'qa-ru
  * disjunct ③ heals exactly this shape every round, so a card still in it
  * after 2h has survived at least one full healing round it should not have —
  * the alarm reads a failure of the healing loop, never routine intake
- * latency (a just-landed domain label sits here only for the sweep's own
+ * latency (a just-landed area label sits here only for the sweep's own
  * ~2-minute settle window, two orders of magnitude under the threshold).
  * Age reads `updated_at`: it needs no timeline fetch, and every healing
  * write would bump it, so a stale `updated_at` in this shape means nothing
  * touched the card at all. The measured specimen sat ~26h; at 2h it would
  * have been flagged a day earlier.
  */
-export const DOMAIN_HALF_STATE_STALE_HOURS = 2;
+export const AREA_HALF_STATE_STALE_HOURS = 2;
 
 /**
  * The prefix H13 stamps on a self-declared-P0 row. Exported because a SECOND
@@ -3859,23 +3863,23 @@ export function h13SelfDeclaredP0(issue) {
  * `updated_at` flags rather than reads as fresh (#4690 direction, same as
  * H10/H11/H12).
  */
-export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
+export function h13AreaWithoutPmState(issue, nowMs = Date.now()) {
   const labels = labelNames(issue);
-  if (!labels.some((l) => l.startsWith('domain:'))) return null;
+  if (!labels.some((l) => l.startsWith('area:'))) return null;
   if (labels.some((l) => PM_STATE_LABELS.includes(l))) return null;
   if (labels.some((l) => H13_EXEMPT_LABELS.includes(l))) return null;
   const updated = Date.parse(issue.updated_at ?? '');
   const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
-  if (ageHours !== null && ageHours <= DOMAIN_HALF_STATE_STALE_HOURS) return null;
+  if (ageHours !== null && ageHours <= AREA_HALF_STATE_STALE_HOURS) return null;
   const reading =
     ageHours === null
       ? 'an unreadable `updated_at` (which must not read as fresh)'
-      : `~${Math.round(ageHours)}h without activity (threshold ${DOMAIN_HALF_STATE_STALE_HOURS}h)`;
+      : `~${Math.round(ageHours)}h without activity (threshold ${AREA_HALF_STATE_STALE_HOURS}h)`;
   const base =
-    `\`domain:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
+    `\`area:*\` with no pm-state label and ${reading} — routing landed, the state machine ` +
     `never did, so the card is invisible to every seat's candidate query. A half-state older ` +
     `than one sweep cycle is a defect of the healing loop (triage sweep disjunct ③), not ` +
-    `inventory: pair the domain label with its pm-state in one write, oldest first.`;
+    `inventory: pair the area label with its pm-state in one write, oldest first.`;
   if (!h13SelfDeclaredP0(issue)) return base;
   return (
     `${P0_SUSPECT_MARKER} the card's own title/body self-declares P0/data-integrity, and for that ` +
@@ -4355,7 +4359,7 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
  * overlap, push — and a lane PM's landing window turns over far faster than
  * that. 2h leaves a normal resolution a full window while catching the
  * measured incident (~4h unnoticed) at roughly half its life. It matches
- * `DOMAIN_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
+ * `AREA_HALF_STATE_STALE_HOURS` for the same underlying reason rather than
  * by coincidence: both measure a loop that should already have turned over,
  * not intake latency.
  */
@@ -4892,14 +4896,14 @@ function readTrackedFiles() {
 
 /**
  * H18 threshold — one triage-Routine cycle, the same reasoning as
- * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
+ * `AREA_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
  * question on every `pm:retriage` card each fire (SKILL.md, 「`pm:retriage` 每
  * fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」), so a card
  * still carrying the label after 2h has survived at least one answer pass it
  * should not have. Age is read from `updated_at` rather than a per-card
  * timeline fetch for the label-APPLICATION event: this sweep makes that fetch
  * for no item (H13's same proxy choice, for the same reason — see
- * `h13DomainWithoutPmState`), and every triage write on the card (whatever
+ * `h13AreaWithoutPmState`), and every triage write on the card (whatever
  * the answer) bumps `updated_at`, so a stale reading here means nothing
  * touched the card since any triage pass at all, which is exactly the failure
  * this item exists to name.
@@ -23341,7 +23345,7 @@ async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
 }
 
 /**
- * The unscoped listing H13 needs: the domain-without-pm-state shape is
+ * The unscoped listing H13 needs: the area-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
  * queries hides it from a label-scoped sweep too. The same
@@ -24582,7 +24586,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const unscoped = await listAllOpenIssues(stats);
   for (const issue of unscoped) {
     seenUnscoped.set(issue.number, issue);
-    const halfState = h13DomainWithoutPmState(issue);
+    const halfState = h13AreaWithoutPmState(issue);
     if (halfState) findings.push([issue, 'H13', halfState]);
     // H18 — same population: `pm:retriage` can coexist with a label this
     // sweep's label pages never fetch (e.g. `pm:blocking`) or with none at
@@ -25995,7 +25999,7 @@ async function selfTest() {
   const h10row = (...args) => String(h10StaleUnclaimedP0(...args) ?? '');
   const h11row = (...args) => String(h11ImportantParked(...args) ?? '');
   const h12row = (...args) => String(h12OrphanLanding(...args) ?? '');
-  const h13row = (...args) => String(h13DomainWithoutPmState(...args) ?? '');
+  const h13row = (...args) => String(h13AreaWithoutPmState(...args) ?? '');
   const h14row = (...args) => String(h14BlockingCacheIncoherent(...args) ?? '');
   const h16row = (...args) => String(h16StuckMergeConflict(...args) ?? '');
   const h18row = (...args) => String(h18RetriageAged(...args) ?? '');
@@ -27527,41 +27531,47 @@ async function selfTest() {
   t('H12: missing draft field is out of scope', h12OrphanLanding({ auto_merge: null, updated_at: hoursAgo(50) }, NOW), null);
   t('H12: merged row is out of scope', h12OrphanLanding({ ...openPr({ updated: hoursAgo(50) }), merged_at: '2026-08-13T10:00:00Z' }, NOW), null);
 
-  // -- H13: domain:* without any pm-state label, aged (2026-08-19 incident) --
+  // -- H13: area:* without any pm-state label, aged (2026-08-19 incident) --
   const domainCard = (labels, updatedAt, extra = {}) => ({
     ...issue(labels),
     updated_at: updatedAt,
     ...extra,
   });
-  t('H13: aged domain card with no pm-state -> finding', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
-  t('H13: …and the finding names the threshold', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes(`${DOMAIN_HALF_STATE_STALE_HOURS}h`), true);
-  t('H13: …and blames the healing loop, not inventory', h13row(domainCard(['domain:engine-core'], hoursAgo(26)), NOW).includes('healing loop'), true);
-  t('H13: pm:queue pairs the domain label -> clean', h13DomainWithoutPmState(domainCard(['domain:engine-core', 'pm:queue'], hoursAgo(26)), NOW), null);
-  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:spec', 'needs-user-decision'], hoursAgo(200)), NOW), null);
-  t('H13: finding is a state (the grading round reads it) -> clean', h13DomainWithoutPmState(domainCard(['domain:cli', 'finding'], hoursAgo(200)), NOW), null);
+  t('H13: aged area card with no pm-state -> finding', typeof h13AreaWithoutPmState(domainCard(['area:data', 'bug', 'regression'], hoursAgo(26)), NOW), 'string');
+  t('H13: …and the finding names the threshold', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes(`${AREA_HALF_STATE_STALE_HOURS}h`), true);
+  t('H13: …and blames the healing loop, not inventory', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('healing loop'), true);
+  t('H13: pm:queue pairs the area label -> clean', h13AreaWithoutPmState(domainCard(['area:data', 'pm:queue'], hoursAgo(26)), NOW), null);
+  t('H13: needs-user-decision is a state (the inbox reads it) -> clean', h13AreaWithoutPmState(domainCard(['area:build', 'needs-user-decision'], hoursAgo(200)), NOW), null);
+  t('H13: finding is a state (the grading round reads it) -> clean', h13AreaWithoutPmState(domainCard(['area:package', 'finding'], hoursAgo(200)), NOW), null);
   // `pm:blocking` is a derived priority cache, not a state — a card carrying
   // only it is exactly as invisible to candidate queries, so it still flags.
-  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13DomainWithoutPmState(domainCard(['domain:services', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
-  t('H13: status:parked exemption (its normal shape IS this one)', h13DomainWithoutPmState(domainCard(['domain:services', 'status:parked'], hoursAgo(200)), NOW), null);
-  t('H13: tracking exemption', h13DomainWithoutPmState(domainCard(['domain:devx', 'tracking'], hoursAgo(200)), NOW), null);
-  t('H13: qa-run exemption', h13DomainWithoutPmState(domainCard(['domain:cli', 'qa-run'], hoursAgo(200)), NOW), null);
-  t('H13: no domain label is out of scope however bare', h13DomainWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
-  t('H13: fresh half-state is intake latency, not a finding', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(1)), NOW), null);
-  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(DOMAIN_HALF_STATE_STALE_HOURS)), NOW), null);
+  t('H13: pm:blocking alone is NOT a state -> still a finding', typeof h13AreaWithoutPmState(domainCard(['area:workflow', 'pm:blocking'], hoursAgo(26)), NOW), 'string');
+  t('H13: status:parked exemption (its normal shape IS this one)', h13AreaWithoutPmState(domainCard(['area:workflow', 'status:parked'], hoursAgo(200)), NOW), null);
+  t('H13: tracking exemption', h13AreaWithoutPmState(domainCard(['area:fleet', 'tracking'], hoursAgo(200)), NOW), null);
+  t('H13: qa-run exemption', h13AreaWithoutPmState(domainCard(['area:package', 'qa-run'], hoursAgo(200)), NOW), null);
+  t('H13: no area label is out of scope however bare', h13AreaWithoutPmState(domainCard(['bug'], hoursAgo(200)), NOW), null);
+  // The routing reading moved from `domain:*` to `area:*`: a card carrying
+  // only the old lane label is unrouted (the sweep's ① owns it), not H13's.
+  t('H13: ⛔ a domain:* label alone routes nothing -> out of scope', h13AreaWithoutPmState(domainCard(['domain:skills', 'bug'], hoursAgo(200)), NOW), null);
+  t('H13: …while the same card with an area:* is the finding', typeof h13AreaWithoutPmState(domainCard(['domain:skills', 'area:fleet', 'bug'], hoursAgo(200)), NOW), 'string');
+  t('H13: the row names area:*', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('`area:*`'), true);
+  t('H13: …and never domain:*', h13row(domainCard(['area:data'], hoursAgo(26)), NOW).includes('domain'), false);
+  t('H13: fresh half-state is intake latency, not a finding', h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(1)), NOW), null);
+  t('H13: exactly at the threshold -> clean (strictly beyond fires)', h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(AREA_HALF_STATE_STALE_HOURS)), NOW), null);
   // #4690 in miniature, same as H10/H11/H12: unreadable must not read as fresh.
-  t('H13: unreadable updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], 'not-a-date'), NOW), 'string');
-  t('H13: absent updated_at -> finding, not fresh', typeof h13DomainWithoutPmState(domainCard(['domain:engine-core'], undefined), NOW), 'string');
+  t('H13: unreadable updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(domainCard(['area:data'], 'not-a-date'), NOW), 'string');
+  t('H13: absent updated_at -> finding, not fresh', typeof h13AreaWithoutPmState(domainCard(['area:data'], undefined), NOW), 'string');
   // The louder line — the measured card carried its trigger in its own body.
   const p0Body = { body: 'P0 checklist-item failure (data-integrity DELETE regression) — priority label is triage’s to set' };
-  t('H13: body self-declaring P0 -> louder line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
-  t('H13: …which prescribes the emergency-triage channel', h13row(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
+  t('H13: body self-declaring P0 -> louder line', h13row(domainCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('P0-SUSPECT'), true);
+  t('H13: …which prescribes the emergency-triage channel', h13row(domainCard(['area:data'], hoursAgo(26), p0Body), NOW).includes('emergency-triage'), true);
   t('H13: data-integrity phrasing alone fires the louder line', h13SelfDeclaredP0({ title: '', body: 'a data integrity regression in DELETE' }), true);
   t('H13: the title is scanned too', h13SelfDeclaredP0({ title: 'p0 suspect: rows vanish', body: '' }), true);
   // Strip reuse (H7 reading 4): quoting the token in backticks is not a
   // self-declaration, and `P0` inside a word is not the token.
   t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
-  t('H13: a quiet body stays on the base line', h13row(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+  t('H13: a quiet body stays on the base line', h13row(domainCard(['area:data'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
 
   // -- H18: `pm:retriage` aged past one triage cycle (2026-08-19/20 ruling) --
   // Reuses `domainCard` — a generic (labels, updated_at, extra) issue builder,
@@ -29117,7 +29127,7 @@ async function selfTest() {
 
   // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
   t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
-  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13DomainWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'domain:skills']), updated_at: daysAgo(9) }, NOW), null);
+  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13AreaWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'area:fleet']), updated_at: daysAgo(9) }, NOW), null);
   t('H63: H22\'s residue set drops the marker — a fine state to close in', PM_RESIDUE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63: H29\'s exclusivity set drops it too — a card KIND, ⛔ not a position', PM_EXCLUSIVE_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63 control: …and H29 stays silent on a carrier with exactly one position', h29PmStateExclusivity(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])), null);
@@ -30409,8 +30419,8 @@ async function selfTest() {
   // The loudness contract between H13 and the renderer — one constant, two
   // readers. If the prefix ever drifts, this pair fails rather than the alarm
   // going quietly unsorted.
-  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), p0Body), NOW)), true);
-  t('loudness: H13\'s base line is not', isLoudFinding(h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26)), NOW)), false);
+  t('loudness: H13\'s P0 line is recognised by the renderer', isLoudFinding(h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(26), p0Body), NOW)), true);
+  t('loudness: H13\'s base line is not', isLoudFinding(h13AreaWithoutPmState(domainCard(['area:data'], hoursAgo(26)), NOW)), false);
 
   // Fold discipline: loud first, issue-number order within each band.
   const mixed = renderMarkdown([quietRow, loudRow, finding(100, 'H1', '`pm:dispatched` with no assignee')], counts);
@@ -31388,8 +31398,8 @@ async function selfTest() {
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
   // The readers the new state joins — each pinned in BOTH directions, so
   // the vocabulary cannot be half-added (the defect class this family is about).
-  t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
-  t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
+  t('vocabulary: H13 treats awaiting as a real state -> clean', h13AreaWithoutPmState(domainCard(['area:fleet', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
+  t('vocabulary: …while the same card without it is still H13', typeof h13AreaWithoutPmState(domainCard(['area:fleet'], hoursAgo(200)), NOW), 'string');
   t('vocabulary: H22 counts awaiting as residue on a closed card', h22labels(closedCard([AWAITING_MAINTAINER_LABEL])), AWAITING_MAINTAINER_LABEL);
   t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
