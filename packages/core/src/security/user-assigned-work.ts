@@ -26,17 +26,25 @@
  *   is a grant, not work, and moving it would move the person's permissions.
  * - a column the platform registers but provisions no storage for (an injected
  *   anchor on a federated object, `unprovisionedInjectedColumns`).
- * - the owner column (`owner_id`) of a `controlled_by_parent` detail. A
- *   detail's access follows its master (ADR-0055), so its owner is not who
- *   holds the work: on a timesheet, an expense or a line item it is the
- *   person who did it, and handing it over would make the successor appear
- *   to have done the leaver's work. The maintainer's ruling on Change Owner
- *   turns transfer off on a detail by default; until an object can say
- *   otherwise, the hand-over leaves the detail's owner where it is. The
- *   detail's own user fields (an `approver`, an `assignee`) are app-authored
- *   work and still count. It is left out rather than counted as not
- *   transferable: the only reason the count answer can give today
- *   (`transferable: false`) reads as a multi-valued field.
+ * - the owner column (`owner_id`) of a `controlled_by_parent` detail. On a
+ *   detail the owner records who did the work, not who holds it: on a
+ *   timesheet, an expense or a line item it is the person who did it, and
+ *   handing it over would make the successor appear to have done the
+ *   leaver's work. A detail row that names its master is reached through
+ *   that master (ADR-0055), so handing the master over hands over its
+ *   access. A detail row whose master reference is empty, on an OPTIONAL
+ *   master (ADR-0055 as amended), has no master: its owner reads and writes
+ *   it, beside View All / Modify All on the detail. That row's owner is left
+ *   out too, because the skip is per object. After a ban only View All /
+ *   Modify All holders reach such a row, and a holder of Modify All on the
+ *   detail moves it by filtering the detail by owner and editing the owner
+ *   by hand. The maintainer's ruling on Change Owner turns transfer off on a
+ *   detail by default; until an object can say otherwise, the hand-over
+ *   leaves the detail's owner where it is. The detail's own user fields (an
+ *   `approver`, an `assignee`) are app-authored work and still count. It is
+ *   left out rather than counted as not transferable: the only reason the
+ *   count answer can give today (`transferable: false`) reads as a
+ *   multi-valued field.
  *
  * A multi-valued user field is counted (any member names the user) but never
  * transferred: replacing one member of a list is a different edit from
