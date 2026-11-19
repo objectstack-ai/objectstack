@@ -4,7 +4,7 @@
 
 feat(scenarios): the gallery export writes each app as a package a customer can install and try (listing text, business-function facet, sample data), and the gallery check refuses an app with no sample data
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: none
 
 The exporter now adds three things to each app's `source/`. It adds them after the run is scored, so the AI's build is never graded on them, and it never writes them into the run's own project.
