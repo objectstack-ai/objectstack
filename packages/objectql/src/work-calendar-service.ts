@@ -4,27 +4,37 @@
  * The working-calendar service (ADR-0157 D1, D2, D8; open point 4), and the
  * write hooks that keep the two calendar objects readable.
  *
- * ## What it does, and what it leaves to the contract package
+ * ## What it does, and what it leaves to the other packages
  *
  * It RESOLVES a calendar under D2 — the code the consumer names, else the
  * organization's default (`is_default`), else a refusal, never wall-clock time
  * — loads its exceptions, caches the result, and computes with the pure
- * arithmetic in `@objectstack/spec/data` (`work-calendar.ts`), which also
- * holds the refusal codes and the service contract it implements. The
- * arithmetic sits there so the working-day formula functions count with the
- * same daylight-saving rule (D11, open point 3); a caller that must compute
- * synchronously resolves here first and counts over the plain data it gets.
+ * arithmetic in `@objectstack/formula` (`work-calendar.ts`), which also holds
+ * the three error classes. The arithmetic sits there so the working-day
+ * formula functions count with the same daylight-saving rule (D11, open point
+ * 3); a caller that must compute synchronously resolves here first and counts
+ * over the plain, frozen data it gets. The contract it implements is
+ * `IWorkCalendarService` (`@objectstack/spec/contracts`); the codes, column
+ * names and the `WorkCalendar` shape are `@objectstack/spec/data`'s.
  *
  * ## Which organization, under whose authority (open point 4)
  *
  * The exchange-rate reader's rule (`homeAmountServing.rateOn`, ADR-0144 D5):
  * the read runs `{ isSystem: true, tenantId: <the organization> }`, so a
  * rank-and-file member — who cannot read the calendar tables — still has every
- * deadline counted through them, and one organization's calendar never counts
- * another's. The organization is the one the CALLER names
+ * deadline counted through them. The organization is the one the CALLER names
  * (`WorkCalendarRef.organizationId`): the record's own, never the ambient
  * active organization. A system-context caller across organizations (the
  * approval sweep) names each request's `organization_id`.
+ *
+ * A computation that names NO organization is refused
+ * `ERR_WORK_CALENDAR_UNRESOLVED` (`no_organization`) before any read, the
+ * cache's included, in every tenancy posture but `single` (the engine's own
+ * reading, `resolveEnginePosture`). An elevated read without an organization
+ * carries no scope under a wall, so a code or a default would resolve in
+ * whichever organization happened to hold one; refusing it is what keeps one
+ * organization's calendar from counting another's. Under `single` there is one
+ * logical tenant and the read runs unscoped, as before.
  *
  * ## The cache
  *
@@ -48,11 +58,23 @@
  * periods); `maintained_from` on or before `maintained_through`; one default
  * per organization. A create that leaves `timezone` out takes the
  * organization's `localization.timezone` (D7), stored as the calendar's own.
+ *
+ * The hooks take the organization from the session. A system writer (a seed,
+ * a package install, the import engine) writes where it names: its row's own
+ * `organization_id`, else the call's tenant, else the session's. An update
+ * reads in the stored row's own organization. Outside the `single` posture no
+ * hook reads without an organization, the service's rule.
  */
 
 import {
   WORK_CALENDAR_CODE_PATTERN,
   WORK_CALENDAR_WEEKDAY_FIELDS,
+  type WorkCalendar,
+} from '@objectstack/spec/data';
+import type { IWorkCalendarService, WorkCalendarRef } from '@objectstack/spec/contracts';
+import type { FieldErrorCode } from '@objectstack/spec/api';
+import type { TenancyPosture } from '@objectstack/spec/security';
+import {
   WorkCalendarUnresolvedError,
   addWorkingDays,
   addWorkingHours,
@@ -62,12 +84,9 @@ import {
   isWorkingTime,
   parseWorkPeriods,
   workingDaysBetween,
-  type WorkCalendar,
-  type WorkCalendarRef,
-  type WorkCalendarService as WorkCalendarServiceContract,
-} from '@objectstack/spec/data';
-import type { FieldErrorCode } from '@objectstack/spec/api';
+} from '@objectstack/formula';
 import { validationFailure } from '@objectstack/types';
+import { resolveEnginePosture } from './engine-driver-options.js';
 
 /** The calendar object (`@objectstack/platform-objects`). */
 export const WORK_CALENDAR_OBJECT = 'sys_work_calendar';
@@ -97,6 +116,11 @@ export interface WorkCalendarServiceOptions {
   getEngine: () => WorkCalendarReadEngine | undefined;
   /** Is the calendar object registered on this kernel? Without it no calendar resolves. */
   hasCalendarObject?: () => boolean;
+  /**
+   * The tenancy posture, read per computation. Omitted, it is the posture the
+   * engine from `getEngine` enforces ({@link enginePostureOf}).
+   */
+  posture?: () => TenancyPosture;
   /** Milliseconds now — injectable for the TTL pin. */
   now?: () => number;
   ttlMs?: number;
@@ -105,6 +129,33 @@ export interface WorkCalendarServiceOptions {
 type Row = Record<string, unknown>;
 
 const isRow = (v: unknown): v is Row => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** A stored or carried organization id, or `undefined` for none. */
+function organizationOf(value: unknown): string | undefined {
+  return value === undefined || value === null || value === '' ? undefined : String(value);
+}
+
+/**
+ * The tenancy posture an engine enforces, through the engine's own reader
+ * (`resolveEnginePosture`), read live: the posture SecurityPlugin injected on
+ * the engine, else the deployment's configuration, else `isolated` when that
+ * cannot be read.
+ */
+export function enginePostureOf(engine?: unknown): TenancyPosture {
+  const provider = (engine as { tenancyPostureProvider?: () => string | undefined } | null | undefined)?.tenancyPostureProvider;
+  return resolveEnginePosture.call({ tenancyPostureProvider: provider });
+}
+
+/** Where the hooks' elevated reads run; `read: false` when they make none. */
+interface ReadScope {
+  read: boolean;
+  organizationId?: string | undefined;
+}
+
+/** May an elevated calendar read run in `organizationId`? Not without one, outside `single`. */
+function mayReadIn(organizationId: string | undefined, posture: TenancyPosture): boolean {
+  return organizationId !== undefined || posture === 'single';
+}
 
 /** The elevated read context in the organization a computation belongs to (open point 4). */
 function readContext(organizationId: string | undefined, transaction?: unknown): Row {
@@ -122,14 +173,20 @@ function namedCode(ref: WorkCalendarRef): string | undefined {
 const CODE_RE = new RegExp(WORK_CALENDAR_CODE_PATTERN);
 
 /** ADR-0157: the calendar service. See the module note. */
-export class WorkCalendarService implements WorkCalendarServiceContract {
+export class WorkCalendarService implements IWorkCalendarService {
   private readonly cache = new Map<string, { at: number; calendar: Promise<WorkCalendar> }>();
 
   constructor(private readonly options: WorkCalendarServiceOptions) {}
 
   resolve(ref: WorkCalendarRef): Promise<WorkCalendar> {
+    // No organization, outside `single`: refused before any read, the cache's
+    // included, so a calendar resolved under another posture is never served.
+    const posture = this.options.posture?.() ?? enginePostureOf(this.options.getEngine());
+    if (!mayReadIn(organizationOf(ref.organizationId), posture)) {
+      return Promise.reject(new WorkCalendarUnresolvedError('no_organization', namedCode(ref)));
+    }
     const now = (this.options.now ?? Date.now)();
-    const key = JSON.stringify([ref.organizationId ?? null, namedCode(ref) ?? null]);
+    const key = JSON.stringify([organizationOf(ref.organizationId) ?? null, namedCode(ref) ?? null]);
     const hit = this.cache.get(key);
     if (hit && now - hit.at < (this.options.ttlMs ?? WORK_CALENDAR_CACHE_TTL_MS)) return hit.calendar;
     const calendar = this.load(ref);
@@ -172,7 +229,7 @@ export class WorkCalendarService implements WorkCalendarServiceContract {
     if (!engine || this.options.hasCalendarObject?.() === false) {
       throw new WorkCalendarUnresolvedError(code === undefined ? 'no_default' : 'not_found', code);
     }
-    const context = readContext(ref.organizationId);
+    const context = readContext(organizationOf(ref.organizationId));
     const rows = (await engine.find(WORK_CALENDAR_OBJECT, {
       where: code === undefined ? { is_default: true } : { code },
       limit: 2,
@@ -226,26 +283,44 @@ function periodsRefusal(field: string, value: unknown): FieldRefusal | undefined
   return { field, code: 'invalid_value', message, value };
 }
 
-/** The organization an insert row is stored in: its own, else the call's tenant, else the writer's. */
-function insertOrganization(ctx: any, row: Row): string | undefined {
-  for (const candidate of [row.organization_id, ctx?.input?.options?.tenantId, ctx?.session?.organizationId]) {
-    if (candidate !== undefined && candidate !== null && candidate !== '') return String(candidate);
+/**
+ * Where an insert's elevated reads run (see the module note): `read: false`
+ * when the hooks make none.
+ */
+function insertReadOrganization(ctx: any, row: Row, posture: TenancyPosture): ReadScope {
+  let organizationId: string | undefined;
+  if (ctx?.session?.isSystem === true) {
+    // A system writer writes where it names.
+    organizationId = organizationOf(row.organization_id)
+      ?? organizationOf(ctx?.input?.options?.tenantId)
+      ?? organizationOf(ctx?.session?.organizationId);
+  } else {
+    // Any other writer: the session's organization only.
+    organizationId = organizationOf(ctx?.session?.organizationId);
+    const named = organizationOf(row.organization_id);
+    if (named !== undefined && named !== organizationId) return { read: false };
   }
-  return undefined;
+  return mayReadIn(organizationId, posture) ? { read: true, organizationId } : { read: false };
 }
 
 export interface WorkCalendarHookOptions {
   /** The organization's `localization.timezone`, for a create that leaves `timezone` out (ADR-0157 D7). */
   timezoneOf?: (organizationId: string | undefined) => Promise<string | undefined>;
+  /** The tenancy posture; omitted, the one the hooked engine enforces ({@link enginePostureOf}). */
+  posture?: () => TenancyPosture;
 }
 
-/** Judge a calendar row's post-image: the columns the write carries, and the pair they belong to. */
+/**
+ * Judge a calendar row's post-image: the columns the write carries, and the
+ * pair they belong to. `scope.read` false skips the one-default judgement,
+ * which reads (see the module note).
+ */
 async function judgeCalendar(
   engine: WorkCalendarReadEngine,
   ctx: any,
   data: Row,
   previous: Row | undefined,
-  organizationId: string | undefined,
+  scope: ReadScope,
 ): Promise<void> {
   const problems: FieldRefusal[] = [];
   for (const field of WORK_CALENDAR_WEEKDAY_FIELDS) {
@@ -268,12 +343,12 @@ async function judgeCalendar(
   }
   // One default per organization (ADR-0157 D2): judged when the write makes
   // this row a default, against every OTHER default the organization holds.
-  if (data.is_default === true && previous?.is_default !== true) {
+  if (scope.read && data.is_default === true && previous?.is_default !== true) {
     const others = (await engine.find(WORK_CALENDAR_OBJECT, {
       where: { is_default: true },
       fields: ['id', 'code'],
       limit: 2,
-      context: readContext(organizationId, ctx?.transaction),
+      context: readContext(scope.organizationId, ctx?.transaction),
     })).filter(isRow).filter((r) => previous === undefined || String(r.id) !== String(previous.id));
     if (others.length > 0) {
       problems.push({
@@ -326,24 +401,27 @@ export function installWorkCalendarHooks(
   engine.unregisterHooksByPackage?.(WORK_CALENDAR_HOOK_PACKAGE);
   const bind = (event: string, object: string | string[], handler: (ctx: any) => unknown) =>
     engine.registerHook(event, handler, { object, packageId: WORK_CALENDAR_HOOK_PACKAGE });
+  const postureNow = () => options.posture?.() ?? enginePostureOf(engine);
 
   bind('beforeInsert', WORK_CALENDAR_OBJECT, async (ctx: any) => {
     const row = ctx?.input?.data;
     if (!isRow(row)) return;
-    const organizationId = insertOrganization(ctx, row);
+    const scope = insertReadOrganization(ctx, row, postureNow());
     const zone = row.timezone;
-    if ((zone === undefined || zone === null || zone === '') && options.timezoneOf) {
-      const fallback = await options.timezoneOf(organizationId);
+    if ((zone === undefined || zone === null || zone === '') && options.timezoneOf && scope.read) {
+      const fallback = await options.timezoneOf(scope.organizationId);
       if (fallback) row.timezone = fallback;
     }
-    await judgeCalendar(engine, ctx, row, undefined, organizationId);
+    await judgeCalendar(engine, ctx, row, undefined, scope);
   });
   bind('beforeUpdate', WORK_CALENDAR_OBJECT, async (ctx: any) => {
     const data = ctx?.input?.data;
     const previous = isRow(ctx?.previous) ? ctx.previous : undefined;
     if (!isRow(data) || !previous) return;
-    const org = previous.organization_id;
-    await judgeCalendar(engine, ctx, data, previous, org === undefined || org === null || org === '' ? undefined : String(org));
+    // The stored row's own organization: the engine read it under the write's own scope.
+    const organizationId = organizationOf(previous.organization_id);
+    const scope: ReadScope = mayReadIn(organizationId, postureNow()) ? { read: true, organizationId } : { read: false };
+    await judgeCalendar(engine, ctx, data, previous, scope);
   });
   bind('beforeInsert', WORK_CALENDAR_EXCEPTION_OBJECT, (ctx: any) => {
     const row = ctx?.input?.data;

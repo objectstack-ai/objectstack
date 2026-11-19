@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
   WORK_CALENDAR_INVALID_CODE,
   WORK_CALENDAR_NOT_MAINTAINED_CODE,
+  type WorkCalendar,
+} from '@objectstack/spec/data';
+import {
   addWorkingDays,
   addWorkingHours,
   buildWorkCalendar,
@@ -11,7 +14,6 @@ import {
   isWorkingTime,
   parseWorkPeriods,
   workingDaysBetween,
-  type WorkCalendar,
 } from './work-calendar';
 
 // ADR-0157: the arithmetic over one resolved calendar. 2026-10-01 is a Thursday.
@@ -156,5 +158,20 @@ describe('working calendar — a transition day counts elapsed time (ADR-0157 D1
     // CONTROL: a week later the same period holds three hours.
     expect(addWorkingHours(ny, Date.parse('2026-11-08T06:00:00Z'), 3.5)).toBe(Date.parse('2026-11-09T06:30:00Z'));
     expect(isWorkingTime(ny, Date.parse('2026-11-01T08:30:00Z'))).toBe(true);
+  });
+});
+
+describe('working calendar — a built calendar cannot be changed by a reader', () => {
+  it('is frozen down to its periods, so one cached calendar answers every caller alike', () => {
+    expect(Object.isFrozen(cn)).toBe(true);
+    expect(Object.isFrozen(cn.weekly)).toBe(true);
+    expect(Object.isFrozen(cn.weekly[0])).toBe(true);
+    expect(Object.isFrozen(cn.weekly[0]![0])).toBe(true);
+    expect(Object.isFrozen(cn.exceptions)).toBe(true);
+    expect(Object.isFrozen(cn.exceptions['2026-10-10'])).toBe(true);
+    expect(Object.isFrozen(cn.exceptions['2026-10-10']!.periods)).toBe(true);
+    const exceptions = cn.exceptions as Record<string, unknown>;
+    expect(() => { exceptions['2026-10-12'] = { kind: 'off', periods: [] }; }).toThrow(TypeError);
+    expect(isWorkingDay(cn, '2026-10-12')).toBe(true);
   });
 });

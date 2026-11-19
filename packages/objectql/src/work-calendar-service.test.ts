@@ -12,17 +12,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveThrownHttpError } from '@objectstack/types';
-import {
-  WORK_CALENDAR_NOT_MAINTAINED_CODE,
-  WORK_CALENDAR_UNRESOLVED_CODE,
-  isWorkingDay,
-} from '@objectstack/spec/data';
+import { WORK_CALENDAR_NOT_MAINTAINED_CODE, WORK_CALENDAR_UNRESOLVED_CODE } from '@objectstack/spec/data';
+import { isWorkingDay } from '@objectstack/formula';
 import { ObjectQL } from './engine.js';
 import {
   WORK_CALENDAR_CACHE_TTL_MS,
   WORK_CALENDAR_EXCEPTION_OBJECT,
   WORK_CALENDAR_OBJECT,
   WorkCalendarService,
+  enginePostureOf,
   installWorkCalendarHooks,
 } from './work-calendar-service.js';
 
@@ -44,7 +42,11 @@ const HOLIDAYS: Row[] = [
 const sh = (day: string, hm: string) => Date.parse(`${day}T${hm}:00+08:00`);
 const ORG = { organizationId: 'org_a' } as const;
 
-/** A read double that answers equality `where`s and records every read. */
+/**
+ * A read double that answers equality `where`s and records every read. A read
+ * whose context names a tenant sees that organization's rows (and rows that
+ * carry none), as the engine scopes it; a read without one sees every row.
+ */
 function readDouble(calendars: Row[], exceptions: Row[]) {
   const reads: Array<{ object: string; query: Row }> = [];
   return {
@@ -52,7 +54,9 @@ function readDouble(calendars: Row[], exceptions: Row[]) {
     async find(object: string, query: Row) {
       reads.push({ object, query });
       const src = object === WORK_CALENDAR_OBJECT ? calendars : exceptions;
+      const tenant = query.context?.tenantId;
       const hits = src.filter((r) =>
+        (tenant === undefined || r.organization_id === undefined || r.organization_id === tenant) &&
         Object.entries(query.where ?? {}).every(([k, v]) => {
           // Equality only: a combinator or an operator object is refused, never answered wrong.
           if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`readDouble answers equality only, not ${k}`);
@@ -117,6 +121,44 @@ describe('WorkCalendarService — organization and authority (ADR-0157 open poin
       [WORK_CALENDAR_EXCEPTION_OBJECT, { isSystem: true, tenantId: 'org_b' }],
     ]);
     expect(engine.reads[1]!.query.where).toEqual({ calendar: 'cal_cn' });
+  });
+});
+
+describe('WorkCalendarService — no organization, outside `single` (ADR-0157 open point 4)', () => {
+  // A calendar that only organization B holds, as its default and by code.
+  const B_ONLY: Row = { ...CN, id: 'cal_b', code: 'plant_b', organization_id: 'org_b' };
+
+  for (const posture of ['isolated', 'group'] as const) {
+    it(`${posture}: a code or a default only another organization holds is refused before any read`, async () => {
+      const engine = readDouble([B_ONLY], []);
+      const svc = new WorkCalendarService({ getEngine: () => engine, posture: () => posture });
+      for (const ref of [{ organizationId: undefined, calendar: 'plant_b' }, { organizationId: undefined }, { organizationId: '' }]) {
+        const e = await refusal(svc.resolve(ref));
+        expect(e).toMatchObject({ code: WORK_CALENDAR_UNRESOLVED_CODE, reason: 'no_organization' });
+        expect(resolveThrownHttpError(e)).toMatchObject({ status: 400, code: WORK_CALENDAR_UNRESOLVED_CODE });
+      }
+      await expect(svc.addWorkingDays({ organizationId: undefined }, '2026-09-30', 1)).rejects.toMatchObject({ reason: 'no_organization' });
+      expect(engine.reads).toHaveLength(0);
+      // CONTROL: named, the organization that holds it resolves it.
+      expect((await svc.resolve({ organizationId: 'org_b', calendar: 'plant_b' })).code).toBe('plant_b');
+    });
+  }
+
+  it('single: a computation without an organization reads unscoped, as before', async () => {
+    const engine = readDouble([B_ONLY], []);
+    const svc = new WorkCalendarService({ getEngine: () => engine, posture: () => 'single' });
+    expect((await svc.resolve({ organizationId: undefined })).code).toBe('plant_b');
+    expect(engine.reads[0]!.query.context).toEqual({ isSystem: true });
+  });
+
+  it('reads the posture the engine enforces when none is passed', async () => {
+    const engine = new ObjectQL();
+    engine.setTenancyPostureProvider(() => 'isolated');
+    expect(enginePostureOf(engine)).toBe('isolated');
+    const svc = new WorkCalendarService({ getEngine: () => engine as never });
+    await expect(svc.resolve({ organizationId: undefined })).rejects.toMatchObject({ reason: 'no_organization' });
+    engine.setTenancyPostureProvider(() => 'single');
+    expect(enginePostureOf(engine)).toBe('single'); // CONTROL
   });
 });
 
@@ -226,6 +268,7 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
     await engine.init();
     engine.registry.registerObject(CALENDAR_SCHEMA as any, 'com.objectstack.test.work-calendar');
     engine.registry.registerObject(EXCEPTION_SCHEMA as any, 'com.objectstack.test.work-calendar');
+    engine.setTenancyPostureProvider(() => 'single');
     svc = new WorkCalendarService({ getEngine: () => engine as never });
     zoneAsked = [];
     installWorkCalendarHooks(engine as never, svc, {
@@ -284,5 +327,77 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
     expect(isWorkingDay(await svc.resolve(ORG), '2026-10-12')).toBe(true);
     await engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, { id: 'x1', calendar: 'cal_cn', date: '2026-10-12', kind: 'off' }, { context: { isSystem: true } });
     expect(isWorkingDay(await svc.resolve(ORG), '2026-10-12')).toBe(false);
+  });
+});
+
+describe('the calendar hooks take the organization from the session', () => {
+  const A_DEFAULT: Row = { ...CN, id: 'cal_a', code: 'plant_a', organization_id: 'org_a' };
+  const B_DEFAULT: Row = { ...CN, id: 'cal_b', code: 'plant_b', organization_id: 'org_b' };
+  const created = (organizationId?: string): Row => ({
+    ...CN, id: 'cal_new', code: 'new_one', timezone: undefined,
+    ...(organizationId === undefined ? {} : { organization_id: organizationId }),
+  });
+
+  /** The hooks bound on a read double, with the time-zone reads they ask for. */
+  function bound(posture: 'single' | 'isolated') {
+    const handlers = new Map<string, (ctx: any) => unknown>();
+    const engine = {
+      ...readDouble([A_DEFAULT, B_DEFAULT], []),
+      registerHook(event: string, handler: (ctx: any) => unknown, options?: Row) {
+        handlers.set(`${event}:${String(options?.object)}`, handler);
+      },
+    };
+    const zoneAsked: Array<string | undefined> = [];
+    installWorkCalendarHooks(engine, { invalidate() {} }, {
+      posture: () => posture,
+      timezoneOf: async (org) => { zoneAsked.push(org); return 'Asia/Shanghai'; },
+    });
+    const insert = (session: Row, data: Row) =>
+      handlers.get(`beforeInsert:${WORK_CALENDAR_OBJECT}`)!({ session, input: { data, options: {} } });
+    const update = (session: Row, data: Row, previous: Row) =>
+      handlers.get(`beforeUpdate:${WORK_CALENDAR_OBJECT}`)!({ session, input: { data, options: {} }, previous });
+    return { reads: engine.reads, zoneAsked, insert, update };
+  }
+  const member = { userId: 'usr_1', organizationId: 'org_a', isSystem: false };
+
+  for (const posture of ['single', 'isolated'] as const) {
+    it(`${posture}: a member's create reads in the session's organization, not one its row names`, async () => {
+      const h = bound(posture);
+      const row = created('org_b');
+      await h.insert(member, row);
+      expect(h.reads).toEqual([]);
+      expect(h.zoneAsked).toEqual([]);
+      expect(row.timezone).toBeUndefined();
+
+      // CONTROL: the session's own organization is read, and judged.
+      const own = bound(posture);
+      const e = await refusal(Promise.resolve(own.insert(member, created())));
+      expect(e.fields).toEqual([expect.objectContaining({ field: 'is_default', code: 'invalid_value' })]);
+      expect(e.message).toContain('plant_a');
+      expect(own.reads.map((r) => r.query.context?.tenantId)).toEqual(['org_a']);
+      expect(own.zoneAsked).toEqual(['org_a']);
+    });
+  }
+
+  it('a system writer writes where its row names', async () => {
+    const h = bound('isolated');
+    const e = await refusal(Promise.resolve(h.insert({ isSystem: true }, created('org_b'))));
+    expect(e.message).toContain('plant_b');
+    expect(h.zoneAsked).toEqual(['org_b']);
+  });
+
+  it('isolated: a write that names no organization reads nothing', async () => {
+    const stored: Row = { ...CN, id: 'cal_old', code: 'old_one', is_default: false };
+    const h = bound('isolated');
+    await h.insert({ isSystem: true }, created());
+    await h.update({ isSystem: true }, { is_default: true }, stored);
+    expect(h.reads).toEqual([]);
+    expect(h.zoneAsked).toEqual([]);
+    // CONTROL: under `single` the same writes read, and are judged.
+    const single = bound('single');
+    for (const write of [() => single.insert({ isSystem: true }, created()), () => single.update({ isSystem: true }, { is_default: true }, stored)]) {
+      const e = await refusal(Promise.resolve(write()));
+      expect(resolveThrownHttpError(e)).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+    }
   });
 });

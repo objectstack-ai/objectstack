@@ -1,5 +1,5 @@
 {
   "file": "packages/objectql/src/work-calendar-service.ts",
   "adrs": ["ADR-0157", "ADR-0144"],
-  "invariant": "ADR-0157 D2: a calendar resolves by the named code, else the organization default, else a refusal with a ledger code, never wall-clock time. Open point 4 follows the ADR-0144 exchange-rate reader: the read is elevated and scoped to the organization the caller names (the record's own), so a member's deadlines are counted through tables the member cannot read and one organization's calendar never counts another's."
+  "invariant": "ADR-0157 D2: a calendar resolves by the named code, else the organization default, else a refusal with a ledger code, never wall-clock time. Open point 4 follows the ADR-0144 exchange-rate reader: the read is elevated and scoped to the organization the caller names (the record's own), so a member's deadlines are counted through tables the member cannot read. Outside the single tenancy posture (resolveEnginePosture), a computation that names no organization is refused ERR_WORK_CALENDAR_UNRESOLVED before any read, so one organization's calendar never counts another's; the write hooks take the organization from the session and read nothing without one."
 }
