@@ -2,8 +2,8 @@
 
 /**
  * A security refusal's `userMessage` names the master object (the
- * master-detail write gate) and the refused fields (the field-write gate) with
- * the rule the metadata route serves the same labels by: a request in the
+ * master-detail write gate) with the rule the metadata route serves the same
+ * label by: a request in the
  * deployment's declared `i18n.sourceLocale` reads the label as the author
  * wrote it, never the `defaultLocale` row `t()` falls to.
  *
@@ -14,9 +14,10 @@
  * `zh-CN` row; with no `sourceLocale` declared an `en` request walks to it as
  * before.
  *
- * The master gate is measured with the real security layer on a real
- * `ObjectQL` over a real `SqlDriver`, through the engine's own writes; the
- * field-write gate through the middleware itself.
+ * Measured with the real security layer on a real `ObjectQL` over a real
+ * `SqlDriver`, through the engine's own writes. The field-write gate's half
+ * of the same scenario lives in its harness,
+ * `owner-queue-field-write-user-message.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -33,7 +34,6 @@ import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-o
 const ZH_CN = {
   objects: {
     lsd_contract: { label: '合同' },
-    lsd_case: { label: '工单', fields: { salary: { label: '薪资' }, grade: { label: '等级' } } },
   },
 };
 
@@ -172,87 +172,5 @@ describe('master-detail write gate: the master is named in the declared sourceLo
   it('CONTROL: with no sourceLocale declared, en walks to the zh-CN row as before', async () => {
     services.i18n = servedI18n(NO_SOURCE);
     expect((await refusal('en')).userMessage).toBe(sentence('master_record_edit_denied', 'en', { master: '合同' }));
-  });
-});
-
-describe('field-write gate: the refused fields are named in the declared sourceLocale as authored', () => {
-  const memberSet = {
-    name: 'member_default',
-    label: 'Member',
-    objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
-    fields: {
-      'lsd_case.salary': { readable: true, editable: false },
-      'lsd_case.grade': { readable: true, editable: false },
-    },
-  } as unknown as PermissionSet;
-  const schema = {
-    name: 'lsd_case',
-    label: 'Case',
-    fields: {
-      id: { name: 'id' },
-      organization_id: { name: 'organization_id' },
-      owner_id: { name: 'owner_id', label: 'Owner' },
-      salary: { name: 'salary', label: 'Salary' },
-      grade: { name: 'grade', label: 'Grade' },
-    },
-  };
-
-  const boot = async (i18n: ReturnType<typeof servedI18n>) => {
-    let middleware: any;
-    const ql = {
-      registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
-      getSchema: () => schema,
-      findOne: vi.fn(async () => ({ id: 'c1', owner_id: 'u1', organization_id: 'org-1' })),
-      find: vi.fn(async () => [] as Record<string, unknown>[]),
-    };
-    const services: Record<string, any> = {
-      manifest: { register: vi.fn() },
-      objectql: ql,
-      metadata: { get: async () => schema, list: async () => [memberSet] },
-      sharing: { checkEdit: vi.fn(async () => 'abstain'), checkDelete: vi.fn(async () => 'abstain') },
-      i18n,
-    };
-    const ctx: any = {
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      registerService: vi.fn(),
-      getService: (name: string) => {
-        if (!(name in services)) throw new Error(`service not registered: ${name}`);
-        return services[name];
-      },
-    };
-    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-    await plugin.init(ctx);
-    await plugin.start(ctx);
-    return async (locale: string): Promise<any> => {
-      const opCtx = {
-        object: 'lsd_case',
-        operation: 'update',
-        data: { id: 'c1', salary: 1, grade: 'A' },
-        context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], locale },
-      };
-      try {
-        await middleware(opCtx, async () => undefined);
-      } catch (e) {
-        return e;
-      }
-      throw new Error('expected a refusal, the write was admitted');
-    };
-  };
-
-  it('en: the fields are named by their declared English labels', async () => {
-    const e = await (await boot(servedI18n(SOURCE_EN)))('en');
-    expect(e.code).toBe('PERMISSION_DENIED');
-    expect(e.status).toBe(403);
-    expect(e.userMessage).toBe(sentence('field_edit_denied', 'en', { fields: '“Grade”, “Salary”' }));
-  });
-
-  it('CONTROL: zh-CN still reads the zh-CN rows', async () => {
-    const e = await (await boot(servedI18n(SOURCE_EN)))('zh-CN');
-    expect(e.userMessage).toBe(sentence('field_edit_denied', 'zh-CN', { fields: '「等级」、「薪资」' }));
-  });
-
-  it('CONTROL: with no sourceLocale declared, en walks to the zh-CN rows as before', async () => {
-    const e = await (await boot(servedI18n(NO_SOURCE)))('en');
-    expect(e.userMessage).toBe(sentence('field_edit_denied', 'en', { fields: '“等级”, “薪资”' }));
   });
 });

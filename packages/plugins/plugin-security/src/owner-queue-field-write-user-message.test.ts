@@ -93,6 +93,8 @@ const boot = async (opts: {
   row?: Record<string, unknown> | null;
   verdict?: 'allow' | 'deny' | 'abstain';
   translations?: Record<string, Record<string, string>>;
+  /** An i18n service of the caller's own, in place of the one `translations` spells. */
+  i18n?: Record<string, unknown>;
 }) => {
   const schema: any = { name: 'case', label: 'Case', fields: FIELDS };
   let middleware: any;
@@ -116,7 +118,7 @@ const boot = async (opts: {
         org && QUEUES[name] ? { name, label: name, source: 'authored', organizationId: org, members: [] } : null),
       isMember: vi.fn(async (userId: string, name: string) => !!QUEUES[name]?.includes(userId)),
     },
-    i18n: {
+    i18n: opts.i18n ?? {
       t: (key: string, loc: string) => (opts.translations ?? TRANSLATIONS)[loc]?.[key] ?? key,
       getLocales: () => Object.keys(opts.translations ?? TRANSLATIONS),
       getTranslations: (loc: string) => nestedRows((opts.translations ?? TRANSLATIONS)[loc]),
@@ -432,5 +434,64 @@ describe('the queue 403 on the wire: a sentence per verb, nothing else moves', (
       expect(create, `${locale} defines record_queue_assign_denied`).toBeTypeOf('string');
       expect(create, locale).not.toBe(BUILTIN_OPERATION_MESSAGES[locale].record_queue_change_denied);
     }
+  });
+});
+
+/**
+ * [#34030] The refused fields are named with the rule the metadata route
+ * serves the same labels by: a request in the deployment's declared
+ * `i18n.sourceLocale` reads the label as the author wrote it, never the
+ * `defaultLocale` row `t()` falls to.
+ *
+ * The scenario: an app authored in English (`sourceLocale: 'en'`) that
+ * defaults its users to Chinese (`defaultLocale: 'zh-CN'`), declares no
+ * `fallbackLocale` (the served adapter's fallback collapses to `zh-CN`) and
+ * ships a `zh-CN` bundle only. CONTROLS: a `zh-CN` request still reads the
+ * `zh-CN` rows; with no `sourceLocale` declared an `en` request walks to them
+ * as before. The master-detail gate's half: `denial-label-source-locale.test.ts`.
+ */
+describe('the field-write 403 names the fields in the declared sourceLocale as authored', () => {
+  const ZH_CN = { objects: { case: { fields: { salary: { label: '薪资' }, grade: { label: '等级' } } } } };
+  /** The served adapter's shape (`FileI18nAdapter`): requested locale, then the declared fallback, then the key. */
+  const servedI18n = (declared: { defaultLocale: string; sourceLocale?: string }) => {
+    const bundles: Record<string, Record<string, unknown>> = { 'zh-CN': ZH_CN };
+    const fallback = declared.defaultLocale;
+    const read = (data: unknown, key: string): string | undefined => {
+      let cur: unknown = data;
+      for (const part of key.split('.')) {
+        if (!cur || typeof cur !== 'object') return undefined;
+        cur = (cur as Record<string, unknown>)[part];
+      }
+      return typeof cur === 'string' ? cur : undefined;
+    };
+    return {
+      t: (key: string, locale: string) =>
+        read(bundles[locale], key) ?? (fallback !== locale ? read(bundles[fallback], key) : undefined) ?? key,
+      getLocales: () => Object.keys(bundles),
+      getTranslations: (locale: string) => bundles[locale] ?? {},
+      getDefaultLocale: () => declared.defaultLocale,
+      getFallbackLocale: () => fallback,
+      getSourceLocale: () => declared.sourceLocale,
+    };
+  };
+  const render = (locale: string, fields: string) =>
+    renderOperationMessage({ messageKey: 'field_edit_denied', params: { fields } }, { locale });
+
+  it('en: the fields are named by their declared English labels', async () => {
+    const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1, i18n: servedI18n({ defaultLocale: 'zh-CN', sourceLocale: 'en' }) });
+    const refusal = await refuse(update({ salary: 1, grade: 'A' }, 'en'));
+    expect(refusal.code).toBe('PERMISSION_DENIED');
+    expect(refusal.status).toBe(403);
+    expect(refusal.userMessage).toBe(render('en', '“Grade”, “Salary”'));
+  });
+
+  it('CONTROL: zh-CN still reads the zh-CN rows', async () => {
+    const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1, i18n: servedI18n({ defaultLocale: 'zh-CN', sourceLocale: 'en' }) });
+    expect((await refuse(update({ salary: 1, grade: 'A' }, 'zh-CN'))).userMessage).toBe(render('zh-CN', '「等级」、「薪资」'));
+  });
+
+  it('CONTROL: with no sourceLocale declared, en walks to the zh-CN rows as before', async () => {
+    const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1, i18n: servedI18n({ defaultLocale: 'zh-CN' }) });
+    expect((await refuse(update({ salary: 1, grade: 'A' }, 'en'))).userMessage).toBe(render('en', '“等级”, “薪资”'));
   });
 });
