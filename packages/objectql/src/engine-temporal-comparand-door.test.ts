@@ -577,3 +577,77 @@ describe('[#20480] a time comparand whose instant has no four-digit UTC year is 
     expect(reads, 'every control reached the driver').toHaveLength(6);
   });
 });
+
+/**
+ * [#34938] A period key is judged as written at this door, never stepped
+ * around: `{current_iso_week}` resolves to an ISO week key (`2026-W47`), which
+ * is text, so on a `date`, `datetime` or `time` column it takes the refusal the
+ * literal key takes — `INVALID_FILTER` / 400, before any driver read.
+ *
+ * Measured before the door judged it, through `engine.find` on SqlDriver
+ * (SQLite) and InMemoryDriver alike, the clock at 2026-11-19: `$eq` and `$gte`
+ * answered 200 `[]` and `$lt` answered every row on `date` and `datetime`,
+ * `$gt` answered 200 `[]` on `time`, while the literal `"2026-W47"` was refused
+ * here. The refusal sits in front of every driver, so this file's recording
+ * driver pins it for both; the REST door over SqlDriver is
+ * `packages/rest/src/data-temporal-write-real-day-iso.test.ts`.
+ *
+ * The positive controls share the test, by this file's ruling: the key still
+ * resolves on a text column, and `{current_week_start}` on a `date` column.
+ */
+describe('[#34938] a period key on a temporal column is refused as written, and still resolves on text', () => {
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+  const refusalOf = async (p: Promise<unknown>) =>
+    p.then(() => null, (e: any) => e as Error & { code?: string; status?: number });
+
+  beforeEach(async () => {
+    // Date only: the engine's async paths keep real timers. A Thursday, ISO week 47.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(support_case, 'test');
+    await engine.insert('support_case', { id: 'w47', subject: '2026-W47', due_on: '2026-11-19', created_date: '2026-11-19T10:00:00.000Z', opens_at: '10:00:00' });
+    await engine.insert('support_case', { id: 'w46', subject: '2026-W46', due_on: '2026-11-12', created_date: '2026-11-12T10:00:00.000Z', opens_at: '09:00:00' });
+    reads.length = 0;
+  });
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('refuses {current_iso_week} on a date, a datetime and a time column with INVALID_FILTER / 400 before any read — the key still resolves on text, and {current_week_start} on a date', async () => {
+    for (const field of ['due_on', 'created_date', 'opens_at'] as const) {
+      for (const token of ['{current_iso_week}', '${current_iso_week}']) {
+        for (const op of ['$eq', '$lt', '$gte', '$gt'] as const) {
+          const err = await refusalOf(engine.find('support_case', { where: { [field]: { [op]: token } } }));
+          expect(err, `${field} ${op} ${token}`).not.toBeNull();
+          expect(err!.code, `${field} ${op} ${token}`).toBe('INVALID_FILTER');
+          expect(err!.status, `${field} ${op} ${token}`).toBe(400);
+          expect(err!.message).toContain(`'${field}'`);
+        }
+        // The implicit-equality and list-member positions too.
+        for (const where of [{ [field]: token }, { [field]: { $in: [token] } }]) {
+          await expect(engine.find('support_case', { where: where as never }), `${field} ${JSON.stringify(where)}`)
+            .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+        }
+      }
+      // The literal key takes the same refusal — the class the token now joins.
+      await expect(engine.find('support_case', { where: { [field]: { $eq: '2026-W47' } } }))
+        .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+
+    // ── the POSITIVE CONTROLS, in this same test ────────────────────────────
+    const ids = async (where: Record<string, unknown>) =>
+      (await engine.find('support_case', { where })).map((r: any) => r.id).sort();
+    expect(await ids({ subject: { $eq: '{current_iso_week}' } }), 'text $eq').toEqual(['w47']);
+    expect(await ids({ subject: '${current_iso_week}' }), 'text, implicit equality').toEqual(['w47']);
+    await engine.find('support_case', { where: { subject: { $contains: '{current_iso_week}' } } });
+    expect(reads[reads.length - 1].ast.where.subject.$contains, 'text $contains reached the driver resolved').toBe('2026-W47');
+    expect(await ids({ due_on: { $gte: '{current_week_start}' } }), 'a date macro on a date column').toEqual(['w47']);
+    expect(reads[reads.length - 1].ast.where.due_on.$gte).toBe('2026-11-16');
+  });
+});

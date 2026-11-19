@@ -65,6 +65,7 @@ import { isFederatedObject, PackageScopedNameRefusedError, permissionSetHoldersM
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
+import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, findNamespaceObjectNameClashes, validateObjectNamespacePrefix, type NamespaceHolder } from '@objectstack/spec/kernel';
 // [#29898] The one walk of which picklists an object body's fields name — the
@@ -330,7 +331,7 @@ export async function defaultRecordPageSaveRefusal(
  * Not caught: the reading is in memory, and a throw from it is a fault to
  * surface, never "nobody holds the name".
  */
-function registryPackageHoldersOf(registry: unknown, name: string): readonly string[] {
+function registryPackageHoldersOf(registry: unknown, name: string, catalogType: 'permission' | 'capability' = 'permission'): readonly string[] {
     const read = (registry as { packageHeldSecurityCatalogNames?: unknown } | null | undefined)
         ?.packageHeldSecurityCatalogNames;
     if (typeof read !== 'function') return [];
@@ -338,7 +339,7 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
     if (!Array.isArray(held)) return [];
     const holders = new Set<string>();
     for (const entry of held as Array<{ catalogType?: unknown; name?: unknown; packageIds?: unknown } | null>) {
-        if (entry?.catalogType !== 'permission' || entry.name !== name || !Array.isArray(entry.packageIds)) continue;
+        if (entry?.catalogType !== catalogType || entry.name !== name || !Array.isArray(entry.packageIds)) continue;
         for (const id of entry.packageIds) if (typeof id === 'string' && id !== '') holders.add(id);
     }
     return [...holders];
@@ -347,6 +348,15 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
 /**
  * The body of `ObjectStackProtocolImplementation#permissionSetNameCollisionRefusal`;
  * the method's docblock there is its contract.
+ *
+ * [#35157] It judges a `capability` too, by the same two holder readings and
+ * the same envelope, with two differences the type itself makes: a
+ * capability's name is ONE per deployment (a grant and a requirement match
+ * it by string, whichever package declared it), so every holder meets every
+ * other; and a curated platform capability's name is refused outright, before
+ * any read (ADR-0090 D5 revision, boundary 1: the platform floor is
+ * absolute), because a declaration under it would re-declare a platform
+ * power's `scope`.
  *
  * A `permission` set's name was its identity across the whole deployment (Q4 =
  * A on #15196, record 6050490870). [ADR-0150 D2/D9, #31698] It is now one name
@@ -416,7 +426,26 @@ export async function permissionSetNameCollisionRefusal(
     owner: string | null | undefined,
     verb: 'save' | 'publish' | 'restore',
 ): Promise<(Error & { code: 'NAMESPACE_CONFLICT'; status: 422 }) | undefined> {
-    if (singularType !== 'permission') return undefined;
+    if (singularType !== 'permission' && singularType !== 'capability') return undefined;
+    const capability = singularType === 'capability';
+    // [#35157] A capability is ONE name per deployment: a grant and a
+    // requirement match it by string, whichever package declared it, so no
+    // namespace scopes it. And the platform floor is absolute (ADR-0090 D5
+    // revision, boundary 1): a curated platform capability's name is the
+    // platform's, and an environment declaration under it would re-declare a
+    // platform power's `scope` — the input to who may administer the sets
+    // that grant it (ADR-0090 D12 (c)). Refused before any read.
+    if (capability && PLATFORM_CAPABILITY_NAMES.has(name)) {
+        const err = new Error(
+            `Security catalog name conflict: this environment cannot ${verb} the capability "${name}" — it is a `
+            + `platform capability. Nothing was ${verb === 'publish' ? 'published' : 'written'}. Name your capability `
+            + 'with your own module prefix (`<namespace>.<name>`) and grant that one instead. A platform capability is '
+            + 'declared by the platform alone, so no package or environment re-declares its scope.',
+        ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
+        err.code = 'NAMESPACE_CONFLICT';
+        err.status = 422;
+        return err;
+    }
 
     let records: any[] = [];
     try {
@@ -437,7 +466,7 @@ export async function permissionSetNameCollisionRefusal(
     const residueOf = storedUnbound && storedPackages.size === 1 ? [...storedPackages][0] : undefined;
 
     const holders = new Set<string | null>(storedPackages);
-    for (const packageId of registryPackageHoldersOf(this.engine?.registry, name)) holders.add(packageId);
+    for (const packageId of registryPackageHoldersOf(this.engine?.registry, name, singularType)) holders.add(packageId);
     if (storedUnbound && residueOf === undefined) holders.add(null);
 
     const written = typeof owner === 'string' && owner !== '' ? owner : residueOf ?? null;
@@ -455,7 +484,7 @@ export async function permissionSetNameCollisionRefusal(
         return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const meets = (holder: string | null): boolean =>
-        holder === null || written === null
+        holder === null || written === null || capability
         || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
     const foreign = [...holders]
         .filter((holder) => holder !== written && meets(holder))
@@ -470,9 +499,24 @@ export async function permissionSetNameCollisionRefusal(
     // the metadata door); never an edit inside another package. A set a
     // package ships leaves the writer only the rename.
     const deletable = foreign.filter((holder) => holder === null || storedPackages.has(holder));
+    const noun = capability ? 'capability' : 'set';
     const releases = deletable
-        .map((holder) => (holder === null ? 'delete the environment catalog\'s set' : `delete the set package "${holder}" stores`))
+        .map((holder) => (holder === null ? `delete the environment catalog's ${noun}` : `delete the ${noun} package "${holder}" stores`))
         .join(', or ');
+    if (capability) {
+        const remedy = verb === 'restore'
+            ? `Restore it once the name is free${releases === '' ? '' : ` (${releases} first)`}, or save this version's body as a capability of a name no other holder holds.`
+            : `Rename this capability to a name no other holder holds (prefix it with your own module prefix)${releases === '' ? '' : `, or ${releases} first`}.`;
+        const err = new Error(
+            `Security catalog name conflict: ${writer} cannot ${verb} the capability "${name}" — it is already held by `
+            + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
+            + 'A capability holds one name per deployment: a grant and a requirement match it by name, whichever '
+            + 'package declared it.',
+        ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
+        err.code = 'NAMESPACE_CONFLICT';
+        err.status = 422;
+        return err;
+    }
     const remedy = verb === 'restore'
         ? (releases === ''
             ? 'Save this version\'s body as a set of a name no other holder holds.'

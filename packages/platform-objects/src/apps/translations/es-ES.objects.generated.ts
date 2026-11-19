@@ -284,6 +284,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "Quitar usuario pendiente",
+        confirmText: "¿Quitar a esta persona, que aún no ha iniciado sesión, y cancelar su invitación? Si ha iniciado sesión mientras tanto o no se puede contactar con la organización anfitriona, no se quita a nadie.",
+        successMessage: "Usuario pendiente quitado"
+      },
       set_user_password: {
         label: "Establecer contraseña",
         successMessage: "Contraseña actualizada",
