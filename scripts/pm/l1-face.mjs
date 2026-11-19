@@ -62,7 +62,7 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { entriesIn } from '../check-changeset-no-major.mjs';
 import { REQUIRED_CONTEXTS } from '../check-required-contexts.mjs';
-import { closingKeywordTargets, DECISION_INBOX_LABEL, DEFAULT_SWEEP_REPO, h7PartOfWithClosingKeyword, partOfDeclarationTargets, partOfTargets, refsTargets, SEAT_SIGNATURE_LINE } from './check-half-states.mjs';
+import { closingKeywordTargets, DECISION_INBOX_LABEL, DEFAULT_SWEEP_REPO, h7PartOfWithClosingKeyword, partOfDeclarationTargets, partOfTargets, refsTargets, SEAT_SIGNATURE_LINE, stripMarkdownCode } from './check-half-states.mjs';
 import { readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
 import { landDogfoodMarkers } from './label-write.mjs';
@@ -111,6 +111,8 @@ export const RULE_FILES = Object.freeze({
     '`+0/-0` 先疑 NUL,以 blob 定论',
     '要求源侧写转义序列',
     '`l1-face.mjs --pr N`',
+    'dev 挂 `skip-changeset` 遭分类器拒 ⇒ 席位转维护者定夺',
+    '把发送或写挪到应答之后的 PR',
   ],
   '.claude/agents/os-dev.md': ['⛔ 永不 `Fixes` 一张还在决策箱的卡', '种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行'],
 });
@@ -123,6 +125,8 @@ export const UNREAD_ITEMS = Object.freeze([
   'files outside the card or past its `Scope-review:` line',
   'whether the `Skills-docs:` value is true',
   "whether a published package's touched files ship (`files[]`), and published defects this round made false or touched",
+  'who hung `skip-changeset`: a dev label the classifier refused goes to the maintainer through the seat, never hung by the seat itself; both premises in the comment, the refused command in `deviations`',
+  'a PR that moves a send or a write after the response: grep `packages/qa/dogfood/test` for a case that reads the side effect right after the response, made a bounded wait in the same PR',
   'adjacent in-place fixes (the four conditions), one-shot codegen in the diff, move/split growth past a pure move',
   'test evidence: real commands and output, positive controls, `.d.ts` byte-identity readings, git-answerable API reads',
   "gate readings in the report pinned to this head, and the report's `dogfood_battery` against it",
@@ -137,7 +141,7 @@ export const UNREAD_ITEMS = Object.freeze([
 /** A harness or seat attribution line the body opens with (the seat signature included) — skipped before the first line is read. */
 export function isAttributionLine(line) {
   const s = line.trim();
-  return s === '' || /^<!--\s*claude-projects-attribution:.*-->$/.test(s) || /^_Requested by .*\[project thread\]\(.*\)_$/.test(s) || SEAT_SIGNATURE_LINE.test(s);
+  return s === '' || /^<!--\s*claude-projects-attribution:.*-->$/.test(s) || /^_Requested by .+_$/.test(s) || SEAT_SIGNATURE_LINE.test(s);
 }
 
 /** The body's first line after the harness attribution lines, or `null`. */
@@ -161,15 +165,11 @@ export function firstLineCard(line) {
   return null;
 }
 
-/** The line-start `Skills-docs:` value outside fenced blocks, or `null`. */
+/** The line-start `Skills-docs:` value outside fenced blocks (the shared fence rule, `stripMarkdownCode`), or `null` — an empty value is no line. */
 export function readSkillsDocsLine(body) {
-  let fenced = false;
-  for (const line of String(body ?? '').split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (!fenced) {
-      const m = /^Skills-docs:[ \t]*(.*)$/.exec(line);
-      if (m) return m[1].trim();
-    }
+  for (const line of stripMarkdownCode(body, { inline: false }).split(/\r?\n/)) {
+    const m = /^Skills-docs:[ \t]*(.*)$/.exec(line);
+    if (m) return m[1].trim() || null;
   }
   return null;
 }
@@ -374,22 +374,29 @@ function changesetItems({ repo, head, files, labels, get, item }) {
     memo.set(dir, out);
     return out;
   };
+  // Every manifest between a path and the root is read, not only the nearest: a private manifest nested inside a
+  // published package (a scaffold template its build ships in the parent's `dist`) does not make the path
+  // unpublished. The nearest manifest that is not `private: true` owns the path; with none, the nearest one is
+  // listed as unpublished.
   const owners = new Map();
   let walkGap = null;
   for (const f of files) {
     for (const path of [f.filename, f.previous_filename].filter(Boolean)) {
+      const chain = [];
       for (const dir of dirsUp(path)) {
         const m = manifestAt(dir);
         if (!m.ok) {
           walkGap ??= m.error;
           break;
         }
-        if (m.manifest) {
-          if (!owners.has(dir)) owners.set(dir, { dir: dir || '.', name: m.manifest.name ?? `(unnamed ${dir || '.'})`, published: m.manifest.private !== true, files: 0 });
-          owners.get(dir).files++;
-          break;
-        }
+        if (m.manifest) chain.push({ dir, manifest: m.manifest });
       }
+      const owner = chain.find((c) => c.manifest.private !== true) ?? chain[0];
+      if (walkGap || !owner) continue;
+      if (!owners.has(owner.dir)) owners.set(owner.dir, { dir: owner.dir || '.', name: owner.manifest.name ?? `(unnamed ${owner.dir || '.'})`, published: owner.manifest.private !== true, files: 0, through: new Set() });
+      const o = owners.get(owner.dir);
+      o.files++;
+      if (chain[0] !== owner) o.through.add(chain[0].manifest.name ?? chain[0].dir);
     }
   }
   const sets = files.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f.filename) && !/\/README\.md$/i.test(f.filename) && f.status !== 'removed');
@@ -410,11 +417,11 @@ function changesetItems({ repo, head, files, labels, get, item }) {
   const skip = labels.includes(SKIP_CHANGESET_LABEL);
   const published = [...owners.values()].filter((o) => o.published);
   const missing = published.filter((o) => !declared.has(o.name));
-  const who = (list) => list.map((o) => `${o.name} (${o.dir}, ${o.files} file(s))`).join(', ');
+  const who = (list) => list.map((o) => `${o.name} (${o.dir}, ${o.files} file(s)${o.through.size ? `, through private ${[...o.through].join(', ')}` : ''})`).join(', ');
   if (walkGap || setGap) item('changeset', NOT_MEASURED, walkGap ?? setGap);
   else if (published.length === 0) item('changeset', OK, `no published package touched${owners.size ? ` (unpublished: ${[...owners.values()].map((o) => o.name).join(', ')})` : ''}${skip ? ` · \`${SKIP_CHANGESET_LABEL}\`` : ''}`);
   else if (missing.length === 0) item('changeset', OK, `every published package touched has a changeset entry: ${who(published)}`);
-  else if (skip) item('changeset', OK, `\`${SKIP_CHANGESET_LABEL}\` carries ${who(missing)} — whether those files ship (\`files[]\`) is the reviewer's`);
+  else if (skip) item('changeset', FLAG, `\`${SKIP_CHANGESET_LABEL}\` carries ${who(missing)} — flagged, not judged: whether those files ship (\`files[]\`) and the tests/docs-only premise are the reviewer's`);
   else item('changeset', FLAG, `published package(s) touched with no changeset entry and no \`${SKIP_CHANGESET_LABEL}\`: ${who(missing)}`);
   if (setGap) item('empty-changeset', NOT_MEASURED, setGap);
   else item('empty-changeset', empty.length ? FLAG : OK, empty.length ? `empty changeset(s) — this repo takes the \`${SKIP_CHANGESET_LABEL}\` label, never an empty changeset: ${empty.join(', ')}` : `${sets.length} changeset(s) in the diff, none empty`);
@@ -422,7 +429,8 @@ function changesetItems({ repo, head, files, labels, get, item }) {
 
 /** `+0/-0` files: the blob decides — NUL bytes and lines, the equivalent of `git show HEAD:PATH | wc -l`. */
 function nulItem({ repo, files, get, item }) {
-  const suspects = files.filter((f) => f.additions === 0 && f.deletions === 0 && ['added', 'modified', 'changed', 'copied'].includes(f.status));
+  // A rename is read too: one whose content also changed and now holds NUL is `+0/-0` exactly as a pure rename is.
+  const suspects = files.filter((f) => f.additions === 0 && f.deletions === 0 && ['added', 'modified', 'changed', 'copied', 'renamed'].includes(f.status));
   if (suspects.length === 0) return item('nul-suspects', OK, 'no `+0/-0` file');
   const flags = [];
   const fine = [];
@@ -577,11 +585,11 @@ export function main(argv, deps = {}) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
-  'PR shape and the card relation: the first line, the shared parser, other open cards': 11,
-  'scope and changeset: the release path, published packages, empty changesets': 8,
-  'declarations: Clause-②, Metadata-protocol and the Skills-docs line they owe': 5,
+  'PR shape and the card relation: the first line, the shared parser, other open cards': 12,
+  'scope and changeset: the release path, published packages, empty changesets': 10,
+  'declarations: Clause-②, Metadata-protocol and the Skills-docs line they owe': 6,
   'gate evidence at the head: the floor checks, every other check via pr-state, dogfood owed': 7,
-  '+0/-0: the blob decides': 4,
+  '+0/-0: the blob decides': 5,
   'the face and the CLI: the unread footer, exits and usage': 8,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
@@ -659,6 +667,7 @@ export function selfTest() {
     t('⭐ the harness attribution lines are skipped before the first line is read', firstContentLine(BODY), 'Part of #500');
     t('a body with no attribution reads its own first line', firstContentLine('\nFixes #9\nmore'), 'Fixes #9');
     t('⭐ a seat signature first line (a relay-stamped body) is skipped too', firstContentLine('repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\nPart of #9'), 'Part of #9');
+    t('a `_Requested by …_` line without the project-thread link is an attribution line too', firstContentLine(`${ATTR}\n_Requested by **Y**_\n\nPart of #9`), 'Part of #9');
     t('the first line names the card through the shared parser — closing keyword, Part of, Refs', [firstLineCard('Fixes #9'), firstLineCard('Part of #8'), firstLineCard('Refs #7 (item 2)'), firstLineCard('see the card')], [{ card: 9, relation: 'Fixes' }, { card: 8, relation: 'Part of' }, { card: 7, relation: 'Refs' }, null]);
     t('⭐ a ready PR, a merged one and a non-main base each flag the shape', [v(read(fixture({ row: { draft: false } })), 'shape'), v(read(fixture({ row: { state: 'closed', merged_at: '2026-11-19T00:00:00Z' } })), 'shape'), at(read(fixture({ row: { base: { ref: 'next' } } })), 'shape').evidence], [FLAG, FLAG, 'base `next`, not `main`']);
     t('a first line naming no card flags', v(read(fixture({ row: { body: bodyOf('Implements the thing.', 'Part of #500') } })), 'first-line'), FLAG);
@@ -683,7 +692,12 @@ export function selfTest() {
     const withSet = touched([file('packages/core/src/a.ts'), file('.changeset/35237-x.md', { status: 'added' })], { contents: { '.changeset/35237-x.md': '---\n"@objectstack/core": patch\n---\n\nFix.\n' } });
     t('a changeset entry for the package clears it', v(withSet, 'changeset'), OK);
     const labelled = touched([file('packages/core/test/a.test.ts')], { row: { labels: [{ name: SKIP_CHANGESET_LABEL }] } });
-    t('⭐ `skip-changeset` carries a published package and says the `files[]` reading is the reviewer\'s', [v(labelled, 'changeset'), at(labelled, 'changeset').evidence.includes('`files[]`')], [OK, true]);
+    t('⭐ `skip-changeset` carrying a published package with no entry flags — flagged, not judged: the `files[]` reading is the reviewer\'s', [v(labelled, 'changeset'), at(labelled, 'changeset').evidence.includes('`files[]`')], [FLAG, true]);
+    const nest = { 'packages/create/package.json': pkg('create-objectstack'), 'packages/create/src/templates/blank/package.json': pkg('objectstack-blank', true) };
+    const scaffold = touched([file('packages/create/src/templates/blank/src/a.ts')], { contents: nest });
+    t('⭐ a private manifest nested inside a published package does not hide it: the published one owns the path, named through the private one', [v(scaffold, 'changeset'), at(scaffold, 'changeset').evidence], [FLAG, 'published package(s) touched with no changeset entry and no `skip-changeset`: create-objectstack (packages/create, 1 file(s), through private objectstack-blank)']);
+    const scaffoldSet = touched([file('packages/create/src/templates/blank/src/a.ts'), file('.changeset/x.md', { status: 'added' })], { contents: { ...nest, '.changeset/x.md': '---\n"create-objectstack": patch\n---\n\nScaffold.\n' } });
+    t('…and a changeset entry naming the published package clears it; naming only the nested private one does not', [v(scaffoldSet, 'changeset'), v(touched([file('packages/create/src/templates/blank/src/a.ts'), file('.changeset/x.md', { status: 'added' })], { contents: { ...nest, '.changeset/x.md': '---\n"objectstack-blank": patch\n---\n\nx\n' } }), 'changeset')], [OK, FLAG]);
     const empty = touched([file('.changeset/x.md', { status: 'added' })], { contents: { '.changeset/x.md': '---\n---\n\nNothing.\n' } });
     t('⭐ an empty changeset flags — this repo takes the label', v(empty, 'empty-changeset'), FLAG);
     const memoAsked = faceReaders(fixture({ files: { 7: [file('scripts/pm/a.mjs'), file('scripts/pm/b.mjs')] } }), REPO);
@@ -700,6 +714,7 @@ export function selfTest() {
     t('a `(narrowing)` arm owes the line too, and `follow-up owed` flags until rewritten to #N', v(read(fixture({ row: { body: bodyOf('Part of #500', 'Clause-②: yes (narrowing)', 'Metadata-protocol: narrowed', 'Skills-docs: follow-up owed — skills/a/SKILL.md') } })), 'skills-docs'), FLAG);
     t('a present value is ok and its truth left to the reviewer', at(read(fixture({ row: { body: bodyOf('Part of #500', 'Clause-②: yes', 'Metadata-protocol: added', 'Skills-docs: follow-up #9') } })), 'skills-docs').evidence, '`Skills-docs: follow-up #9` — its truth is the reviewer\'s');
     t('a `Skills-docs:` line inside a fence is not the line', readSkillsDocsLine('```\nSkills-docs: none — x\n```'), null);
+    t('⭐ an empty `Skills-docs:` value is no line: owed and absent flags', [readSkillsDocsLine('Skills-docs:   '), v(read(fixture({ row: { body: bodyOf('Part of #500', 'Clause-②: yes', 'Metadata-protocol: added', 'Skills-docs:') } })), 'skills-docs')], [null, FLAG]);
   }
 
   battery('gate evidence at the head: the floor checks, every other check via pr-state, dogfood owed');
@@ -720,7 +735,9 @@ export function selfTest() {
     const zero = (filename, over = {}) => file(filename, { additions: 0, deletions: 0, sha: sha('d'), ...over });
     const nul = read(fixture({ files: { 7: [zero('scripts/x.mjs'), file('a.md')] }, blobs: { [sha('d')]: 'const s = "\u0000";\nmore\n' } }));
     t('⭐ a `+0/-0` text file whose blob holds NUL flags, with its line count and the git show reading', [v(nul, 'nul-suspects'), at(nul, 'nul-suspects').evidence.includes('1 NUL byte(s), 2 line(s) — `git show HEAD:scripts/x.mjs | wc -l`')], [FLAG, true]);
-    t('a binary-by-kind file and a renamed one are not suspects', v(read(fixture({ files: { 7: [zero('docs/a.png'), zero('b.ts', { status: 'renamed', previous_filename: 'a.ts' })] } })), 'nul-suspects'), OK);
+    const renamed = (blob) => read(fixture({ files: { 7: [zero('docs/a.png'), zero('b.ts', { status: 'renamed', previous_filename: 'a.ts' })] }, blobs: { [sha('d')]: blob } }));
+    t('a binary-by-kind file is not a suspect, and a `+0/-0` rename is read by its blob and cleared when it holds no NUL', [v(renamed('x\n'), 'nul-suspects'), at(renamed('x\n'), 'nul-suspects').evidence.includes('b.ts (blob')], [OK, true]);
+    t('⭐ a `+0/-0` rename whose blob holds NUL flags, never set aside', v(renamed('a\u0000b\n'), 'nul-suspects'), FLAG);
     t('a `+0/-0` blob with no NUL is cleared by the blob', at(read(fixture({ files: { 7: [zero('x.json'), file('a.md')] }, blobs: { [sha('d')]: '' } })), 'nul-suspects').evidence.includes('no NUL, empty'), true);
     t('an unreadable blob is not measured', v(read(fixture({ files: { 7: [zero('x.json'), file('a.md')] }, blobs: { [sha('d')]: null } })), 'nul-suspects'), NOT_MEASURED);
   }
