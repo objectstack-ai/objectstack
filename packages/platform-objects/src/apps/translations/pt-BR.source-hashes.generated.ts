@@ -19,6 +19,7 @@
 
 export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.action.fields.patch.label": "815f68570a78eba1",
+  "metadataForms.action.fields.refusals.status.label": "64a420165247654b",
   "metadataForms.agent.fields.avatar.label": "0f06369995b69b8b",
   "metadataForms.dashboard.fields.widgets.label": "bd4bf82396edd638",
   "metadataForms.dashboard.sections.layout.label": "7f508ea1bb2c3a6b",
