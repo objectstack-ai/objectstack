@@ -3217,8 +3217,12 @@ export function renderSizeVerdict(verdict) {
 /** The leg's own name in a log — the third predicate inside the same check run. */
 export const NARROWED_LEG_NAME = 'Narrowed Spec Change (2026-11-19 ruling)';
 
-/** The maintainer's word the leg stands on, verbatim and untranslated (card #35321). */
-export const NARROWED_RULING = '「spec：收紧作者能写的东西（会让现有应用报错），也需要fable 吧？」';
+/**
+ * Where the leg is ruled, as a log line carries it. The maintainer's own words are quoted in the header section
+ * ("The FIFTH leg"); ⛔ not here — this string is printed on every refusal, and the quotation names a tier by
+ * its value, which a runtime message never carries.
+ */
+export const NARROWED_RULING = 'maintainer ruling 2026-11-19 on #35321: a spec change that narrows what an author may write lands by the maintainer';
 
 /**
  * Every line of `text` that DECLARES a narrowing, read with the fleet's two line readers one line at a time
@@ -3483,7 +3487,7 @@ export function renderNarrowedVerdict(verdict) {
     lines.push(
       '      At least one queued pull request above declares that it NARROWS what an author may write — a key removed or',
       '      tombstoned, a value refused, a requirement tightened: metadata that validated yesterday is rejected after it —',
-      `      and lands like Tier H. The maintainer's ruling (verbatim, untranslated): 2026-11-19 ${NARROWED_RULING}`,
+      `      and lands like Tier H (${NARROWED_RULING}).`,
     );
   }
   lines.push(
