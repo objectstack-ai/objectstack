@@ -238,6 +238,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-ef
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
+pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -314,12 +315,29 @@ it. The arm is part of the driver's record (`env.driver.door`), and `summary` ne
   reader and closed front-matter key set as `--ask-skills`). `--door-skill-omit NAME[,NAME]` leaves named skills of
   `DIR` out: with and without one skill is the same directory with and without that omission. The record names each
   skill given, with its version and sha256, and each omitted.
-- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, given to
-  the client as its directory's `CLAUDE.md`. The file lives outside this repository; one inside the checkout is
-  refused. `--door-rules-omit A[,B]` leaves out rule ids or named sets. The record names the file (its name, not its
-  path), its sha256, and the ids active and omitted, never a text.
+- `--door-rules builtin` (or `OS_SCENARIOS_DOOR_RULES=builtin`): the **built-in corpus**, given to the client as its
+  directory's `CLAUDE.md`. It is the authoring rules the hosted product's MCP build door hands its client, ported as
+  data (`src/runner/door-rules-corpus.ts`, which names the source files and the revision they were rendered from):
+  54 rules and the two corpora's preambles, 56 entries. Its named sets, for `--door-rules-omit`:
 
-The rules file is one JSON object (`src/runner/door.ts` holds the whole contract):
+  | Set | Holds |
+  |:---|:---|
+  | `metadata-authoring`, `solution-design` | each corpus, its preamble included |
+  | `inline` | what the hosted door hands its client up front: both preambles and every always-on rule |
+  | `ondemand` | what the hosted door serves only when the client asks for a rule by id |
+  | `names-build-door-tools` | the rules whose own text names a tool the hosted build door registers (`apply_blueprint`, `verify_build`, …), most of which the open draft door does not serve |
+
+  The arm gives every active rule up front, so `--door-rules-omit ondemand` is the closest it comes to the hosted
+  delivery; the whole corpus is about 113,000 characters of `CLAUDE.md`.
+- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, in place
+  of the built-in corpus. The file lives outside this repository; one inside the checkout is refused. A file named
+  `builtin` is given with a path (`./builtin`).
+
+`--door-rules-omit A[,B]` leaves out rule ids or named sets of either. The record names the rules (a file by its name,
+not its path; the built-in corpus as `builtin`), their sha256 (the built-in corpus's: of its JSON), and the ids active
+and omitted, never a text.
+
+The rules file is one JSON object, the built-in corpus's shape too (`src/runner/door.ts` holds the whole contract):
 
 ```json
 {
@@ -346,7 +364,7 @@ otherwise). Codex and an external driver are refused.
 **One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
 
 ```bash
-RULES=/abs/path/outside/the/repo/rules.json   # the maintainer's file
+RULES=builtin   # the built-in corpus; or /abs/path/outside/the/repo/rules.json, a file of the maintainer's
 for arm in bare skills rules both; do
   case $arm in
     bare)   flags=() ;;

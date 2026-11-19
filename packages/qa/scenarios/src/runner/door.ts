@@ -12,13 +12,18 @@
  *    `readAskSkills`, the same reader and the same closed front-matter set as
  *    `--ask-skills`), less the ones `--door-skill-omit` names: the arm with and
  *    without one skill is the same directory with and without that omission;
- *  - a rules file the maintainer supplies at run time (`--door-rules FILE`, or
- *    the {@link DOOR_RULES_ENV} variable), less the rules `--door-rules-omit`
- *    names: the arm with and without a named set of rule texts.
+ *  - a set of rule texts, less the rules `--door-rules-omit` names: the arm
+ *    with and without a named set of rule texts. `--door-rules builtin` (or
+ *    the {@link DOOR_RULES_ENV} variable set to `builtin`) gives the built-in
+ *    corpus, the hosted MCP build door's authoring rules ported as data
+ *    (`door-rules-corpus.ts`, which names its source and revision);
+ *    `--door-rules FILE` gives a rules file the maintainer supplies instead.
  *
  * ## The rules file
  *
- * One JSON object, read once when the run starts ({@link readDoorRules}):
+ * One JSON object, read once when the run starts ({@link readDoorRules}); the
+ * built-in corpus is the same shape ({@link DoorRulesCorpus}) and is judged
+ * by the same rules:
  *
  * ```json
  * {
@@ -46,7 +51,8 @@
  * ({@link renderDoorRules}), the instruction file a Claude Code session reads
  * at start, so the turn's prompt is the same text in every arm. The record
  * states the arm ({@link DoorArm}): the skills given and omitted, the rules
- * file's name and sha256, and the ids active and omitted. Never the texts.
+ * file's name and sha256 (for the built-in corpus, `builtin` and the sha256 of
+ * its JSON), and the ids active and omitted. Never the texts.
  */
 
 import { createHash } from 'node:crypto';
@@ -56,9 +62,17 @@ import { basename, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 import { askSkillsText, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
+import { DOOR_RULES_CORPUS } from './door-rules-corpus.js';
 
-/** The variable naming the rules file when `--door-rules` is not given. */
+/** The variable naming the rules file (or {@link BUILTIN_DOOR_RULES}) when `--door-rules` is not given. */
 export const DOOR_RULES_ENV = 'OS_SCENARIOS_DOOR_RULES';
+
+/**
+ * The `--door-rules` value that names the built-in corpus
+ * ({@link DOOR_RULES_CORPUS}) instead of a file. A file of that name is
+ * passed with a path (`./builtin`).
+ */
+export const BUILTIN_DOOR_RULES = 'builtin';
 
 /**
  * The draft door's write tools (`packages/runtime/src/domains/mcp-authoring.ts`):
@@ -102,6 +116,12 @@ export interface DoorRulesInfo {
   omit?: string;
 }
 
+/** A rules file's content, and the built-in corpus's: rules, and optional named sets of their ids. */
+export interface DoorRulesCorpus {
+  rules: DoorRule[];
+  sets?: Record<string, string[]>;
+}
+
 /** A rules file read into memory: what the record states, and the text the client is given. */
 export interface DoorRulesBundle {
   info: DoorRulesInfo;
@@ -135,10 +155,10 @@ const DoorRulesFileSchema = z.strictObject({
   sets: z.record(z.string().regex(RULE_ID, 'a set name is letters, digits, `.`, `_` or `-`'), z.array(z.string()).min(1, 'a set names at least one rule')).optional(),
 });
 
-/** Why a rules file is refused; the message names the file and what is wrong with it. */
+/** Why a rules file (or the built-in corpus) is refused; the message names it and what is wrong with it. */
 export class DoorRulesRefusedError extends Error {
   constructor(file: string, why: string) {
-    super(`the door rules file \`${file}\` is refused: ${why}`);
+    super(`${file === BUILTIN_DOOR_RULES ? 'the built-in door rules corpus (`--door-rules builtin`)' : `the door rules file \`${file}\``} is refused: ${why}`);
     this.name = 'DoorRulesRefusedError';
   }
 }
@@ -158,13 +178,17 @@ export interface ReadDoorRulesOptions {
 }
 
 /**
- * Read and judge a rules file (the module header states the format and every
- * refusal). Pure over the file's bytes and `opts`; throws
+ * Read and judge a rules file, or the built-in corpus when `path` is
+ * {@link BUILTIN_DOOR_RULES} (the module header states the format and every
+ * refusal). Pure over the file's bytes (the corpus's JSON) and `opts`; throws
  * {@link DoorRulesRefusedError}.
  */
 export function readDoorRules(path: string, opts: ReadDoorRulesOptions = {}): DoorRulesBundle {
   const shown = path;
   const refuse = (why: string) => new DoorRulesRefusedError(shown, why);
+  if (path === BUILTIN_DOOR_RULES) {
+    return judgeDoorRules(DOOR_RULES_CORPUS, Buffer.from(JSON.stringify(DOOR_RULES_CORPUS), 'utf8'), BUILTIN_DOOR_RULES, refuse, opts);
+  }
   const file = resolve(path);
   if (!existsSync(file) || !statSync(file).isFile()) throw refuse('no such file');
   if (opts.repoRoot !== undefined && inside(opts.repoRoot, file)) {
@@ -177,6 +201,11 @@ export function readDoorRules(path: string, opts: ReadDoorRulesOptions = {}): Do
   } catch (e) {
     throw refuse(`it is no JSON (${e instanceof Error ? e.message : String(e)})`);
   }
+  return judgeDoorRules(raw, bytes, basename(file), refuse, opts);
+}
+
+/** Judge a rules file's parsed content (or the built-in corpus): the shape, the ids, the sets and the selector. */
+function judgeDoorRules(raw: unknown, bytes: Buffer, name: string, refuse: (why: string) => DoorRulesRefusedError, opts: ReadDoorRulesOptions): DoorRulesBundle {
   const parsed = DoorRulesFileSchema.safeParse(raw);
   if (!parsed.success) {
     throw refuse(parsed.error.issues.map((i) => `${i.path.length ? `\`${i.path.join('.')}\`: ` : ''}${i.message}`).join('; '));
@@ -206,7 +235,7 @@ export function readDoorRules(path: string, opts: ReadDoorRulesOptions = {}): Do
   return {
     rules: rules.filter((r) => !omitted.has(r.id)),
     info: {
-      file: basename(file),
+      file: name,
       sha256: createHash('sha256').update(bytes).digest('hex'),
       active: rules.filter((r) => !omitted.has(r.id)).map((r) => r.id),
       omitted: rules.filter((r) => omitted.has(r.id)).map((r) => r.id),

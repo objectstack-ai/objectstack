@@ -26,13 +26,19 @@
  *                        door mode: leave these skills of --door-skills out,
  *                        the arm without them; a name DIR holds no skill of
  *                        is refused
- *   --door-rules FILE    door mode: give the client the rule texts in FILE,
- *                        a rules file the maintainer supplies from outside the
- *                        repository (`door.ts` states the format); default
- *                        the OS_SCENARIOS_DOOR_RULES variable; absent ⇒ none
+ *   --door-rules builtin door mode: give the client the built-in rule texts,
+ *                        the hosted MCP build door's authoring rules ported as
+ *                        data (`door-rules-corpus.ts` names their source)
+ *   --door-rules FILE    door mode: give the client the rule texts in FILE
+ *                        instead, a rules file the maintainer supplies from
+ *                        outside the repository (`door.ts` states the format);
+ *                        default the OS_SCENARIOS_DOOR_RULES variable (a file
+ *                        or `builtin`); absent ⇒ none
  *   --door-rules-omit S[,S]
  *                        door mode: leave these rule ids or named sets of the
- *                        rules file out, the arm without them
+ *                        rules out, the arm without them (the built-in sets:
+ *                        metadata-authoring, solution-design, inline,
+ *                        ondemand, names-build-door-tools)
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
  *                        login (`drivers/codex.ts`); it has no turn cap and no
@@ -195,7 +201,7 @@ export interface CliArgs {
   doorSkills?: string;
   /** Skill names left out of {@link doorSkills} (`--door-skill-omit`). */
   doorSkillOmit?: string[];
-  /** Door mode's rules file (`--door-rules`); else {@link DOOR_RULES_ENV}; none when neither. */
+  /** Door mode's rules file, or `builtin` for the built-in corpus (`--door-rules`); else {@link DOOR_RULES_ENV}; none when neither. */
   doorRules?: string;
   /** The rule ids and set names left out of the rules file (`--door-rules-omit`). */
   doorRulesOmit?: string;
@@ -272,7 +278,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
     else if (flag === '--door-skills' || flag === '--door-rules' || flag === '--door-rules-omit' || flag === '--door-skill-omit') {
       const raw = val();
-      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes ${flag === '--door-skills' ? 'a skills directory' : flag === '--door-rules' ? 'a rules file' : 'a comma-separated list'}, not \`${raw}\``);
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes ${flag === '--door-skills' ? 'a skills directory' : flag === '--door-rules' ? 'a rules file or `builtin`' : 'a comma-separated list'}, not \`${raw}\``);
       if (flag === '--door-skills') a.doorSkills = raw;
       else if (flag === '--door-rules') a.doorRules = raw;
       else if (flag === '--door-rules-omit') a.doorRulesOmit = raw;
@@ -351,7 +357,7 @@ export interface DriverContext {
 }
 
 export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts & DriverSkills = {}, context: DriverContext = {}): AgentDriver {
-  if (opts.doorRulesOmit !== undefined && opts.doorRules === undefined) throw new Error('--door-rules-omit leaves rules out of --door-rules, which is not given');
+  if (opts.doorRulesOmit !== undefined && opts.doorRules === undefined) throw new Error('--door-rules-omit leaves rules out of --door-rules, which is not given (`--door-rules builtin` gives the built-in corpus)');
   if (spec === 'claude') {
     const rules = opts.doorRules !== undefined ? readDoorRules(opts.doorRules, { ...(opts.doorRulesOmit !== undefined ? { omit: opts.doorRulesOmit } : {}), ...(context.repoRoot !== undefined ? { repoRoot: context.repoRoot } : {}) }) : undefined;
     return new ClaudeCodeDriver({
