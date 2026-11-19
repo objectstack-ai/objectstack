@@ -44,6 +44,9 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { DatasetSchema, ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { MetadataClient } from '@object-ui/data-objectstack';
+// The draft preview bar's publish reaches `import('@objectstack/lint')`: paid at
+// collection, never inside a clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 /** A served dataset over THIS view's object: one dimension, two measures. */
 const DEAL_METRICS = {

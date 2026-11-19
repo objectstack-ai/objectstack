@@ -40,6 +40,9 @@ import { render, cleanup, fireEvent, waitFor, screen, act } from '@testing-libra
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
+// The draft preview bar's publish reaches `import('@objectstack/lint')`: paid at
+// collection, never inside a clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), {

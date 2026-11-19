@@ -22,6 +22,9 @@ import { renderHook, cleanup } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { toast } from 'sonner';
+// The draft preview bar's publish reaches `import('@objectstack/lint')`: paid at
+// collection, never inside a clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence';
 import { useRuntimeCreateApp } from './objectViewViewCrud';
