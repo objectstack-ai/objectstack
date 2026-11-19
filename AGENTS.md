@@ -145,6 +145,9 @@ never deleted; a test is deleted only when its PR names a duplicate pinning that
 layer at least as close to the code (ruling record 6120820653).
 A new pin for a component that already has a shared harness file goes into that file as a
 top-level `describe`, not a new file (ruling record 6583487846).
+The merge queue has a speed budget, a median and a p90 alarm held in `scripts/ci/queue-budget.json` and changed only by
+the maintainer, read weekly by `queue-duration-budget.yml`, which files one speed-up card when over; a PR that changes
+CI or adds a gate reports the affected job's before/after median in its body as advisory, ⛔ never a merge block.
 
 ### Running the dev server
 

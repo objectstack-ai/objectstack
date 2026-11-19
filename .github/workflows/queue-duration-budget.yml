@@ -1,0 +1,231 @@
+name: Queue Duration Budget
+
+# The weekly merge-queue speed reading, and the one speed-up card it files.
+#
+# The merge queue has a speed budget held in `scripts/ci/queue-budget.json`: a
+# median and a p90 alarm, the maintainer's numbers. Once a week this reads the
+# last 7 days of `merge_group` runs of the queue workflows
+# (`scripts/ci/queue-duration.mjs`, whose header defines what is measured), and
+# when the median is over the budget or the p90 over the alarm it files or
+# refreshes ONE speed-up card. A week within budget writes nothing.
+#
+# ## Why its own file, not a job in fleet-patrols.yml
+#
+# `fleet-patrols.yml` is pinned by `scripts/check-platform-checklist-watchdog.mjs`:
+# its `pull_request:` paths list is frozen as a set, and a `pull_request` run
+# there exercises EVERY job. Exercising this reading on the PRs that change it
+# would mean widening that frozen list and editing the pin and its self-test,
+# and every PR touching a sibling patrol's input would then spend a live queue
+# reading too. A file of its own keeps the pin untouched and scopes the
+# `pull_request` run to this reading alone.
+#
+# ## What it never does
+#
+# - ⛔ It is NOT a required context and never reds a required job: a gate
+#   grading a duration reports (AGENTS.md Build & Test). An OVER week is a
+#   green run that files a card.
+# - ⛔ It writes nothing on `pull_request`, nor from any ref but `main`: the
+#   `file` job's `if:` carries both guards. A pull request proves transport,
+#   the reading and the rendering on a real runner.
+# - ⛔ NO `merge_group:` and NO `pull_request_target:` trigger.
+#
+# ## The card
+#
+# Identity, de-dup and body live in `fileQueueCard` (the module above), driven
+# offline by its `--self-test` in `Lint & Repo Gates`: a fixed title plus a
+# plain-text body marker, a bounded open-issue scan that refuses rather than
+# files when it cannot establish absence, the oldest open match refreshed in
+# place, labels and the issue type on create only.
+#
+# ## The run red, and what it means
+#
+# The `measure` job fails only when the objectstack reading could not be taken
+# (exit 2: NOT MEASURED — the API refused, a window could not be listed whole,
+# or the sample fell under the budget's floor). That is the patrol reporting its
+# own death, never a verdict on the queue. hotcrm's reading is report-only: a
+# line in the run summary, no card, and its failure never reds the run.
+
+on:
+  schedule:
+    # Weekly, Monday 07:09 UTC: the reading covers the trailing week. Hour 07
+    # carries no other scheduled workflow in this repository, and the minute is
+    # off the top of the hour, where scheduled runs queue behind everyone's :00.
+    - cron: '9 7 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/queue-duration-budget.yml'
+      - 'scripts/ci/queue-duration.mjs'
+      - 'scripts/ci/queue-budget.json'
+
+permissions: {}
+
+concurrency:
+  # One reading at a time per ref: a dispatch overlapping the schedule on main
+  # would race the same card lookup. ⛔ Never cancel-in-progress: a filer
+  # cancelled between its scan and its create is how a duplicate is born.
+  group: queue-duration-budget-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Read the merge-queue duration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Least privilege: the runs and jobs reads, and the checkout. No write.
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      verdict: ${{ steps.reading.outputs.verdict }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # No `pnpm install`: the script loads node builtins and one repo-local
+      # helper, and a weekly reading must not fail on a lockfile.
+      - name: Read the objectstack queue
+        id: reading
+        timeout-minutes: 12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/ci/queue-duration.mjs --repo "$GITHUB_REPOSITORY" --since 7d --json \
+            > "$RUNNER_TEMP/reading.json" 2> "$RUNNER_TEMP/reading.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between (`cmd | tail` reports tail's status).
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/reading.err" >&2 || true
+          verdict=$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).verdict ?? "")) } catch { }' "$RUNNER_TEMP/reading.json")
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "queue-duration exited $code, verdict '${verdict:-none}'"
+
+      - name: Read the hotcrm queue (report-only)
+        id: hotcrm
+        timeout-minutes: 8
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/ci/queue-duration.mjs --repo objectstack-ai/hotcrm --since 7d --json \
+            > "$RUNNER_TEMP/hotcrm.json" 2> "$RUNNER_TEMP/hotcrm.err"
+
+      - name: Publish the readings to the run summary
+        if: always()
+        env:
+          VERDICT: ${{ steps.reading.outputs.verdict }}
+          READING_EXIT: ${{ steps.reading.outputs.exit_code }}
+          HOTCRM_OUTCOME: ${{ steps.hotcrm.outcome }}
+        run: |
+          {
+            echo "### Merge-queue duration — verdict \`${VERDICT:-none}\` (exit ${READING_EXIT:-not recorded})"
+            echo
+            if node scripts/ci/queue-duration.mjs --render "$RUNNER_TEMP/reading.json"; then :; else
+              echo "NOT MEASURED — the objectstack reading did not complete:"
+              echo
+              echo '```'
+              tail -20 "$RUNNER_TEMP/reading.err" || true
+              echo '```'
+            fi
+            echo
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+              echo "_Card write skipped: a pull_request run proves the reading without filing anything._"
+              echo
+            fi
+            echo "### hotcrm (report-only, no card) — step ${HOTCRM_OUTCOME:-not run}"
+            echo
+            if node scripts/ci/queue-duration.mjs --render "$RUNNER_TEMP/hotcrm.json"; then :; else
+              echo "NOT MEASURED for hotcrm:"
+              echo
+              echo '```'
+              tail -20 "$RUNNER_TEMP/hotcrm.err" || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY" 2>&1
+
+      - name: Keep the readings with the run
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: queue-duration-reading
+          path: |
+            ${{ runner.temp }}/reading.json
+            ${{ runner.temp }}/reading.err
+            ${{ runner.temp }}/hotcrm.json
+            ${{ runner.temp }}/hotcrm.err
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail the run if the objectstack reading was not taken
+        # LAST, so the summary and the artifact land first. An OVER week never
+        # reaches here: it is a successful reading.
+        if: always() && steps.reading.outputs.exit_code != '0'
+        env:
+          READING_EXIT: ${{ steps.reading.outputs.exit_code }}
+        run: |
+          echo "::error::queue-duration exited '${READING_EXIT}' — NOT MEASURED is not a week within budget; see this run's summary."
+          exit 1
+
+  file:
+    name: File or refresh the speed-up card
+    needs: measure
+    # OVER only; ⛔ never on a pull_request run, never from a ref but main.
+    if: >-
+      needs.measure.outputs.verdict == 'over'
+      && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The one job that writes: the card. `contents: read` is the checkout that
+    # imports the card writer.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download the reading
+        uses: actions/download-artifact@v8
+        with:
+          name: queue-duration-reading
+          path: ${{ runner.temp }}/reading
+
+      - name: File or refresh the card
+        id: card
+        uses: actions/github-script@v9
+        with:
+          # 403 is not exempt: GitHub answers a secondary rate limit with 403.
+          retries: 3
+          retry-exempt-status-codes: 400,401,404,422
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { pathToFileURL } = require('url');
+            const mod = await import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/queue-duration.mjs')).href);
+            const reading = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'reading', 'reading.json'), 'utf8'));
+            const budget = mod.loadBudget();
+            const result = await mod.fileQueueCard({ github, context, core, reading, budget });
+            core.setOutput('action', result.action);
+            core.setOutput('number', String(result.number));
+
+      - name: Publish the card to the run summary
+        if: always()
+        env:
+          CARD_ACTION: ${{ steps.card.outputs.action }}
+          CARD_NUMBER: ${{ steps.card.outputs.number }}
+        run: |
+          {
+            if [ -n "${CARD_ACTION:-}" ]; then
+              echo "### Speed-up card: ${CARD_ACTION} #${CARD_NUMBER}"
+            else
+              echo "### Speed-up card: NOT WRITTEN — the filing step reported no outcome. A bounded issue scan"
+              echo "that could not complete REFUSES to file rather than risk a duplicate; read this job's log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

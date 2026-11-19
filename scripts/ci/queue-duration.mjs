@@ -350,6 +350,10 @@ const pct = (r) => (r == null ? 'n/a' : `${(r * 100).toFixed(1)}%`);
 
 /** The reading as markdown lines (run summary, card body, and the CLI). */
 export function renderReading(reading, budget) {
+  if (!reading?.shas) {
+    // A refused reading carries only its repo, verdict and reasons.
+    return [`**${reading?.repo ?? 'unknown repository'}** — verdict **NOT MEASURED**: ${(reading?.reasons ?? ['no reading was recorded']).join('; ')}.`];
+  }
   const s = reading.shas;
   const lines = [
     `**${reading.repo}** — merge_group runs created ${reading.window.since} .. ${reading.window.until} · verdict **${reading.verdict.toUpperCase()}**`,
@@ -471,7 +475,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'critical run: the slowest jobs of the run that finished last': 4,
   'budget file: the tracked file, and malformed shapes refused': 7,
   'card: files once, refreshes the oldest, refuses an unfinished scan': 10,
-  'render: the summary names its numbers, window and verdict': 5,
+  'render: the summary names its numbers, window and verdict': 6,
 });
 const SELF_TEST_BATTERY_FLOOR = 8;
 
@@ -699,6 +703,7 @@ async function selfTest() {
     t(B, 'a repo without a budget says report-only and nothing filed', text.includes('nothing is filed for it'));
     t(B, 'unlisted and missing workflows are warned about', text.includes('Docs Preview (2 runs)') && text.includes('no run in the window: Governed Surface Guard'));
     t(B, 'a pipe inside a job name cannot break the table', text.includes('| CI / a/b |'));
+    t(B, 'a refused reading renders its reason, never a crash', renderReading({ repo: 'o/r', verdict: 'not-measured', reasons: ['HTTP 502'] }, FIX_BUDGET)[0].includes('NOT MEASURED**: HTTP 502'));
   }
 
   // ── floor
