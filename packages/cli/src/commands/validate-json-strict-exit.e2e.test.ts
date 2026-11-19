@@ -192,7 +192,13 @@ export default defineStack({
  *
  * Nothing else here raises an advisory: the lints run on the POST-conversion
  * `normalized`, so what they see is the canonical `http` either way, and both
- * members are pinned to `warnings: []` below rather than assumed to be.
+ * members are pinned to `warnings: []` below rather than assumed to be. That is
+ * why the callout node sets `config.timeoutMs`: an `http` node with no positive
+ * timeout raises the `flow-http-timeout-missing` warning, which `--strict`
+ * promotes like any other, so without it the canonical member exits 1 and the
+ * converting member's `warnings` is no longer empty — the pair would stop
+ * discriminating on the conversion. The probe rewrites only `type`, so the
+ * `config` reaches the lint unchanged in both members.
  */
 const calloutFlowSource = (calloutNodeType: typeof PROBE_FROM | 'http'): string => `
 import { defineStack } from '@objectstack/spec';
@@ -212,7 +218,7 @@ export default defineStack({
     type: 'autolaunched',
     nodes: [
       { id: 'start', type: 'start', label: 'Start' },
-      { id: 'call', type: '${calloutNodeType}', label: 'Call', config: { url: 'https://example.com/hook' } },
+      { id: 'call', type: '${calloutNodeType}', label: 'Call', config: { url: 'https://example.com/hook', timeoutMs: 10000 } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
