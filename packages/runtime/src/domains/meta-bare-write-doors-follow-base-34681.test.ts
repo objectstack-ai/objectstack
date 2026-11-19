@@ -236,7 +236,7 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
 
         it('the rollback naming no package restores the base\'s row to the base\'s own version, as ?package=<base> does', async () => {
             await versionedPair('rb_mail');
-            const versions = ((await b.engine.find('sys_metadata_history', { where: { type: 'email_template', name: 'rb_mail' }, context: { isSystem: true } } as any)) as any[])
+            const versions = ((await b.engine.find('sys_metadata_history', { where: { type: 'email_template', name: 'rb_mail' }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[])
                 .filter((row) => JSON.parse(String(row.metadata)).subject === 'v1').map((row) => Number(row.version));
             expect(versions.length, 'one stored version of the base\'s v1').toBe(1);
             const rolled = await settle(b.protocol.rollbackMetaItem({ type: 'email_template', name: 'rb_mail', toVersion: versions[0] }));
