@@ -19,6 +19,9 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
+// `HomePage` reaches `@objectstack/lint` (through the drafts row), so its first
+// load is paid here, at collection, never inside a clocked `waitFor`.
+import '@objectstack/lint';
 import { MetadataProvider } from '../../../providers/MetadataProvider';
 
 const navigateMock = vi.fn();
