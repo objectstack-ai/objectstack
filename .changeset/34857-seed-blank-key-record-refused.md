@@ -6,7 +6,7 @@ fix(metadata-protocol)!: a seed record that leaves a key field blank is refused 
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-data/references/seeds.md (:48 the externalId row, :68 the composite key, :93 `externalId` selection: none says a record must carry every key field or is refused at load)
+Skills-docs: follow-up #35480 — skills/objectstack-data/references/seeds.md (:48 the externalId row, :68 the composite key, :93 `externalId` selection: none says a record must carry every key field or is refused at load)
 
 <!-- adr-0087: registered seed-key-blank-record-refused -->
 
