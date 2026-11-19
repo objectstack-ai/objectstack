@@ -91,4 +91,6 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
   "objects.sys_user._actions.import_sso_users.params.csv.label": "bfb77802b66a9222",
   "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
+  "objects.sys_work_calendar.fields.id.label": "00b0385c9c152888",
+  "objects.sys_work_calendar_exception.fields.id.label": "00b0385c9c152888",
 };

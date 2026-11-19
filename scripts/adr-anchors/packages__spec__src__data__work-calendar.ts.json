@@ -1,0 +1,5 @@
+{
+  "file": "packages/spec/src/data/work-calendar.ts",
+  "adrs": ["ADR-0157"],
+  "invariant": "ADR-0157: the working-calendar arithmetic is the contract package's so the calendar service and the working-day formula functions count with one daylight-saving rule (D11, open point 3). A computation that needs a date outside the calendar's maintained span is refused, never read from the weekly pattern alone or from wall-clock time (D2, D8); a period crossing midnight is refused, 24:00 is a legal end, and an `on` exception carries its date's full periods (D7, D10)."
+}

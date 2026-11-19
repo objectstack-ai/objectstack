@@ -4422,5 +4422,128 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_work_calendar: {
+    label: "Calendário de trabalho",
+    pluralLabel: "Calendários de trabalho",
+    description: "Calendários de trabalho: o horário semanal, o fuso horário em que ele vale e até quando os feriados estão mantidos. Prazos contados em tempo útil os leem.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Código",
+        help: "Código de máquina pelo qual fórmulas, escalonamentos de aprovação e pacotes nomeiam este calendário, por exemplo cn_standard: letras minúsculas, dígitos e sublinhados."
+      },
+      name: {
+        label: "Nome"
+      },
+      timezone: {
+        label: "Fuso horário",
+        help: "Fuso horário IANA em que os períodos de trabalho valem, por exemplo Asia/Shanghai. Se omitido na criação, usa o fuso horário padrão da organização (Configurações → Localização)."
+      },
+      is_default: {
+        label: "Padrão",
+        help: "O calendário que um prazo usa quando não indica nenhum. Um por organização."
+      },
+      maintained_from: {
+        label: "Mantido desde",
+        help: "Primeira data a partir da qual feriados e dias úteis de compensação estão cadastrados. Um cálculo que precise de uma data anterior é recusado."
+      },
+      maintained_through: {
+        label: "Mantido até",
+        help: "Última data até a qual feriados e dias úteis de compensação estão cadastrados. Um cálculo que precise de uma data posterior é recusado: cadastre os feriados do próximo ano e depois mova esta data."
+      },
+      monday_periods: {
+        label: "Segunda-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      tuesday_periods: {
+        label: "Terça-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      wednesday_periods: {
+        label: "Quarta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      thursday_periods: {
+        label: "Quinta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      friday_periods: {
+        label: "Sexta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      saturday_periods: {
+        label: "Sábado",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      sunday_periods: {
+        label: "Domingo",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Todas",
+        emptyState: {
+          title: "Nenhum calendário de trabalho ainda",
+          message: "Adicione um calendário com seu horário semanal e marque um como padrão; depois cadastre seus feriados e dias úteis de compensação."
+        }
+      },
+      needs_maintenance: {
+        label: "Precisa de manutenção",
+        emptyState: {
+          title: "Todos os calendários estão mantidos com antecedência",
+          message: "Um calendário aparece aqui quando seus feriados acabam nos próximos 60 dias; prazos além dessa data são recusados."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "O código deve começar com uma letra minúscula e usar apenas letras minúsculas, dígitos e sublinhados, por exemplo cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Exceção de calendário",
+    pluralLabel: "Exceções de calendário",
+    description: "Exceções datadas de um calendário de trabalho: feriados, dias úteis de compensação e paralisações. Um dia útil traz seus períodos de trabalho completos.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendário"
+      },
+      date: {
+        label: "Data"
+      },
+      kind: {
+        label: "Tipo",
+        help: "Folga: a data inteira é de folga. Dia útil: a data é trabalhada com os períodos abaixo, por exemplo um dia útil de compensação.",
+        options: {
+          off: "Folga",
+          on: "Dia útil"
+        }
+      },
+      periods: {
+        label: "Períodos",
+        help: "Para um dia útil, os períodos de trabalho completos dessa data, HH:mm-HH:mm separados por vírgulas (09:00-12:00, 13:00-18:00); nunca são herdados do dia da semana. Deixe em branco para uma folga."
+      },
+      note: {
+        label: "Observação",
+        help: "O que é a data, por exemplo o Dia Nacional ou um dia útil de compensação do Festival da Primavera."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Todas",
+        emptyState: {
+          title: "Nenhuma exceção de calendário ainda",
+          message: "Adicione uma linha por feriado ou dia útil de compensação, ou importe um ano deles de um arquivo."
+        }
+      }
+    }
   }
 };
