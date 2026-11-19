@@ -61,7 +61,12 @@ if (cardsIdx < 0) throw new Error(`${INBOX_FILE}: the phone card list (${CARDS_M
 const lineStart = SRC[INBOX_FILE].lastIndexOf('\n', cardsIdx);
 SRC['cards'] = SRC[INBOX_FILE].slice(lineStart);
 
-/** One capture out of a source; a capture missing a token throws, so a drifted match cannot pass. */
+/**
+ * One capture out of a source; a capture missing a token throws, so a drifted
+ * match cannot pass. The tokens are structural ones the capture always holds,
+ * never a class this fix added, so an ablation of the fix reaches the
+ * measurement instead of stopping here.
+ */
 function grab(file: string, re: RegExp, mustContain: string[] = []): string {
   const m = SRC[file].match(re);
   if (!m) throw new Error(`${file}: nothing matched ${re}`);
@@ -115,18 +120,18 @@ const BASE = {
 const F = INBOX_FILE;
 const INBOX = {
   toolbar: grab(F, /<div className="([^"]+)">\s*<Tabs value=\{tab\}/, ['justify-between']),
-  tableBox: grab(F, /<div className="([^"]+)">\s*<Table>/, ['md:block']),
+  tableBox: grab(F, /<div className="([^"]+)">\s*<Table>/, ['rounded-md']),
   heads: [...SRC[F].matchAll(/<TableHead className="([^"]+)">/g)].map((m) => m[1]),
-  cardList: grab(F, /<div className="([^"]+)" data-testid="ai-inbox-cards">/, ['md:hidden']),
+  cardList: grab(F, /<div className="([^"]+)" data-testid="ai-inbox-cards">/, ['space-y-2']),
   card: grab('cards', /className="([^"]+)" data-testid=\{`ai-inbox-card-\$\{row\.id\}`\}/, ['border']),
   cardHead: grab('cards', /data-testid=\{`ai-inbox-card-\$\{row\.id\}`\}>\s*<div className="([^"]+)">/, ['flex']),
   action: grab('cards', /<div className="([^"]+)">\{row\.action_name\}<\/div>/, ['min-w-0']),
   badgeBox: grab('cards', /<div className="([^"]+)"><StatusBadge status=\{row\.status\}/, ['shrink-0']),
-  meta: grab('cards', /<div className="([^"]+)">\s*<span className="[^"]+">\{row\.object_name\}/, ['flex-wrap']),
+  meta: grab('cards', /<div className="([^"]+)">\s*<span className="[^"]+">\{row\.object_name\}/, ['flex']),
   object: grab('cards', /<span className="([^"]+)">\{row\.object_name\}/, ['min-w-0']),
   tool: grab('cards', /<span className="([^"]+)">\{row\.tool_name\}/, ['font-mono']),
-  time: grab('cards', /<span className="([^"]+)">\s*<Clock className="h-3 w-3" \/>/, ['whitespace-nowrap']),
-  buttons: grab('cards', /<div className="([^"]+)">\s*\{isPending \?/, ['flex-wrap']),
+  time: grab('cards', /<span className="([^"]+)">\s*<Clock className="h-3 w-3" \/>/, ['inline-flex']),
+  buttons: grab('cards', /<div className="([^"]+)">\s*\{isPending \?/, ['flex']),
   approveSize: grab('cards', /<Button\s+size="([^"]+)"\s+variant="default"/),
   approve: grab('cards', /size="[^"]+"\s+variant="default"\s+className="([^"]+)"/, ['flex-1']),
   rejectSize: grab('cards', /<Button\s+size="([^"]+)"\s+variant="destructive"/),
