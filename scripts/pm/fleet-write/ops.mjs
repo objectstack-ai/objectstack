@@ -432,7 +432,7 @@
  * the pull is no longer listed (`dequeueReadBack`) AND its own GET reads it
  * still open with `merged` false (`dequeuePullAfter`) on two reads one poll
  * apart — out of the queue and not landed, the two readings
- * `platform-readings.md` asks for, whose removal and `merged` arrive seconds
+ * `readings-queue.md` asks for, whose removal and `merged` arrive seconds
  * apart in either order. A pull that
  * left by MERGING inside the window is a FAILED action naming the merge; one
  * closed unmerged is FAILED too. A read-back that still lists it after the
