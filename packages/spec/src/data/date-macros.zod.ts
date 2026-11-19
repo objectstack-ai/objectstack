@@ -82,7 +82,9 @@ import { z } from 'zod';
  * dashboard filter's `defaultValue` and a calendar view's `initialDate`
  * accept any of them — and a week key is not a date. So
  * `isDateMacroToken('current_iso_week')` is `false`, and those two surfaces
- * refuse it. Every door that asks whether a filter placeholder is KNOWN
+ * refuse it; so does the query engine's temporal-comparand door, on a
+ * `date`, `datetime` or `time` column (`INVALID_FILTER` / 400), as it
+ * refuses the literal key. Every door that asks whether a filter placeholder is KNOWN
  * (`isKnownFilterToken` and `classifyFilterToken` in `./context-tokens.zod.ts`,
  * which lint, the flow filter operand and the server resolver read) knows
  * it, with its own `period-key` kind. A dashboard text filter may default to

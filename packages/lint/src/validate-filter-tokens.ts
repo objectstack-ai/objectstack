@@ -248,12 +248,12 @@ function walkFilterValues(
             `\`type: 'record'\` page, to the id of the record in view.`
           : suggestion
           ? `Did you mean "{${suggestion}}"? Context tokens are {${KNOWN_LIST}}; ` +
-            `time-based values use date macros such as {today} or {30_days_ago}.`
-          // [#22161] One remedy line; the two vocabularies in full, and why a
+            `time-based values use date macros such as {today}, or the week key {current_iso_week}.`
+          // [#22161] One remedy line; the three vocabularies in full, and why a
           // literal shaped like a placeholder cannot be filtered on, are
           // `os explain filter-token-unknown`.
-          : `Use a context token ({${KNOWN_LIST}}) or a date macro such as {today} or ` +
-            `{30_days_ago}; a literal value that looks like a placeholder must be renamed.`,
+          : `Use a context token ({${KNOWN_LIST}}), a date macro such as {today} or the week ` +
+            `key {current_iso_week}; a literal value that looks like a placeholder must be renamed.`,
       });
     }
     return;

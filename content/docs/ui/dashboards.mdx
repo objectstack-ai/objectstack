@@ -671,9 +671,9 @@ user can edit it like any typed value, and it filters the field the same way.
 - **Not a date.** The key is text. A `type: 'date'` filter refuses it as a
   default, and so does a calendar view's `initialDate`. To filter a date field
   to this week, use the `this_week` preset or `{current_week_start}` /
-  `{current_week_end}`. In a filter on a date or datetime field the key is
-  compared as text, not read as a week, so the answer is wrong: use it only on
-  fields that store week keys.
+  `{current_week_end}`. In a filter on a date, datetime or time field the
+  placeholder is refused (`INVALID_FILTER`, 400), as the literal key is: use it
+  only on fields that store week keys.
 
 ### Per-Widget Filter Bindings
 

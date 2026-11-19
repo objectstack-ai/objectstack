@@ -478,7 +478,7 @@ describe('validateFilterTokens — {record_id}', () => {
 });
 
 // [#22161] Slice 21: a placeholder with no near miss prints one remedy line —
-// the two vocabularies, briefly — and the vocabularies in full, why a literal
+// the three vocabularies, briefly — and the vocabularies in full, why a literal
 // shaped like a placeholder cannot be filtered on, and where `{record_id}`
 // resolves are the id's `os explain` entry.
 describe('[#22161] one-line fix — filter-token-unknown', () => {
@@ -487,8 +487,8 @@ describe('[#22161] one-line fix — filter-token-unknown', () => {
       dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { owner: '{whoever_is_watching}' } }] }],
     });
     expect(findings.map((f) => f.hint)).toEqual([
-      'Use a context token ({current_user_id}, {current_org_id}) or a date macro such as {today} or ' +
-        '{30_days_ago}; a literal value that looks like a placeholder must be renamed.',
+      'Use a context token ({current_user_id}, {current_org_id}), a date macro such as {today} or the week ' +
+        'key {current_iso_week}; a literal value that looks like a placeholder must be renamed.',
     ]);
   });
 
