@@ -354,6 +354,15 @@ function rowOrganization(row: Rec, column: string | null, publishing: string | n
  * say) one unscoped pass, `null`. On an object that has a tenant column, a
  * row stamped with no organization is not judged: an unscoped pass there would
  * read every organization's rows together.
+ *
+ * Why a sample of rows and not a distinct read of the column: the list this
+ * answers is a loop bound. Every organization in it costs the roll-up probe
+ * two more reads, on the publish's own request, so it is held to the
+ * organizations that the first {@link PROBE_SAMPLE_ROWS} child rows carry; a
+ * distinct read pushed down to the database would return every organization
+ * of the table and make that loop as long as the tenant count. The verdict
+ * claims no more: it names the first sampled organization whose sampled
+ * parents all read blank, never every organization.
  */
 async function probeOrganizations(engine: ProbeEngine, objectName: string, publishing: string | null): Promise<Array<string | null>> {
     if (publishing) return [publishing];
@@ -372,6 +381,56 @@ function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
     const list = map.get(key);
     if (list) list.push(value);
     else map.set(key, [value]);
+}
+
+/** The seed modes whose replay writes a record back onto the row its key matched. */
+const WRITING_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update']);
+
+/** A published seed's mode: the spec default `ignore` when it declares none. */
+function seedModeOf(seed: Rec): string {
+    return typeof seed.mode === 'string' ? seed.mode : 'ignore';
+}
+
+/** The fields of a seed's `externalId`: the spec default `name` when it declares none. */
+function seedKeyFields(seed: Rec): Set<string> {
+    const key = seed.externalId;
+    return new Set((Array.isArray(key) ? key : [key ?? 'name']).filter((k): k is string => typeof k === 'string'));
+}
+
+/**
+ * The column a seed declares `columns.<field>.applyOn: 'create'`, which the
+ * loader drops from a matched row's write unless the field is part of the
+ * seed's `externalId` (`createOnlySeedColumns`, `seed-loader.ts`).
+ */
+function seedKeepsForCreate(seed: Rec, field: string): boolean {
+    return asRec(asRec(seed.columns)?.[field])?.applyOn === 'create' && !seedKeyFields(seed).has(field);
+}
+
+/** Every record of the seed carries the column, so each matched row's write names it. */
+function seedRecordsCarry(seed: Rec, field: string): boolean {
+    const records = asArr(seed.records);
+    return records.length > 0 && records.every((r) => !!asRec(r) && Object.prototype.hasOwnProperty.call(r, field));
+}
+
+/**
+ * The seed writes `field` back onto every row its key matches, on every
+ * replay: a writing mode, every record carries the column, and the column is
+ * not kept for create. The loader's matched-row write is the record's own
+ * columns (`writeRecord`, `seed-loader.ts`), less the create-only ones.
+ */
+function seedRewritesOnMatch(seed: Rec, field: string): boolean {
+    return WRITING_SEED_MODES.has(seedModeOf(seed)) && seedRecordsCarry(seed, field) && !seedKeepsForCreate(seed, field);
+}
+
+/** Why a replay of these seeds leaves `field` as a matched row holds it, naming each seed by the reason. */
+function seedNotRewritingWhy(seeds: ReadonlyArray<{ name: string; body: Rec }>, field: string): string {
+    const named = (pick: (s: Rec) => boolean) => seeds.filter((s) => pick(s.body)).map((s) => `"${s.name}"`).join(', ');
+    const reasons = [
+        [named((s) => !WRITING_SEED_MODES.has(seedModeOf(s))), "use `mode: 'ignore'` (the default)"],
+        [named((s) => seedKeepsForCreate(s, field)), `declare \`columns.${field}.applyOn: 'create'\``],
+        [named((s) => !seedRecordsCarry(s, field)), `have a record that does not carry "${field}"`],
+    ].filter(([who]) => who !== '');
+    return reasons.map(([who, why]) => `seed(s) ${who} ${why}`).join('; ');
 }
 
 /** A measure value that renders as an empty card: no value, or zero. */
@@ -762,6 +821,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 const childField = ops.function !== 'count' && typeof ops.field === 'string' ? ops.field : undefined;
                 const organizations = await probeOrganizations(engine, childObject, organizationId ?? null);
                 let blank: Rec[] | undefined;
+                let blankIn: string | null = null;
                 for (const organization of organizations) {
                     const children = asArr(await engine.find(childObject, {
                         fields: [...new Set(['id', fk, ...(childField ? [childField] : [])])],
@@ -779,6 +839,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     })).map(asRec).filter((r): r is Rec => !!r);
                     if (parents.length > 0 && parents.every((r) => r[fieldName] === null || r[fieldName] === undefined)) {
                         blank = parents;
+                        blankIn = organization;
                         break;
                     }
                 }
@@ -796,7 +857,8 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     ref: { type: 'object', name: p.name, member: fieldName },
                     code: 'rollup_never_computed',
                     message:
-                        `Roll-up "${p.name}.${fieldName}" is empty on all ${blank.length} parent row(s) of one organization that have ` +
+                        `Roll-up "${p.name}.${fieldName}" is empty on all ${blank.length} sampled parent row(s)` +
+                        `${blankIn !== null ? ' of one organization' : ''} that have ` +
                         `"${childObject}" children — the field is configured, but its stored value was never computed for them. A ` +
                         'roll-up is written when a parent is inserted, when a child write names the parent, by `os migrate ' +
                         'summary-nulls`, and by the install door that adds it; one declared after its children landed reaches none ' +
@@ -832,13 +894,31 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
     // the person will meet; the operator's reference audit
     // (`inspectDanglingReferences`) reports the same rows later.
     //
-    // The rows judged are the SEED's own: the ids the loader reports it landed
+    // The rows judged are the SEEDS' own: the ids the loader reports it landed
     // (`seedApplied.landed`), read by `id`, so no row the loader did not land
-    // is matched, judged or quoted. Those it created always; those a seed key
-    // matched only when the seed's mode wrote them (`upsert`, `update`): under
-    // `ignore` a matched row was left as its writer left it, and may be a
-    // customer's. `landed` is per object, so two seeds of one object in one
-    // publish are judged over the object's landed rows together.
+    // is matched, judged or quoted. `landed` is one entry per OBJECT, merging
+    // every seed of it, so the judgement is per object too: one finding per
+    // object and column, over the object's published seeds together.
+    //
+    //  • The rows a seed CREATED are always judged: this publish wrote them.
+    //  • A row a seed key MATCHED is judged only when every published seed of
+    //    the object declares a writing mode (`upsert`, `update`): the loader
+    //    does not say which seed matched it, and under `ignore` (the default)
+    //    a matched row was left as its writer left it, and may be a
+    //    customer's. And only in a column every one of those seeds writes back
+    //    onto a matched row ({@link seedRewritesOnMatch}); any other column of
+    //    a matched row is its writer's, not the seed's.
+    //
+    // The repair named is the one that reaches the stored value. A replay
+    // writes a column back onto a row it finds again only under a writing
+    // mode, only when the record carries the column, and never for a column
+    // declared `applyOn: 'create'` (the loader drops it from a matched row's
+    // write), so "correct the seed and republish" is offered only when every
+    // seed of the object does all three (`cause: 'seed'`). Otherwise the
+    // republish leaves the value where it is, and the repair is the stored
+    // rows (correct, clear or delete them), plus declaring `upsert` where
+    // that alone would make the replay reach the column (`cause: 'mode'`), or
+    // the stored rows alone (`cause: 'stored'`).
     //
     // Why this is not `ObjectQL.inspectDanglingReferences`: that audit reads
     // the first rows of the whole object (no row filter, so it cannot read the
@@ -853,17 +933,20 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
     // seed row that names a row of a sibling organization would be reported.
     // A seed loads into one organization and resolves its references there.
     const landedByObject = new Map((opts.seedLanded ?? []).map((l) => [l.object, l] as const));
+    const seedsByObject = new Map<string, Array<{ name: string; body: Rec }>>();
     for (const p of published.filter((x) => x.type === 'seed')) {
         const seed = asRec(await readItem('seed', p.name));
-        const objectName = typeof seed?.object === 'string' ? seed.object : undefined;
-        if (!objectName) continue;
+        if (seed && typeof seed.object === 'string') pushTo(seedsByObject, seed.object, { name: p.name, body: seed });
+    }
+    const landedIdsOf = (list: { ids: readonly string[] } | undefined): string[] =>
+        asArr(list?.ids).filter((id): id is string => typeof id === 'string' && id !== '');
+    for (const [objectName, seeds] of seedsByObject) {
         const landed = landedByObject.get(objectName);
         if (!landed) continue;
-        const mode = typeof seed?.mode === 'string' ? seed.mode : 'ignore';
-        const ids = [...new Set([
-            ...asArr(landed.inserted?.ids),
-            ...(mode === 'upsert' || mode === 'update' ? asArr(landed.matched?.ids) : []),
-        ].filter((id): id is string => typeof id === 'string' && id !== ''))].slice(0, PROBE_SAMPLE_ROWS);
+        const writing = seeds.every((s) => WRITING_SEED_MODES.has(seedModeOf(s.body)));
+        const inserted = new Set(landedIdsOf(landed.inserted));
+        const matched = new Set(writing ? landedIdsOf(landed.matched).filter((id) => !inserted.has(id)) : []);
+        const ids = [...new Set([...inserted, ...matched])].slice(0, PROBE_SAMPLE_ROWS);
         if (ids.length === 0) continue;
         const objectBody = asRec(await readItem('object', objectName));
         const refFields = fieldsOf(objectBody).flatMap(([name, def]) => {
@@ -888,9 +971,15 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         } catch {
             continue;
         }
+        const seedNames = seeds.map((s) => `"${s.name}"`).join(', ');
         for (const { name: field, def, target } of refFields) {
+            // Every seed writes this column back onto a row it matched: the
+            // seed is where the value is corrected, and a matched row's value
+            // is the seed's to judge.
+            const rewritten = writing && seeds.every((s) => seedRewritesOnMatch(s.body, field));
+            const judged = rows.filter((r) => inserted.has(String(r.id)) || (rewritten && matched.has(String(r.id))));
             const byOrganization = new Map<string | null, string[]>();
-            for (const r of rows) {
+            for (const r of judged) {
                 for (const v of idsIn(r[field])) pushTo(byOrganization, rowOrganization(r, orgColumn, organizationId ?? null), v);
             }
             if (byOrganization.size === 0) continue;
@@ -912,27 +1001,46 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             }
             const distinct = [...new Set(missing)];
             if (distinct.length === 0) continue;
+            const ignoring = seeds.filter((s) => !WRITING_SEED_MODES.has(seedModeOf(s.body)));
+            // Declaring `upsert` on the seeds that do not write reaches the
+            // column only when every seed carries it and none keeps it for create.
+            const cause: 'seed' | 'mode' | 'stored' = rewritten
+                ? 'seed'
+                : !writing && seeds.every((s) => seedRewritesOnMatch({ ...s.body, mode: 'upsert' }, field))
+                ? 'mode'
+                : 'stored';
             // The values quoted are the landed rows' own column; nothing of
             // the target is read beyond its `id`.
             const shown = distinct.slice(0, 5).map((v) => `"${v}"`).join(', ');
+            const column = `"${objectName}.${field}"`;
+            const storedRepair =
+                `correct or clear ${column} on those stored rows, or delete them and republish the corrected seed so it creates them again`;
             issues.push({
                 layer: 'runtime',
                 severity: 'warning',
-                artifact: { type: 'seed', name: p.name },
+                artifact: { type: 'seed', name: seeds[0]!.name },
                 ref: { type: 'object', name: objectName, member: field },
                 code: 'seed_reference_unresolved',
                 message:
-                    `Reference column "${objectName}.${field}" holds ${distinct.length} value(s) on the rows the seed landed that ` +
+                    `Reference column ${column} holds ${distinct.length} value(s) on the rows seed(s) ${seedNames} landed that ` +
                     `name no "${target}" row in their organization: ${shown}${distinct.length > 5 ? ', …' : ''}. The rows landed ` +
                     'as a system write, which is not checked for references, so they point at nothing.',
-                fix:
-                    `Point "${objectName}.${field}" on those rows at real "${target}" records (in the seed, by a value the loader ` +
-                    'resolves), or clear it, then republish the seed.',
+                fix: cause === 'seed'
+                    ? `Point ${column} on those rows at real "${target}" records in the seed (by a value the loader resolves), ` +
+                      'or clear it there, then republish the seed: its mode writes the column back onto the rows it finds again.'
+                    : cause === 'mode'
+                    ? `Republishing the seed as it is does not change those rows: under \`mode: 'ignore'\` (the default) ` +
+                      `seed(s) ${ignoring.map((s) => `"${s.name}"`).join(', ')} leave a row they find again as it is. ` +
+                      `Either ${storedRepair}, or declare \`mode: 'upsert'\` on those seed(s), point ${column} at real ` +
+                      `"${target}" records there, and republish.`
+                    : `Republishing the seed does not change ${column} on those rows: ${seedNotRewritingWhy(seeds, field)}, ` +
+                      `so a replay leaves the column on a row it finds again as it is. Instead, ${storedRepair}.`,
                 userMessage: say('seed_reference_unresolved', {
                     object: labelIn(objectBody, objectName),
                     field: labelIn(def, field),
                     target: await labelOf('object', target),
                     count: String(distinct.length),
+                    cause,
                 }),
             });
         }

@@ -118,7 +118,14 @@ const ITEMS: Record<string, unknown> = {
         label: DEALS,
         fields: { acct_ref: { type: 'lookup', reference: 'crm_acct', label: ACCT_REF } },
     },
-    'seed crm_deal_seed': { object: 'crm_deal', records: [{ name: 'Big deal' }] },
+    // Under the default `ignore`, a seed that carries the reference: the repair is the stored rows, or `upsert`.
+    'seed crm_deal_seed': { object: 'crm_deal', records: [{ name: 'Big deal', acct_ref: 'Acme Corp' }] },
+    // Under `upsert`, the seed writes the reference back on every replay: the repair is the seed.
+    'seed crm_deal_seed_upsert': { object: 'crm_deal', mode: 'upsert', records: [{ name: 'Big deal', acct_ref: 'Acme Corp' }] },
+    // A reference kept for create: no replay writes it again, so the repair is the stored rows alone.
+    'seed crm_deal_seed_kept': {
+        object: 'crm_deal', mode: 'upsert', columns: { acct_ref: { applyOn: 'create' } }, records: [{ name: 'Big deal', acct_ref: 'Acme Corp' }],
+    },
     'flow crm_erp_sync': {
         name: 'crm_erp_sync',
         label: ERP_SYNC,
@@ -451,17 +458,21 @@ const CASES: readonly ProbeCase[] = [
         params: (tag) => ({ object: ACCOUNTS, field: said(OPEN_DEALS, tag, 'open_deal_count'), child: DEALS, cause: 'fills' }),
         hidden: ['crm_acct', 'open_deal_count', 'crm_deal'],
     },
-    {
-        title: 'sample records whose reference names no record',
+    ...([
+        ['sample records whose reference names no record', 'crm_deal_seed', 'mode'],
+        ['sample records whose reference names no record, under a seed that writes it back', 'crm_deal_seed_upsert', 'seed'],
+        ['sample records whose reference names no record, kept for create', 'crm_deal_seed_kept', 'stored'],
+    ] as const).map(([title, seed, cause]): ProbeCase => ({
+        title,
         code: 'seed_reference_unresolved', // adr0112-ok: D6c build-probe diagnostics code
         run: probe({
             engine: engineOver({ crm_deal: [{ id: 'd1', name: 'Big deal', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
             seedLanded: [{ object: 'crm_deal', inserted: { ids: ['d1'] }, matched: { ids: [] } }],
-            published: [{ type: 'seed', name: 'crm_deal_seed' }],
+            published: [{ type: 'seed', name: seed }],
         }),
-        params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1' }),
+        params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1', cause }),
         hidden: ['crm_deal', 'acct_ref', 'crm_acct', 'Acme Corp'],
-    },
+    })),
     {
         title: 'a flow step whose connector name two connectors share',
         code: 'flow_connector_action_unresolved', // adr0112-ok: D6c build-probe diagnostics code

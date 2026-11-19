@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import './lint-root-preload.testkit.js';
 import { runBuildProbes, type ProbeAutomation, type ProbeEngine, type RunBuildProbesOptions } from './build-probes.js';
+import { buildProbeUserMessage } from './build-probes.user-text.js';
 
 type Row = Record<string, unknown>;
 
@@ -73,7 +74,7 @@ const ITEMS: Record<string, unknown> = {
         },
     },
     'seed deal_seed': { object: 'deal', records: [{ name: 'D1' }, { name: 'D2' }] },
-    'seed deal_seed_upsert': { object: 'deal', mode: 'upsert', records: [{ name: 'D1' }, { name: 'D2' }] },
+    'seed deal_seed_upsert': { object: 'deal', mode: 'upsert', records: [{ name: 'D1', acct_ref: 'a_gone' }, { name: 'D2', acct_ref: 'a1' }] },
     'dashboard board': {
         name: 'board',
         widgets: [{ id: 'w1', dataset: 'deal_totals', values: ['total'] }],
@@ -392,7 +393,7 @@ describe('the landed-data reads are scoped like the engine\'s reference audit, a
             ['rollup_never_computed', 'warning', 'deal_count'],
             ['rollup_never_computed', 'warning', 'deal_total'],
         ]);
-        expect(report.issues[0]!.message).toContain('all 2 parent row(s) of one organization');
+        expect(report.issues[0]!.message).toContain('all 2 sampled parent row(s) of one organization');
         const samples = reads.filter((r) => r.object === 'deal' && r.context?.tenantId !== undefined);
         expect(samples.map((r) => r.context!.tenantId)).toEqual(['o1', 'o2', 'o1', 'o2']);
         // The organizations come from a read projected to the tenant column alone.
@@ -428,5 +429,115 @@ describe('rollup_never_computed names the repair that fills the function', () =>
         expect(report.issues[1]!.fix).toContain('`os migrate summary-nulls --apply --recompute-undefined-on-empty acct.deal_max`');
         expect(report.issues[1]!.userMessage).toContain('--recompute-undefined-on-empty');
         expect(report.issues[0]!.userMessage).not.toContain('--recompute-undefined-on-empty');
+    });
+});
+
+describe('rollup_never_computed: the message says "of one organization" only on a pass split by organization', () => {
+    it('an object with no tenant column is judged in one unscoped pass, and the message claims no organization', async () => {
+        const report = await run({
+            engine: { find: engineOver({ deal: [{ id: 'd1', acct_ref: 'a1', amount: 5 }], acct: [{ id: 'a1' }] }).find },
+            published: [{ type: 'object', name: 'acct' }],
+        });
+        expect(codes(report)[0]).toEqual(['rollup_never_computed', 'warning', 'deal_count']);
+        expect(report.issues[0]!.message).toContain('all 1 sampled parent row(s) that have "deal" children');
+        expect(report.issues[0]!.message).not.toContain('organization');
+    });
+});
+
+describe('seed_reference_unresolved is judged per object, and names the repair a republish reaches', () => {
+    // `seedApplied.landed` is one entry per object for every seed of it
+    // (`seedAppliedLanded`), so the judgement is per object and column. A
+    // republish rewrites a stored value only under a writing mode, for a
+    // column every record carries and none keeps for create (`seed-loader.ts`
+    // `writeRecord`, `createOnlySeedColumns`); any other repair is the stored row's.
+    const items: Record<string, unknown> = {
+        ...ITEMS,
+        'seed deals_ignore': { object: 'deal', records: [{ name: 'D1', acct_ref: 'a_gone' }] },
+        'seed deals_upsert': { object: 'deal', mode: 'upsert', records: [{ name: 'D1', acct_ref: 'a_gone' }] },
+        'seed deals_upsert_too': { object: 'deal', mode: 'upsert', records: [{ name: 'D2', acct_ref: 'a_lost' }] },
+        'seed deals_kept_for_create': {
+            object: 'deal', mode: 'upsert', columns: { acct_ref: { applyOn: 'create' } }, records: [{ name: 'D1', acct_ref: 'a_gone' }],
+        },
+        'seed deals_without_column': { object: 'deal', mode: 'upsert', records: [{ name: 'D1' }] },
+    };
+    const getItem: RunBuildProbesOptions['getItem'] = async (t, n) => items[`${t} ${n}`];
+    const seeds = (...names: string[]) => names.map((name) => ({ type: 'seed', name }));
+    const sentence = (cause: string, count = '1') =>
+        buildProbeUserMessage('seed_reference_unresolved', { object: 'deal', field: 'acct_ref', target: 'acct', count, cause }, ['en']);
+    const only = (report: Awaited<ReturnType<typeof run>>) => {
+        expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
+        return report.issues[0]!;
+    };
+
+    it('under `ignore`, the repair named reaches the stored row; a republish of the seed as it is does not', async () => {
+        const dangling = engineOver({ deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }], acct: [{ id: 'a1' }] });
+        // The first publish created the row: judged, and the repair is the stored row's, or `upsert`.
+        const first = only(await run({ engine: dangling, getItem, seedLanded: landedOn('deal', ['d1']), published: seeds('deals_ignore') }));
+        expect(first.fix).toContain("Republishing the seed as it is does not change those rows: under `mode: 'ignore'`");
+        expect(first.fix).toContain('correct or clear "deal.acct_ref" on those stored rows, or delete them');
+        expect(first.fix).toContain("declare `mode: 'upsert'` on those seed(s)");
+        expect(first.userMessage).toBe(sentence('mode'));
+        // A republish under `ignore` matched the row and left it: not the seed's to judge.
+        expect((await run({ engine: dangling, getItem, seedLanded: landedOn('deal', [], ['d1']), published: seeds('deals_ignore') })).issues)
+            .toEqual([]);
+        // The repair it named, `upsert`: the matched row is the seed's now, and keeps being reported until it resolves.
+        const kept = only(await run({ engine: dangling, getItem, seedLanded: landedOn('deal', [], ['d1']), published: seeds('deals_upsert') }));
+        expect(kept.fix).toContain('in the seed (by a value the loader resolves), or clear it there, then republish the seed');
+        expect(kept.userMessage).toBe(sentence('seed'));
+        const repaired = engineOver({ deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1' }], acct: [{ id: 'a1' }] });
+        expect((await run({ engine: repaired, getItem, seedLanded: landedOn('deal', [], ['d1']), published: seeds('deals_upsert') })).issues)
+            .toEqual([]);
+    });
+
+    it('two seeds of one object, one `ignore` and one `upsert`: one finding per column, over the rows this publish created', async () => {
+        const engine = engineOver({
+            deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }, { id: 'd2', name: 'D2', acct_ref: 'a_matched_by_ignore' }],
+            acct: [],
+        });
+        const issue = only(await run({
+            engine, getItem, seedLanded: landedOn('deal', ['d1'], ['d2']), published: seeds('deals_ignore', 'deals_upsert'),
+        }));
+        // The matched row is not judged: no seed of the object can be said to have written it.
+        expect(issue.message).toContain('1 value(s)');
+        expect(issue.message).toContain('seed(s) "deals_ignore", "deals_upsert" landed');
+        expect(issue.message).not.toContain('a_matched_by_ignore');
+        expect(issue.artifact).toEqual({ type: 'seed', name: 'deals_ignore' });
+        expect(issue.fix).toContain('seed(s) "deals_ignore" leave a row they find again as it is');
+        expect(issue.userMessage).toBe(sentence('mode'));
+    });
+
+    it('two writing seeds of one object: their matched rows are judged together, in one finding', async () => {
+        const engine = engineOver({
+            deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }, { id: 'd2', name: 'D2', acct_ref: 'a_lost' }],
+            acct: [],
+        });
+        const issue = only(await run({
+            engine, getItem, seedLanded: landedOn('deal', [], ['d1', 'd2']), published: seeds('deals_upsert', 'deals_upsert_too'),
+        }));
+        expect(issue.message).toContain('2 value(s)');
+        expect(issue.userMessage).toBe(sentence('seed', '2'));
+    });
+
+    it('a column the seed does not write on a matched row is not judged there; on a row it created, the repair is the stored row', async () => {
+        const engine = engineOver({
+            deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }, { id: 'd2', name: 'D2', acct_ref: 'a_customer_value' }],
+            acct: [],
+        });
+        for (const seed of ['deals_kept_for_create', 'deals_without_column']) {
+            // Matched only: the column is its writer's, so nothing is judged.
+            expect((await run({ engine, getItem, seedLanded: landedOn('deal', [], ['d2']), published: seeds(seed) })).issues).toEqual([]);
+            // Created by this publish: judged, and the seed cannot repair it on a replay.
+            const issue = only(await run({ engine, getItem, seedLanded: landedOn('deal', ['d1'], ['d2']), published: seeds(seed) }));
+            expect(issue.message).toContain('1 value(s)');
+            expect(issue.message).not.toContain('a_customer_value');
+            expect(issue.fix).toContain('Republishing the seed does not change "deal.acct_ref" on those rows');
+            expect(issue.fix).toContain(
+                seed === 'deals_kept_for_create'
+                    ? "declare `columns.acct_ref.applyOn: 'create'`"
+                    : 'have a record that does not carry "acct_ref"',
+            );
+            expect(issue.fix).not.toContain("declare `mode: 'upsert'`");
+            expect(issue.userMessage).toBe(sentence('stored'));
+        }
     });
 });
