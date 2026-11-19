@@ -1,6 +1,6 @@
 # ADR-0013: Bidirectional Messaging — Conversational Channels, Slack First
 
-**Status**: Draft (2026-05-26) · **Amended** (2026-11-19, rulings `7023437637` and `7023709522` on #34730) — the "Addendum (2026-11-19): Slack DM delivery of notifications" at the end is accepted: install model and its open/enterprise line, per-person binding by a confirmed email match, DM only. Everything else here stays Draft.
+**Status**: Draft (2026-05-26) · **Amended** (2026-11-19, rulings `7023437637`, `7023709522` and `7024100939` on #34730) — the "Addendum (2026-11-19): Slack DM delivery of notifications" at the end is accepted: install model and its open/enterprise line, per-person binding by a confirmed email match and who may remove it, DM only. Everything else here stays Draft.
 **Authors**: Platform team
 **Consumers**: `@objectstack/spec` (extensions to the `messaging/` domain introduced by ADR-0012), `@objectstack/service-messaging` (gains a receiver sub-system), `@objectstack/plugin-messaging-slack` (new, first reference implementation), future `plugin-messaging-lark` / `plugin-messaging-telegram` / `plugin-messaging-wecom` / `plugin-messaging-dingtalk`, the flow engine (new `messaging.inbound` trigger), ADR-0011 (Actions as AI Tools — inbound messages may become tool calls)
 **Sibling**: [ADR-0012 — Messaging Platform (Outbound)](./0012-notification-platform.md)
@@ -741,7 +741,8 @@ This delivers "chat with ObjectOS from Slack" without forking openclaw, without 
 
 > Status of this addendum: **accepted** — maintainer ruling of record `7023437637` on #34730
 > (2026-11-19, 「按推荐三点定(推荐)」; the options are in `7022838733`), and for the tier line in point 1
-> ruling of record `7023709522` (2026-11-19, 「社区版可用」). Only this addendum is accepted.
+> ruling of record `7023709522` (2026-11-19, 「社区版可用」), and for unlinking in point 2 ruling of
+> record `7024100939` (2026-11-19). Only this addendum is accepted.
 > The rest of this ADR stays **Draft**, and nothing above it is accepted by implication.
 
 **Scope.** Outbound delivery of platform notifications to one person over Slack, inside the pipeline
@@ -767,11 +768,11 @@ Draft as written above.
    person. A link is **proposed** by matching the person's email to the Slack user's email and takes
    effect only once the person **confirms** it, once; a proposal nobody confirmed delivers nothing.
    For this scope that replaces §8 item 2's "auto-create the link row": an email match proposes, it
-   never links. An email that matches more than one user proposes nothing. Who may remove a link
-   is not said by this ADR or by ADR-0022, so it is listed as open below. A person with no confirmed
-   link receives nothing on Slack; their other channels are unchanged.
-3. **Destination.** Direct messages to the linked person only. Posting to Slack channels is not in this scope; a flow
-   that must post to a channel keeps using `connector_action` on the Slack connector (ADR-0022 §2).
+   never links. An email that matches more than one user proposes nothing. A link may be removed by
+   the person and by an organization administrator (ruling `7024100939`, 「本人和管理员都可」). A
+   person with no confirmed link receives nothing on Slack; their other channels are unchanged.
+3. **Destination.** Direct messages to the linked person only. Posting to Slack channels is not in
+   this scope; a flow that must post to a channel keeps using `connector_action` on the Slack connector (ADR-0022 §2).
 
 **What `main` holds** (objectstack-ai/objectstack at `5dd856f4`). Neither `sys_channel_account` nor
 `sys_channel_user_link` is declared in code (`git grep` outside `docs/adr/` finds the first nowhere and
@@ -790,5 +791,8 @@ static bot-token auth and is composed only by `examples/app-showcase`.
 - connect and disconnect on the person's notification settings page;
 - the hosted half — the ObjectOS app's credentials and OAuth redirect — as a cloud card.
 
-**Open — not ruled:** who may remove a person link (the person, an organization administrator, or
-both).
+**Step 2 owes, with the binding store** (riders of ruling `7024100939`, named here, designed there):
+an audit row for every link removal; a notice to the person when an administrator removes their
+link; removal of the link when the user is deleted, banned or leaves the organization; an
+administrator's removal never blocks the person from confirming a new link; and the permission
+that defines "organization administrator", which step 2 names.
