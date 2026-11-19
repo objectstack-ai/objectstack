@@ -9374,7 +9374,8 @@ export function seatPostLastEventMs(seat, commentRows) {
 
 /**
  * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
- * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
+ * (`Seat: repo:<name>#<n>`, `Seat: epic:#<N>#<k>`, or a retired domain seat's
+ * `Seat: domain:<x>#<n>`; free-claim multi-seat), read with the same key-line
  * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
  * decoration around the key). Three answers, and the middle one is the reason
  * this reader is not a one-liner:
@@ -9405,13 +9406,16 @@ const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:
 /**
  * PRESENCE only — consulted solely when the key line matched nothing, and it
  * ⛔ never yields a number. Case-SENSITIVE, and it demands the whole declared
- * payload (`domain:<lane>#<n>`), because off the line start there is no
- * position left to tell a declaration from prose: the pinned control
- * 「the seat: domain:services#2 is busy」 has to keep reading as seat 1. Pinned
- * to the measured shape; an unmeasured variant it misses falls back to 1,
- * which is the defect, so widen it on evidence rather than narrowing it.
+ * payload in one of the seat spellings live on the board — `repo:<name>#<n>`
+ * (a repo name may carry `.` and `-`, e.g. `repo:www.objectos.ai#2`),
+ * `epic:#<N>#<k>`, and a retired domain seat's `domain:<lane>#<n>` — because
+ * off the line start there is no position left to tell a declaration from
+ * prose: the pinned controls 「the seat: domain:services#2 is busy」 and
+ * 「the seat: repo:objectstack#2 is busy」 have to keep reading as seat 1.
+ * Pinned to the measured shapes; an unmeasured variant it misses falls back to
+ * 1, which is the defect, so widen it on evidence rather than narrowing it.
  */
-const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?domain:[a-z0-9_-]+[ \t]*#\d/;
+const CLAIM_SEAT_DECLARATION_ANYWHERE = /(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*`?(?:domain:[a-z0-9_-]+|repo:[A-Za-z0-9._-]+|epic:#[1-9][0-9]*)[ \t]*#\d/;
 
 /** @returns {number|null} the seat number, 1 when NO declaration is present at all, null when one is present but unreadable. */
 export function claimSeatNumber(body) {
@@ -33046,6 +33050,11 @@ async function selfTest() {
   t('H38 seat: a declaration mid-sentence in a code span is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** dispatched by the `domain:spec` execution seat. `Seat: domain:spec#3` · claimed 2026-09-18T19:31Z'), null);
   t('H38 seat: …and the same declaration inside a subscript tag', claimSeatNumber('<sub>Seat: domain:spec#3</sub>'), null);
   // The two controls that keep the probe from swallowing the default: prose (above) needs the capital key, and a lane token alone is not a declaration.
+  // The seat spellings live today, mid-line: a `repo:` or `epic:` declaration the key line cannot see is PRESENT too.
+  t('H38 seat: a mid-line `repo:` declaration is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** by the seat. `Seat: repo:objectstack#3` · claimed'), null);
+  t('H38 seat: …and so is a mid-line `epic:` declaration', claimSeatNumber('**Claim:** by the seat. `Seat: epic:#31527#1` · claimed'), null);
+  t('H38 seat: a line-initial `Seat: repo:objectstack#3` reads 3', claimSeatNumber('Claim: x\nSeat: repo:objectstack#3'), 3);
+  t('H38 seat: prose naming a repo seat is still not a declaration, so seat 1', claimSeatNumber('the seat: repo:objectstack#2 is busy'), 1);
   t('H38 seat: a lane token with no `Seat:` key is not a declaration, so the absent default holds', claimSeatNumber('Claim: x\nre-graded for `domain:spec#3` work'), 1);
   t('H38 seat: a body with no declaration at all is still seat 1 — every pre-line claim keeps its default', claimSeatNumber('Claim: x\nSession: `session_y`\nWorktree: `objectstack-issue-1`'), 1);
   const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
