@@ -85,7 +85,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
 
 function createMetadata(): IMetadataService {
   const objects: Record<string, any> = {
-    demo_other: { name: 'demo_other', fields: { name: { type: 'text' }, code: { type: 'text' } } },
+    demo_other: { name: 'demo_other', fields: { name: { type: 'text' }, sku: { type: 'text' } } },
   };
   return {
     getObject: vi.fn(async (name: string) => objects[name]),
@@ -109,7 +109,7 @@ const CONFIG = {
   organizationId: 'org_demo',
 } as any;
 
-const dataset = (externalId: string | string[], mode = 'upsert', records: Record<string, unknown>[] = [{ name: 'G1', code: 'g' }]) =>
+const dataset = (externalId: string | string[], mode = 'upsert', records: Record<string, unknown>[] = [{ name: 'G1', sku: 'g' }]) =>
   ({ object: 'demo_other', externalId, mode, env: ['prod', 'dev', 'test'], records });
 
 /** The loader's blank-key refusals in a load result, by their message. */
@@ -139,9 +139,9 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
   for (const [label, blank] of [['empty string', ''], ['null', null], ['no value', undefined]] as const) {
     it(`composite key, one component ${label}: the record is not written, its siblings converge`, async () => {
       const blankRecord: Record<string, unknown> = { name: 'B' };
-      if (blank !== undefined) blankRecord.code = blank;
+      if (blank !== undefined) blankRecord.sku = blank;
       const { store, counts, results, loggers } = await threeLoads([
-        dataset(['name', 'code'], 'upsert', [{ name: 'A', code: 'a' }, blankRecord, { name: 'C', code: 'c' }]),
+        dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, blankRecord, { name: 'C', sku: 'c' }]),
       ]);
 
       expect(counts).toEqual([2, 2, 2]);
@@ -151,11 +151,11 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
         expect(result.results[0]).toMatchObject({ object: 'demo_other', errored: 1, total: 3 });
         const refused = blankKeyRefusals(result);
         expect(refused).toHaveLength(1);
-        expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'code', recordIndex: 1 });
+        expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'sku', recordIndex: 1 });
         expect(refused[0].message).toContain(
-          "Seed record #1 of 'demo_other' was NOT loaded: it is keyed on externalId 'name+code' and leaves 'code' blank",
+          "Seed record #1 of 'demo_other' was NOT loaded: it is keyed on externalId 'name+sku' and leaves 'sku' blank",
         );
-        expect(refused[0].message).toContain("Give the record a value for 'code'");
+        expect(refused[0].message).toContain("Give the record a value for 'sku'");
       }
       // Logged once per load, at `error`: the record is dropped.
       for (const logger of loggers) expect(blankKeyLines(logger)).toHaveLength(1);
@@ -163,19 +163,19 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
   }
 
   it('single-field key: a record with no value for it is refused; its keyed sibling converges', async () => {
-    const { counts, results } = await threeLoads([dataset('code', 'upsert', [{ name: 'A', code: 'a' }, { name: 'B' }])]);
+    const { counts, results } = await threeLoads([dataset('sku', 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B' }])]);
 
     expect(counts).toEqual([1, 1, 1]);
     for (const result of results) {
       const refused = blankKeyRefusals(result);
       expect(refused).toHaveLength(1);
-      expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'code', recordIndex: 1 });
-      expect(refused[0].message).toContain("keyed on externalId 'code' and leaves 'code' blank");
+      expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'sku', recordIndex: 1 });
+      expect(refused[0].message).toContain("keyed on externalId 'sku' and leaves 'sku' blank");
     }
   });
 
   it('the default key (`name`, no externalId declared): a record with no name is refused, and the message says the key is the default', async () => {
-    const seed = { object: 'demo_other', mode: 'ignore', env: ['prod', 'dev', 'test'], records: [{ name: 'A', code: 'a' }, { code: 'b' }] };
+    const seed = { object: 'demo_other', mode: 'ignore', env: ['prod', 'dev', 'test'], records: [{ name: 'A', sku: 'a' }, { sku: 'b' }] };
     const { counts, results } = await threeLoads([seed]);
 
     expect(counts).toEqual([1, 1, 1]);
@@ -188,17 +188,17 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
   it('an expression that evaluates empty in a key field is refused the same way (it is read after expressions resolve)', async () => {
     // `os.user.id` is null at seed time when no identity is supplied.
     const { counts, results } = await threeLoads([
-      dataset(['name', 'code'], 'upsert', [{ name: 'A', code: 'a' }, { name: 'B', code: { dialect: 'cel', source: 'os.user.id' } }]),
+      dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B', sku: { dialect: 'cel', source: 'os.user.id' } }]),
     ]);
 
     expect(counts).toEqual([1, 1, 1]);
     const refused = blankKeyRefusals(results[0]);
     expect(refused).toHaveLength(1);
-    expect(refused[0]).toMatchObject({ field: 'code', recordIndex: 1 });
+    expect(refused[0]).toMatchObject({ field: 'sku', recordIndex: 1 });
   });
 
   it('an `update` dataset reports the record instead of skipping it in silence', async () => {
-    const { results } = await threeLoads([dataset('code', 'update', [{ name: 'B' }])]);
+    const { results } = await threeLoads([dataset('sku', 'update', [{ name: 'B' }])]);
     const refused = blankKeyRefusals(results[0]);
     expect(refused).toHaveLength(1);
     expect(refused[0].message).toContain('so an update load can never find the row it names');
@@ -209,7 +209,7 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
     const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: [dataset('code', 'upsert', [{ name: 'B' }])] as any[], config: { ...CONFIG, dryRun: true },
+      seeds: [dataset('sku', 'upsert', [{ name: 'B' }])] as any[], config: { ...CONFIG, dryRun: true },
     });
     expect(blankKeyRefusals(result)).toHaveLength(1);
     expect(blankKeyLines(logger)).toEqual([]);
@@ -217,7 +217,7 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
 
   it('CONTROL: a fully keyed dataset converges on replay, refuses nothing and says nothing', async () => {
     const { counts, results, loggers } = await threeLoads([
-      dataset(['name', 'code'], 'upsert', [{ name: 'A', code: 'a' }, { name: 'B', code: 'b' }]),
+      dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B', sku: 'b' }]),
     ]);
 
     expect(counts).toEqual([2, 2, 2]);
@@ -232,7 +232,7 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
   });
 
   it('CONTROL: a whitespace-only key value is a value, as before (no trim)', async () => {
-    const { counts, results } = await threeLoads([dataset('code', 'upsert', [{ name: 'A', code: ' ' }])]);
+    const { counts, results } = await threeLoads([dataset('sku', 'upsert', [{ name: 'A', sku: ' ' }])]);
     expect(counts).toEqual([1, 1, 1]);
     expect(blankKeyRefusals(results[0])).toEqual([]);
   });
@@ -241,7 +241,7 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
 describe('[#28952] the boot loader — a keyed dataset whose every record keys empty', () => {
   it('refuses every record, one error each in the result, one line logged per dataset, and never writes', async () => {
     const { store, counts, results, loggers } = await threeLoads([
-      dataset('no_such_field', 'upsert', [{ name: 'G1', code: 'g' }, { name: 'G2', code: 'h' }]),
+      dataset('no_such_field', 'upsert', [{ name: 'G1', sku: 'g' }, { name: 'G2', sku: 'h' }]),
     ]);
 
     expect(counts).toEqual([0, 0, 0]);
@@ -264,12 +264,12 @@ describe('[#28952] the boot loader — a keyed dataset whose every record keys e
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
     const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: [dataset(['code', 'no_such_field'], 'ignore')] as any[], config: CONFIG,
+      seeds: [dataset(['sku', 'no_such_field'], 'ignore')] as any[], config: CONFIG,
     });
     const refused = blankKeyRefusals(result);
     expect(refused).toHaveLength(1);
     expect(refused[0]).toMatchObject({ field: 'no_such_field', recordIndex: 0 });
-    expect(refused[0].message).toContain("keyed on externalId 'code+no_such_field' and leaves 'no_such_field' blank");
+    expect(refused[0].message).toContain("keyed on externalId 'sku+no_such_field' and leaves 'no_such_field' blank");
   });
 
   it('control: a retired `insert` dataset is refused before any key is read, so it carries no blank-key refusal (#34613)', async () => {
