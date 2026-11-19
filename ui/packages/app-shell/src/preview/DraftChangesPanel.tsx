@@ -894,6 +894,8 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   doc: (t, count) => t('preview.changes.typeCount.doc', { count, defaultValue: '{{count}} documentation pages' }),
   book: (t, count) => t('preview.changes.typeCount.book', { count, defaultValue: '{{count}} documentation books' }),
   position: (t, count) => t('preview.changes.typeCount.position', { count, defaultValue: '{{count}} positions' }),
+  capability: (t, count) =>
+    t('preview.changes.typeCount.capability', { count, defaultValue: '{{count}} capabilities' }),
   tool: (t, count) => t('preview.changes.typeCount.tool', { count, defaultValue: '{{count}} AI tools' }),
   skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
   datasource: (t, count) =>

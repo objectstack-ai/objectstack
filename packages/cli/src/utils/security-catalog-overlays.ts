@@ -10,8 +10,9 @@
  * Every active environment `sys_metadata` row (`state = 'active'`; on a
  * database the organization-ownership ceremony has not migrated, a row whose
  * physical `organization_id` holds a value is a legacy organization's and is
- * left out, ADR-0131 D6/D7) of type `permission` or `position` — the legacy plurals
- * `permissions` / `positions` included, which the boot's load folds to the same
+ * left out, ADR-0131 D6/D7) of type `permission`, `position` or (#35157)
+ * `capability` — the plurals `permissions` / `positions` / `capabilities`
+ * included, which the boot's load folds to the same
  * types — whose name a configured package holds. That is exactly what the cold
  * boot's catalog check refuses (ADR-0048 N.3): the check meets the package-held
  * names with what `sys_metadata` hydration put in the registry's bare slot, and
@@ -39,7 +40,9 @@
  *
  * A row stored under a legacy plural is out of that door's reach: it folds the
  * type it is given to the canonical one before reading, and the audit trail
- * refuses a non-canonical type by design. Such a row goes through the layer
+ * refuses a non-canonical type by design. So is a `capability` row (#35157):
+ * the door reads the managed seal for a type that takes no overlay, and
+ * refuses to remove it. Such a row goes through the layer
  * beneath it, the `SysMetadataRepository` delete, addressed by its stored
  * spelling, its name, its `package_id` and its checksum: the same transaction
  * and the same history tombstone (under the spelling the row carried), without
@@ -51,22 +54,29 @@ import type { SecurityCatalogType } from '@objectstack/core';
 /** The command's own name, the `actor` its deletions record. */
 export const SECURITY_CATALOG_OVERLAYS_ACTOR = 'os migrate security-catalog-overlays';
 
-/** The stored spellings of each catalog type the boot's load folds together. */
-const STORED_TYPE_SPELLINGS: ReadonlyArray<readonly [string, 'permission' | 'position']> = [
+/**
+ * The stored spellings of each catalog type the boot's load folds together.
+ * [#35157] `capability` joins: an environment can store a capability since it
+ * became runtime-creatable, and the cold boot refuses one held under a name a
+ * configured package declares, so the remedy that refusal prescribes lists it.
+ */
+const STORED_TYPE_SPELLINGS: ReadonlyArray<readonly [string, SecurityCatalogType]> = [
   ['position', 'position'],
   ['positions', 'position'],
   ['permission', 'permission'],
   ['permissions', 'permission'],
+  ['capability', 'capability'],
+  ['capabilities', 'capability'],
 ];
 
 /** One listed row. */
 export interface SecurityCatalogOverlayRow {
   /** The `sys_metadata` row id. */
   readonly id: string;
-  /** The type as stored: `permission` / `position`, or a legacy plural. */
+  /** The type as stored: `permission` / `position` / `capability`, or a plural spelling. */
   readonly storedType: string;
   /** The catalog type the boot folds it to. */
-  readonly catalogType: 'permission' | 'position';
+  readonly catalogType: SecurityCatalogType;
   readonly name: string;
   /** The row's own package binding (`package_id`), `null` when it has none. */
   readonly packageId: string | null;
@@ -179,6 +189,20 @@ async function stillStored(engine: EngineLike, storedType: string, name: string,
   return new Set(ids.filter((id) => present.has(id)));
 }
 
+/**
+ * Whether a row goes through the protocol's delete (module header, "The
+ * deletion"). [#35157] A `capability` row does not, in either spelling: its type
+ * takes no overlay (`supportsOverlay: false`), so that door reads the managed
+ * seal over the package's capability of the same name and refuses the removal
+ * (`refusePackagedBaseRemoval`), where a position or permission set, whose
+ * types merge at read, takes the #6960 carve-out. It goes through the
+ * repository beneath, as a legacy plural does, removed as the environment's
+ * own runtime-created item.
+ */
+function throughProtocolDelete(row: SecurityCatalogOverlayRow): boolean {
+  return row.storedType === row.catalogType && row.catalogType !== 'capability';
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -201,7 +225,7 @@ export async function deleteSecurityCatalogOverlayRows(
   // Canonical spellings: the protocol's delete, one call per row of a name.
   const canonical = new Map<string, SecurityCatalogOverlayRow[]>();
   for (const row of rows) {
-    if (row.storedType !== row.catalogType) continue;
+    if (!throughProtocolDelete(row)) continue;
     const key = `${row.catalogType}|${row.name}`;
     canonical.set(key, [...(canonical.get(key) ?? []), row]);
   }
@@ -245,7 +269,7 @@ export async function deleteSecurityCatalogOverlayRows(
   }
 
   // Legacy plural spellings: the repository beneath that door, row by row.
-  const plural = rows.filter((row) => row.storedType !== row.catalogType);
+  const plural = rows.filter((row) => !throughProtocolDelete(row));
   if (plural.length > 0) {
     const { SysMetadataRepository } = await import('@objectstack/metadata-protocol');
     const repository = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
@@ -261,7 +285,11 @@ export async function deleteSecurityCatalogOverlayRows(
             source: SECURITY_CATALOG_OVERLAYS_ACTOR,
             message: `Deleted the environment-wide ${row.storedType}/${row.name} row over a name `
               + `${row.heldBy.join(', ')} holds (ADR-0048 N.3)`,
-            intent: 'override-artifact',
+            // [#35157] A capability row is the environment's own runtime-created
+            // item (its type takes no overlay), removed as one: the override
+            // intent reads the managed seal over the package's capability and
+            // refuses, as the protocol's door does.
+            intent: row.catalogType === 'capability' ? 'runtime-only' : 'override-artifact',
             state: 'active',
             packageId: row.packageId,
           },
