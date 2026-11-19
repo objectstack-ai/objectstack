@@ -344,12 +344,16 @@
  * the grade and the card's state stay. ⛔ This is the seat's label door and claims nothing about the
  * others: a write that reaches the board another way is not judged here.
  *
- * A grade the fleet wrote ON the maintainer's word is his too (`filing-gate.md`: 「代维护者落的级 … 读作人定」):
- * the bot actor says who typed it, not whose grade it is. Such a write folds a comment with a `Ruling-ref:`
- * line quoting him, so a fleet-set grade whose `labeled` event has a `Ruling-ref:` comment within
- * `RULING_COMMENT_WINDOW_MS` of it is refused like a hand. That costs one comments read (from the oldest such
- * event minus the window), only when a carried grade reads as the fleet's; a read that does not answer is refused,
- * never passed — the same rule as an unread events list.
+ * A grade the fleet wrote ON the maintainer's word is his too (`filing-gate.md`: 「代维护者落的级 … 才算人定」):
+ * the bot actor says who typed it, not whose grade it is. Such a write folds a comment whose line opens
+ * `Ruling-ref: priority:pN` — the grade it writes — before his words (`GRADE_RULING_MARK`), so a fleet-set grade whose
+ * `labeled` event has, within `RULING_COMMENT_WINDOW_MS` of it, a FLEET comment (the same allow-list as the event)
+ * with a line opening `Ruling-ref:` and that same grade is refused like a hand. Any other `Ruling-ref:` is not a
+ * grade he named and reads as nothing here: a lane seat's self-triage record citing the standing exception
+ * (`triage-duties.md`), a claim or dispatch citing a ruling comment id (`dispatch-runbook.md`), a line naming
+ * another grade, or one a person typed — so triage's 改判 of a self-triaged grade still lands. That costs one
+ * comments read (from the oldest fleet grade event minus the window), only when a carried grade reads as the fleet's;
+ * a read that does not answer is refused, never passed — the same rule as an unread events list.
  */
 
 import process from 'node:process';
@@ -609,8 +613,10 @@ export const GRADE_LABEL_PREFIX = 'priority:';
 export const RULING_REF_KEY = 'Ruling-ref:';
 /** The grade read walks at most this many pages of a card's events (100 a page); a card with more is an incomplete read. */
 export const GRADE_EVENT_PAGE_CAP = 10;
-/** A `Ruling-ref:` comment this close to a fleet `labeled` event is the write's own fold: the grade is the maintainer's (header). */
+/** A grade-ruling comment this close to a fleet `labeled` event is the write's own fold: the grade is the maintainer's (header). */
 export const RULING_COMMENT_WINDOW_MS = 120_000;
+/** The marker `filing-gate.md` spells for a grade written on the maintainer's word: the key, then the grade it writes (header). */
+export const GRADE_RULING_MARK = `${RULING_REF_KEY} ${GRADE_LABEL_PREFIX}pN`;
 
 const gradeKeys = (labels) => dedupe((labels ?? []).map(labelKey).filter((l) => typeof l === 'string' && l.startsWith(GRADE_LABEL_PREFIX))).sort();
 
@@ -633,11 +639,19 @@ export function hasRulingRef(text) {
 /** The newest `labeled` event of one grade, or undefined. */
 const newestGradeEvent = (events, grade) => events.filter((e) => e?.event === 'labeled' && labelKey(e?.label?.name) === grade).at(-1);
 
-/** A comment carrying a `Ruling-ref:` line within the window of a label event: the fold of a write on the maintainer's word. */
+/** A line opening `Ruling-ref:` whose first cited word is `grade` (`GRADE_RULING_MARK`): his ruling on THAT grade, not any ruling. */
+export function hasGradeRuling(text, grade) {
+  return String(text ?? '').split(/\r?\n/u).some((line) => line.startsWith(RULING_REF_KEY) && labelKey(line.slice(RULING_REF_KEY.length).trim().split(/\s/u)[0]) === grade);
+}
+
+/** The fleet's comment, within the window of a fleet label event, naming that event's grade after `Ruling-ref:`: the fold of a write on the maintainer's word. */
 export function rulingCommentNear(event, comments = []) {
   const at = Date.parse(event?.created_at ?? '');
-  if (!Number.isFinite(at)) return undefined;
-  return (comments ?? []).find((c) => Math.abs(Date.parse(c?.created_at ?? '') - at) <= RULING_COMMENT_WINDOW_MS && hasRulingRef(c?.body));
+  const grade = labelKey(event?.label?.name);
+  if (!Number.isFinite(at) || typeof grade !== 'string') return undefined;
+  return (comments ?? []).find(
+    (c) => isFleetLabelEvent({ performed_via_github_app: c?.performed_via_github_app, actor: c?.user }) && Math.abs(Date.parse(c?.created_at ?? '') - at) <= RULING_COMMENT_WINDOW_MS && hasGradeRuling(c?.body, grade),
+  );
 }
 
 /** Where a fleet-set grade's ruling comments are read from: the oldest fleet event among the grades, minus the window; or null. */
@@ -658,7 +672,7 @@ export function rulingCommentsSince({ grades = [], events = null } = {}) {
  *   events     the card's issue events, oldest first as the platform lists them; null when the read did not answer or
  *              ran past `GRADE_EVENT_PAGE_CAP`. Only `labeled` events are read (header: why not `unlabeled`).
  *   comments   the card's comments around the fleet-set grades' events (`rulingCommentsSince`); null when that read did
- *              not answer. A fleet event with a `Ruling-ref:` comment beside it is the maintainer's grade (header).
+ *              not answer. A fleet event with the fleet's `Ruling-ref: <that grade>` comment beside it is his grade (header).
  *   rulingRef  the folded comment carries a `Ruling-ref:` line — the maintainer's ruling, cited; nothing is refused.
  */
 export function refuseHandSetGrade({ grades = [], events = null, comments = [], rulingRef = false, ref = 'the card' } = {}) {
@@ -683,7 +697,7 @@ export function refuseHandSetGrade({ grades = [], events = null, comments = [], 
       }
       const ruling = rulingCommentNear(set, comments);
       if (!ruling) continue;
-      byHand.push(`\`${grade}\` (set by the fleet at ${set.created_at} on the maintainer's word: comment ${ruling.id ?? 'unread'} beside it carries a \`${RULING_REF_KEY}\` line)`);
+      byHand.push(`\`${grade}\` (set by the fleet at ${set.created_at} on the maintainer's word: the fleet's comment ${ruling.id ?? 'unread'} beside it opens a line \`${RULING_REF_KEY} ${grade}\`)`);
       continue;
     }
     byHand.push(
@@ -2603,7 +2617,7 @@ const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a 
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
 const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull is not judged";
 const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
-const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor), or is the fleet's with a `Ruling-ref:` comment beside it, is never changed — refused at step ② with zero writes unless the folded comment cites a `Ruling-ref:`";
+const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor), or is the fleet's with its own `Ruling-ref: <that grade>` fold beside it, is never changed — refused at step ② with zero writes unless the folded comment cites a `Ruling-ref:`";
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
@@ -2622,7 +2636,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
   [LAND_DOGFOOD_BATTERY]: 50,
-  [HAND_SET_BATTERY]: 23,
+  [HAND_SET_BATTERY]: 38,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -3199,9 +3213,17 @@ export async function selfTest() {
     t('⭐ an events read that did not answer is refused too, never passed', String(hs(null)).includes('could not be read in full'));
     t('a `Ruling-ref:` line passes it, and the key must open a line and cite something', [hs([HAND], { rulingRef: true }), hasRulingRef('seat sig\nRuling-ref: 6982855148 「改回去」'), hasRulingRef('see Ruling-ref: x'), hasRulingRef('Ruling-ref:   ')], [null, true, false, false]);
     t('two carried grades are each asked: one by hand refuses the write', typeof refuseHandSetGrade({ grades: ['priority:p1', 'priority:p2'], events: [RELAY, labeled('priority:p2', 'hotlong', 'User')] }), 'string');
-    const ruled = (at, body = 'Grade on the maintainer\'s word.\nRuling-ref: project thread 「改到 p1」') => ({ id: 41, body, created_at: at });
+    const FLEET_USER = { login: RELAY_COMMENT_AUTHOR, type: 'Bot' };
+    const ruled = (at, body = 'Grade on the maintainer\'s word.\nRuling-ref: priority:p1 project thread 「改到 p1」', user = FLEET_USER) => ({ id: 41, body, user, created_at: at });
     const onWord = hs([RELAY], { comments: [ruled('2026-11-18T10:00:20Z')] });
-    t('⭐ a grade the fleet set ON the maintainer\'s word — a `Ruling-ref:` comment beside its event — is his: REFUSED, naming the comment', typeof onWord === 'string' && ['`priority:p1`', 'comment 41', RULING_REF_KEY, HAND_SET_RULE].every((s) => onWord.includes(s)), true, onWord);
+    t('⭐ a grade the fleet set ON the maintainer\'s word — its fold `Ruling-ref: priority:p1` beside the event — is his: REFUSED, naming the comment and the line', typeof onWord === 'string' && ['`priority:p1`', 'comment 41', `\`${RULING_REF_KEY} priority:p1\``, HAND_SET_RULE].every((s) => onWord.includes(s)), true, onWord);
+    const BESIDE = '2026-11-18T10:00:20Z';
+    const SELF_TRIAGE = 'Self-triage: p1 — blocks our in-flight claim, failing run named.\nRuling-ref: 「车道席自分诊 … 方可首触定 p1/p2」';
+    t('⭐ a self-triage record beside a fleet grade cites the standing exception, not a grade he named: passes, so triage\'s 改判 lands', hs([RELAY], { comments: [ruled(BESIDE, SELF_TRIAGE)] }), null);
+    t('⭐ …and so does a claim or dispatch citing a ruling comment id (`Ruling-ref: <id>`)', hs([RELAY], { comments: [ruled(BESIDE, 'Claim: seat 5\nRuling-ref: 7000373266')] }), null);
+    t('…a `Ruling-ref:` naming ANOTHER grade, or naming this one only after other words, is not this grade\'s ruling', [hs([RELAY], { comments: [ruled(BESIDE, 'Ruling-ref: priority:p2 「改到 p2」')] }), hs([RELAY], { comments: [ruled(BESIDE, 'Ruling-ref: 「改到 p1」 priority:p1')] })], [null, null]);
+    t('…the same line typed by a PERSON is not the fleet\'s fold: passes; through an app it is the fleet\'s, and the label is matched as GitHub does', [hs([RELAY], { comments: [ruled(BESIDE, undefined, { login: 'os-warren', type: 'User' })] }), typeof hs([RELAY], { comments: [{ ...ruled(BESIDE, 'Ruling-ref: Priority:P1 「改到 p1」', { login: 'os-warren', type: 'User' }), performed_via_github_app: { slug: 'claude' } }] })], [null, 'string']);
+    t('↔ the rule names the marker this check reads: filing-gate.md spells `Ruling-ref: priority:pN`, and coordinator.md\'s grade-only word points there', [readFileSync(new URL(HAND_SET_RULE_PATH, REPO_ROOT), 'utf8').includes(GRADE_RULING_MARK), readFileSync(new URL('.claude/skills/pm-dispatch/references/coordinator.md', REPO_ROOT), 'utf8').includes('只落级,评论照 `filing-gate.md`')], [true, true]);
     t('…the window is both sides of the event, and only that window', [hs([RELAY], { comments: [ruled('2026-11-18T09:58:30Z')] }) === null, hs([RELAY], { comments: [ruled('2026-11-18T10:05:00Z')] }), hs([RELAY], { comments: [ruled('2026-11-18T09:50:00Z')] })], [false, null, null]);
     t('…a comment beside it WITHOUT a `Ruling-ref:` line is a plain fleet grade: passes', hs([RELAY], { comments: [ruled('2026-11-18T10:00:20Z', 'Triage audit: p2 by the grading table.')] }), null);
     t('⭐ …a comments read that did not answer, beside a fleet grade, is refused — never passed', String(hs([RELAY], { comments: null })).includes('could not be read'));
@@ -3223,6 +3245,8 @@ export async function selfTest() {
     const onWordE2E = await driveOffline(REGRADE, { ...CARD, events: [RELAY], comments: [ruled('2026-11-18T10:00:20Z')] });
     t('⭐ end to end: regrading a grade the fleet wrote on the maintainer\'s word is exit 2 at step ② with ZERO writes, after one comments read', [onWordE2E.exit, onWordE2E.res.stoppedAt, writes(onWordE2E), onWordE2E.fake.calls.filter((c) => c.op === 'comments-list').length], [EXIT_USAGE, 2, 0, 1], onWordE2E.text);
     t('…and the maintainer can still regrade it: a folded `Ruling-ref:` passes over a ruled grade', hs([RELAY], { comments: [ruled('2026-11-18T10:00:20Z')], rulingRef: true }), null);
+    const triaged = await driveOffline(REGRADE, { ...CARD, events: [RELAY], comments: [ruled('2026-11-18T10:00:20Z', SELF_TRIAGE)] });
+    t('⭐ end to end: triage\'s 改判 of a self-triaged grade — its record\'s `Ruling-ref:` beside the event — lands and reads back, after one comments read', [triaged.exit, triaged.fake.board.labels, triaged.fake.calls.filter((c) => c.op === 'comments-list').length], [EXIT_OK, ['pm:queue', 'priority:p3'], 1], triaged.text);
     const deadComments = await driveOffline(REGRADE, { ...CARD, events: [RELAY], hooks: { 'comments-list': [{ status: 502 }] } });
     t('a comments read answered 502 beside a fleet grade is exit 2 with zero writes', [deadComments.exit, writes(deadComments)], [EXIT_USAGE, 0]);
     const dead = await driveOffline(REGRADE, { ...CARD, hooks: { 'events-list': [{ status: 502 }] } });

@@ -1661,8 +1661,8 @@ export const CEILINGS = new Map([
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
   // 82 → 83: an ordinary ruled raise by the same ruling of record as
   // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
-  // the maintainer's word, its comment carrying `Ruling-ref:`, reads as his.
-  // Measured delta +1. Landed count, headroom 0.
+  // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
+  // as his. Measured delta +1. Landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
