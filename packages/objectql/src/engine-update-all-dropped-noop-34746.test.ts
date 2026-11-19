@@ -189,7 +189,7 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
     it('control: one surviving caller field takes the unchanged path — stamps written, afterUpdate runs', async () => {
       await objectql.update(OBJECT, { id: 't1', total_score: 100, title: 'new' }, asEditor() as any);
       expect(stub.writes).toEqual([
-        { verb: 'update', data: { title: 'new', updated_at: T_UPDATE, updated_by: EDITOR } },
+        { verb: 'update', data: { id: 't1', title: 'new', updated_at: T_UPDATE, updated_by: EDITOR } },
       ]);
       expect(afterUpdateCalls).toEqual([{ id: 't1' }]);
     });
@@ -198,7 +198,7 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
       hookWritesDerived = 'from-hook';
       await objectql.update(OBJECT, { id: 't1', total_score: 100 }, asEditor() as any);
       expect(stub.writes).toEqual([
-        { verb: 'update', data: { derived: 'from-hook', updated_at: T_UPDATE, updated_by: EDITOR } },
+        { verb: 'update', data: { id: 't1', derived: 'from-hook', updated_at: T_UPDATE, updated_by: EDITOR } },
       ]);
       expect(afterUpdateCalls).toEqual([{ id: 't1' }]);
     });
