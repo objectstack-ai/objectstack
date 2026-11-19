@@ -25,10 +25,11 @@ What follows from it:
 - A platform-injected system field (`owner_id`, `created_at`, …) that keeps its English default label is named by the built-in translation of that label, as `/meta` names it.
 - The security layer's labels now negotiate the request locale the way `/meta` does, so a `zh-TW` request reads the `zh-CN` rows, in step with its `zh-CN` sentence.
 
-## FROM → TO
+## What a direct validator caller sees
 
-| FROM | TO |
-|:---|:---|
-| `messages: { locale, objectName, translate }` translated field, option and object labels through `translate` | labels are read only through `messages.labelTranslation`; `translate` carries message templates only |
+| `messages` passed to `validateRecord` / `evaluateValidationRules` | was | now |
+|:---|:---|:---|
+| `{ locale, objectName, translate }` | field, option and object labels translated through `translate` | declared labels in every locale; `translate` renders message templates only |
+| `{ locale, objectName, translate, labelTranslation }` | not a member of the type | labels translated through `labelTranslation`, the way `GET /meta` serves them |
 
-One-line fix: add `labelTranslation: () => ({ bundle, options })` to the `messages` you pass, where `bundle` is a `TranslationBundle` keyed by locale and `options` is a `ResolveOptions` (both from `@objectstack/spec/system`); the pair is typed `ValidationLabelTranslation`, now exported as a type from `@objectstack/objectql` and `@objectstack/objectql/core`.
+What to do on upgrade: add `labelTranslation: () => ({ bundle, options })` to the `messages` you pass, where `bundle` is a `TranslationBundle` keyed by locale and `options` is a `ResolveOptions` (both from `@objectstack/spec/system`). The pair is typed `ValidationLabelTranslation`, now exported as a type from `@objectstack/objectql` and `@objectstack/objectql/core`. Nothing else changes: the call compiles as before, and no verdict, code or status moves.
