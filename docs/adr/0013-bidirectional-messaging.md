@@ -1,6 +1,6 @@
 # ADR-0013: Bidirectional Messaging — Conversational Channels, Slack First
 
-**Status**: Draft (2026-05-26) · **Amended** (2026-11-19, ruling `7023437637` on #34730) — the "Addendum (2026-11-19): Slack DM delivery of notifications" at the end is accepted: install model, per-person binding by a confirmed email match, DM only. Everything else here stays Draft.
+**Status**: Draft (2026-05-26) · **Amended** (2026-11-19, rulings `7023437637` and `7023709522` on #34730) — the "Addendum (2026-11-19): Slack DM delivery of notifications" at the end is accepted: install model and its open/enterprise line, per-person binding by a confirmed email match, DM only. Everything else here stays Draft.
 **Authors**: Platform team
 **Consumers**: `@objectstack/spec` (extensions to the `messaging/` domain introduced by ADR-0012), `@objectstack/service-messaging` (gains a receiver sub-system), `@objectstack/plugin-messaging-slack` (new, first reference implementation), future `plugin-messaging-lark` / `plugin-messaging-telegram` / `plugin-messaging-wecom` / `plugin-messaging-dingtalk`, the flow engine (new `messaging.inbound` trigger), ADR-0011 (Actions as AI Tools — inbound messages may become tool calls)
 **Sibling**: [ADR-0012 — Messaging Platform (Outbound)](./0012-notification-platform.md)
@@ -740,7 +740,8 @@ This delivers "chat with ObjectOS from Slack" without forking openclaw, without 
 ## Addendum (2026-11-19): Slack DM delivery of notifications — install model, person binding, DM only
 
 > Status of this addendum: **accepted** — maintainer ruling of record `7023437637` on #34730
-> (2026-11-19, 「按推荐三点定(推荐)」; the options are in `7022838733`). Only this addendum is accepted.
+> (2026-11-19, 「按推荐三点定(推荐)」; the options are in `7022838733`), and for the tier line in point 1
+> ruling of record `7023709522` (2026-11-19, 「社区版可用」). Only this addendum is accepted.
 > The rest of this ADR stays **Draft**, and nothing above it is accepted by implication.
 
 **Scope.** Outbound delivery of platform notifications to one person over Slack, inside the pipeline
@@ -754,6 +755,13 @@ Draft as written above.
    One organization's install is one `sys_channel_account` row (§4). §9's two shapes map onto this
    directly: "one Slack app per workspace" is the self-hosted case, "one Slack app, N workspaces
    installed" the hosted case.
+   **Tier** (ruling `7023709522`, beside `7023437637`): the self-hosted install is **open** — the
+   organization creates its own Slack app and supplies its token, one `sys_channel_account` row per
+   organization, as ADR-0012 already puts a default row in the open baseline — and so is the
+   confirm-once `sys_channel_user_link` binding of point 2. The enterprise tier keeps the hosted
+   one-click ObjectOS app, managed credentials and the vault, account health, and the managed
+   multi-workspace lifecycle (ADR-0022 §4's "multi-tenant `sys_channel_account` lifecycle", which
+   ADR-0143 left in place).
 2. **Person binding.** The link between a platform user and their Slack user is a
    `sys_channel_user_link` row (§8, §13); `sys_channel_account` is the organization's install, never a
    person. A link is **proposed** by matching the person's email to the Slack user's email and takes
