@@ -40,6 +40,8 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+// The served save reaches a dynamic `import('@objectstack/lint')` (metadata diagnostics): pay its load at collection.
+import '@objectstack/lint';
 
 interface Row {
     id: string;

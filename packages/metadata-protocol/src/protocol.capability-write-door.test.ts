@@ -70,6 +70,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The served save reaches a dynamic `import('@objectstack/lint')` (metadata diagnostics): pay its load at collection.
+import '@objectstack/lint';
 
 interface Row {
     id: string;
@@ -99,12 +101,14 @@ function makeStubEngine(
             }
             return null;
         },
-        async find(_t: string, opts?: { where?: Record<string, unknown> }) {
+        async find(_t: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (_t !== 'sys_metadata') return [];
             const where = opts?.where ?? {};
-            return [...rows.values()].filter((row) =>
-                (where.type === undefined || row.type === where.type)
-                && (where.state === undefined || row.state === where.state));
+            // Every scalar condition is an equality on that column; an operator
+            // object is not modelled by this double and does not narrow.
+            const matched = [...rows.values()].filter((row) => Object.entries(where).every(([key, value]) =>
+                value === undefined || (typeof value === 'object' && value !== null) || (row as Record<string, unknown>)[key] === value));
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(_t: string, data: Record<string, unknown>) {
             if (_t !== 'sys_metadata') return { id: 'side_effect_skip' };
