@@ -793,7 +793,10 @@ function readObjectRouteNames(
   // route's names: a lookup cell links and names its target and reads none of
   // its views, and a target outside the app bundle (`sys_user`) composed with
   // them read the whole `/meta/view` list (objectstack#29551). They join the
-  // scope's objects as they land; the route's names keep their views.
+  // scope's objects as they land; the route's names keep their views. A
+  // target the presence read answered served is answered with the definition
+  // that read carried, and costs no request of its own (objectstack#35306,
+  // `readObjectScope`).
   const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
   const readNames = (names: readonly string[]) =>
     packageId ? readWithoutViews({ packageId, names, views: false }) : readWithoutViews({ names, views: false });

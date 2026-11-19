@@ -1968,24 +1968,21 @@ export function ObjectFieldInspector({
                 </span>
               </p>
             )}
-            {visibleWhenFormulaReads.formulas.length > 0 && (
+            {/* Only a formula the form cannot compute: one it computes is judged on the server's value. */}
+            {(visibleWhenFormulaReads.writePath.length > 0 || visibleWhenFormulaReads.formOnly.length > 0) && (
               <p
                 data-testid="field-required-visiblewhen-formula"
                 className="flex items-start gap-1 px-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
               >
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  {tFormat('designer.field.requiredVisibleWhenFormula', locale, {
-                    fields: visibleWhenFormulaReads.formulas.join(', '),
-                  })}
-                  {visibleWhenFormulaReads.unservable.length > 0 && (
-                    <>
-                      {' '}
-                      {tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
-                        fields: visibleWhenFormulaReads.unservable.join(', '),
+                  {visibleWhenFormulaReads.writePath.length > 0
+                    ? tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
+                        fields: visibleWhenFormulaReads.writePath.join(', '),
+                      })
+                    : tFormat('designer.field.requiredVisibleWhenFormulaFormOnly', locale, {
+                        fields: visibleWhenFormulaReads.formOnly.join(', '),
                       })}
-                    </>
-                  )}
                 </span>
               </p>
             )}

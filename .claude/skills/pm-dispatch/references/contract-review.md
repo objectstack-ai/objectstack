@@ -20,7 +20,6 @@
   维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔请 L2 席(请谁照 `lanes/l2-review.md`);
   无 L2 席在座改点能取该档的兄弟席,皆无则挂等 L2 标记留欠审表待 (a)(b)(c)。交接行:
 - `Contract-review-handoff: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
-- 「立 skills 卡，把契约复审的路由直接改成 review 座位」「没有 fable 时，找 review 座位」(卡33157)
 - 欠审 PR(含 draft)现 head 无记录无活认领且 (a)(b)(c) 之一 ⇒ 车道达档自审或交接,⛔ 非分诊
 - (a) 交接行/敲门点名现 head(同轮所点席接)或带等 L2 标记;(b) 现 head 已等满一轮(约 60 分钟);
 - (c) 车道收班或离总表,欠审入交班简报;L2 席只接 (a) 所点、自记录 delta、他席皆禁之 head。

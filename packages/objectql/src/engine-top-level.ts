@@ -101,15 +101,18 @@ export interface AdmittedValueShapeViolationTally {
  * in, and an in-engine audit hook depends on landing inside it.
  *
  * Four ordinary paths open such a unit around the dispatch:
- *   - the write door itself, when the object has a metadata-bound `after*`
- *     hook that can abort — blocking with `onError` `abort`, or carrying a
- *     `condition` — so that abort rolls the row back as `HookSchema.onError`
- *     says (#22782, #22856, `opensAfterAbortUnit`);
+ *   - the write's own engine body, when the object has a metadata-bound
+ *     `after*` hook that can abort — blocking with `onError` `abort`, or
+ *     carrying a `condition` — so that abort rolls the row back as
+ *     `HookSchema.onError` says (#22782, #22856, `opensAfterAbortUnit`). One
+ *     rule for `insert`, `update` and `delete`: the unit opens around the
+ *     executor, inside the middleware chain, so a middleware's work before
+ *     and after `next()` runs outside it (#35142, #35167);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
  *     PARENT's `afterDelete` is outside that wrap by construction (inside the
- *     door's own unit when the first path opened one); the cascaded
+ *     write's own unit when the first path opened one); the cascaded
  *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's

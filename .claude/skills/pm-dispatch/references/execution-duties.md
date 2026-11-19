@@ -9,17 +9,14 @@
 - 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
 - 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
-- 写裁决区前 grep 申报文件面(源码与测试)的 `ruling`、`Ruling-ref`、`maintainer`、`⛔`。
+- 裁决区与过时检查先跑 `check-prior-rulings.mjs --card <n> --paths <面>`;引现状 ⛔ 不引裁决旧述。
 - 本卡与命中所引裁决逐字入区(id+原句)作约束;零命中才写无裁决,命中无裁决写命中数。
-- 派发前做前提过时检查,裁决同罪,三面都查;动作面:`git log --oneline -20 -- <paths>`。
-- 卡引用面:裁决/卡片点名的每张 issue 逐个读现 open/closed/assignee,引现状 ⛔ 不引裁决旧述。
 - 工作项面:卡片、裁决与分诊评论列的工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
 - 每轮按现 head 核本席终局四件套 PR:席位记录/`pm:awaiting-merge`/请审/终版速读,缺件同轮补。
 - 四件读数器:本地 `node scripts/pm/check-half-states.mjs` H43/H48 只读受管 H;超行无受管 PR 自读。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
-- 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
-- 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
+- 第 N 单派发前跑 `scripts/pm/os-verify-lock.sh --depth`:≥ `LOCK_DEPTH_HOLD`(= 2)即等(exit 1)。
 - 同批独立按文件面不相交判,⛔ 不按包/check 名;有效上限随锁宽,⛔ 不是第二个 `batch`。
 - p0 无槽或低级在飞 PR 重叠挡住 ⇒ 暂停腾位的最低级 dev:停会话、PR 留 draft、认领不动。
 - 卡记 `Paused-for: #<p0>`,⛔ 不丢弃、不回退、不 force-push;p0 落地即复活该 dev,同认领同分支。
@@ -38,7 +35,7 @@
 - 派发令与复读请求 ⛔ 不令主动合;合后按 AGENTS.md §10 只重跑它所划的门禁。
 - 阻塞解除后延后单重定价:前一单派发词必答 #X 变简单、变难、不必要或无影响。
 - 派发后一单前用该回答重读它的选项与成本,⛔ 不沿用立单时那份。
-- 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、优先级继承。
+- 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、查表定级。
 - 排队卡含他车道项 ⇒ 发现席自拆:新卡无 `domain:*`,首行 `carries item k of #N; #N keeps items …`。
 - 分诊首触定域可改判;拆出卡 ⛔ 不承父卡域(承域只及本车道 sub-issue),父卡余项照 `Fixes`。
 - `ui/**` 余项照常自派不拆(同仓同 worktree、门禁、合并队列),⛔ 不作 UI 跳过,非他车道项。
@@ -47,13 +44,10 @@
 - 分诊预见的后续工作是一张卡,触发条件落地时立卡;⛔ 分诊一句话永不授权无卡编辑。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等;卡 PR 叠未合 PR 或 `Blocked-by:` 未合的,合前 ⛔ 不开线程(维护者令除外)。
-- 取卡次序 = `docs/NORTH-STAR.md`「Priority」第 3 条:本车道队列开放 P0/P1 取卡时现读。
+- 标签序 = NORTH-STAR「Priority」第 3 条(无级殿后),本车道开放卡现读 `card-pick.mjs --order <序>`。
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
-- 标签序:`priority:p0` > p1(任何 area,含暂停)> 维护者点名的 area 或子专题里的下一张 > 无级。
 - 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
-- 点名范围内:子专题照其子卡次序与 `Blocked-by:`;无子专题先 p2 后 p3;级只决定插队。
-- `pm:blocking` 的写入与摘除都在分诊轮 sweep,依赖者全关即摘。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。
 - 同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄;⛔ 不升级、不越 p0。
 - 一车道多席按全序交替取卡:席 1 奇位、席 2 偶位;只为破交替才发 `split`;认领戳仲裁。

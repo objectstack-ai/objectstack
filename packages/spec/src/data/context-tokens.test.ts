@@ -307,3 +307,23 @@ describe('classifyFilterToken — Object.prototype fall-through in `suggestion`'
     expect(Object.prototype.hasOwnProperty.call(CONTEXT_TOKEN_SUGGESTIONS, 'current_user')).toBe(true);
   });
 });
+
+describe('classifyFilterToken — the period key {current_iso_week}', () => {
+  it('is its own kind, not a date macro, in both wrappings', () => {
+    expect(classifyFilterToken('{current_iso_week}')).toEqual({ kind: 'period-key', token: 'current_iso_week' });
+    expect(classifyFilterToken('${current_iso_week}')).toEqual({ kind: 'period-key', token: 'current_iso_week' });
+  });
+
+  it('is a filter token the server resolves, so the flow hand-off predicate admits it', () => {
+    expect(isKnownFilterToken('current_iso_week')).toBe(true);
+    // Lit control: the record-context token, which the server never resolves.
+    expect(isKnownFilterToken('record_id')).toBe(false);
+  });
+
+  it('a near spelling stays unknown', () => {
+    expect(classifyFilterToken('{currentIsoWeek}')).toEqual({ kind: 'unknown', token: 'currentIsoWeek', suggestion: undefined });
+    expect(classifyFilterToken('{current_iso_week }')?.kind).toBe('unknown');
+    // The template dialect's double brace is not one wrapped token at all.
+    expect(classifyFilterToken('{{currentIsoWeek}}')).toBeNull();
+  });
+});

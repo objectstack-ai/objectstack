@@ -3353,13 +3353,16 @@ const FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
       'resolved just before the query: `{ owner_id: \'{current_user_id}\', created_at: { $gte: ' +
       '\'{week_start}\' } }`. Only a whole-string placeholder counts (`{token}`, or `${token}`); a value ' +
       'that merely contains braces is left alone.',
-    // The context tokens are held equal to `CONTEXT_TOKENS` (`@objectstack/spec/data`) by the rule's test.
-    'Exactly two vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
+    // The context tokens and the period keys are held equal to `CONTEXT_TOKENS` and
+    // `PERIOD_KEY_TOKENS` (`@objectstack/spec/data`) by the rule's test.
+    'Three vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
       '`{current_org_id}`. The date macros: the instants `{today}`, `{yesterday}`, `{tomorrow}` and ' +
       '`{now}`; the start and end of the current, last or next week, month, quarter or year ' +
       '(`{current_quarter_start}`, `{last_year_end}`), with bare aliases for the current period ' +
       '(`{week_start}`, `{month_end}`); and counted offsets in minutes, hours, days, weeks, months or ' +
-      'years (`{30_days_ago}`, `{2_weeks_from_now}`).',
+      'years (`{30_days_ago}`, `{2_weeks_from_now}`). The period keys: `{current_iso_week}`, the ' +
+      'current ISO week\'s key such as `2026-W47`, which is text, not a date, for a field that stores ' +
+      'ISO week keys.',
     'Anything else does not resolve: the data engine refuses the query (`FILTER_TOKEN_UNKNOWN`, 400) ' +
       'rather than compare the placeholder as a literal string, so the surface never shows the data the ' +
       'filter meant. The rule makes that an error at build time, where an author — or an AI correcting ' +
@@ -3575,8 +3578,8 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
 
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
-// registry entries and on `os lint` through `lintDataModel`; the other three
-// are `lintDataModel`'s own sweep.
+// registry entries and on `os lint` through `lintDataModel`; the sweep ids
+// below are `lintDataModel`'s own.
 
 /** The ADR-0120 scope words, as the two uniqueness spellings read them (both write it out). */
 const UNIQUE_SCOPE_WORDS =
@@ -3585,7 +3588,7 @@ const UNIQUE_SCOPE_WORDS =
   '`\'organization\'` and stays valid; on a declared INDEX the same spelling states no scope, and ' +
   'is judged as `\'global\'`.';
 
-/** Where the three `lintDataModel` sweep ids are reported (all three write it out). */
+/** Where the `lintDataModel` sweep ids are reported (each entry writes it out). */
 const DATA_MODEL_SWEEP_REACH =
   'Reach: `os lint` and the metadata-generation rubric run this rule, and nothing else does — it ' +
   'is not an `os validate` / `os build` rule and does not run at the metadata save door, so its ' +
@@ -3758,6 +3761,28 @@ const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
       'to this rule. It fires only on the doors that never parse — `os lint` on a raw object-literal ' +
       'config, `defineStack(x, { strict: false })`, and the metadata-generation rubric beside its own ' +
       'schema verdict — where without it the key would ride unnamed to `os build`.',
+  ],
+};
+
+const FIELD_MISSING_VALUE_DOMAIN_EXPLANATION: RuleExplanation = {
+  rule: 'field/missing-value-domain',
+  covers: 'which field names read as a standard code',
+  paragraphs: [
+    'A `text` field declares `valueDomain` to hold one standard code, and the record write path then ' +
+      'refuses any value outside it: `iso_4217_currency` admits `USD` but not `Dollar`, ' +
+      '`iso_3166_alpha2` admits `CN` but not `China`, `iana_time_zone` admits `Asia/Shanghai` but ' +
+      'not `Beijing time`. Without it the field stores any text, and every later match, join or ' +
+      'conversion across apps starts with cleaning that text.',
+    'Names judged, as the whole field name compared case-insensitively: `currency`, `currency_code` ' +
+      '(`iso_4217_currency`); `country`, `country_code` (`iso_3166_alpha2`); `time_zone`, `timezone`, ' +
+      '`tz` (`iana_time_zone`). Not judged: any other name, a field that already declares a ' +
+      '`valueDomain`, and any type but `text` — a `select` takes its values from its options, and ' +
+      '`valueDomain` is declared on `text` only.',
+    'A warning, never an error: `os validate`, `os build` and the metadata save door are unchanged. A ' +
+      '`--strict` run (`os lint --strict`) fails on every warning, this one included; there is no per-rule ' +
+      'switch, so a strict CI step fails until the field declares the domain. Declaring it does not re-read ' +
+      'rows that already hold free text: only a later write that carries a non-member is refused.',
+    DATA_MODEL_SWEEP_REACH,
   ],
 };
 
@@ -5559,10 +5584,11 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
-      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
-      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
-      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'registers at boot; `MCP_DOOR_TOOL_NAMES` (same module), every tool the MCP door registers ' +
+      '(its record, file, action, federation and dataset tools), only for a skill offered over MCP: ' +
+      'a door tool no cloud package registers, such as `run_action` or `read_file`, is absent from an ' +
+      'in-product turn, so a skill kept out of MCP (`mcpPrompt: false`) is still reported for naming ' +
+      'one, by a verdict that says the name resolves over MCP only; and the materialised action tools, ' +
       'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
       '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
       '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
@@ -5580,7 +5606,9 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     'Family prefixes materialised by the runtime: action_. A materialised tool needs no tool record ' +
       '(the ADR-0109 default path), so backing a name means declaring the action, or referencing a ' +
       'platform tool by its registered name; otherwise remove the name and the instructions that mention ' +
-      'it. Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+      'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
+      'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
+      'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -6469,6 +6497,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
+  [FIELD_MISSING_VALUE_DOMAIN_EXPLANATION.rule]: FIELD_MISSING_VALUE_DOMAIN_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,
