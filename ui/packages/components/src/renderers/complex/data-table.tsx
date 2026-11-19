@@ -1121,6 +1121,17 @@ function keepsBrowserContextMenu(target: HTMLElement, row: HTMLElement): boolean
 }
 
 /**
+ * The scroll box's scrollbar while the table is wider than the box
+ * (objectstack#35446): drawn at rest in the theme's muted foreground, the
+ * colour the shared hover-only bar (`HOVER_SCROLLBAR_CLASSES`) turns on hover,
+ * and as thin. Marked important for the same reason that one is: a host may
+ * theme every scrollbar with an unlayered `*` rule. One complete literal:
+ * Tailwind builds only from scanned source text.
+ */
+const SIDEWAYS_SCROLLBAR_CLASSES =
+  '[scrollbar-width:thin]! [scrollbar-color:var(--color-muted-foreground)_transparent]!';
+
+/**
  * A right-pinned column: its sticky utilities arrive on `col.className` (the
  * auto-pinned row-actions column, and an author's `pinned: 'right'`, both
  * from `ObjectGrid`).
@@ -2918,6 +2929,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     return () => observer?.disconnect();
   }, [overflowRight, columns, leadingCellCount, paginatedData.length]);
 
+  /**
+   * objectstack#35446 — while the table is wider than its box, the box draws
+   * its scrollbar at rest ({@link SIDEWAYS_SCROLLBAR_CLASSES}): columns out of
+   * view are announced by the bar itself, in a narrowed main area as anywhere,
+   * not only once the pointer is over the box. A table that fits keeps the
+   * shared hover-only bar (objectui#12708). A grouped sub-table
+   * (`disableInnerScroll`) scrolls in a shared ancestor and draws no bar.
+   */
+  const [scrollsSideways, setScrollsSideways] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box) {
+      setScrollsSideways(false);
+      return;
+    }
+    const read = () => setScrollsSideways(box.scrollWidth - box.clientWidth > 1);
+    read();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    if (tableRef.current) observer.observe(tableRef.current);
+    return () => observer.disconnect();
+  }, [disableInnerScroll, columns, paginatedData.length]);
+
   const [rovingCell, setRovingCell] = useState<{ rowIndex: number; colIndex: number }>({ rowIndex: 0, colIndex: 0 });
   const rovingRowIndex = Math.max(0, Math.min(rovingCell.rowIndex, paginatedData.length - 1));
   const rovingColIndex = Math.max(0, Math.min(rovingCell.colIndex, columns.length - 1));
@@ -3435,7 +3470,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         // sub-tables share one horizontal scrollbar with aligned columns.
         disableInnerScroll
           ? "overflow-visible"
-          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", HOVER_SCROLLBAR_CLASSES],
+          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", scrollsSideways ? SIDEWAYS_SCROLLBAR_CLASSES : HOVER_SCROLLBAR_CLASSES],
         !borderless && "rounded-md border",
       )}>
         {/* This div is already the (bounded) scroll container for BOTH axes —
