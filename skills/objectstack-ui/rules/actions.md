@@ -35,7 +35,7 @@ it.
 - `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' `{ path, label?, format? }` (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
-- `successMessage` / `errorMessage` — toast copy on success / failure; without `successMessage` the UI shows a generic "Action completed" toast.
+- `successMessage` / `errorMessage` — toast copy; without `successMessage` the UI shows a generic "Action completed" toast.
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`); the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
@@ -64,7 +64,7 @@ export const ReassignLeadAction = defineAction({
 
 ## Examples
 
-**Flow-typed action** (`onSuccess` hops once the run completes, not when it pauses at a screen; its URL template reads an `isOutput` variable as `${result.output.NAME}`):
+`onSuccess` hops once the flow run completes, not when it pauses at a screen; its URL template reads an `isOutput` variable:
 
 <!-- os:check -->
 ```typescript
@@ -86,8 +86,6 @@ export const ConvertLeadAction = defineAction({
   refreshAfter: true,
 });
 ```
-
-**Script-typed action**:
 
 <!-- os:check -->
 ```typescript
@@ -133,13 +131,33 @@ Bodies execute **trusted** (`ctx.api` /
 `ctx.engine` bypass RLS/FLS). `ctx.session.positions` (absent when the caller holds none) is
 **not an authorization input** — ask the security service for privilege (ADR-0095).
 
+### Refusing by code (`refusals`)
+
+`throw new Error('…')` answers every caller in the author's language. A `type: 'script'` action
+with a `js` body (an inline `target` function is lowered to one; any other action is refused the
+key) declares `refusals` and throws the code, as `crm_add_invoice_line` below does: the catalogue,
+throws and checks are a hook's (objectstack-data → Lifecycle Hooks → Declared refusals). The
+sentence is answered as `userMessage`, translated at
+`objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
+failure toast shows it unless the action authors `errorMessage`.
+
+### Writing in the organization's language (`texts`)
+
+A sentence the body writes into a record (an activity's subject) is read organization-wide:
+the same actions declare it under `texts` and ask for it by key —
+`texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then
+`await ctx.text('email_subject', { subject: input.subject })`. It answers in the organization's
+language, never the caller's, translated at the same node's `texts.<key>.message`; with no
+translation the declared sentence is written, filled; an unreadable Localization setting
+rejects. An undeclared key is refused at save when named literally, else at run.
+
 ## Opening in a New Tab
 
 ### `openIn: 'new-tab'`
 
-A **static** `target` URL on a `type: 'url'` action: `openIn: 'new-tab'` opens
-it in a new tab, `'self'` forces in-place navigation; omitted, absolute URLs open
-in a new tab and relative ones navigate in place.
+A **static** `target` URL on a `type: 'url'` action: `openIn: 'self'` forces
+in-place navigation; omitted, absolute URLs open in a new tab and relative ones
+navigate in place.
 
 <!-- os:check -->
 ```typescript
@@ -160,7 +178,7 @@ export const PrintA3Action = defineAction({
 A redirect URL **computed after a fetch**: `opensInNewTab:
 true` pre-opens the tab synchronously on click (no popup blocker), then navigates
 it to the handler's `redirectUrl`. `newTabUrl` skips the round-trip — a backend
-path starting with `/` (`{recordId}` placeholder; an external URL is refused, use
+path starting with `/` (an external URL is refused, use
 `openIn`), valid only with `opensInNewTab: true`; the endpoint enforces its own
 auth (the tab carries no in-app session).
 
@@ -188,8 +206,8 @@ export const OpenInvoicePdfAction = defineAction({
 
 ## Action Parameter Patterns
 
-Prefer **field-backed** params (`{ field: 'email' }`): label (i18n), type,
-validation, options, placeholder and widget come from the object metadata
+Prefer **field-backed** params: label (i18n), type, validation, options,
+placeholder and widget come from the object metadata
 (`widget` only while the param keeps or restates the field's `type`; a param
 that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
@@ -215,11 +233,12 @@ export const AddInvoiceLineAction = defineAction({
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },
   ],
+  refusals: { PRODUCT_NOT_FOUND: { message: 'Product not found.', status: 404 } },
   body: {
     language: 'js',
     source: `
       const product = await ctx.api.object('product').findOne({ where: { id: input.product } });
-      if (!product) throw new Error('Product not found.');
+      if (!product) throw { code: 'PRODUCT_NOT_FOUND' };
       await ctx.api.object('invoice_line').insert({
         invoice: ctx.recordId, product: input.product, quantity: input.quantity,
         unit_price: product.list_price,

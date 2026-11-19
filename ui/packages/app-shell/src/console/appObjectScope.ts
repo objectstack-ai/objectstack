@@ -32,9 +32,9 @@
  * same names by name once the package list has answered empty: the route's
  * object, its lookup targets and the app's `requiresObject` entries, never the
  * whole registry. Only the route's object holds the route. The app's ROOT in
- * such a package keeps the whole registry: measured on Setup's landing, asking
- * the entries' objects by name cost a request each and the landing loaded the
- * whole registry anyway (objectui#12811).
+ * such a package reads the same way (objectstack#34211): the objects its
+ * entries require, in the one presence read, those the entered app's bundle
+ * holds answered from it, and never the whole registry.
  *
  * A record route (`:objectName/record/:recordId`, and its named-page sibling)
  * whose record page is declared as a full page reads the objects that page
@@ -734,11 +734,9 @@ export function readAppObjectScope(
   const own = readObjectScope({ packageId });
   if (!own.settled) return { candidate, scope: own, ready: false, ...NOT_READ };
   // objectui#13046 — a package that holds no objects of its own: an object's
-  // route reads its names by name all the same, below; the app's root keeps the
-  // whole registry (the header says why).
-  if (!route.objectName && !own.served.some((o: any) => o?._packageId === packageId)) {
-    return { candidate, scope: null, ready: false, ...NOT_READ };
-  }
+  // route reads its names by name all the same, below, and so does the app's
+  // root (objectstack#34211): the objects its entries require, never the whole
+  // registry.
   return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId) };
 }
 

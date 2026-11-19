@@ -187,7 +187,8 @@ async function callOnLongLivedServer(bridge: McpDataBridge, name: string, args: 
 async function getRecordOverHttp(objectName: string, recordId: string) {
   const bridge: McpDataBridge = {
     async listObjects() { return [{ name: 'task', label: 'Task', fieldCount: 0 }]; },
-    async describeObject() { return null; },
+    // [#35138] `task` is served, as the stdio side serves it: a miss on it is a missing record, not an unrecorded object.
+    async describeObject(name) { return name === 'task' ? { name: 'task', label: 'Task', fields: [] } : null; },
     async query(object) { return { object, records: [], total: 0 }; },
     async get(object, id) { throw recordNotFoundError(object, id); },
     async create(object, data) { return { object, id: 'n1', record: data }; },

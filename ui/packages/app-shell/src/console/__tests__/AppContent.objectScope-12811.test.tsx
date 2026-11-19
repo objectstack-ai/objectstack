@@ -21,9 +21,9 @@
  * An app item with no package id asks its route's names by name instead
  * (objectstack#29416; it read the whole registry).
  *
- * CONTROLs: the root of an app whose package holds no objects of its own (a
- * platform app such as Setup; its object routes read by name, objectui#13046)
- * asks the whole registry, as before; a record overlay (`?recordId=`) reads the whole registry, because a record's
+ * The root of an app whose package holds no objects of its own (a platform app
+ * such as Setup) asks its entries' required objects, as its object routes do
+ * (objectui#13046, objectstack#34211). CONTROL: a record overlay (`?recordId=`) reads the whole registry, because a record's
  * related lists come from every object that points at it (since
  * objectstack#27626 the drawer reads it beside the list's scope, and the list
  * does not wait for it: `AppContent.recordDrawerKeepsScope-27626.test.tsx`).
@@ -263,16 +263,18 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
 
-  it("CONTROL: the root of an app whose package holds no objects of its own reads the whole registry, and asks none by name", async () => {
-    // objectui#13046 moved this control from an object's route to the app's
-    // root: an object's route in such an app now reads by name
-    // (`AppContent.emptyPackageScope-13046.test.tsx`), its landing does not.
+  it("the root of an app whose package holds no objects of its own asks its entries' required objects, never the whole registry (objectstack#34211)", async () => {
+    // objectui#13046 read the whole registry here; the root now reads as the
+    // app's object routes do (`AppContent.emptyPackageScope-13046.test.tsx`).
     server.apps = [{ name: 'crm', label: 'Setup-like', _packageId: 'app.platform', navigation: NAVIGATION }];
     boot('/apps/crm');
-    await waitFor(() => expect(objectCalls()).toContain('object'));
+    await waitFor(() => expect(objectCalls()).toContain('object?names=cloud_only'));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(objectCalls()).toEqual(['object?package=app.platform', 'object']);
+    // Then it lands on its first entry, which reads its own names by name; the
+    // whole registry is read at no point.
+    expect(objectCalls().slice(0, 2)).toEqual(['object?package=app.platform', 'object?names=cloud_only']);
+    expect(objectCalls()).not.toContain('object');
   });
 
   it('CONTROL: a record overlay reads the whole registry (a record\'s related lists come from every object)', async () => {

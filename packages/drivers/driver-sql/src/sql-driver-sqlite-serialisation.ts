@@ -53,8 +53,11 @@ import { isDateOnInstantColumn, utcMidnightOfDay } from './date-on-instant-colum
  * that arm admits reached a SQLite column as text (the console's inline grid
  * sent them), and `Boolean('false')` presented an un-ticked row as `true`.
  * Any other string keeps the `Boolean(value)` reading it had.
+ *
+ * [#34974] `presentReadValue`'s `'boolean'` arm calls this same function, so
+ * `distinct()` and an `aggregate()` group key read a stored value as `find()` does.
  */
-function presentStoredBoolean(value: unknown): boolean {
+export function presentStoredBoolean(value: unknown): boolean {
   if (value === 'false' || value === '0') return false;
   if (value === 'true' || value === '1') return true;
   return Boolean(value);

@@ -499,6 +499,12 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.requiredWhen': '必填条件',
   'designer.field.conditionalRulesHint':
     '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
+  'designer.field.requiredVisibleWhenReference':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。条件经由引用字段 {fields} 读取关联记录，服务器在这里无法读取，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。请改为读取本对象自己的字段。',
+  'designer.field.requiredVisibleWhenFormula':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填，其中的 {fields} 按要保存的记录计算。表单在你编辑时也会同样计算该公式；但向导最后提交时的检查，以及数据源不提供对象定义的表单，用的是上次读取的公式值（新建记录时没有值），可能与服务器的判断不一致。',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    '{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录都仍要求填写。表单同样无法计算它：会显示该字段并保持必填。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',
@@ -1731,6 +1737,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.create.submit': '创建软件包',
   'engine.packages.create.failed': '创建软件包失败',
   'engine.packages.create.exists': '已存在相同 ID 的软件包。',
+  'engine.packages.create.created': '已创建软件包「{name}」。',
   // objectstack#8270 — 这条正是在 zh 控制台里显示为英文原文的服务端拒绝信息。
   'engine.packages.noCapability': '你没有在本系统管理软件包的权限 — 该操作需要「管理元数据」权限。',
   'engine.packages.form.basics': '基本信息',
@@ -2497,6 +2504,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.operation': '操作',
   'engine.studio.access.explain.run': '解释',
   'engine.studio.access.explain.running': '解释中…',
+  'engine.studio.access.explain.needObject': '请先选择对象',
   'engine.studio.access.explain.allowedLine': '该主体对「{object}」执行 {operation} 将被【允许】。',
   'engine.studio.access.explain.deniedLine': '该主体对「{object}」执行 {operation} 将被【拒绝】。',
   'engine.studio.access.explain.principal': '主体',

@@ -370,6 +370,7 @@ import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
+import { suggestedSetLabel as suggestedSetLabelOf } from '../../components/suggestedSetLabel.js';
 import {
   AppNavCanvas,
   heldNavEntriesOf,
@@ -10858,8 +10859,7 @@ export function AccessPillar({
   // (`ux-conventions.labels-over-machine-names`). The suggestions listed here
   // are this package's own sets, which the rail read; a set the rail does not
   // hold, or one with no label, is named by its machine name.
-  const suggestedSetLabel = (s: SuggestedBinding): string =>
-    perms.find((p) => p.name === s.permission_set_name)?.label || s.permission_set_name;
+  const suggestedSetLabel = (s: SuggestedBinding): string => suggestedSetLabelOf(s, perms);
 
   return (
     <div className="flex h-full flex-col">

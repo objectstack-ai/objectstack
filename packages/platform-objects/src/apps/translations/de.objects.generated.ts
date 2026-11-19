@@ -159,7 +159,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Einladung an {{ result.email }} gesendet",
         outcomeMessages: {
           sent: "Einladung an {{ result.email }} gesendet",
-          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Verwenden Sie „Einladungslink kopieren“ an der Einladung, um sie zu teilen."
+          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Zum Annehmen ist eine bestätigte E-Mail-Adresse nötig: Ohne E-Mail-Versand kann nur eine eingeladene Person annehmen, deren Social- oder SSO-Anmeldung die Adresse bestätigt. Für alle anderen legt ein Plattformadministrator das Konto an."
         },
         params: {
           role: {
@@ -265,7 +265,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             "summary.added": "Hinzugefügt",
-            "summary.alreadyPending": "Bereits ausstehend, erneut benachrichtigt",
+            "summary.alreadyPending": "Bereits ausstehend",
             "summary.failed": "Nicht hinzugefügt",
             rows: "Ergebnis pro Zeile"
           },
@@ -274,7 +274,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
               row: "Zeile",
               email: "E-Mail",
               ok: "Erfolgreich",
-              alreadyPending: "Bereits ausstehend, erneut benachrichtigt",
+              alreadyPending: "Bereits ausstehend",
               "host.notified": "Hosting-Organisation benachrichtigt",
               "host.reason": "Warum nicht benachrichtigt",
               "error.message": "Nicht hinzugefügt, weil",
@@ -709,7 +709,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Einladung an {{ result.email }} gesendet",
         outcomeMessages: {
           sent: "Einladung an {{ result.email }} gesendet",
-          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Verwenden Sie „Einladungslink kopieren“ an der Einladung, um sie zu teilen."
+          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Zum Annehmen ist eine bestätigte E-Mail-Adresse nötig: Ohne E-Mail-Versand kann nur eine eingeladene Person annehmen, deren Social- oder SSO-Anmeldung die Adresse bestätigt. Für alle anderen legt ein Plattformadministrator das Konto an."
         },
         params: {
           role: {
@@ -815,7 +815,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Einladung an {{ result.email }} gesendet",
         outcomeMessages: {
           sent: "Einladung an {{ result.email }} gesendet",
-          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Verwenden Sie „Einladungslink kopieren“ an der Einladung, um sie zu teilen."
+          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Zum Annehmen ist eine bestätigte E-Mail-Adresse nötig: Ohne E-Mail-Versand kann nur eine eingeladene Person annehmen, deren Social- oder SSO-Anmeldung die Adresse bestätigt. Für alle anderen legt ein Plattformadministrator das Konto an."
         },
         params: {
           role: {
@@ -967,7 +967,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Einladung an {{ result.email }} gesendet",
         outcomeMessages: {
           sent: "Einladung an {{ result.email }} gesendet",
-          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Verwenden Sie „Einladungslink kopieren“ an der Einladung, um sie zu teilen."
+          link_only: "Einladung für {{ result.email }} erstellt. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Zum Annehmen ist eine bestätigte E-Mail-Adresse nötig: Ohne E-Mail-Versand kann nur eine eingeladene Person annehmen, deren Social- oder SSO-Anmeldung die Adresse bestätigt. Für alle anderen legt ein Plattformadministrator das Konto an."
         },
         params: {
           role: {
@@ -994,7 +994,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Einladung erneut gesendet",
         outcomeMessages: {
           sent: "Einladung erneut an {{ result.email }} gesendet",
-          link_only: "Einladung für {{ result.email }} verlängert. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Verwenden Sie „Einladungslink kopieren“ an der Einladung, um sie zu teilen."
+          link_only: "Einladung für {{ result.email }} verlängert. Auf diesem Server ist kein E-Mail-Versand konfiguriert, daher wurde keine E-Mail gesendet. Zum Annehmen ist eine bestätigte E-Mail-Adresse nötig: Ohne E-Mail-Versand kann nur eine eingeladene Person annehmen, deren Social- oder SSO-Anmeldung die Adresse bestätigt. Für alle anderen legt ein Plattformadministrator das Konto an."
         }
       },
       copy_invitation_link: {

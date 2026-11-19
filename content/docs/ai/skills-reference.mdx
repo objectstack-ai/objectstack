@@ -45,7 +45,7 @@ npm create objectstack@latest my-app
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **12 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **13 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -62,7 +62,8 @@ ObjectStack ships **12 skills** — one per authoring domain, plus process skill
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
 | 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 | 11 | [Ask](#ask) | `process` | `skills/objectstack-ask/` | Answer a business question over a live ObjectStack environment through its MCP tools (list_datasets, query_dataset, list_objects, describe_object, query_records, aggregate_records): find the governed metric the question names, compute it and cite its source, or fall back to an object query and say so. |
-| 12 | [ObjectUI](#objectui) | `ui` | `skills/objectui/` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
+| 12 | [Project](#project) | `process` | `skills/objectstack-project/` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
+| 13 | [ObjectUI](#objectui) | `ui` | `skills/objectui/` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
 
 ---
 
@@ -217,6 +218,18 @@ Use for EVERY question answered from the app's records, before the first data to
 Do not use for building or changing metadata (the domain skills cover that), or for writing a query in application code (see objectstack-query).
 
 **Tags:** `ask`, `question`, `metric`, `dataset`, `mcp`, `list_datasets`, `query_dataset`, `问数`, `指标`
+
+---
+
+### Project
+
+**Domain** `process` · **Path** `skills/objectstack-project/`
+
+Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded.
+
+Use when deciding where a change belongs or what to write before building, filing an issue, writing a test, opening a PR, releasing, or bumping `@objectstack/*`. Not for writing metadata (the domain skills) or crossing a protocol major (objectstack-upgrade).
+
+**Tags:** `project`, `process`, `testing`, `verify`, `release`, `changeset`, `upgrade`, `backfill`, `platform-gap`
 
 ---
 

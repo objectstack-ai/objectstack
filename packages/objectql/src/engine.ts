@@ -5913,6 +5913,7 @@ export class ObjectQL implements IObjectQLEngine {
       formulaFaultSink: (...a) => engine.formulaFaultSink(...a),
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       getDriver: (...a) => engine.getDriver(...a),
+      hasHooksFor: (...a) => engine.hasHooksFor(...a),
       get logger() { return engine.logger; },
       lowerRelationConditions: (...a) => engine.lowerRelationConditions(...a),
       maskSecretFields: (...a) => engine.maskSecretFields(...a),

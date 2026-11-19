@@ -1980,6 +1980,19 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
               else entry.missing = [...entry.missing, name];
               continue;
             }
+            // objectstack#34211 — a presence read (the batched names scope)
+            // asks only whether this runtime registers the object: one the
+            // entered app's bundle holds is registered, and is answered with
+            // the bundle's definition, as a by-name read of it is. A name the
+            // bundle does not hold, or a bundle not yet in hand, is asked.
+            if (batched) {
+              const bundled = readBundledItem('object', name);
+              if (bundled.state === 'hit') {
+                entry.names.set(name, 'answered');
+                entry.items = [...entry.items, bundled.value];
+                continue;
+              }
+            }
             namesSettled = false;
             if (batched) toBatch.push(name);
             else void fetchScopeName(packageId, entry, name);
@@ -2033,7 +2046,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         views: scopeViews.views,
       };
     },
-    [fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readType, viewsForObjects],
+    [fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readBundledItem, readType, viewsForObjects],
   );
 
   const value = useMemo<MetadataContextValue>(() => {

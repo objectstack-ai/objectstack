@@ -1386,6 +1386,79 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One metadata item that still shows (or, after a type change, still filters
+ * by) a field a refused `object` save would remove or retype — an entry of
+ * {@link DestructiveChangeIssueSchema}'s `stillShownBy`.
+ */
+export const FieldStillShownBySchema = lazySchema(() => z.object({
+  type: z.string().describe(
+    'The metadata type of the item: `view` (a list view or a form), `dataset`, `dashboard`, `page`, '
+    + '`flow`, `report`, or `object` (another object, or the saved object\'s own body).',
+  ),
+  name: z.string().describe(
+    'The item\'s name, as the served list names it. One item can appear in more than one entry: a '
+    + 'dashboard once directly and once per `via` dataset, a view once per unfit `operator`.',
+  ),
+  where: z.array(z.string()).describe(
+    'Each position inside the item that names the field, as a path relative to the item as the '
+    + 'served listing presents it: `config.columns[1]` or `config.sections[0].fields[2]` on a view '
+    + 'item (the served listing never presents a `{ list, form, listViews }` container, only the '
+    + 'view items it expands into), `columns[1]` on a flattened list overlay, `widgets[3]` on a '
+    + 'dashboard. The literal `(root)` when the finding sits on the item itself.',
+  ),
+  via: z.string().optional().describe(
+    'A dashboard widget shows the field through this dataset: it names a dimension or measure of '
+    + 'the dataset, and that dimension or measure names the field.',
+  ),
+  operator: z.string().optional().describe(
+    'On a `field_type_change` entry only: the filter operator, as the view rule spells it, that '
+    + 'no longer fits the new type (`filterOperatorFieldTypeFit` answers `unfit`).',
+  ),
+}));
+
+/**
+ * One finding of the `409 DESTRUCTIVE_CHANGE` refusal of an `object` save (the
+ * save door's destructive-change diff): an entry of the refusal's `issues[]`,
+ * which every door relays verbatim beside the message — the REST `PUT` doors
+ * as a top-level `issues`, the runtime dispatcher as `details.issues`, the MCP
+ * draft door as `error.issues` on its refusal.
+ */
+export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
+  code: z.string().describe(
+    'What the save loses: `field_removed`, `field_type_change`, `field_required_no_default`, '
+    + '`currency_mode_to_record` or `currency_field_repointed`.',
+  ),
+  field: z.string().optional().describe('The field the finding is about.'),
+  message: z.string().describe(
+    'The finding in prose. When `stillShownBy` names items, the prose ends by naming them too.',
+  ),
+  stillShownBy: z.array(FieldStillShownBySchema).optional().describe(
+    'The metadata items that still show the field, computed from the environment\'s served '
+    + 'metadata (one served listing per type: what the code packages register, with this '
+    + 'environment\'s stored active rows folded over them; drafts are not read, and no record is read). '
+    + 'On `field_removed` and `field_type_change` findings only; absent on every other code, and '
+    + 'absent when it could not be computed: a listing could not be read, a judge threw or could not '
+    + 'be loaded, or the retyped field\'s new definition carries no readable `type` (absent is "not '
+    + 'computed", `[]` is "computed, none"). '
+    + 'On `field_removed`: the `object`, `view`, `dataset`, `dashboard`, `page`, `flow` and `report` '
+    + 'items in which the platform\'s reference-integrity suite, form-layout check and widget-binding '
+    + 'check (`@objectstack/lint`, the judges `os validate` runs) find a reference that resolves with '
+    + 'the field and dangles without it, the saved body taken as the save would write it; plus each '
+    + 'dashboard widget bound to a dataset dimension or measure that dangles (`via`). A position '
+    + 'those judges do not read is not seen, nor is an item of any other type (an app, an action, a '
+    + 'permission set), nor code outside the metadata. On `field_type_change`: each filter rule of a '
+    + 'served `view` item bound to the saved object that names the field by its bare name and whose '
+    + 'operator does not fit the new type, judged by `filterOperatorFieldTypeFit` (an operator is '
+    + 'unfit only where a declared-type door refuses it; a filter another door refuses, such as any '
+    + 'filter on a field retyped to `formula`, is not named). The rules read are a view item\'s '
+    + '`config.filter` (the canonical served shape), a flattened list overlay\'s own `filter`, and '
+    + 'the `userFilters.tabs[].filter` of either, rules inside an any-of group included. Filters '
+    + 'elsewhere (datasets, dashboards, reports, flows), dotted paths, and comparands are not judged '
+    + 'there. The save does not edit any listed item.',
+  ),
+}));
+
+/**
  * Metadata Conflict — the 409 body of the `/meta/:type/:name` write doors
  *
  * Describes the body `PUT /api/v1/meta/:type/:name` (and its sibling write
@@ -1847,34 +1920,46 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
   severity: z.enum(['error', 'warning']).describe(
     '`error`: the published artifact is broken at runtime, or the check that '
     + 'judges it could not run (`object_field_ref_rule_failed`). `warning`: a '
-    + 'dashboard widget was not probed, so nothing is known about it. Neither '
-    + 'fails the publish.',
+    + 'dashboard widget was not probed, so nothing is known about it '
+    + '(`widget_not_probed`, `probes_unavailable`); what landed reads in a way '
+    + 'the person will notice although it may be the truth (`widget_empty_result`, '
+    + '`rollup_never_computed`); or what landed is wrong in a way that depends on '
+    + 'data or on what the environment serves rather than on the artifact alone: '
+    + 'a stored reference that names no row (`seed_reference_unresolved`), a '
+    + 'flow step that fails on every run that reaches it until the connector it '
+    + 'names is served (`flow_connector_action_unresolved`). Neither fails the publish.',
   ),
   artifact: z.object({
-    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`).'),
+    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`, `flow`).'),
     name: z.string().describe(
       'Item name of the artifact. On `probes_unavailable` it is the name of '
       + 'every dashboard whose widgets went unprobed, joined by `, `.',
     ),
   }).describe('The published artifact whose runtime behaviour the finding is about.'),
   ref: z.object({
-    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`).'),
+    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`, `connector`).'),
     name: z.string().describe('Its item name.'),
     member: z.string().optional().describe(
-      'The dashboard widget the finding is about, when the finding is about '
-      + 'one widget: its `id`, else its `title` as a string, else `?`.',
+      'The part of it the finding is about: the dashboard widget, when the '
+      + 'finding is about one widget (its `id`, else its `title` as a string, '
+      + 'else `?`); the field of an object (a roll-up, a reference column); the '
+      + 'action of a connector.',
     ),
   }).optional().describe(
-    'What the probe exercised, when that is not the artifact itself: the '
-    + 'object a seed loads into or a view reads, the dataset a widget is bound '
-    + 'to. Absent when the finding is about the artifact as a whole.',
+    'What the probe exercised: the object a seed loads into or a view reads, '
+    + 'the dataset a widget is bound to, the connector a flow step dispatches, '
+    + 'or the published object itself when `member` names the field the '
+    + 'finding is about (a roll-up). Absent when the finding is about the '
+    + 'artifact as a whole.',
   ),
   code: z.string().describe(
     'Stable machine id of the finding class, lowercase snake: a diagnostics '
     + 'code carried in a 200, not an ADR-0112 error code. The probes emit '
     + '`seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, '
     + '`object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, '
-    + '`widget_not_probed` and `probes_unavailable`. The list is the '
+    + '`widget_not_probed`, `probes_unavailable`, `widget_empty_result`, '
+    + '`rollup_never_computed`, `seed_reference_unresolved` and '
+    + '`flow_connector_action_unresolved`. The list is the '
     + 'producer\'s and may grow: a consumer treats an id it does not know as '
     + 'any other finding.',
   ),
@@ -4399,13 +4484,24 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
   defaultModel: z.string().optional().describe('Default model id, when the service reports one'),
 }));
 
+/**
+ * One message of a persisted conversation, as the `/ai/conversations` routes
+ * return it: {@link AiMessageSchema} plus the turn it belongs to.
+ */
+export const AiConversationMessageSchema = lazySchema(() => AiMessageSchema.extend({
+  turnId: z.string().nullable().optional().describe(
+    'The turn the server stamped on the message: the `turnId` of the chat request that wrote it. '
+    + 'Absent or null on a message stored with no turn',
+  ),
+}));
+
 /** A persisted AI conversation, as the `/ai/conversations` routes return it. */
 export const AiConversationSchema = lazySchema(() => z.object({
   id: z.string().describe('Conversation id'),
   title: z.string().optional().describe('Title / summary'),
   agentId: z.string().optional().describe('Agent this conversation is bound to'),
   userId: z.string().optional().describe('Owning user'),
-  messages: z.array(AiMessageSchema).describe('Message history'),
+  messages: z.array(AiConversationMessageSchema).describe('Message history'),
   createdAt: z.string().describe('Creation timestamp (ISO 8601)'),
   updatedAt: z.string().describe('Last update timestamp (ISO 8601)'),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
@@ -4763,6 +4859,12 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type FieldStillShownBy = z.input<typeof FieldStillShownBySchema>;
+export type DestructiveChangeIssue = z.input<typeof DestructiveChangeIssueSchema>;
+/** Post-parse shape of {@link FieldStillShownBy} (ADR-0122). */
+export type FieldStillShownByParsed = z.infer<typeof FieldStillShownBySchema>;
+/** Post-parse shape of {@link DestructiveChangeIssue} (ADR-0122). */
+export type DestructiveChangeIssueParsed = z.infer<typeof DestructiveChangeIssueSchema>;
 /** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
 export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
 /** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
@@ -4958,6 +5060,7 @@ export type MarkAllNotificationsReadResponse = z.input<typeof MarkAllNotificatio
 
 // AI Types
 export type AiMessage = z.input<typeof AiMessageSchema>;
+export type AiConversationMessage = z.input<typeof AiConversationMessageSchema>;
 export type AiChatRequest = z.input<typeof AiChatRequestSchema>;
 export type AiChatResponse = z.input<typeof AiChatResponseSchema>;
 export type AiStreamChunk = z.input<typeof AiStreamChunkSchema>;

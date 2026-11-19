@@ -404,7 +404,8 @@ export const DatasetProvenanceSchema = lazySchema(() => z.object({
 
 /**
  * `query_dataset` output: the dataset answer the REST door serves, without the
- * executed SQL, plus `provenance`, `rowCount` and `truncated`.
+ * executed SQL, plus `provenance`, `rowCount`, `truncated` and, where the
+ * groups were counted without a read, `totalGroups`.
  *
  * The answer's members are taken BY REFERENCE from
  * `AnalyticsResultResponseSchema`'s `data`, so a column property the REST door
@@ -429,6 +430,23 @@ export const QueryDatasetOutputSchema = lazySchema(() => AnalyticsResultResponse
     rowCount: z.number().int().nonnegative().describe('How many rows `rows` holds'),
     truncated: z.boolean().describe(
       '`true` when more rows existed past the row cap the tool applied and were not returned',
+    ),
+    totalGroups: z.number().int().nonnegative().optional().describe(
+      'How many groups the selection formed before `offset` and `limit` cut them: the rows the same selection '
+      + 'answers with no window. The same name and meaning as `aggregate_records`\' `totalGroups`. Never paid for '
+      + 'with a read. Where the window is pushed into the one SQL statement that grouped the answer, the database '
+      + 'counts the groups with a window count in that statement. Where the window is applied in memory, it is the '
+      + 'length of the grid before the window: an order by a display label (the tool\'s own order when none is sent '
+      + 'sorts every selected dimension, so any select or reference dimension brings it in; an order by measures '
+      + 'alone does not), a grid assembled from several queries (a measure with its own filter, a derived measure, '
+      + '`compareTo`), and a query the engine\'s aggregate serves, such as a date bucket, a field-to-field filter, an '
+      + 'external object or a driver with no raw SQL. That grid is counted only when every read that built it came '
+      + 'back whole: a grid that any cap or row guard cut before the window answers no count. Equals `rowCount` when '
+      + 'the answer was not cut. Absent otherwise, which is when: the window was pushed down and the SQL dialect is '
+      + 'not one the tool knows, or a selected member is itself named `__os_group_count`, or the page came back '
+      + 'empty after an `offset`; a read was served by a strategy that does not vouch for its grid, such as one a '
+      + 'host adds, or was cut by a cap under it; or the dataset\'s object is missing and the answer is the empty '
+      + 'one served for it',
     ),
     delegationNarrowed: z.literal(true).optional().describe(
       'Present, and `true`, when the caller acts as an agent whose authority narrows what it may read on the '

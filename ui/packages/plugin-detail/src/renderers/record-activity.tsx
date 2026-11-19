@@ -90,6 +90,7 @@ import {
   RecordTimelinePanelContext,
   RecordTimelineTotalContext,
   filterTimelineStream,
+  mergeFieldHistoryIntoFeed,
   mergeTimelineStream,
   timelineStreamFilters,
   type TimelineStreamFilter,
@@ -315,15 +316,22 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const [chosenStreamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
   const [streamPages, setStreamPages] = React.useState(1);
   // objectstack#30074 — no 变更 chip while the record's field history is not
-  // shown; a chip that is not offered filters nothing.
-  const streamFilters = timelineStreamFilters(React.useContext(RecordFieldHistoryContext));
+  // shown; a chip that is not offered filters nothing. Nor while this block
+  // un-mixes the field changes (`unifiedTimeline: false`): it shows none, so
+  // its `changes_only` is not offered either (objectstack#33996).
+  const fieldHistoryShown = React.useContext(RecordFieldHistoryContext) && unifiedTimeline !== false;
+  const streamFilters = timelineStreamFilters(fieldHistoryShown);
   const streamFilter: TimelineStreamFilter = streamFilters.includes(chosenStreamFilter) ? chosenStreamFilter : 'all';
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
     const sourceItems: FeedItem[] = hostItems ?? discussionItems ?? fetched ?? [];
     if (!asStream) {
-      return { ...applyFeedConfig(sourceItems, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME), total: 0 };
+      // objectstack#33996 — off the default record page (an authored page)
+      // the field changes the host hands over join the feed by the stream's
+      // pairing, oldest first as this face reads.
+      const feed = mergeFieldHistoryIntoFeed(sourceItems, fieldChanges);
+      return { ...applyFeedConfig(feed, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME), total: 0 };
     }
     // The chip filters the WHOLE stream before the page is cut, so 讨论 is
     // every comment, not the comments of the first page.
@@ -396,6 +404,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
 
   return (
     <div className={className} {...designer} {...ariaProps}>
+      <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
       <RecordActivityTimeline
         items={items}
         config={config}
@@ -441,6 +450,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
               }
             : {})}
       />
+      </RecordFieldHistoryContext.Provider>
     </div>
   );
 };

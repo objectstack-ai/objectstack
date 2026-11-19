@@ -106,7 +106,7 @@
 import { createHash } from 'node:crypto';
 
 import { askedFirst, confirmedByAgent, DATASET_GRADERS, type CheckResult, type DatasetGrader } from '../score/index.js';
-import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
+import type { CardRun, DoorSteps, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
@@ -261,8 +261,10 @@ export interface ModelSpend {
 export type AskSpend = Record<string, ModelSpend>;
 
 export interface ModeScorecard {
-  mode: 'scratch' | 'template' | 'ask';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
   skipped?: string;
+  /** Door mode's person-equivalent steps in one line ({@link doorStepsText}); absent on every other mode. */
+  door?: string;
   /**
    * The source of the verified build the mode ran on and did not author or
    * score (`ModeRun.template.source`), on an ask mode that got as far as its
@@ -656,6 +658,23 @@ export function rollupSourceChecks(b: BuildHalf | undefined): CheckResult[] {
   }));
 }
 
+/**
+ * Door mode's steps as the scorecard states them: the package, the drafts the
+ * client left pending, and what the publish answered, with each refused draft.
+ */
+export function doorStepsText(d: DoorSteps): string {
+  const answered = (a: { status: number; code?: string }) => [String(a.status), a.code].filter(Boolean).join(' ');
+  const parts = [`package \`${d.package.id}\` ${d.package.create.ok ? 'created' : `not created (${answered(d.package.create)})`}`];
+  if (d.token) parts.push(d.token.ok ? `client connected (${d.token.scope ?? 'scope not stated'})` : `no token (${answered(d.token)})`);
+  if (d.drafts) parts.push(`${d.drafts.items.length} draft${d.drafts.items.length === 1 ? '' : 's'} pending${d.drafts.answer.ok ? '' : ` (the list answered ${answered(d.drafts.answer)})`}`);
+  if (d.publish) {
+    const p = d.publish;
+    const refused = p.failed?.length ? `; refused: ${p.failed.map((f) => `${f.type} ${f.name}${f.code ? ` ${f.code}` : ''}`).join(', ')}` : '';
+    parts.push(`publish: ${p.outcome ?? answered(p)}${p.publishedCount !== undefined ? `, ${p.publishedCount} published` : ''}${refused}`);
+  }
+  return parts.join(' · ');
+}
+
 export function modeScorecard(m: ModeRun): ModeScorecard {
   const first: HalfScores = {};
   const b = buildTally(m.build, NO_ARTIFACT_TOTAL);
@@ -701,6 +720,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   };
   if (m.skipped) out.skipped = m.skipped;
   if (m.mode === 'ask' && m.template) out.supplied = m.template.source;
+  if (m.mode === 'door' && m.door) out.door = doorStepsText(m.door);
   if (m.iterate) {
     const it: HalfScores & { changeSize?: number } = {};
     const ib = buildTally(m.iterate.build, NO_ARTIFACT_TOTAL);
@@ -913,6 +933,7 @@ export function renderScorecard(sc: CardScorecard): string {
   for (const m of sc.modes) {
     if (m.skipped) lines.push('', `- ${m.mode}: skipped — ${m.skipped}`);
     if (m.supplied !== undefined) lines.push('', `- ${m.mode}: the build is supplied (${m.supplied}), installed as it is; it is not scored, and no authoring turn ran`);
+    if (m.door !== undefined) lines.push('', `- ${m.mode}: ${m.door}`);
     for (const f of m.findings) lines.push(`- ${m.mode} finding: ${f}`);
   }
   return lines.join('\n');
@@ -947,7 +968,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     const firstOut = m.build?.notMeasured ? `not run: the build was not measured (${m.build.notMeasured})` : undefined;
     // An ask mode authors nothing: its Build half is the supplied build's, never scored, and it has no iterate.
     const supplied = s.supplied !== undefined ? `${SUPPLIED_BUILD} (${s.supplied}): not scored` : undefined;
-    const noIterate = m.mode === 'ask' ? 'not run: ask mode authors no iterate' : undefined;
+    const noIterate = m.mode === 'ask' ? 'not run: ask mode authors no iterate' : m.mode === 'door' ? 'not run: door mode builds once and runs no iterate' : undefined;
     const iterateOut = firstOut ?? noIterate ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
     const buildNote = (b: HalfScores['build']) => supplied ?? (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [

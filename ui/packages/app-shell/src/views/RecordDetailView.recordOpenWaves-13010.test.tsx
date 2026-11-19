@@ -796,16 +796,63 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
     expect(screen.getByText(/negotiation/)).toBeTruthy();
   });
 
-  // Only the synthesized page hands the view's audit rows to a block; an
-  // assigned page's `record:history` reads its own source. So an assigned page
-  // never shows what this read fetches.
-  it('an assigned page of a trackHistory object never reads the audit log', async () => {
+  // objectstack#33996 flipped this pin. It read "an assigned page of a
+  // trackHistory object never reads the audit log": only the synthesized page
+  // handed the audit rows to a block, so an authored feed panel's
+  // `changes_only` held nothing and an authored `filterMode: 'changes_only'`
+  // read as All. Now an assigned page's feed blocks draw the field changes,
+  // so the read goes out while one is on screen, as the stream's does.
+  it('an assigned page of a trackHistory object reads the audit log while its feed panel is on screen, and the panel shows the change', async () => {
     const { held } = await openHistory({ page: ACTIVITY_PAGE, search: '?tab=activity' });
     const table = waveTable(held);
-    // Its activity comes with the page (objectstack#28470); the audit log is never read.
+    // Its activity comes with the page (objectstack#28470).
     expect(pageStreams(held).activity, table).toBe(200);
     expect(held.filter(isActivityRead), table).toEqual([]);
+    expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
+    expect(topOf(held.filter(isAuditRead)[0]), table).toBe(50);
+    expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
+    expect(screen.getByText('Grace')).toBeTruthy();
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+  });
+
+  it('CONTROL: the same page opened on a tab with no feed panel reads no audit log until the panel opens', async () => {
+    const { held, state } = await openHistory({ page: ACTIVITY_PAGE });
+    expect(held.filter(isAuditRead), waveTable(held)).toEqual([]);
+    const openedWith = held.length;
+    await openTab('Activity');
+    await runWaves(held, state);
+    const table = waveTable(held);
+    const reads = held.filter(isAuditRead);
+    expect(reads, table).toHaveLength(1);
+    expect(reads[0].seq, table).toBeGreaterThanOrEqual(openedWith);
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+  });
+
+  it('CONTROL: an assigned page with no feed panel at all never reads the audit log', async () => {
+    const { held } = await openHistory({ page: RECORD_PAGE, search: '?tab=related' });
+    const table = waveTable(held);
     expect(held.filter(isAuditRead), table).toEqual([]);
     expect(held.filter(isAuditUserLookup), table).toEqual([]);
+  });
+
+  it('CONTROL: the feed panel on screen over an object without trackHistory reads no audit log', async () => {
+    const { held } = await openHistory({ page: ACTIVITY_PAGE, search: '?tab=activity', object: objectDef });
+    const table = waveTable(held);
+    expect(pageStreams(held).activity, table).toBe(200);
+    expect(held.filter(isAuditRead), table).toEqual([]);
+  });
+
+  it('an authored record:discussion with `filterMode: changes_only` opens on Field Changes and holds the change only', async () => {
+    const DISCUSSION_TAB = {
+      value: 'discussion',
+      label: 'Discussion',
+      children: [{ type: 'record:discussion', id: 'deal_discussion', properties: { feed: { filterMode: 'changes_only' } } }],
+    };
+    const { held } = await openHistory({ page: tabsPage([DETAILS_TAB, DISCUSSION_TAB]), search: '?tab=discussion' });
+    const table = waveTable(held);
+    expect(held.filter(isAuditRead), table).toHaveLength(1);
+    expect(screen.getByRole('combobox').textContent, table).toContain('Field Changes');
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+    expect(screen.queryByText('Ping the buyer on Friday'), table).toBeNull();
   });
 });

@@ -159,7 +159,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }}에게 초대를 보냄",
         outcomeMessages: {
           sent: "{{ result.email }}에게 초대를 보냄",
-          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대에서 초대 링크 복사를 사용해 공유하세요."
+          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대를 수락하려면 인증된 이메일 주소가 필요합니다. 메일이 없으면 소셜 또는 SSO 로그인으로 주소가 인증되는 초대 대상자만 수락할 수 있습니다. 그 밖의 사람은 플랫폼 관리자가 계정을 만들어야 합니다."
         },
         params: {
           role: {
@@ -265,7 +265,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "완료",
           fields: {
             "summary.added": "추가됨",
-            "summary.alreadyPending": "이미 대기 중, 다시 알림",
+            "summary.alreadyPending": "이미 대기 중",
             "summary.failed": "추가되지 않음",
             rows: "행별 결과"
           },
@@ -274,7 +274,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
               row: "행",
               email: "이메일",
               ok: "성공",
-              alreadyPending: "이미 대기 중, 다시 알림",
+              alreadyPending: "이미 대기 중",
               "host.notified": "호스팅 조직에 알림",
               "host.reason": "알리지 않은 이유",
               "error.message": "추가되지 않은 이유",
@@ -709,7 +709,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }}에게 초대를 보냄",
         outcomeMessages: {
           sent: "{{ result.email }}에게 초대를 보냄",
-          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대에서 초대 링크 복사를 사용해 공유하세요."
+          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대를 수락하려면 인증된 이메일 주소가 필요합니다. 메일이 없으면 소셜 또는 SSO 로그인으로 주소가 인증되는 초대 대상자만 수락할 수 있습니다. 그 밖의 사람은 플랫폼 관리자가 계정을 만들어야 합니다."
         },
         params: {
           role: {
@@ -815,7 +815,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }}에게 초대를 보냄",
         outcomeMessages: {
           sent: "{{ result.email }}에게 초대를 보냄",
-          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대에서 초대 링크 복사를 사용해 공유하세요."
+          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대를 수락하려면 인증된 이메일 주소가 필요합니다. 메일이 없으면 소셜 또는 SSO 로그인으로 주소가 인증되는 초대 대상자만 수락할 수 있습니다. 그 밖의 사람은 플랫폼 관리자가 계정을 만들어야 합니다."
         },
         params: {
           role: {
@@ -967,7 +967,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }}에게 초대를 보냄",
         outcomeMessages: {
           sent: "{{ result.email }}에게 초대를 보냄",
-          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대에서 초대 링크 복사를 사용해 공유하세요."
+          link_only: "{{ result.email }}에 대한 초대를 만들었습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대를 수락하려면 인증된 이메일 주소가 필요합니다. 메일이 없으면 소셜 또는 SSO 로그인으로 주소가 인증되는 초대 대상자만 수락할 수 있습니다. 그 밖의 사람은 플랫폼 관리자가 계정을 만들어야 합니다."
         },
         params: {
           role: {
@@ -994,7 +994,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "초대를 다시 보냄",
         outcomeMessages: {
           sent: "{{ result.email }}에게 초대를 다시 보냄",
-          link_only: "{{ result.email }}에 대한 초대를 갱신했습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대에서 초대 링크 복사를 사용해 공유하세요."
+          link_only: "{{ result.email }}에 대한 초대를 갱신했습니다. 이 서버에는 메일이 구성되어 있지 않아 이메일은 발송되지 않았습니다. 초대를 수락하려면 인증된 이메일 주소가 필요합니다. 메일이 없으면 소셜 또는 SSO 로그인으로 주소가 인증되는 초대 대상자만 수락할 수 있습니다. 그 밖의 사람은 플랫폼 관리자가 계정을 만들어야 합니다."
         }
       },
       copy_invitation_link: {

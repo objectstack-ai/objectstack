@@ -1094,6 +1094,9 @@ export const FanOutNotifyFlow = defineFlow({
                   // `TaskCompletedSlackFlow` uses.
                   url: 'https://hooks.slack.com/services/T000/B000/XXXX',
                   method: 'POST',
+                  // The node arms no timer without one: an endpoint that never
+                  // answers would hold the run open.
+                  timeoutMs: 10000,
                   // The body is a value slot (#19939): one CEL envelope builds
                   // the whole payload. `title` is a required field, so it is
                   // read unguarded.
@@ -1281,6 +1284,7 @@ export const ResilientSyncFlow = defineFlow({
               config: {
                 url: 'https://api.example.com/v1/tasks',
                 method: 'POST',
+                timeoutMs: 10000,
                 // CEL holds a map's values to one type: the literal beside the
                 // field reads is wrapped in `dyn(…)`.
                 body: { dialect: 'cel', source: "{'id': taskId, 'title': title, 'status': dyn('done')}" },
@@ -1523,7 +1527,7 @@ export const ProjectEscalationFlow = defineFlow({
         // the request cannot be queued, and the catch region reports that.
         errorVariable: '$error',
         try: {
-          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', durable: true, body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
+          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', durable: true, timeoutMs: 10000, body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
           edges: [],
         },
         catch: {

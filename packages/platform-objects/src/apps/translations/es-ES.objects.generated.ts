@@ -159,7 +159,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
           sent: "Invitación enviada a {{ result.email }}",
-          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Para aceptar hace falta una dirección de correo verificada: sin correo, solo puede aceptar un invitado cuyo inicio de sesión social o SSO verifique la dirección. Para cualquier otra persona, un administrador de la plataforma crea la cuenta."
         },
         params: {
           role: {
@@ -265,7 +265,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Hecho",
           fields: {
             "summary.added": "Añadidos",
-            "summary.alreadyPending": "Ya pendientes, avisados de nuevo",
+            "summary.alreadyPending": "Ya pendientes",
             "summary.failed": "No añadidos",
             rows: "Resultado por fila"
           },
@@ -274,7 +274,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               row: "Fila",
               email: "Correo electrónico",
               ok: "Correcto",
-              alreadyPending: "Ya pendiente, avisado de nuevo",
+              alreadyPending: "Ya pendiente",
               "host.notified": "Organización de alojamiento avisada",
               "host.reason": "Por qué no se avisó",
               "error.message": "No añadido porque",
@@ -709,7 +709,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
           sent: "Invitación enviada a {{ result.email }}",
-          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Para aceptar hace falta una dirección de correo verificada: sin correo, solo puede aceptar un invitado cuyo inicio de sesión social o SSO verifique la dirección. Para cualquier otra persona, un administrador de la plataforma crea la cuenta."
         },
         params: {
           role: {
@@ -815,7 +815,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
           sent: "Invitación enviada a {{ result.email }}",
-          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Para aceptar hace falta una dirección de correo verificada: sin correo, solo puede aceptar un invitado cuyo inicio de sesión social o SSO verifique la dirección. Para cualquier otra persona, un administrador de la plataforma crea la cuenta."
         },
         params: {
           role: {
@@ -967,7 +967,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
           sent: "Invitación enviada a {{ result.email }}",
-          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Para aceptar hace falta una dirección de correo verificada: sin correo, solo puede aceptar un invitado cuyo inicio de sesión social o SSO verifique la dirección. Para cualquier otra persona, un administrador de la plataforma crea la cuenta."
         },
         params: {
           role: {
@@ -994,7 +994,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitación reenviada",
         outcomeMessages: {
           sent: "Invitación reenviada a {{ result.email }}",
-          link_only: "Invitación renovada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          link_only: "Invitación renovada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Para aceptar hace falta una dirección de correo verificada: sin correo, solo puede aceptar un invitado cuyo inicio de sesión social o SSO verifique la dirección. Para cualquier otra persona, un administrador de la plataforma crea la cuenta."
         }
       },
       copy_invitation_link: {

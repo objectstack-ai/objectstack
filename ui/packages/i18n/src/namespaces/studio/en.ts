@@ -584,6 +584,12 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.requiredWhen': 'Required when',
   'designer.field.conditionalRulesHint':
     'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
+  'designer.field.requiredVisibleWhenReference':
+    'This field is required, and the server decides that from this condition on every save. The condition reads through {fields}, a reference the server cannot follow here, so it counts the field as shown: it stays required on every record, including the ones this condition hides it on. Read a field of this object instead.',
+  'designer.field.requiredVisibleWhenFormula':
+    'This field is required, and the server decides that from this condition on every save, with {fields} computed over the record being saved. The form computes the same formula as you edit; a wizard\'s final-submit check, or a form whose data source serves no object schema, judges the value it last read instead (a new record has none) and can disagree with the server.',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    '{fields} reads through a reference, or calls label() or current_user.can(), itself or through another formula, which the server cannot compute on a save (current_user.can() only on a save that picks no permission-gated option): it counts this field as shown, so it stays required on every record. The form cannot compute it either: it shows this field and keeps it required.',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '{n} selected',
   'designer.canvas.bulkMoveTo': 'Move to section',
@@ -1948,6 +1954,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.submit': 'Create package',
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
+  'engine.packages.create.created': 'Created package “{name}”.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2793,6 +2800,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.operation': 'Operation',
   'engine.studio.access.explain.run': 'Explain',
   'engine.studio.access.explain.running': 'Explaining…',
+  'engine.studio.access.explain.needObject': 'Choose an object first',
   'engine.studio.access.explain.allowedLine': '{operation} on “{object}” is ALLOWED for this principal.',
   'engine.studio.access.explain.deniedLine': '{operation} on “{object}” is DENIED for this principal.',
   'engine.studio.access.explain.principal': 'Principal',

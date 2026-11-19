@@ -14,7 +14,7 @@
 
 ## 范围与 changeset
 
-- 三条判据:无 `content/docs/releases/` 改动、用户可见改动有 changeset、无与卡无关的文件。
+- 无 `content/docs/releases/` 改动、用户可见改动有 changeset、无卡外或超 `Scope-review:` 的文件。
 - 种类非 `none` 或带 `(narrowing)`:`Skills-docs:` 行在且属实;`follow-up owed` 立卡改 `#N`;缺 ⇒ REWORK。
 - changeset/CHANGELOG、`content/docs/**`、`apps/docs/**`:逐句核 diff,ACCEPT 点名所核句,⛔ 不起子代理。
 - Tests/docs-only 按仓库分流:本仓库走 `skip-changeset` 标签,⛔ 不走空 changeset。

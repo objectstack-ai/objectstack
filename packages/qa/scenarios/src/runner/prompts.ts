@@ -103,7 +103,7 @@ function text(t: LocalizedText, choice: PromptChoice | undefined, field: string)
 }
 
 /** The modes a run renders prompts for, as `RunOptions.modes` names them. */
-type PromptMode = 'scratch' | 'template' | 'ask';
+type PromptMode = 'scratch' | 'template' | 'ask' | 'door';
 
 /**
  * Every card text a run in `modes` renders that the card does not carry in
@@ -112,6 +112,7 @@ type PromptMode = 'scratch' | 'template' | 'ask';
  * card order; empty when no language is chosen or nothing is missing. Scratch
  * mode renders the build prompt `choice.prompt` names (default
  * `prompt.detailed`), the iterate change, every question and every
+ * operation; door mode the build prompt, every question and every
  * operation; template mode the iterate change, every question and every
  * operation; ask mode every question and every operation.
  */
@@ -122,7 +123,7 @@ export function promptLanguageGaps(card: Card, choice: PromptChoice | undefined,
   const need = (t: LocalizedText, field: string) => {
     if (t[lang] === undefined) out.push(field);
   };
-  if (modes.includes('scratch')) {
+  if (modes.includes('scratch') || modes.includes('door')) {
     const length = choice?.prompt ?? 'detailed';
     need(card.prompt[length], `prompt.${length}`);
   }
@@ -490,6 +491,30 @@ function buildPreamble(card: Card): string {
 export function buildPrompt(card: Card, choice?: PromptChoice): string {
   const length = choice?.prompt ?? 'detailed';
   return [buildPreamble(card), '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
+}
+
+/** What a door build is told about where it builds (`doorMode` in `orchestrate.ts`). */
+export interface DoorTarget {
+  /** The writable package the runner created for the build, which every draft is saved into. */
+  packageId: string;
+}
+
+/**
+ * Door mode's build prompt: the card's prompt and the runner's data contract,
+ * as scratch mode sends them, under a preamble that names the draft door and
+ * the package. It is the same text in every arm: whether the client was given
+ * a skill or a rule is the arm's, never the prompt's.
+ */
+export function doorBuildPrompt(card: Card, target: DoorTarget, choice?: PromptChoice): string {
+  const length = choice?.prompt ?? 'detailed';
+  const preamble =
+    'You are building an ObjectStack app in a running environment, through its MCP server (`app`), whose authoring tools ' +
+    'save metadata as DRAFTS. There is no project and there are no files to edit: you build through those tools alone. ' +
+    `Save every item you author as a draft in the package \`${target.packageId}\` (namespace \`${scenarioNamespace(card)}\`), ` +
+    'read the publish verdict each save answers, and fix every finding it reports until each draft would publish. ' +
+    'When you finish, a person publishes that package’s drafts in Studio: nothing you save is live before then. ' +
+    'Work without asking questions.';
+  return [preamble, '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
 }
 
 export function iteratePrompt(card: Card, choice?: PromptChoice): string {

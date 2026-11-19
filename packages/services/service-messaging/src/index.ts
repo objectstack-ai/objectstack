@@ -52,6 +52,13 @@ export type {
     PreferenceContext,
     PreferenceTarget,
     QuietHours,
+    // The return types of `PreferenceResolver.effectiveFor` /
+    // `MessagingService.effectivePreferencesFor` (#34728).
+    EffectivePreferences,
+    EffectiveTopic,
+    EffectiveCell,
+    EffectiveSource,
+    EffectiveSetting,
 } from './preference-resolver.js';
 
 // Plugin-facing inbox writes scoped to the authenticated caller (ADR-0030 L5)

@@ -559,12 +559,13 @@ export function undeclaredActionRefusalReasonAtRun(
 }
 
 /**
- * The save-time refusal for a catalogue on an action whose code cannot throw a
- * code: a type other than `script` (its `target` is a URL, page, flow or
- * endpoint — a refused flow answers through its own `end` refusal), an
- * `expression` body, or a `script` action with neither a body nor an inline
- * `target` function. `os i18n` would demand its translations and nothing would
- * serve them.
+ * The save-time refusal for a catalogue on an action that runs no sandboxed
+ * `js` body, so nothing it runs can throw a declared code: a type other than
+ * `script` (its `target` is a URL, page, flow or endpoint — a refused flow
+ * answers through its own `end` refusal), an `expression` body, or a `script`
+ * action with no `body` — which is what a string `target` naming a host
+ * handler, or an inline `target` function `os build` could not lower, leaves.
+ * `os i18n` would demand its translations and nothing would serve them.
  */
 export function actionRefusalsWithoutSandboxedBody(type: string, language: string | undefined): string {
   const has = actionCodeCarrier(type, language);

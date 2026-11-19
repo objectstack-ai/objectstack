@@ -1983,7 +1983,6 @@ const en = {
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
-    exportCsv: 'Export CSV',
     openInList: 'Open in list',
     config: {
       breadcrumb: {
@@ -5005,6 +5004,7 @@ const en = {
     composer: {
       queued: 'Sends when the current reply finishes',
       queuedCancel: 'Cancel',
+      fileTooLarge: 'Too large to attach (limit {{limit}}): {{files}}',
     },
     answer: {
       showFull: 'Show full answer',
@@ -6132,6 +6132,34 @@ const en = {
     insecureBody: "This server's address is {{address}}. The mobile app signs in through it, so it must use HTTPS, and no code is shown. Serve this server over HTTPS, set {{setting}} to its https:// address, for example {{example}}, and restart it.",
     unpublishedTitle: "This server does not publish its public address",
     unpublishedBody: "No code is shown: this server does not offer its public address to the mobile app yet. Update the server to a version that does.",
+  },
+  notificationSettings: {
+    title: "Notification Settings",
+    subtitle: "Choose which notifications reach you, and on which channels",
+    loading: "Loading your notification settings…",
+    loadFailed: "Could not read your notification settings. Reload the page to try again.",
+    saveFailed: "The change was not saved: {{reason}}",
+    readOnly: "You can view these settings, but your access does not let you change them. An administrator of your organization can change them for you.",
+    general: "General",
+    generalWarning: "Changing your digest or quiet hours saves your own general setting. It then applies to every topic and channel you have not set yourself, in place of your organization's defaults.",
+    digest: "Digest",
+    digestNone: "No digest",
+    digestDaily: "Daily",
+    digestWeekly: "Weekly",
+    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
+    quietHours: "Quiet hours",
+    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
+    save: "Save",
+    matrix: "Topics and channels",
+    topic: "Topic",
+    allTopics: "All topics",
+    alwaysDelivered: "Always delivered",
+    notConfigured: "Not set up",
+    toggleLabel: "{{topic}} by {{channel}}",
+    sourceOwn: "Your setting",
+    sourceDefault: "Organization default",
+    sourceBuiltin: "Default",
+    sourceMandatory: "Required",
   },
 } as const;
 

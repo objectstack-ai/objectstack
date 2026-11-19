@@ -35,7 +35,7 @@ import type { SchemaRegistry } from './registry.js';
 import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
-import { declaredOptionLabels } from './formula-option-labels.js';
+import { declaredOptionLabels, planCallsOptionLabel } from './formula-option-labels.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -43,7 +43,7 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
-import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
+import { collectReferenceTraversals, readsPermissionPredicate, readsUserRoot, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
 import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
@@ -3125,6 +3125,116 @@ async function hydrateWriteFormulas(
 }
 
 /**
+ * [ADR-0113 D1, as amended] The `formula` fields computed over a record for
+ * the rule validator's `formulaValues`: a required field's `visibleWhen` that
+ * reads a formula is judged on the value a read would serve. The SAME plan and
+ * evaluation a read uses, over a copy of the record.
+ *
+ * Two kinds of formula that does not compute, answered apart:
+ *
+ * - **Unservable** — the write path cannot know the value a read would serve:
+ *   the formula reads through a reference (no hop is resolved here), calls
+ *   `label()` (no option label is read here), calls `current_user.can()`
+ *   and this write resolved no permission map, or reads the acting user
+ *   (`current_user`, `user`, `ctx`, `os`) and this write has none — a system
+ *   write; or it reads such a formula, at any depth (the plan's read closure,
+ *   {@link orderFormulaPlan}). A formula over one may compute cleanly over the
+ *   `null` it reads here, and still not be the value a read serves, so it is
+ *   unservable too. Named in `unservable` with the reason, and the validator
+ *   counts a predicate reading one as SHOWN; `noActingUser` names those
+ *   unservable for the missing user alone, so the validator logs them as
+ *   `no-acting-user`, as it logs the direct `current_user` spelling.
+ * - **A fault a read shares** — an operator over an empty operand, an
+ *   undeclared key, a cycle: a read serves `null` for it, and so does this
+ *   copy, so the predicate is judged on that `null`, as the form judges it.
+ *
+ * The plan, and which formulas are unservable, are built on the first call,
+ * so a write whose predicates read no formula pays nothing; a record already
+ * computed is answered from a memo, so the verdicts of several fields over the
+ * same merged and prior records compute each once. `undefined` when the
+ * object declares no formula.
+ */
+function formulaValuesFor(
+  schema: any,
+  execCtx: ExecutionContext | undefined,
+  permissions: EvalPermissions | undefined,
+): ((record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string>; noActingUser: ReadonlySet<string> }) | undefined {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const formulaNames = Object.keys(fields).filter((name) => fields[name]?.type === 'formula');
+  if (formulaNames.length === 0) return undefined;
+  // The same test `applyFormulaPlan` binds `current_user` by.
+  const actingUser = Boolean(execCtx?.userId);
+  let plan: FormulaPlanEntry[] | null | undefined;
+  const unservable = new Map<string, string>();
+  const noActingUser = new Set<string>();
+  const memo = new WeakMap<object, Record<string, unknown>>();
+  return (record) => {
+    if (plan === undefined) {
+      try {
+        plan = planFormulaProjection(schema, undefined).plan;
+      } catch {
+        plan = null;
+        for (const name of formulaNames) unservable.set(name, 'cannot be planned (its expression does not compile)');
+      }
+      // In read order, so a formula's reads are judged before it.
+      for (const entry of plan ?? []) {
+        const why = unservableReason(entry, permissions, actingUser, unservable, noActingUser);
+        if (!why) continue;
+        unservable.set(entry.name, why.reason);
+        if (why.noActingUser) noActingUser.add(entry.name);
+      }
+    }
+    if (plan === null) return { record, unservable, noActingUser };
+    const hit = memo.get(record);
+    if (hit) return { record: hit, unservable, noActingUser };
+    const copy: Record<string, unknown> = { ...record };
+    applyFormulaPlan(plan, [copy], execCtx, permissions);
+    memo.set(record, copy);
+    return { record: copy, unservable, noActingUser };
+  };
+}
+
+/**
+ * Why the write path cannot compute the value a read serves for one formula,
+ * or `undefined` when it can ({@link formulaValuesFor}). `known` holds the
+ * formulas already judged unservable, earlier in read order, and
+ * `knownNoActingUser` those of them judged so for the missing acting user
+ * alone; `noActingUser` on the answer says the same of this one, directly or
+ * through the formula it reads.
+ */
+function unservableReason(
+  entry: FormulaPlanEntry,
+  permissions: EvalPermissions | undefined,
+  actingUser: boolean,
+  known: ReadonlyMap<string, string>,
+  knownNoActingUser: ReadonlySet<string>,
+): { reason: string; noActingUser?: true } | undefined {
+  if (entry.hops) {
+    return { reason: `reads through ${[...entry.hops.keys()].map((f) => `'${f}'`).join(', ')}, a reference the write path does not follow` };
+  }
+  if (planCallsOptionLabel([entry])) return { reason: 'calls label(), which the write path does not answer' };
+  if (!permissions && readsPermissionPredicate(entry.expression)) {
+    return { reason: 'calls current_user.can(), and this write resolved no permission map' };
+  }
+  // A read computes it for the reader; a system write has nobody to compute
+  // it for, so its `null` here is no value any read serves (ADR-0137 D4's
+  // `no-acting-user` arm, as for the direct `current_user` spelling). Read at
+  // bare-root granularity, so a formula reading only `os.org` counts too: the
+  // strict direction, the unconditional `required`.
+  if (!actingUser && readsUserRoot(entry.expression)) {
+    return { reason: 'reads the acting user or a bare ctx/os root, and this write has no acting user (a system write)', noActingUser: true };
+  }
+  if (known.size === 0) return undefined;
+  const reads = storedExpressionReads(entry);
+  // Reads the member reader cannot name count as reading every formula.
+  const via = reads === null ? [...known.keys()][0] : [...reads].find((name) => known.has(name));
+  if (via === undefined) return undefined;
+  const reason = `reads the formula '${via}', which ${known.get(via)}`;
+  return knownNoActingUser.has(via) ? { reason, noActingUser: true } : { reason };
+}
+
+/**
  * [#24619] The stored computed fields: every field that is NOT a `formula`
  * and declares an `expression`. Such a field has a column, so a summary can
  * roll it up (a summary aggregates stored columns, never an on-read formula),
@@ -5339,7 +5449,7 @@ export {
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, handBackWithheldInsertReadonly,
+  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, formulaValuesFor, handBackWithheldInsertReadonly,
   hydrateWriteFormulas, isWhereFilterObject, judgeWhereAdmission, noteRegistrationStamp,
   organizationPredicateDeleteRefusal, planFormulaProjection, planStoredExpressions, readStoredAutonumberCounter,
   recomputeAutonumberReaders, refuseSearchOverrideNamingNoField, refuseSearchOverrideNamingNoSearchableField,

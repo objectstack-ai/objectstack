@@ -190,6 +190,26 @@
         "must_contain": ["type: 'simple'", "modalSize"],
         "must_not_contain": ["type: 'tabbed'"]
       }
+    },
+    {
+      "id": 20,
+      "prompt": "The `submit_signoff` script action on `crm_invoice` refuses a non-draft invoice with `throw new Error('Only a draft invoice can be signed off.')` in its `js` body, so zh-CN users read that English sentence in the failure toast. Make it refuse in the caller's language, with the code `NOT_DRAFT` and a 409.",
+      "expected_output": "The action declares `refusals: { NOT_DRAFT: { message: 'Only a draft invoice can be signed off.', status: 409 } }` and the body throws the code instead of the sentence: `throw { code: 'NOT_DRAFT' }`. The server answers the declared sentence on the refusal's `userMessage` with status 409, in the caller's locale once the zh-CN bundle carries `objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message`, else as declared, and the console's failure toast shows it. The action authors no failure copy of its own, which would replace that sentence in the toast. A code the body throws literally and `refusals` does not declare is refused at save. Not a locale branch in the body, and not a second sentence per language in the throw.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["refusals", "NOT_DRAFT", "409", "_actions"],
+        "must_not_contain": ["hooks.submit_signoff"]
+      }
+    },
+    {
+      "id": 21,
+      "prompt": "The `send_email` script action on `crm_contact` logs a `crm_activity` whose subject its `js` body builds as `'Email: ' + input.subject`. Our organization works in zh-CN, but every logged subject reads English. Make the subject follow the organization's language.",
+      "expected_output": "The action declares `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }` and the body writes `const subject = await ctx.text('email_subject', { subject: input.subject });` instead of concatenating. The sentence is answered in the organization's language (the Localization setting if somebody set it, else `i18n.defaultLocale`), never the language of the person who pressed the button, and translated at `objects.crm_contact._actions.send_email.texts.email_subject.message`, the translation keeping its `{{ subject }}` hole. With no translation the declared sentence is written. A key `texts` does not declare is refused. Not a locale branch in the body, and not a `messages` lookup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["texts", "email_subject", "ctx.text", "_actions"],
+        "must_not_contain": ["hooks.send_email"]
+      }
     }
   ]
 }

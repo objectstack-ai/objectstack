@@ -159,7 +159,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -265,7 +265,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Terminé",
           fields: {
             "summary.added": "Ajoutés",
-            "summary.alreadyPending": "Déjà en attente, prévenus à nouveau",
+            "summary.alreadyPending": "Déjà en attente",
             "summary.failed": "Non ajoutés",
             rows: "Résultat par ligne"
           },
@@ -274,7 +274,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
               row: "Ligne",
               email: "E-mail",
               ok: "Réussi",
-              alreadyPending: "Déjà en attente, prévenu à nouveau",
+              alreadyPending: "Déjà en attente",
               "host.notified": "Organisation d’hébergement prévenue",
               "host.reason": "Pourquoi non prévenue",
               "error.message": "Non ajouté car",
@@ -709,7 +709,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -815,7 +815,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -967,7 +967,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation envoyée à {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation envoyée à {{ result.email }}",
-          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation créée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         },
         params: {
           role: {
@@ -994,7 +994,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation renvoyée",
         outcomeMessages: {
           sent: "Invitation renvoyée à {{ result.email }}",
-          link_only: "Invitation renouvelée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. Utilisez Copier le lien d’invitation sur l’invitation pour la partager."
+          link_only: "Invitation renouvelée pour {{ result.email }}. L’envoi d’e-mails n’est pas configuré sur ce serveur, aucun e-mail n’a donc été envoyé. L’acceptation exige une adresse e-mail vérifiée : sans e-mail, seul un invité dont la connexion sociale ou SSO vérifie l’adresse peut accepter. Pour toute autre personne, un administrateur de la plateforme crée le compte."
         }
       },
       copy_invitation_link: {

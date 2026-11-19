@@ -273,6 +273,7 @@ import {
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
+    sealedFlowNodeTypeVocabulary,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1858,20 +1859,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof assertRuntimeAuthoringRules> = {
-            get authoringChannel() { return readAuthoringChannel(); },
-            get engine() { return readEngine(); },
-            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
-            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
-            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
-            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
-            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
-            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
-            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-        };
-        return assertRuntimeAuthoringRules.call(host, evt);
+        // [#34776] Its host is the draft verdicts' (a superset of the members it reads), so the two cannot drift.
+        return assertRuntimeAuthoringRules.call(this.draftVerdictHost(), evt);
     }
 
     /**
@@ -1912,10 +1901,11 @@ export class ObjectStackProtocolImplementation implements
         return draftPublishVerdict.call(this.draftVerdictHost(), draft);
     }
 
-    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
-    private draftPublishJudgement(draft: {
-        type: string; name: string; body: unknown; packageId: string | null;
+    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    draftPublishJudgement(draft: {
+        type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
     }): Promise<DraftPublishJudgement> {
         return draftPublishJudgement.call(this.draftVerdictHost(), draft);
     }
@@ -1938,6 +1928,7 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return host;
@@ -2233,6 +2224,15 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
+    }
+
+    /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
+    private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return sealedFlowNodeTypeVocabulary.call(host);
     }
 
     /**

@@ -374,6 +374,7 @@
     "ai/QueryDatasetOutput:rowCount",
     "ai/QueryDatasetOutput:rows",
     "ai/QueryDatasetOutput:sourceLine",
+    "ai/QueryDatasetOutput:totalGroups",
     "ai/QueryDatasetOutput:totals",
     "ai/QueryDatasetOutput:truncated",
     "ai/QueryDatasetOutput:warning",

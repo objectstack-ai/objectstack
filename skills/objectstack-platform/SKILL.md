@@ -252,8 +252,7 @@ that `basePath` is not inside **refuses at boot**, naming both values.
 ### Architecture
 
 `createHonoApp` creates an `HttpDispatcher`, mounts explicit
-routes for auth and discovery, and delegates everything else to it — so **new
-routes added to HttpDispatcher work automatically**.
+routes for auth and discovery, and delegates everything else to it.
 
 ---
 
@@ -323,15 +322,17 @@ through it:
 
 The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is
-**rejected by `defineStack` at authoring time**, not at boot.
+**rejected by `defineStack` at authoring time**.
 
 Six rules that change what you write:
 
 - **Precedence:** `requires` › `tiers` › `--preset` › built-in default. An
   explicit instance in `plugins:` always shadows capability resolution.
-- **Declaring is a demand.** A capability YOU declared whose provider package is
-  absent is a hard boot error; one the platform auto-injects for you stays
-  best-effort (warn and continue).
+- **Declaring is a demand.** A table token or `ai`/`ai-studio` YOU declared
+  whose provider package is absent is a hard boot error; one the platform
+  auto-injects for you stays best-effort (warn and continue). An enterprise /
+  cloud token with no provider only warns at boot; `hierarchy-security`'s
+  scopes then fall back to owner-only.
 - **`auth` implies `email`**, even under `--preset minimal`: auth callbacks
   need the mail service.
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
@@ -373,8 +374,8 @@ The stack's `data:` collection is authored with `defineSeed()`, which
 **objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
 and which keys are derived.
 
-`mode` (`ignore` default · `upsert` · `insert` · `update` · `replace` ⚠️ never
-deletes, duplicates) decides what a replay does to existing rows:
+`mode` (`ignore` default · `upsert` · `update`) decides what a replay does
+to existing rows:
 [Import modes](../objectstack-data/references/seeds.md#import-modes).
 
 ### Demo accounts — `demoStaff` vs `devLogins`

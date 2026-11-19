@@ -34,7 +34,7 @@ import {
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
-import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
@@ -48,6 +48,10 @@ import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+// The engine's order-cut-count read option for `aggregate` (and the request it
+// carries): `aggregate_records`' ranking form rides to the engine on it.
+import { AGGREGATE_ORDER_CUT, type AggregateOrderCutRequest } from '@objectstack/objectql';
+import { LATEST_PER, type LatestPerRequest } from '@objectstack/objectql';
 import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
@@ -733,6 +737,16 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
 }
 
 /**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The stdio twin is
+ * `describedFieldNames` in `packages/mcp/src/stdio-data-bridge.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+    const fields = described.fields;
+    return Array.isArray(fields) ? fields.map((f: any) => String(f?.name ?? '')).filter(Boolean) : [];
+}
+
+/**
  * [#34721] An object's or a field's `description` as `list_objects` and
  * `describe_object` serve it: `{ description }` when the definition, as the
  * caller is served it ({@link servedToCaller}), carries a non-blank string
@@ -1080,6 +1094,24 @@ export function buildMcpBridge(
         return out;
     };
 
+    /**
+     * `describe_object`'s answer for THIS caller: the object as they are
+     * served it ({@link readObjectForCaller}'s two steps, kept apart so the
+     * declaration it masks is in hand, [#32530] `readonly`), [#34872] in
+     * their locale, [#32435] each field and rule carrying what a write needs
+     * ({@link describeServedObject}). `null` for an object not served.
+     * [#35137] Also the served-schema half of `fieldVisibilityOf`, so the
+     * fields `withheldFields` may name are exactly the ones this answer lists.
+     */
+    const describeForCaller = async (name: string): Promise<Record<string, unknown> | null> => {
+        const declared: any = await readServedObject(name);
+        const def: any = declared ? await servedToCaller(declared) : declared;
+        if (!def) return null;
+        // `declared` is read for the `readonly` verdict alone, which no translation touches.
+        const [localized] = await inCallerLocale([def]);
+        return describeServedObject(localized, declared);
+    };
+
     return {
         listObjects: listObjectSummaries,
         /**
@@ -1147,18 +1179,7 @@ export function buildMcpBridge(
                 : await ((await getMeta()) as any)?.getObject?.(name);
             return isAiReadExposed(def);
         },
-        describeObject: async (name: string) => {
-            // {@link readObjectForCaller}'s two steps, kept apart so the
-            // declaration it masks is in hand ([#32530] `readonly`).
-            const declared: any = await readServedObject(name);
-            const def: any = declared ? await servedToCaller(declared) : declared;
-            if (!def) return null;
-            // [#34872] …in the caller's locale. `declared` is read for the
-            // `readonly` verdict alone, which no translation touches.
-            const [localized] = await inCallerLocale([def]);
-            // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(localized, declared);
-        },
+        describeObject: describeForCaller,
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
@@ -1187,7 +1208,16 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
-            return await callData('query', { object, query }, driver, envId, ec);
+            // [#35145] `query_records`' `expand`: the names, which `findData`
+            // lowers, gates (`assertExpandTargetsExist`, `servedExpand`) and
+            // the engine expands in one batched read per field, as on REST.
+            if (Array.isArray(o?.expand) && o.expand.length > 0) query.expand = o.expand;
+            if (!o?.latestPer) return await callData('query', { object, query }, driver, envId, ec);
+            // [latest per group] One row per group rides to the engine on the
+            // engine's own symbol key (never a wire key), through `findData`,
+            // which judges the query as it judges every other.
+            const latestPer: LatestPerRequest = { by: o.latestPer.by, orderBy: o.latestPer.orderBy };
+            return await callData('query', { object, query, [LATEST_PER]: latestPer }, driver, envId, ec);
         },
         /**
          * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] The
@@ -1219,6 +1249,27 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
+        /**
+         * [#35137] The two answers `query_records` and `get_record` name
+         * withheld fields from (`McpFieldVisibility`, `@objectstack/mcp`), both
+         * asked as THIS request's caller: the field names `describe_object`
+         * lists for them, read off the very answer it serves
+         * ({@link describeForCaller}, so whatever it leaves out is left out
+         * here too), and this request's security service's readable answer
+         * (`getReadableFields`). No security service, an object not served,
+         * or no readable answer: `undefined`, and nothing is named. A throw
+         * reaches the tool layer, which names nothing either.
+         */
+        fieldVisibilityOf: async (object: string) => {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.getReadableFields !== 'function') return undefined;
+            const described = await describeForCaller(object);
+            if (!described) return undefined;
+            const readable = await security.getReadableFields(object, ec);
+            if (!Array.isArray(readable)) return undefined;
+            return { served: describedFieldNames(described), readable };
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
@@ -1243,6 +1294,45 @@ export function buildMcpBridge(
             );
             return res?.rows ?? [];
         },
+        /**
+         * [aggregate order and cut] `aggregate_records` with an `orderBy` /
+         * `limit`: the same engine door as `aggregate` above, with the
+         * engine's request on its own symbol key (never a wire key). `callData`
+         * reads the engine's outcome back and answers its `totalGroups`; a read
+         * the driver's statement did not serve is refused there.
+         */
+        aggregateGroups: async (object: string, o: any) => {
+            const orderCut: AggregateOrderCutRequest = {
+                orderBy: o.orderBy,
+                ...(typeof o?.limit === 'number' ? { limit: o.limit } : {}),
+            };
+            const res: any = await callData(
+                'aggregate',
+                {
+                    object,
+                    where: o?.where,
+                    groupBy: o?.groupBy,
+                    aggregations: o?.aggregations,
+                    timezone: o?.timezone,
+                    [AGGREGATE_ORDER_CUT]: orderCut,
+                },
+                undefined,
+                envId,
+                ec,
+            );
+            if (typeof res?.totalGroups !== 'number') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${object}' came back without its group count, so its `
+                        + 'rows are not the answer and none is returned.',
+                };
+            }
+            return { rows: res?.rows ?? [], totalGroups: res.totalGroups };
+        },
+        // [#35138] The caller's locale ladder for a sentence the record tools
+        // compose (`ifNotRecorded`): this request's, as the dataset tools'
+        // `nextStep` reads it on this door (`userTextLocalesOf`).
+        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────
         // ADR-0063 §2 names skills the only third-party extension primitive,

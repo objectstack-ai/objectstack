@@ -32,6 +32,8 @@ import {
   FIELD_RULE_JUDGED_ROOTS,
 } from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
+// [#34662] The rule id a flow condition's finding is reported under (bottom of this file).
+import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 // [#8405] Cross-site pin only — see the describe block at the bottom of this
 // file. Not otherwise used here; validate-semantic-roles.test.ts owns the
 // rest of this rule's coverage.
@@ -4323,6 +4325,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'FieldSchema.conditionalFormatting[]',
     keys: () => shapeKeysOf(FieldSchema.shape.conditionalFormatting),
   },
+  {
+    // [#34905] A `required` field with its own `visibleWhen` that also sets
+    // `storage.notNull` draws a warning naming that key: the column refuses the
+    // null the write contract now admits on a record the predicate hides.
+    receiver: 'storage',
+    expected: ['notNull'],
+    declaredBy: 'FieldSchema.storage',
+    keys: () => shapeKeysOf(FieldSchema.shape.storage),
+  },
 ];
 
 /**
@@ -4362,7 +4373,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     // have hidden the new surface from this very scan.
     // `conditionalFormatting` joined in #22228 — the cell formatting rules,
     // read literally for the same reason.
-    expect(read).toEqual(['conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
+    // `required`, `storage` and `visibleWhen` joined in #34905 — a `required`
+    // field's own `visibleWhen` now decides whether the field is required on a
+    // write (ADR-0113 D1, amended), so its reads are checked here, and a
+    // `storage.notNull` beside the pair is warned.
+    expect(read).toEqual([
+      'conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'required', 'requiredWhen', 'storage', 'visibleWhen',
+    ]);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);
@@ -6817,5 +6834,196 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
       };
       expect(validateStackExpressions(stack), slot).toEqual([]);
     }
+  });
+});
+
+// [#34662] A flow CONDITION (start, edge, `decision` branch) reads the run's
+// row through `record.<field>` / `previous.<field>` as well as through the
+// flattened bare name, and the date-text family judged only the bare name:
+// `timestamp(record.borrow_date) < now()` got zero findings and fails every
+// run on the `YYYY-MM-DD` text, while `timestamp(borrow_date) < now()` was
+// refused. The root read now takes the same finding, under the same rule.
+describe('validateStackExpressions — a flow condition\'s record. / previous. read takes the date-text family (#34662)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { borrow_date: { type: 'date' }, picked_up_at: { type: 'datetime' } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_overdue',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Overdue', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const dateTextOf = (issues: ExprIssue[]) => issues.filter((i) => /is a date field, and the runtime holds/.test(i.message));
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses timestamp() over a date field through record. and previous. in a %s condition, as its bare name is',
+    (site) => {
+      const bare = dateTextOf(validateStackExpressions(stackWith(site, 'timestamp(borrow_date) < now()')));
+      expect(bare.map((i) => i.severity)).toEqual(['error']);
+      for (const root of ['record', 'previous']) {
+        const source = `timestamp(${root}.borrow_date) < now()`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(issues.map((i) => [i.severity, i.path ?? i.where]), source).toEqual([['error', bare[0].path ?? bare[0].where]]);
+        expect(issues[0].message).toContain(`\`timestamp(${root}.borrow_date)\` — \`${root}.borrow_date\` is a date field`);
+        expect(issues[0].message).toContain(`\`isoDate(addDays(${root}.borrow_date, N))\``);
+      }
+    },
+  );
+
+  it('reports it under the expression rule id, as the bare name is', () => {
+    for (const source of ['timestamp(borrow_date) < now()', 'timestamp(record.borrow_date) < now()', 'timestamp(previous.borrow_date) < now()']) {
+      const stack = stackWith('start', source);
+      // The minimal fixture draws other rules' findings (region shape, sharing); this one's is the date text's.
+      const findings = runAuthoringRules('build', { normalized: stack, parsed: stack } as never)
+        .filter((f) => /is a date field, and the runtime holds/.test(f.message));
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[EXPRESSION_INVALID, 'error']]);
+    }
+  });
+
+  it('takes the run-may-fail sentence where the run is not proven to hold the row, as the bare name does', () => {
+    // No trigger: the start names the object but no entrance binds its row, so no outcome is declared.
+    const untriggered = (condition: string) => {
+      const stack = stackWith('start', condition);
+      const start = stack.flows[0].nodes[0] as { config: Record<string, unknown> };
+      delete start.config.triggerType;
+      return stack;
+    };
+    for (const read of ['borrow_date', 'record.borrow_date', 'previous.borrow_date']) {
+      const issues = dateTextOf(validateStackExpressions(untriggered(`timestamp(${read}) < now()`)));
+      expect(issues.map((i) => i.severity), read).toEqual(['error']);
+      expect(issues[0].message, read).toContain(`this faults wherever \`${read}\` holds that text when the condition runs`);
+    }
+  });
+
+  it('CONTROL: a datetime field under timestamp() stays clean through either root', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      for (const root of ['record', 'previous']) {
+        const source = `timestamp(${root}.picked_up_at) < now()`;
+        expect(validateStackExpressions(stackWith(site, source)), `${site}: ${source}`).toEqual([]);
+      }
+    }
+  });
+});
+
+/**
+ * [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides its
+ * requirement on the write, and a predicate the server cannot evaluate counts
+ * as SHOWN — the field keeps the unconditional `required` it had before. Two
+ * shapes the author can see at build time leave the field required where the
+ * form hides it, so both are WARNINGS (never refusals): a read through a
+ * reference field, and `storage.notNull` beside the pair. The roots the server
+ * cannot bind are already refused for every field `visibleWhen`
+ * (`FIELD_RULE_BOUND_ROOTS`), so no second warning is drawn for them.
+ * `packages/objectql/src/engine-required-when-shown.test.ts` pins the runtime.
+ */
+describe('a `required` field\'s `visibleWhen` the server cannot use to lift the requirement (ADR-0113 D1)', () => {
+  const account = {
+    name: 'rws_account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' }, tier: { type: 'text', label: 'Tier' } },
+  };
+  const order = (fields: Record<string, unknown>) => ({
+    name: 'rws_order',
+    label: 'Order',
+    fields: {
+      account: { type: 'lookup', label: 'Account', reference: 'rws_account' },
+      status: { type: 'text', label: 'Status' },
+      ...fields,
+    },
+  });
+  const run = (...objects: Array<Record<string, unknown>>) =>
+    validateStackExpressions(specValid({ objects: [account, ...objects] }));
+  const at = (issues: ReturnType<typeof run>, where: string) => issues.filter((i) => i.where === where);
+  const WHERE = "object 'rws_order' · field 'po_number' visibleWhen";
+
+  it('warns on a read through a reference, naming the counts-as-shown consequence', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message.startsWith('`visibleWhen` reads `tier` through `record.account`, a `lookup` field')).toBe(true);
+    expect(issues[0].message).toContain('counts as SHOWN (ADR-0113 D1)');
+  });
+
+  it('draws nothing for the same read on a field that is not required — display only', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('draws nothing for a required field whose predicate reads its own columns', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.status == 'sent'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('warns on `storage.notNull` beside `required` + `visibleWhen` — and the parse still accepts it', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, storage: { notNull: true }, visibleWhen: "record.status == 'sent'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain('`storage.notNull: true`');
+  });
+
+  // A formula the predicate reads: a reminder that the server judges it on the
+  // formula value it computes, and a formula the write path cannot compute (a
+  // hop, `label()`, `can`, at any depth) keeps the field required on every write.
+  it('warns when the predicate reads a formula field: the server judges it on the formula it computes', () => {
+    const issues = at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain("reads the formula field 'risk'");
+    expect(issues[0].message).toContain('the formula value it computes over the record being written');
+    expect(issues[0].message).not.toContain('counts the field as SHOWN');
+  });
+
+  it('…and names the chain when a formula it reads reads through a reference, at any depth', () => {
+    const issues = at(run(order({
+      tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.tier_name == 'gold' ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'risk' reads the formula 'tier_name', which reads through 'account'");
+    expect(issues[0].message).toContain('counts the field as SHOWN on every write');
+  });
+
+  it('…and when a formula it reads calls label()', () => {
+    const issues = at(run(order({
+      stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+      stage_label: { type: 'formula', label: 'Stage label', expression: 'label(record.stage)', returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.stage_label == 'Won'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'stage_label' calls label()");
+  });
+
+  it('draws no formula warning on a field that is not required', () => {
+    expect(at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.risk == 'high'" },
+    })), WHERE)).toEqual([]);
   });
 });

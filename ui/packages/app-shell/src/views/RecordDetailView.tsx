@@ -309,6 +309,8 @@ const FEED_CONSUMER_TYPES: ReadonlySet<string> = new Set([
  * objectui#13010 part 5 — the block that draws this view's `sys_audit_log`
  * read: on the synthesized page, the timeline stream (objectstack#27055), a
  * `record:activity` the field changes reach through `RecordFieldChangesContext`.
+ * On an assigned page every feed block draws it (`FEED_CONSUMER_TYPES`,
+ * objectstack#33996).
  */
 const HISTORY_CONSUMER_TYPES: ReadonlySet<string> = new Set(['record:activity']);
 /** Where a page tree nests nodes: the keys `pageSchemaIntrospect` walks. */
@@ -2778,6 +2780,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   });
   const editDisabledByPredicate = editPredicates?.disabledWhen != null && editDisabledPred;
   const deleteDisabledByPredicate = deletePredicates?.disabledWhen != null && deleteDisabledPred;
+  // The sentence a `disabledWhen`-greyed Edit / Delete gives (objectstack#35135):
+  // `userActions` declares no reason key, so it is the generic one an
+  // authored action without a `disabledReason` gives too.
+  const predicateDisabledReason = String(
+    t('actions.notAvailableForRecord', { defaultValue: 'Not available for this record' }),
+  );
   // objectstack#32756 — the record's state leaves the edit form nothing to
   // edit: every field it shows resolves read-only, at least one by its
   // `readonlyWhen`. Judged by the form's own field-rule evaluator over the
@@ -2883,26 +2891,32 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return () => observer.disconnect();
   }, [attachmentsFallbackEl, attachmentsFallbackShown]);
 
-  // ── The audit read waits for the timeline (objectui#13010 part 5) ───────
+  // ── The audit read waits for the blocks that draw it (objectui#13010 part 5) ──
   //
   // The `sys_audit_log` read below, and the `sys_user` name lookup behind it,
-  // fill only the field changes of the timeline stream the synthesized page
-  // composes (objectstack#27055: one stream, no History tab); an assigned page
-  // is rendered as authored, and its `record:history` reads its own source.
-  // So, like the feed above, the read goes out when the stream is on screen,
-  // judged by `pageShowsNodeOnOpen` on the page this view synthesizes: at open
-  // when the page opens on it (a laid-out page, or `?tab=timeline`), else on
-  // the tab switch that mounts it. Latched for the view's life for the feed's
-  // reason.
+  // fill only the record's field changes. On the synthesized page they are the
+  // timeline stream's (objectstack#27055: one stream, no History tab); on an
+  // assigned page they join its authored feed blocks, `record:discussion`,
+  // `record:chatter` and `record:activity` (objectstack#33996), so an authored
+  // `filterMode: 'changes_only'` has something to hold. So, like the feed
+  // above, the read goes out when such a block is on screen: on the
+  // synthesized page judged by `pageShowsNodeOnOpen` on the page this view
+  // synthesizes (a laid-out page, or `?tab=timeline`), on an assigned page
+  // exactly when its feed is (`feedConsumerOnScreen`, the tree this view
+  // renders and its `?tab=`); else on the tab switch that mounts it. Latched
+  // for the view's life for the feed's reason. A page with no such block on
+  // screen, or an object without `trackHistory`, reads nothing.
   const historyPage = historyEnabled && !assignedPage && !namedPageBlocked && objectDef ? synthesizedPage : null;
   // On a laid-out page the stream is the 动态 panel, so its read goes out at
   // open (objectstack#26678, objectstack#27524).
   const historyConsumerOnScreen = useMemo(
     () =>
-      historyPage != null
-      && ((pageLaidOut && buildDefaultPageColumns(historyPage) !== null)
-        || pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam)),
-    [historyPage, activeTabParam, pageLaidOut],
+      assignedPage
+        ? historyEnabled && feedConsumerOnScreen
+        : historyPage != null
+          && ((pageLaidOut && buildDefaultPageColumns(historyPage) !== null)
+            || pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam)),
+    [assignedPage, historyEnabled, feedConsumerOnScreen, historyPage, activeTabParam, pageLaidOut],
   );
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
@@ -4352,9 +4366,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // refused ledger read as no field change (objectstack#28737).
   const fieldHistoryShown = historyEnabled && historyEntries !== null;
   // objectstack#27055, Target 3 — the record's field changes, as feed items of
-  // the timeline stream. `null` while there are none to give (no
-  // `trackHistory`, an authored page, the read not made, not landed or not
-  // answered).
+  // the timeline stream, or of an authored page's feed blocks
+  // (objectstack#33996). `null` while there are none to give (no
+  // `trackHistory`, the read not made, not landed or not answered).
   const timelineFieldChanges = useMemo(
     () =>
       historyEnabled && historyEntries
@@ -4721,6 +4735,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     if (affordances.edit) {
       const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
+      // objectstack#35135 — the reason a predicate-disabled Edit gives. The
+      // approval band and the state-lock badge explain their own locks, so
+      // the generic sentence is spoken only when `edit.disabledWhen` is what
+      // turned Edit off and neither of those draws: one reason at a time.
+      const editReason = editDisabledByPredicate && !approvalLocked && !editLockedByState
+        ? predicateDisabledReason
+        : undefined;
       // Single primary Edit CTA → opens the full record form. Inline editing
       // is no longer a standalone header button; it is entered by
       // double-clicking a field (or its hover pencil) in the record body,
@@ -4767,6 +4788,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
         disabled: editOff,
+        // `page:header` draws a host action's own `disabledReason` as the
+        // button's tooltip and accessible description, and as the second
+        // line of its `⋯` entry (the phone bar's, where an off Edit goes).
+        ...(editReason ? { disabledReason: editReason } : null),
         // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
         // first slot is its primary place, and an action that cannot be
         // pressed never holds it: whichever of the three reasons above turns
@@ -4878,8 +4903,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // declared no `disabled` key before, and `page:header` reads a declared
         // `disabled` by `!= null`, so emitting a bare `false` would say
         // something the object never declared. With no predicate the emitted
-        // ActionDef is byte-identical to the pre-#4213 one.
-        ...(deleteDisabledByPredicate ? { disabled: true } : null),
+        // ActionDef is byte-identical to the pre-#4213 one. The predicate is
+        // the only thing that greys Delete, so it carries the same generic
+        // reason as Edit (objectstack#35135).
+        ...(deleteDisabledByPredicate ? { disabled: true, disabledReason: predicateDisabledReason } : null),
         onClick: async () => {
           // objectui#11695 — the list's delete copy, from the one shared core
           // (`recordDelete.confirmCopy`): the title names this record by the
@@ -5375,8 +5402,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onMentionSuggestionsWanted={wantMentionSuggestions}
         >
         {/* objectstack#27055 — the field changes of the timeline stream,
-            for the synthesized page's `record:activity`. */}
-        <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+            for the synthesized page's `record:activity`; on an assigned page,
+            for its feed blocks (objectstack#33996). */}
+        <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
             the stream offers its 变更 chip only while it does. */}
@@ -5559,8 +5587,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 ) : pageColumns ? null : (
                   // objectstack#27055 — a synthesized page whose strip cannot
                   // be laid out keeps the record page v3 face as its tab strip
-                  // (frameless sections, the empty-sections line, the
-                  // highlight grid); an authored page keeps its own face.
+                  // (frameless sections, the highlight grid); an authored page
+                  // keeps its own face. Every `record:details` body, authored
+                  // or not, draws the empty-sections line (objectstack#35019).
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {/* A page drawn as its strip is drawn as written: the

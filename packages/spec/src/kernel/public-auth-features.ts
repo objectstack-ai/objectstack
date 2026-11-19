@@ -418,12 +418,18 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * mounted). It gates no spec input and changes no server door: the server's
  * password sign-in is the same either way.
  *
+ * `afterSignOut` reports where an explicit sign-out returns when the identity
+ * provider ends its own session: `hold` (the sign-in page, which holds) or
+ * `identity-provider` (the direct sign-in start door, so the identity
+ * provider's own sign-in page is shown). Served on the same terms as
+ * `localSignIn`. It gates no spec input and changes no server door.
+ *
  * `publicBaseUrl` is the deployment's public base URL (the canonical origin
  * every link the auth layer hands out is built on, sub-path included), served
  * as an address only. Its reader is the console's mobile-app connect page,
  * which encodes it in the connect code. It gates no spec input.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn', 'publicBaseUrl'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn', 'afterSignOut', 'publicBaseUrl'] as const;
 
 /**
  * Capabilities that are RESERVED but deliberately **not advertised** — the

@@ -2874,7 +2874,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       [resolveObjectLabel, resolveFieldLabel, resolveFieldTypeLabel],
     );
     // objectstack#32984 — the issues chip spoke English in every locale.
-    const { t: tCount } = useObjectTranslation();
+    const { t: tCount, language: composerLanguage } = useObjectTranslation();
     const buildIssuesCountLabel = (count: number): string =>
       tCount('chatbot.build.issuesCount', { count, defaultValue: '{{count}} to fix' });
     const planObjectsLabel = tt('chatbot.plan.objectsAndFields', 'Objects and fields');
@@ -3322,6 +3322,52 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       ReadonlyArray<{ id: number; text: string; files?: File[] }>
     >([]);
     const queuedSeqRef = React.useRef(0);
+    // objectstack#34463 — a picked, pasted or dropped file the composer
+    // refuses for size is named to the user with the limit, instead of only
+    // reaching `console.warn` while the file silently fails to attach. Cleared
+    // by the next send or the notice's close button; a later refusal replaces it.
+    // A file whose type `acceptedFileTypes` does not admit is named the same way,
+    // with the accepted list. Refusals reported by ONE pick (a wrong-type file
+    // and an over-size one) all show: the sentences of the same tick are joined.
+    const [attachmentNotice, setAttachmentNotice] = React.useState<string | null>(null);
+    const attachmentNoticeTickRef = React.useRef<string[] | null>(null);
+    const handlePromptInputError = React.useCallback(
+      (e: { code: string; message: string; files?: File[] }) => {
+        let sentence: string | null = null;
+        if (e.code === 'max_file_size' && e.files?.length) {
+          sentence = tCount('chatbot.composer.fileTooLarge', {
+            files: e.files.map((f) => f.name).join(', '),
+            limit: formatSizeLimit(maxFileSize, composerLanguage),
+            defaultValue: 'Not attached, over the {{limit}} limit: {{files}}',
+          });
+        } else if (e.code === 'accept' && e.files?.length) {
+          const allowed = acceptedFileTypes
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .join(', ');
+          sentence = tCount('fields.file.typeNotAccepted', {
+            name: e.files.map((f) => f.name).join(', '),
+            accept: allowed,
+            defaultValue: '"{{name}}" is not an accepted file type ({{accept}})',
+          });
+        }
+        if (sentence === null) {
+          console.warn('[plugin-chatbot] prompt-input error', e);
+          return;
+        }
+        if (attachmentNoticeTickRef.current === null) {
+          const tick: string[] = [];
+          attachmentNoticeTickRef.current = tick;
+          queueMicrotask(() => {
+            if (attachmentNoticeTickRef.current === tick) attachmentNoticeTickRef.current = null;
+          });
+        }
+        attachmentNoticeTickRef.current.push(sentence);
+        setAttachmentNotice(attachmentNoticeTickRef.current.join(' '));
+      },
+      [tCount, maxFileSize, composerLanguage, acceptedFileTypes],
+    );
     const handleSubmit = React.useCallback(
       (payload: PromptInputMessage) => {
         const hasText = Boolean(payload.text?.trim());
@@ -3331,6 +3377,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         const hasFiles = Boolean(files && files.length > 0);
         if (!(hasText || hasFiles)) return;
         const text = payload.text?.trim() ?? '';
+        setAttachmentNotice(null);
         if (isLoading) {
           queuedSeqRef.current += 1;
           const id = queuedSeqRef.current;
@@ -5695,6 +5742,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           )
         ) : null}
 
+        {attachmentNotice && !readOnly ? (
+          <ComposerNotice
+            text={attachmentNotice}
+            testId="chat-attachment-refused"
+            closeLabel={tt('common.close', 'Close')}
+            onClose={() => setAttachmentNotice(null)}
+          />
+        ) : null}
+
         {readOnly ? null : (
         <div
           ref={promptInputWrapRef}
@@ -5757,10 +5813,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             fileInputLabel={L.uploadFiles}
             maxFileSize={maxFileSize}
             onSubmit={handleSubmit}
-            onError={(e) => {
-              // Surface upload-level validation errors via the existing toast/alert path
-              console.warn('[plugin-chatbot] prompt-input error', e);
-            }}
+            onError={handlePromptInputError}
           >
             {enableFileUpload ? (
               <PromptInputBody>
@@ -7259,16 +7312,63 @@ function SendErrorNotice({
     () => (isRateLimitError(error) ? rateLimitedLabel : genericLabel),
     [error, rateLimitedLabel, genericLabel],
   );
+  return <ComposerNotice text={text} testId="chat-send-error" />;
+}
+
+/**
+ * The amber band above the composer that tells the user why something they
+ * did there did not go through — an unsent message ({@link SendErrorNotice})
+ * or a refused attachment (objectstack#34463). `onClose` adds a close button.
+ */
+function ComposerNotice({
+  text,
+  testId,
+  closeLabel,
+  onClose,
+}: {
+  text: string;
+  testId: string;
+  closeLabel?: string;
+  onClose?: () => void;
+}) {
   return (
-    <div className="border-t bg-background px-3 py-2 text-sm" role="alert" data-testid="chat-send-error">
+    <div className="border-t bg-background px-3 py-2 text-sm" role="alert" data-testid={testId}>
       <div className="rounded-md border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-foreground dark:bg-amber-950/20">
         <div className="flex items-start gap-2">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <div className="min-w-0 flex-1 break-words leading-snug">{text}</div>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={closeLabel}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <XCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * A byte count as the user's locale spells a size, in the largest binary unit
+ * it reaches (`10 * 1024 * 1024` → "10 MB"), for the composer's size-limit notice.
+ */
+function formatSizeLimit(bytes: number, locale: string): string {
+  const units = [
+    ['gigabyte', 1024 ** 3],
+    ['megabyte', 1024 ** 2],
+    ['kilobyte', 1024],
+  ] as const;
+  const spell = (unit: string, value: number) =>
+    new Intl.NumberFormat(locale, { style: 'unit', unit, maximumFractionDigits: 1 }).format(value);
+  for (const [unit, size] of units) {
+    if (bytes >= size) return spell(unit, bytes / size);
+  }
+  return spell('byte', bytes);
 }
 
 /**
