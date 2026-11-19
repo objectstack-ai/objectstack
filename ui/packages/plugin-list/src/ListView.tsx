@@ -4358,11 +4358,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // spelling free to drift from it.
         // objectstack#35554 — an infinite list appends the window `loadMoreRows`
         // asked for; any other run with several windows held (a refresh, the
-        // first load back to a kept position) re-reads them all from the top.
+        // first load back to a kept position) re-reads them all from the top,
+        // ONE WINDOW PER REQUEST: a host caps a read's `$top`
+        // (`OS_DATA_MAX_PAGE_SIZE`, refused with 400 MAX_RECORDS_EXCEEDED, never
+        // clamped), so the held rows are never asked for in one read.
         const appendWindow = infiniteScroll && fetchSkip > 0 && infiniteAppendSkipRef.current === fetchSkip;
         infiniteAppendSkipRef.current = null;
         const skip = infiniteScroll && !appendWindow ? 0 : fetchSkip;
-        const windowSize = infiniteScroll && !appendWindow ? fetchSkip + effectivePageSize : effectivePageSize;
+        const rereadWindows = infiniteScroll && !appendWindow ? fetchSkip / effectivePageSize + 1 : 1;
+        // Every row this run asks for, across its windows.
+        const windowSize = rereadWindows * effectivePageSize;
 
         // Hoisted out of the `find` call so the exact params that produced this
         // window can be handed down with it (objectui#4501). One object, one
@@ -4374,7 +4379,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            // [objectui#12081] The calendar's window is walked in fetch-batch
            // steps, so its first request asks for the batch; the walk sets
            // each later step's `$top` and `$skip` itself.
-           $top: calendarWindowNode ? DEFAULT_LIST_FETCH_BATCH_SIZE : windowSize,
+           $top: calendarWindowNode ? DEFAULT_LIST_FETCH_BATCH_SIZE : effectivePageSize,
            ...(skip > 0 ? { $skip: skip } : {}),
            ...(selectFields ? { $select: selectFields } : {}),
            ...(expandFields.length > 0 ? { $expand: expandFields } : {}),
@@ -4409,6 +4414,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           windowCeiling = applyNonGridRowCeiling(walked);
           results = walked;
           items = windowCeiling.rows;
+        } else if (rereadWindows > 1) {
+          // objectstack#35554 — the held windows, each its own read (above).
+          const objectName = schema.objectName;
+          const windows = await Promise.all(
+            Array.from({ length: rereadWindows }, (_, w) =>
+              dataSource.find(objectName, w === 0 ? findParams : { ...findParams, $skip: w * effectivePageSize })),
+          );
+          if (!isCurrentRequest()) return;
+          results = windows[0];
+          items = windows.flatMap((w) => readListRows(w));
         } else {
           results = await dataSource.find(schema.objectName, findParams);
           if (!isCurrentRequest()) return;
