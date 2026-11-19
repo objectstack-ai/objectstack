@@ -103,6 +103,15 @@ async function answer(res: Response): Promise<{ status: number; code?: string }>
 const cookieOf = (res: Response): string =>
   (res.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).filter(Boolean).join('; ');
 
+/**
+ * Whether a response hands its caller a session in its headers: a
+ * `set-auth-token` header, or a session cookie set to a value (a cookie
+ * cleared to empty hands out none).
+ */
+const handsOutSession = (res: Response): boolean =>
+  res.headers.get('set-auth-token') !== null
+  || (res.headers.getSetCookie?.() ?? []).some((c) => /session_(token|data)=[^;]+/.test(c.split(';')[0]));
+
 // RFC 6238 TOTP, hand-rolled as `two-factor-reenrollment-verified-reset.test.ts` does.
 function base32Decode(input: string): Buffer {
   const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -196,6 +205,7 @@ async function stage(config: Record<string, unknown> = {}) {
     return {
       ...(await answer(res)),
       bearer: res.headers.get('set-auth-token') ?? undefined,
+      handsOutSession: handsOutSession(res),
       challenge: body?.twoFactorRedirect === true ? cookieOf(res) : undefined,
     };
   };
@@ -267,6 +277,17 @@ async function stage(config: Record<string, unknown> = {}) {
 function advanceTheClock() {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(Date.now() + 2_000);
+}
+
+/** Turn on a TOTP second factor for the account `bearer` signs in as, and answer its secret. */
+async function enrolTotp(s: Awaited<ReturnType<typeof stage>>, bearer: string): Promise<Buffer> {
+  const enabled = await s.fire('/two-factor/enable', { password: FIRST }, s.bearer(bearer));
+  expect(enabled.status, await enabled.clone().text()).toBe(200);
+  const { totpURI } = (await enabled.json()) as { totpURI: string };
+  const secret = base32Decode(String(new URL(totpURI.replace('otpauth://', 'https://')).searchParams.get('secret')));
+  const confirmed = await s.fire('/two-factor/verify-totp', { code: totp(secret) }, s.bearer(bearer));
+  expect(confirmed.status, await confirmed.clone().text()).toBe(200);
+  return secret;
 }
 
 describe('an email-change link issued before a credential change answers what a link never issued answers', () => {
@@ -457,7 +478,8 @@ describe('a password sign-in during which the password changes is refused', () =
 
     expect(changed).toEqual({ status: 200 });
     expect({ status: raced.status, code: raced.code }).toEqual({ status: wrong.status, code: wrong.code });
-    if (raced.bearer) expect(await s.whoIs(raced.bearer)).toBeNull();
+    expect(wrong.handsOutSession, 'a wrong password hands out no session').toBe(false);
+    expect(raced.handsOutSession, 'the refused sign-in hands out no session token in its headers').toBe(false);
     expect(await s.liveSessions()).toEqual([]);
   }, 60_000);
 
@@ -466,10 +488,12 @@ describe('a password sign-in during which the password changes is refused', () =
     await s.engine.update('sys_user', { id: s.userId, phone_number: PHONE, phone_number_verified: true }, SYS);
     const phoneSignIn = async (password: string) => {
       const res = await s.fire('/sign-in/phone-number', { phoneNumber: PHONE, password });
-      return { ...(await answer(res)), bearer: res.headers.get('set-auth-token') ?? undefined };
+      return { ...(await answer(res)), handsOutSession: handsOutSession(res) };
     };
     const wrong = await phoneSignIn('Not!The-Password-1');
     expect(wrong).toMatchObject({ status: 401, code: 'INVALID_PHONE_NUMBER_OR_PASSWORD' });
+    const fine = await phoneSignIn(FIRST);
+    expect(fine, 'the control: the phone door hands out a session to the right password').toMatchObject({ status: 200, handsOutSession: true });
     const link = await s.requestLink();
     const internal = (await s.manager.getAuthContext()).internalAdapter;
     const original = internal.createSession.bind(internal);
@@ -483,7 +507,8 @@ describe('a password sign-in during which the password changes is refused', () =
 
     expect(changed).toEqual({ status: 200 });
     expect({ status: raced.status, code: raced.code }).toEqual({ status: wrong.status, code: wrong.code });
-    if (raced.bearer) expect(await s.whoIs(raced.bearer)).toBeNull();
+    expect(wrong.handsOutSession, 'a wrong password hands out no session').toBe(false);
+    expect(raced.handsOutSession, 'the refused sign-in hands out no session token in its headers').toBe(false);
     expect(await s.liveSessions()).toEqual([]);
   }, 60_000);
 
@@ -491,7 +516,130 @@ describe('a password sign-in during which the password changes is refused', () =
     const s = await stage();
     const fine = await s.signIn(EMAIL, FIRST);
     expect(fine.status).toBe(200);
+    expect(fine.handsOutSession).toBe(true);
     expect(await s.whoIs(fine.bearer!)).toBe(s.userId);
+  }, 60_000);
+});
+
+describe('a check that cannot read its record refuses', () => {
+  /** The account's credential row cannot be read through the vendor's adapter, until the spy is restored. */
+  async function unreadableCredential(s: Awaited<ReturnType<typeof stage>>) {
+    const internal = (await s.manager.getAuthContext()).internalAdapter;
+    return vi.spyOn(internal, 'findCredentialAccount').mockRejectedValue(new Error('the credential row cannot be read'));
+  }
+
+  it('an email-change link whose clock cannot be read answers what a link never issued answers; read again, it verifies', async () => {
+    const s = await stage();
+    const user = await s.signIn(EMAIL, FIRST);
+    const link = await s.requestEmailChange(user.bearer!);
+    const neverIssued = await s.verifyEmail('a-token-never-issued');
+
+    const unreadable = await unreadableCredential(s);
+    expect(await s.verifyEmail(link)).toEqual(neverIssued);
+    expect(unreadable).toHaveBeenCalled();
+    expect(await s.emailOf()).toBe(EMAIL);
+
+    // The control: the account never changed its password, so the same link verifies once the clock reads.
+    unreadable.mockRestore();
+    expect(await s.verifyEmail(link)).toMatchObject({ status: 200 });
+    expect(await s.emailOf()).toBe(NEW_ADDRESS);
+  }, 60_000);
+
+  it('a second-factor challenge whose clock cannot be read answers what a challenge never opened answers', async () => {
+    const s = await stage({ plugins: { twoFactor: true } });
+    const secret = await enrolTotp(s, (await s.signIn(EMAIL, FIRST)).bearer!);
+    const opened = await s.signIn(EMAIL, FIRST);
+    expect(opened.challenge, 'the password sign-in stops at the challenge').toBeTruthy();
+    const neverOpened = await answer(await s.fire('/two-factor/verify-totp', { code: totp(secret) }));
+
+    const unreadable = await unreadableCredential(s);
+    expect(await answer(await s.fire('/two-factor/verify-totp', { code: totp(secret) }, { cookie: opened.challenge! }))).toEqual(neverOpened);
+    expect(unreadable).toHaveBeenCalled();
+    unreadable.mockRestore();
+
+    // The control: a challenge verified while the clock reads completes.
+    const fresh = await s.signIn(EMAIL, FIRST);
+    const completed = await s.fire('/two-factor/verify-totp', { code: totp(secret) }, { cookie: fresh.challenge! });
+    expect(completed.status, await completed.clone().text()).toBe(200);
+  }, 60_000);
+
+  it('a password sign-in whose first reading cannot be taken answers what a wrong password answers and leaves no session', async () => {
+    const s = await stage();
+    const wrong = await s.signIn(EMAIL, 'Not!The-Password-1');
+    const internal = (await s.manager.getAuthContext()).internalAdapter;
+    const original = internal.findCredentialAccount.bind(internal);
+    let refusedReads = 0;
+    vi.spyOn(internal, 'findCredentialAccount').mockImplementation(async (...args: unknown[]) => {
+      if (refusedReads === 0) {
+        refusedReads += 1;
+        throw new Error('the credential row cannot be read');
+      }
+      return (original as (...a: unknown[]) => Promise<unknown>)(...args);
+    });
+
+    const refused = await s.signIn(EMAIL, FIRST);
+
+    expect(refusedReads, 'the first reading was the one that failed').toBe(1);
+    expect({ status: refused.status, code: refused.code }).toEqual({ status: wrong.status, code: wrong.code });
+    expect(refused.handsOutSession).toBe(false);
+    expect(await s.liveSessions()).toEqual([]);
+  }, 60_000);
+});
+
+describe('the clock needs no data engine', () => {
+  it('on the vendor in-memory adapter: a link of an account that never changed its password verifies; one minted before a change does not', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    // No `dataEngine`: the manager runs on better-auth's own in-memory adapter.
+    const manager = new AuthManager({ secret: SECRET, baseUrl: ORIGIN } as never);
+    const mail: Array<{ template: string; to?: { address?: string }; data: Record<string, unknown> }> = [];
+    manager.setEmailService({
+      sendTemplate: async (input: any) => {
+        mail.push(input);
+        return { status: 'sent' };
+      },
+    } as never);
+    const app = new Hono();
+    const ctx = mockCtx();
+    const plugin = new AuthPlugin({ secret: SECRET });
+    await plugin.init(ctx);
+    (plugin as any).authManager = manager;
+    (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
+    const fire = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(`${ORIGIN}${BASE}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN, ...headers },
+        body: JSON.stringify(body),
+      });
+    const verify = async (token: string) =>
+      answer(await app.request(`${ORIGIN}${BASE}/verify-email?token=${encodeURIComponent(token)}`, { headers: { origin: ORIGIN } }));
+    const linkTo = async (bearer: string, newEmail: string): Promise<string> => {
+      const sent = () => mail.filter((m) => m.template === 'auth.verify_email' && m.to?.address === newEmail);
+      const before = sent().length;
+      const res = await fire('/change-email', { newEmail, callbackURL: '/' }, { authorization: `Bearer ${bearer}` });
+      expect(res.status, `change-email: ${await res.clone().text()}`).toBe(200);
+      await vi.waitFor(() => expect(sent().length).toBe(before + 1));
+      return String(sent()[before].data.token);
+    };
+    const signedUp = await fire('/sign-up/email', { email: EMAIL, password: FIRST, name: EMAIL });
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const signedIn = await fire('/sign-in/email', { email: EMAIL, password: FIRST });
+    expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+    const bearer = String(signedIn.headers.get('set-auth-token'));
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    const addressNow = async () => (await internal.findUserByEmail(NEW_ADDRESS)) ? NEW_ADDRESS : 'unchanged';
+    const neverIssued = await verify('a-token-never-issued');
+
+    // Never changed: the link verifies.
+    expect(await verify(await linkTo(bearer, 'prior-access-first-move@example.com'))).toMatchObject({ status: 200 });
+
+    // Minted before a change: it answers what a link never issued answers.
+    const before = await linkTo(bearer, NEW_ADDRESS);
+    advanceTheClock();
+    const changed = await fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, { authorization: `Bearer ${bearer}` });
+    expect(changed.status, await changed.clone().text()).toBe(200);
+    expect(await verify(before)).toEqual(neverIssued);
+    expect(await addressNow()).toBe('unchanged');
   }, 60_000);
 });
 
@@ -504,18 +652,20 @@ describe('the predicate and its clock', () => {
   });
 
   it('the clock is the last write over the credential row; its creation and no row are no change', async () => {
-    const engine = (account: unknown) => ({ findOne: async () => account });
+    const reader = (account: unknown) => ({ findCredentialAccount: async () => account }) as never;
     const created = '2026-01-01T00:00:00.000Z';
-    expect(await readCredentialChangedAt(engine(null) as never, 'u')).toBeUndefined();
-    expect(await readCredentialChangedAt(engine({ created_at: created, updated_at: created }) as never, 'u')).toBeUndefined();
-    expect(
-      await readCredentialChangedAt(engine({ created_at: created, updated_at: '2026-01-01T00:00:00.900Z' }) as never, 'u'),
-    ).toBeUndefined();
-    expect(
-      await readCredentialChangedAt(engine({ created_at: created, updated_at: '2026-02-01T00:00:00.000Z' }) as never, 'u'),
-    ).toBe(Date.parse('2026-02-01T00:00:00.000Z'));
+    expect(await readCredentialChangedAt(reader(null), 'u')).toBeUndefined();
+    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: created }), 'u')).toBeUndefined();
+    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: '2026-01-01T00:00:00.900Z' }), 'u')).toBeUndefined();
+    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: '2026-02-01T00:00:00.000Z' }), 'u')).toBe(
+      Date.parse('2026-02-01T00:00:00.000Z'),
+    );
+    // The adapter answers `Date` values.
+    expect(await readCredentialChangedAt(reader({ createdAt: new Date(created), updatedAt: new Date('2026-02-01T00:00:00.000Z') }), 'u')).toBe(
+      Date.parse('2026-02-01T00:00:00.000Z'),
+    );
     await expect(
-      readCredentialChangedAt({ findOne: async () => { throw new Error('down'); } } as never, 'u'),
+      readCredentialChangedAt({ findCredentialAccount: async () => { throw new Error('down'); } } as never, 'u'),
     ).rejects.toThrow('down');
   });
 });

@@ -267,9 +267,9 @@ export async function globalBeforeHook(
   // change answers what a link never issued answers, and a second-factor
   // challenge opened before it is ended. `credential-change-ends-prior-
   // access.ts` states the rule and its one predicate.
-  const endedEmailChange = await endEmailChangeTokenIssuedBeforeCredentialChange(ctx, this.getDataEngine());
+  const endedEmailChange = await endEmailChangeTokenIssuedBeforeCredentialChange(ctx);
   if (endedEmailChange) return endedEmailChange;
-  await endTwoFactorChallengeIssuedBeforeCredentialChange(ctx, this.getDataEngine());
+  await endTwoFactorChallengeIssuedBeforeCredentialChange(ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──
   // A hosted environment sets no local password for anyone, a platform

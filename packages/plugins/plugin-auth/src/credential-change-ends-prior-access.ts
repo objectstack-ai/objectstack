@@ -33,8 +33,11 @@
  * issued strictly before the account's credential change is refused. The
  * change's moment is {@link readCredentialChangedAt}: the last time the
  * account's local credential row (`sys_account`, provider `credential`) was
- * written over, its `updated_at`. Every door that replaces a password writes
- * that row — both reset doors, `/change-password`, an administrator's
+ * written over, its `updated_at`. It is read through better-auth's internal
+ * adapter (`findCredentialAccount`), the same row and the same seam the
+ * vendor reads to check a password, so the clock needs no data engine: a
+ * manager on the vendor's in-memory adapter reads it as well. Every door that
+ * replaces a password writes that row — both reset doors, `/change-password`, an administrator's
  * `/admin/set-user-password`, the one-step invitation door — whether or not it
  * also stamps `sys_user.password_changed_at`. The row's creation is the
  * account's first password, not a change: a row written over within
@@ -64,11 +67,6 @@
  * every session-delete hook runs, and a reset door's records the reason a
  * reset records (`session-tombstone.ts`).
  */
-
-import type { IDataEngine } from '@objectstack/core';
-import { SystemObjectName } from '@objectstack/spec/system';
-
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
 /** The path of better-auth's email verification door. */
 export const VERIFY_EMAIL_PATH = '/verify-email';
@@ -119,7 +117,14 @@ function toMs(value: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-type ClockEngine = Pick<IDataEngine, 'findOne'>;
+/**
+ * The seam the clock reads through: better-auth's internal adapter, whose
+ * `findCredentialAccount` answers the account's local credential row (provider
+ * `credential`, `accountId` the user's id) with its `createdAt` / `updatedAt`.
+ */
+export interface CredentialClockReader {
+  findCredentialAccount(userId: string): Promise<{ createdAt?: unknown; updatedAt?: unknown } | null | undefined>;
+}
 
 /**
  * How long after its creation a credential row's own write still counts as
@@ -133,24 +138,24 @@ export const FIRST_CREDENTIAL_WINDOW_MS = 1_000;
  * `undefined` when it has never had one. Throws when the record cannot be
  * read, so a caller refuses.
  */
-export async function readCredentialChangedAt(engine: ClockEngine, userId: string): Promise<number | undefined> {
-  const account = (await engine.findOne(SystemObjectName.ACCOUNT, {
-    where: { user_id: userId, provider_id: 'credential' },
-    fields: ['id', 'created_at', 'updated_at'],
-    context: SYSTEM_CTX,
-  } as never)) as { created_at?: unknown; updated_at?: unknown } | null;
-  const created = toMs(account?.created_at);
-  const updated = toMs(account?.updated_at);
+export async function readCredentialChangedAt(reader: CredentialClockReader, userId: string): Promise<number | undefined> {
+  const account = await reader.findCredentialAccount(userId);
+  const created = toMs(account?.createdAt);
+  const updated = toMs(account?.updatedAt);
   if (updated === undefined) return undefined;
   if (created !== undefined && updated - created <= FIRST_CREDENTIAL_WINDOW_MS) return undefined;
   return updated;
 }
 
-/** Whether `issuedAt` falls before `userId`'s credential change; a clock that cannot be read answers yes. */
-async function issuedBeforeChangeOf(engine: ClockEngine | undefined, userId: string, issuedAtMs: number): Promise<boolean> {
-  if (!engine) return true;
+/**
+ * Whether `issuedAt` falls before `userId`'s credential change, read through
+ * the request's own internal adapter; a clock that cannot be read answers yes.
+ */
+async function issuedBeforeChangeOf(ctx: any, userId: string, issuedAtMs: number): Promise<boolean> {
+  const reader: CredentialClockReader | undefined = ctx?.context?.internalAdapter;
+  if (typeof reader?.findCredentialAccount !== 'function') return true;
   try {
-    return issuedBeforeCredentialChange(issuedAtMs, await readCredentialChangedAt(engine, userId));
+    return issuedBeforeCredentialChange(issuedAtMs, await readCredentialChangedAt(reader, userId));
   } catch {
     return true;
   }
@@ -166,7 +171,6 @@ async function issuedBeforeChangeOf(engine: ClockEngine | undefined, userId: str
  */
 export async function endEmailChangeTokenIssuedBeforeCredentialChange(
   ctx: any,
-  engine: ClockEngine | undefined,
 ): Promise<{ context: { query: Record<string, unknown> } } | undefined> {
   if (ctx?.path !== VERIFY_EMAIL_PATH) return undefined;
   const token: unknown = ctx?.query?.token;
@@ -191,7 +195,7 @@ export async function endEmailChangeTokenIssuedBeforeCredentialChange(
   // No account at the address: the vendor's own refusal answers it.
   if (!userId) return undefined;
   const issuedAtMs = typeof claims.iat === 'number' ? claims.iat * 1000 : Number.NaN;
-  return (await issuedBeforeChangeOf(engine, userId, issuedAtMs)) ? ended : undefined;
+  return (await issuedBeforeChangeOf(ctx, userId, issuedAtMs)) ? ended : undefined;
 }
 
 /**
@@ -200,10 +204,7 @@ export async function endEmailChangeTokenIssuedBeforeCredentialChange(
  * the account's credential change, so the vendor's own check finds no
  * challenge. Throws when the challenge cannot be ended.
  */
-export async function endTwoFactorChallengeIssuedBeforeCredentialChange(
-  ctx: any,
-  engine: ClockEngine | undefined,
-): Promise<void> {
+export async function endTwoFactorChallengeIssuedBeforeCredentialChange(ctx: any): Promise<void> {
   if (!TWO_FACTOR_VERIFY_PATHS.has(ctx?.path)) return;
   const cookie = ctx?.context?.createAuthCookie?.(TWO_FACTOR_COOKIE);
   if (!cookie?.name || typeof ctx?.getSignedCookie !== 'function') return;
@@ -214,7 +215,7 @@ export async function endTwoFactorChallengeIssuedBeforeCredentialChange(
   if (!challenge) return;
   const userId = typeof challenge.value === 'string' ? challenge.value : '';
   const issuedAtMs = toMs(challenge.createdAt) ?? Number.NaN;
-  if (userId && !(await issuedBeforeChangeOf(engine, userId, issuedAtMs))) return;
+  if (userId && !(await issuedBeforeChangeOf(ctx, userId, issuedAtMs))) return;
   await internal.deleteVerificationByIdentifier(identifier);
   await internal.deleteVerificationByIdentifier(`${TWO_FACTOR_ATTEMPTS_PREFIX}${identifier}`);
 }
