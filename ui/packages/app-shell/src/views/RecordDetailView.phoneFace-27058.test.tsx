@@ -605,9 +605,10 @@ async function expectEditInBarOverflowOff() {
   expect(first.disabled).toBe(false);
   fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
   const menu = await screen.findByRole('menu');
-  const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.trim() === 'Edit');
-  expect(edit).toBeTruthy();
-  expect(edit!.getAttribute('aria-disabled')).toBe('true');
+  // By accessible name: an entry that says why it is off carries the reason
+  // as a second line, and its name stays the label (objectstack#35135).
+  const edit = within(menu).getByRole('menuitem', { name: 'Edit' });
+  expect(edit.getAttribute('aria-disabled')).toBe('true');
 }
 
 describe('a phone bar never leads with an Edit that is off, for any reason (objectstack#35099)', () => {
@@ -705,7 +706,7 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
     await expectEditInBarOverflowOff();
     const menu = screen.getByRole('menu');
-    const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.startsWith('Edit'))!;
+    const edit = within(menu).getByRole('menuitem', { name: 'Edit' });
     expect(describedText(edit)).toBe(PREDICATE_REASON);
   });
 
@@ -720,7 +721,7 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     const more = await waitFor(() => within(within(header).getByRole('toolbar')).getByRole('button', { name: 'More actions' }));
     fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     const menu = await screen.findByRole('menu');
-    const del = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.startsWith('Delete'))!;
+    const del = within(menu).getByRole('menuitem', { name: 'Delete' });
     expect(del.getAttribute('aria-disabled')).toBe('true');
     expect(describedText(del)).toBe(PREDICATE_REASON);
   });
