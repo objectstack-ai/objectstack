@@ -36,9 +36,9 @@ Agent  →  Skill  →  Tool
   └─ Autonomous actor with role, instructions, and guardrails
 ```
 
-Agents are platform-internal (☁️ `ask` / `build`; reference section at the
-bottom). **Skills are your entry point** — you extend the platform by authoring
-skills, and a skill reaches tools by naming them.
+**Skills are your entry point** — agents are platform-internal (reference
+section at the bottom), so you extend the platform by authoring skills, and a
+skill reaches tools by naming them.
 
 ---
 
@@ -337,18 +337,18 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action** (its door only, pitfall 2), or `approval: 'always'` on an MCP
    tool binding. AI metadata edits are already gated: they land as drafts a
-   human must publish (ADR-0033).
-   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2; retired
-   above). There is no `requireApprovalFor` field.
+   human must publish (ADR-0033). There is no `requireApprovalFor` field.
 2. **Gating the action, not the state.** `ai.requiresConfirmation` guards the
    action's own door only: an agent can still write the field it changes with
    `update_record` or any data write, and the write lands. An irreversible
    transition is a gated action **plus a lock on that field**: a `script`
    action, whose body writes elevated (`isSystem`), over a field a non-system
-   write cannot set — `readonly: true` (the value is stripped,
-   **objectstack-data** → `readonly`) or field permissions leaving the caller
-   no `editable` on it (refused `403`; any set granting it wins,
-   **objectstack-data** `rules/security.md`). A declarative
+   write cannot set. `readonly: true` binds every non-system caller (the value
+   is stripped, **objectstack-data** → `readonly`); a field permission without
+   `editable` (refused `403`) binds only a caller no held set grants it, and
+   Modify All grants it, so an admin's agent still writes the field. The body
+   skips the caller's edit right: declare who may run the action in its
+   `requiredPermissions` (ADR-0066). A declarative
    `operation: 'update'` action, and a `flow` action under `runAs: 'user'`,
    write as the caller, so the lock stops them too. `readonlyWhen` and a
    `state_machine` rule bind the elevated body as well, so neither is the
