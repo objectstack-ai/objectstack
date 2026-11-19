@@ -80,6 +80,10 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// The source under test reaches `@objectstack/lint` through a dynamic import;
+// its first load is paid here, during collection, never inside a case's clocked
+// window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';

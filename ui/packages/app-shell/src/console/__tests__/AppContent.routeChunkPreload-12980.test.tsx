@@ -92,8 +92,8 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 /** objectstack#35535 — the two saved-view readers `ObjectView` calls on mount. */
 const viewReads = vi.hoisted(() => ({
-  listViews: vi.fn(async () => []),
-  listViewOverrides: vi.fn(async () => ({})),
+  listViews: vi.fn(async (_objectName: string) => [] as unknown[]),
+  listViewOverrides: vi.fn(async (_objectName: string) => ({}) as Record<string, unknown>),
 }));
 const dataSourceStub = {
   onConnectionStateChange: () => () => {},
@@ -158,6 +158,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// The source under test reaches `@objectstack/lint` through a dynamic import;
+// its first load is paid here, during collection, never inside a case's clocked
+// window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 const USER = 'u_12980';
