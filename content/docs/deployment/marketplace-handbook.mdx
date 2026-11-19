@@ -361,6 +361,15 @@ There is no `OBJECT_PACKAGE_DISABLED` error to catch there. A browser or API
 client reading the module's objects does meet the `404 OBJECT_PACKAGE_DISABLED`
 refusal while the module is off.
 
+A script action of an enabled package answers the same way. Its body's
+`ctx.api` and `ctx.engine` run in system context inside the server, so an
+`insert` into a disabled module's object succeeds, the action answers `200`,
+and the module's own `beforeInsert` hooks run on the row. The row is kept and
+appears when the module is enabled again. `OBJECT_PACKAGE_DISABLED` is an
+answer of the outward doors only (the data plane, the by-name reads and the
+`/actions` door for the module's own objects); code running in-process never
+meets it.
+
 ## Related
 
 - [CLI reference](/docs/deployment/cli) — every `os package publish` and `os package install` flag
