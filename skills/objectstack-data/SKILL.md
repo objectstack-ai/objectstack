@@ -78,7 +78,7 @@ removed):
 
 | Value | Who can read / write |
 |:--|:--|
-| `private` | owner only |
+| `private` | owner only (widen with sharing rules, RLS, or `readScope`/`writeScope`) |
 | `public_read` | everyone reads; the owner writes |
 | `public_read_write` | everyone reads and writes |
 | `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
@@ -147,7 +147,6 @@ record's title, copy that title into a **stored field on this object** and
 declare *that* field searchable. A task list searched by project name:
 
 ```typescript
-// `project_name` is a stored, denormalized mirror of the parent's title.
 {
   name: 'task',
   enable: { searchable: true },
@@ -413,9 +412,9 @@ hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` �
 `owner_id IN (…)` set and AND-injects like RLS. ⚠️ Open-core boundary (ADR-0016):
 only `own` and `org` work in open source — the hierarchy-relative three need the
 paid `@objectstack/security-enterprise` plugin in `plugins[]`, **fail closed to
-`own`** without it, and `defineStack` errors unless the grant declares
-`requires: ['hierarchy-security']`. A missing or unwired plugin is only advised:
-`os validate` warns, `os verify --json` lists it in `capabilities`.
+`own`** without it, and `defineStack` errors unless the stack declares
+`requires: ['hierarchy-security']`. The CLI only advises on a missing or unwired
+plugin: `os validate` warns, `os verify --json` lists it in `capabilities`.
 
 ### Ownership queues — park a record for a team to claim
 
