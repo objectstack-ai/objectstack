@@ -767,11 +767,10 @@ Draft as written above.
    person. A link is **proposed** by matching the person's email to the Slack user's email and takes
    effect only once the person **confirms** it, once; a proposal nobody confirmed delivers nothing.
    For this scope that replaces §8 item 2's "auto-create the link row": an email match proposes, it
-   never links. Risk 4 stands as written: an ambiguous email proposes nothing. Who may remove a link
+   never links. An email that matches more than one user proposes nothing. Who may remove a link
    is not said by this ADR or by ADR-0022, so it is listed as open below. A person with no confirmed
    link receives nothing on Slack; their other channels are unchanged.
-3. **Destination.** Direct messages to the linked person only, opened with §3's new-DM session key
-   (`slack:ACC:dm:USER`, no thread segment). Posting to Slack channels is not in this scope; a flow
+3. **Destination.** Direct messages to the linked person only. Posting to Slack channels is not in this scope; a flow
    that must post to a channel keeps using `connector_action` on the Slack connector (ADR-0022 §2).
 
 **What `main` holds** (objectstack-ai/objectstack at `5dd856f4`). Neither `sys_channel_account` nor
