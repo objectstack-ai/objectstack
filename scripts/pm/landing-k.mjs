@@ -135,7 +135,7 @@ export function labelSurfaceReader(extractRoots) {
     if (p.includes('/translations/') || p.startsWith('translations/')) return 'a translation bundle';
     if (isMetadataFormModulePath(p)) return 'a metadata form module (the metadataForms half)';
     if (p.startsWith('packages/spec/src/')) return 'spec-declared labels';
-    if (p.startsWith('examples/')) return 'an example config (check:i18n-coverage)';
+    if (/^examples\//.test(p)) return 'an example config (check:i18n-coverage)';
     const root = extractRoots.find((r) => p.startsWith(r));
     return root ? `a package that owns an i18n extract config (${root.slice(0, -1)})` : null;
   };
