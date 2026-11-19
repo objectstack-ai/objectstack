@@ -86,7 +86,8 @@
 
 - 停:队列空或 `rounds` 用尽(仅一次性调用适用);一轮 ≥ 半数派发失败或升级;维护者打断。
 - 队列空是待命非退场(按需席除外):巡查跑到收班,只维护者令停;⛔ 不按 N 次无变化即停。
-- 队列空是逐卡表:报无卡可派即贴 `card-pick.mjs --why`,卡点含无分诊审计、他席 `Claim:`。
+- 队列空是逐卡表:报无卡可派即贴 `card-pick.mjs --order <序> --why`;无卡点即候选,⛔ 不得报空。
+- 卡点一份词表:候选定义反面,open `Blocked-by:`、`outside --order`、无分诊审计、他席 `Claim:`。
 - 单车道仓 `repo:*` 席:每轮首触 sweep 清空再认领,先于待命五项;cloud 细则见 `lanes/cloud.md`。
 - 巡查每轮探针后读信箱、认领满 `batch`,跑待命五项;间隔按 `execution-duties.md` 收集节②。
 - 待命五项各以其主节为准,⛔ 此处不另抄:findings 配合;`pm:blocked`/`pm:on-hold` 解锁扫描。

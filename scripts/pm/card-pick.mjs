@@ -45,9 +45,12 @@
  *
  * The maintainer's direct dispatch (the first leg of 取卡全序, three provenance pieces), the contract-surface leg
  * (`references/lanes/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
- * machine line), the multi-seat odd/even alternation and batching a p3 onto a PR that touches the same files (rule
- * ④'s "or batched", a judgement over a diff). A seat reads those itself; the output says so every time,
- * so an absent leg never reads as a leg that found nothing.
+ * machine line), the multi-seat odd/even alternation, batching a p3 onto a PR that touches the same files (rule
+ * ④'s "or batched", a judgement over a diff), lane ownership (a `domain:*` card outside the seat's lane, a cloud
+ * card or a security card is listed but may not be claimed; each row prints its `domain:*` so the seat can read it)
+ * and an area item that holds a sub-epic (rule 3 ③ binds that sub-epic's child order; the reader ranks the area p2
+ * before p3 unless the sub-epic is named as an `epic:` item). A seat reads those itself; the output says so every
+ * time, so an absent leg never reads as a leg that found nothing.
  *
  * ## What it reads — REST through `gh api`, every page
  *
@@ -69,8 +72,9 @@
  *   1  `--self-test` failed
  *   2  usage
  *   3  PREREQUISITE NOT MET — the queue listing or the platform count could not be read; nothing was ranked
- *   4  INCOMPLETE — a count gap, an epic that could not be read, or a card whose thread could not be read; the list
- *      is printed with each gap named, ⛔ never as a clean answer
+ *   4  INCOMPLETE — a count gap, an epic that could not be read, or a card whose thread, `Blocked-by:` target or
+ *      sub-issue parent could not be read; the list is printed with each gap named and every card such a read holds
+ *      printed even without `--why`, ⛔ never as a clean answer
  *
  * ## Self-test
  *
@@ -89,6 +93,8 @@ import {
   H74_PARENT_UNREADABLE,
   PM_EXCLUSIVE_STATE_LABELS,
   RELEASE_COMMENT_MARKER,
+  SEAT_SIGNATURE_LINE,
+  SEAT_SIGNATURE_SEPARATOR,
   blockerResolutionFromRow,
   blockerTargetsFor,
   gradeRung,
@@ -129,7 +135,7 @@ export const DUTIES_PHRASES = Object.freeze([
   '候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`',
   '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序',
   '同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄',
-  '`node scripts/pm/card-pick.mjs',
+  '本车道开放卡现读 `card-pick.mjs --order <序>`',
   '开放 = 未派发(无 `pm:dispatched`、无 assignee)',
 ]);
 export const STATE_MACHINE_PATH = '.claude/skills/pm-dispatch/references/state-machine.md';
@@ -138,7 +144,7 @@ export const STATE_MACHINE_PHRASES = Object.freeze([
   '合并才放,关而未合并 ⛔ 不放',
 ]);
 export const LIFECYCLE_PATH = '.claude/skills/pm-dispatch/references/seat-lifecycle.md';
-export const LIFECYCLE_PHRASES = Object.freeze(['无分诊审计、他席 `Claim:`', '`card-pick.mjs']);
+export const LIFECYCLE_PHRASES = Object.freeze(['无分诊审计、他席 `Claim:`', '`card-pick.mjs --order <序> --why`', '`outside --order`']);
 
 /** The legs this file cannot read, printed under every run. */
 export const UNREAD_LEGS = Object.freeze([
@@ -147,6 +153,8 @@ export const UNREAD_LEGS = Object.freeze([
   "a `tooling` card's three-gate admission — triage's reading; flagged on the row, not judged",
   'multi-seat odd/even alternation — the seat applies it to this list',
   "batching a p3 onto a PR that touches the same files (rule ④'s \"or batched\") — a judgement over a diff; here every area p3 ranks as its close-out",
+  "lane ownership — a `domain:*` card outside this seat's lane, a cloud card or a security card is listed here but a seat may not claim it; read each row's `domain:*` against your lane",
+  "an area item that holds a sub-epic — ranked here p2 before p3, but rule 3 ③ binds that sub-epic's child order; name it as `epic:#N` in --order to get it",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -171,9 +179,14 @@ export function parseOrder(text) {
   return { ok: true, items };
 }
 
-/** `--seat LANE#N` parsed the way a seat signature spells its first two parts. */
+/**
+ * `--seat LANE#N` parsed by the seat signature's own grammar (`SEAT_SIGNATURE_LINE`, borrowed, never re-spelled), so
+ * every lane a signature can carry is accepted, an epic seat's `epic:#N#1` included. Pure.
+ */
 export function parseSeat(text) {
-  const m = /^([a-z][a-z0-9:/._-]*)#([1-9][0-9]*)$/i.exec(String(text ?? ''));
+  const v = String(text ?? '');
+  if (/\s/.test(v)) return null;
+  const m = SEAT_SIGNATURE_LINE.exec(`${v}${SEAT_SIGNATURE_SEPARATOR}seat${SEAT_SIGNATURE_SEPARATOR}session_parseseat`);
   return m ? { lane: m[1], seat: Number(m[2]), name: `${m[1]}#${m[2]}` } : null;
 }
 
@@ -188,6 +201,8 @@ export const issueType = (issue) => {
   return typeof name === 'string' && name.trim() ? name.trim() : null;
 };
 const areaOf = (issue) => labelNames(issue).filter((l) => l.startsWith('area:')).join(',') || 'no area';
+/** The card's lane labels, printed on every row: the reader does not judge lane ownership, the seat does. Pure. */
+export const domainOf = (issue) => labelNames(issue).filter((l) => l.startsWith('domain:')).join(',') || 'no domain';
 
 /**
  * The same-grade order: a non-fleet card first, then a `Bug`, then the card opened first. H67's read order supplies
@@ -350,7 +365,7 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
   for (const issue of queue) {
     const reasons = labelReasons(issue);
     const place = placeCard(issue, items, children);
-    const row = { issue, place, reasons, flags: [], read: false };
+    const row = { issue, place, reasons, flags: [], read: false, gap: false };
     rows.push(row);
     if (reasons.length) continue;
     if (place === null) {
@@ -380,6 +395,7 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
     row.read = true;
     if (!thread.ok) {
       row.reasons.push(`thread unreadable (${thread.error})`);
+      row.gap = true;
       incomplete.push(`#${issue.number}'s thread could not be read`);
       return;
     }
@@ -388,7 +404,11 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
     for (const t of blockerTargetsFor(issue, bodies, repo)) {
       const res = resolveTarget(t);
       const name = t.local ? `#${t.number}` : t.key;
-      if (res.state === 'unresolved') row.reasons.push(`Blocked-by: ${name} (unreadable — held, never read as closed)`);
+      if (res.state === 'unresolved') {
+        row.reasons.push(`Blocked-by: ${name} (unreadable — held, never read as closed)`);
+        row.gap = true;
+        incomplete.push(`#${issue.number}'s Blocked-by: ${name} could not be read (${res.detail ?? 'no detail'})`);
+      }
       else if (res.state === 'open') row.reasons.push(`Blocked-by: ${name} (open)`);
       else if (res.unmerged) row.reasons.push(`Blocked-by: ${name} (PR closed unmerged — the block stays)`);
     }
@@ -402,6 +422,10 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
     }
     if (h74QueuedWithoutTriageAudit(issue, bodies, parent) !== null) {
       row.reasons.push(parent === H74_PARENT_UNREADABLE ? 'no triage audit (parent unreadable — unjudged, held)' : 'no triage audit — knock triage');
+    }
+    if (parent === H74_PARENT_UNREADABLE) {
+      row.gap = true;
+      incomplete.push(`#${issue.number}'s sub-issue parent could not be read`);
     }
   };
   const picks = [];
@@ -420,6 +444,7 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
   }
   const pickSet = new Set(picks.map((r) => r.issue.number));
   const others = rows.filter((r) => !pickSet.has(r.issue.number) && r.reasons.length > 0);
+  const held = others.filter((r) => r.gap);
   return {
     repo,
     items,
@@ -434,6 +459,7 @@ export async function pick({ repo, items, seat, limit = DEFAULT_LIMIT, why = fal
     incomplete,
     picks,
     others,
+    held,
     notReached,
   };
 }
@@ -446,7 +472,7 @@ function rowLine(row, rank, nowMs) {
   const i = row.issue;
   const leg = row.place?.leg ?? '—';
   const where = row.place?.item ?? areaOf(i);
-  const parts = [`#${i.number}`, gradeName(i), where, issueType(i) ?? 'no type', leg, ageDays(i, nowMs), isFleetCard(i) ? 'fleet' : 'non-fleet'];
+  const parts = [`#${i.number}`, gradeName(i), where, domainOf(i), issueType(i) ?? 'no type', leg, ageDays(i, nowMs), isFleetCard(i) ? 'fleet' : 'non-fleet'];
   const title = String(i.title ?? '').replace(/\s+/g, ' ').slice(0, 90);
   const flags = row.flags.length ? ` [${row.flags.join('; ')}]` : '';
   return `${rank === null ? '' : `${rank} · `}${parts.join(' · ')} — ${title}${flags}`;
@@ -461,15 +487,19 @@ export function renderText(r) {
   const at = new Date(r.nowMs).toISOString().slice(0, 16) + 'Z';
   const L = [`card-pick — ${r.repo} · order ${r.items.map((i) => i.name).join(', ') || '(none: p0/p1 only)'} · seat ${r.seat?.name ?? '(none)'} · ${at}`];
   L.push(`read: ${r.enumerated} open ${QUEUE_LABEL} issue(s) over ${r.reads.pages} page(s) · the platform counts ${r.totalCount} · threads ${r.reads.threads} · Blocked-by targets ${r.reads.targets} · parents ${r.reads.parents} · epics ${r.reads.epics}`);
-  L.push(`Picks (limit ${r.limit}) — rank · #N · grade · area/epic · type · leg · age · fleet:`);
+  L.push(`Picks (limit ${r.limit}) — rank · #N · grade · area/epic · domain · type · leg · age · fleet:`);
   if (r.picks.length === 0) L.push('  (none — every card the order reaches has a named blocking point; --why lists them)');
   r.picks.forEach((row, k) => L.push(`  ${rowLine(row, k + 1, r.nowMs)}`));
   if (r.why) {
     L.push(`Not a pick (--why) — ${r.others.length} card(s), each with its blocking point:`);
     const sorted = [...r.others].sort((a, b) => (a.place ? 0 : 1) - (b.place ? 0 : 1) || a.issue.number - b.issue.number);
-    for (const row of sorted) L.push(`  · #${row.issue.number} · ${gradeName(row.issue)} · ${row.place?.item ?? areaOf(row.issue)} — ${row.reasons.join('; ')}`);
-  } else if (r.notReached > 0) {
-    L.push(`Not reached: ${r.notReached} lower-ranked card(s) were not read once --limit filled (--why reads them all).`);
+    for (const row of sorted) L.push(`  · #${row.issue.number} · ${gradeName(row.issue)} · ${row.place?.item ?? areaOf(row.issue)} · ${domainOf(row.issue)} — ${row.reasons.join('; ')}`);
+  } else {
+    if (r.held.length > 0) {
+      L.push(`Held by a read that did not answer — ${r.held.length} card(s), printed without --why (⛔ not a card the order skipped):`);
+      for (const row of r.held) L.push(`  · ${rowLine(row, null, r.nowMs)} — ${row.reasons.join('; ')}`);
+    }
+    if (r.notReached > 0) L.push(`Not reached: ${r.notReached} lower-ranked card(s) were not read once --limit filled (--why reads them all).`);
   }
   L.push('Not read by this reader — the seat reads these itself:');
   for (const leg of UNREAD_LEGS) L.push(`  · ${leg}`);
@@ -483,6 +513,7 @@ export function renderJson(r) {
     title: row.issue.title ?? '',
     grade: gradeName(row.issue),
     area: areaOf(row.issue),
+    domain: domainOf(row.issue),
     type: issueType(row.issue),
     leg: row.place?.leg ?? null,
     order_item: row.place?.item ?? null,
@@ -503,6 +534,7 @@ export function renderJson(r) {
     reads: r.reads,
     picks: r.picks.map(card),
     not_a_pick: r.why ? r.others.map(card) : null,
+    held_on_unread: r.held.map(card),
     not_reached: r.notReached,
     unread_legs: UNREAD_LEGS,
     verdict: verdictLine(r),
@@ -515,8 +547,8 @@ export function renderJson(r) {
 
 /**
  * A `get` over a fixture: `{ issues, total_count?, comments?: {N: []}, sub_issues?: {N: []}, rows?: {"o/r#N": row},
- * parents?: {N: row|null} }`. A path the fixture does not hold answers 404, so a fixture can never read as a board
- * that answered. Pure.
+ * parents?: {N: row} }`. A path the fixture does not hold answers 404, so a fixture can never read as a board that
+ * answered; a `null` comment list, row or parent answers HTTP 502, a read that failed. Pure.
  */
 export function fixtureGet(fixture, repo) {
   const page = (rows, path) => {
@@ -535,9 +567,13 @@ export function fixtureGet(fixture, repo) {
     m = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/sub_issues$/.exec(bare);
     if (m) return fixture.sub_issues?.[m[1]] ? { ok: true, value: page(fixture.sub_issues[m[1]], path) } : { ok: false, error: 'HTTP 404 Not Found' };
     m = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/parent$/.exec(bare);
-    if (m) return fixture.parents?.[m[1]] ? { ok: true, value: fixture.parents[m[1]] } : { ok: false, error: 'HTTP 404 Not Found' };
+    if (m) {
+      if (fixture.parents?.[m[1]] === null) return { ok: false, error: 'HTTP 502' };
+      return fixture.parents?.[m[1]] ? { ok: true, value: fixture.parents[m[1]] } : { ok: false, error: 'HTTP 404 Not Found' };
+    }
     m = /^\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(bare);
     if (m) {
+      if (fixture.rows?.[`${m[1]}#${m[2]}`] === null) return { ok: false, error: 'HTTP 502' };
       const row = fixture.rows?.[`${m[1]}#${m[2]}`] ?? (m[1] === repo ? issues.find((i) => i.number === Number(m[2])) : undefined);
       return row ? { ok: true, value: row } : { ok: false, error: 'HTTP 404 Not Found' };
     }
@@ -559,7 +595,7 @@ const USAGE = [
   '  --order  the maintainer-named order, epics and areas mixed; p0 and p1 jump it whatever their area.',
   '  --seat   this seat, so its own Claim: reads as already yours rather than another seat\'s.',
   '  --why    every other queue card with its named blocking point (reads every thread the order reaches).',
-  '  Exits: 0 complete · 2 usage · 3 prerequisite (queue unreadable) · 4 INCOMPLETE (a gap, named).',
+  '  Exits: 0 complete · 2 usage · 3 prerequisite (queue unreadable) · 4 INCOMPLETE (a gap, named; held cards printed).',
 ].join('\n');
 
 export function parseArgs(argv) {
@@ -576,7 +612,9 @@ export function parseArgs(argv) {
       opts.repo = String(take() ?? '');
       if (!/^[\w.-]+\/[\w.-]+$/.test(opts.repo)) return { error: `--repo must be OWNER/NAME, got \`${opts.repo}\`` };
     } else if (flag === '--order') {
-      const parsed = parseOrder(take());
+      const v = take();
+      if (v === undefined) return { error: '--order needs a value (epic:#N and area:NAME, comma-separated; --order "" for p0/p1 only)' };
+      const parsed = parseOrder(v);
       if (!parsed.ok) return { error: parsed.error };
       opts.order = parsed.items;
     } else if (flag === '--seat') {
@@ -645,8 +683,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Blocked-by: an open target holds, a closed-unmerged PR holds, a merged PR and a closed issue release, cross-repo is read': 7,
   'the same-grade order and the epic child order': 5,
   'the candidate definition: label reasons, claims and the triage audit': 9,
-  'the walk: every page, the count checked, the limit and --why': 7,
-  'the CLI: usage, exits and the footer': 8,
+  'the walk: every page, the count checked, the limit and --why': 11,
+  'the CLI: usage, exits and the footer': 12,
 });
 const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -842,8 +880,17 @@ export async function selfTest() {
     t('⭐ a count gap is INCOMPLETE, never clean', [gap.complete, gap.incomplete[0]], [false, `the walk returned 2 ${QUEUE_LABEL} issue(s) and the platform counts 5`]);
     const dead = await run(null, { get: () => ({ ok: false, error: 'HTTP 403' }) });
     t('an unreadable queue is a prerequisite, nothing ranked', Boolean(dead.prerequisite), true);
-    const unread = await run({ issues: [many[0]], comments: { [many[0].number]: null } });
-    t('a thread that cannot be read holds the card and makes the run INCOMPLETE', [unread.picks.length, unread.complete], [0, false]);
+    const unread = await run({ issues: [many[0]], comments: { [many[0].number]: null } }, { why: false });
+    t('a thread that cannot be read holds the card, makes the run INCOMPLETE, and the held card is printed without --why', [unread.picks.length, unread.complete, nums(unread.held), renderText(unread).includes(`#${many[0].number} · p2`)], [0, false, [many[0].number], true]);
+    const onUnread = card(['area:ux', 'priority:p2'], { body: 'Blocked-by: #904' });
+    const ur = await run({ issues: [onUnread], comments: { [onUnread.number]: [{ body: AUDIT }] }, rows: { [`${REPO}#904`]: null } }, { why: false });
+    t('⭐ an unreadable Blocked-by: target holds the card AND makes the run INCOMPLETE, the gap named', [ur.picks.length, ur.complete, ur.incomplete[0]], [0, false, `#${onUnread.number}'s Blocked-by: #904 could not be read (HTTP 502)`]);
+    t('⭐ …and the held card is printed without --why', [renderText(ur).includes('Held by a read that did not answer — 1 card(s)'), renderText(ur).includes(`#${onUnread.number} · p2`)], [true, true]);
+    const orphan = card(['area:ux', 'priority:p2'], { user: APP });
+    const pr = await run({ issues: [orphan], comments: { [orphan.number]: [{ body: 'just a note' }] }, parents: { [orphan.number]: null } }, { why: false });
+    t('⭐ an unreadable sub-issue parent makes the run INCOMPLETE, the gap named, the held card printed without --why', [pr.complete, pr.incomplete[0], nums(pr.held), renderText(pr).includes('no triage audit (parent unreadable — unjudged, held)')], [false, `#${orphan.number}'s sub-issue parent could not be read`, [orphan.number], true]);
+    const quietRun = await run({ issues: [many[0]], comments }, { why: false });
+    t('a complete run prints no held block', [quietRun.complete, renderText(quietRun).includes('Held by a read')], [true, false]);
   }
 
   battery('the CLI: usage, exits and the footer');
@@ -853,9 +900,13 @@ export async function selfTest() {
     t('a malformed --seat is refused', Boolean(parseArgs(['--order', 'area:ux', '--seat', 'five']).error), true);
     t('an unknown flag is refused, never ignored', Boolean(parseArgs(['--order', 'area:ux', '--lane', 'x']).error), true);
     t('both spellings of an option are read', [parseArgs(['--order=area:ux', '--limit=2']).opts.limit, parseArgs(['--order', 'epic:#7']).opts.order[0].number], [2, 7]);
-    const c = card(['area:ux', 'priority:p2']);
+    t('--order as the last argument with no value is a usage error; --order "" is the p0/p1-only order', [Boolean(parseArgs(['--order']).error), parseArgs(['--order', '']).opts?.order], [true, []]);
+    t('--seat reads every lane a seat signature carries, an epic seat\'s epic:#N included', [parseSeat('epic:#35205#1')?.name, parseSeat('domain:ui#2')?.name, parseSeat('area:ux#1'), parseSeat('repo:objectstack#5 x')], ['epic:#35205#1', 'domain:ui#2', null, null]);
+    t('⭐ the footer names lane ownership and the sub-epic an area item holds, beside the five legs it named before', [UNREAD_LEGS.length, UNREAD_LEGS.some((l) => l.startsWith('lane ownership — ')), UNREAD_LEGS.some((l) => l.startsWith('an area item that holds a sub-epic — '))], [7, true, true]);
+    const c = card(['area:ux', 'priority:p2', 'domain:ui']);
     const ok = await quiet(main)(['--order', 'area:ux'], { get: fixtureGet({ issues: [c], comments: { [c.number]: [] } }, REPO), nowMs: NOW });
     t('a complete run exits 0', ok.code, EXIT_OK);
+    t('⭐ each row prints its domain:* label, so the seat reads lane ownership off the row', ok.out.includes(`#${c.number} · p2 · area:ux · domain:ui · `), true);
     t('⭐ every run names the legs it cannot read', UNREAD_LEGS.every((l) => ok.out.includes(l)), true);
     const down = await quiet(main)(['--order', 'area:ux'], { get: () => ({ ok: false, error: 'HTTP 403' }) });
     t('an unread queue exits 3, a usage error 2', [down.code, (await quiet(main)(['--bogus'])).code], [EXIT_PREREQUISITE, EXIT_USAGE]);
