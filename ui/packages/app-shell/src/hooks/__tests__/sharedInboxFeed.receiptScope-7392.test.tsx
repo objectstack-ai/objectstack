@@ -70,8 +70,8 @@
  * The id-scoped read could only start once the message read had answered,
  * which made it the page's last request layer. The tick now reads the newest
  * `WINDOW_SIZE` receipts IN PARALLEL with the newest `WINDOW_SIZE` messages
- * (the inbox channel writes a message and its `delivered` receipt with one
- * `created_at`), and keeps the id-scoped read only for listed ids that the
+ * (the inbox channel writes each message's `delivered` receipt right after
+ * the message), and keeps the id-scoped read only for listed ids that the
  * parallel read did not carry. The unique key makes that exact; the window
  * bounds the rows. The fake below therefore honours `$orderby` too.
  */
@@ -94,8 +94,8 @@ const READ_STATES = new Set(['read', 'clicked', 'dismissed']);
 const notifId = (i: number) => `ntf_${String(i).padStart(3, '0')}`;
 /**
  * One clock for both objects: notification `i` was delivered `i` hours before
- * the newest, and its message and `delivered` receipt share that instant — as
- * the inbox channel writes them.
+ * the newest, and its `delivered` receipt was written with its message — the
+ * inbox channel writes the receipt right after the message.
  */
 const deliveredAt = (i: number) => new Date(Date.UTC(2026, 8, 30, 9) - i * 3_600_000).toISOString();
 

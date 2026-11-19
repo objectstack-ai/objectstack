@@ -1534,10 +1534,10 @@ function idsWithoutReceipt(ids: readonly string[], got: readonly unknown[]): str
  *   - `sys_inbox_message` filtered by `user_id`, newest first, `$top: 20`.
  *   - IN PARALLEL with it, `sys_notification_receipt` filtered by `user_id` +
  *     `channel:'inbox'`, newest first, `$top: 20` — the same window over the
- *     receipts. The inbox channel writes a message and its `delivered`
- *     receipt with one `created_at`, so this read normally carries exactly
- *     the listed messages' receipts, and the receipt read no longer waits for
- *     the message read to answer (objectstack#35410).
+ *     receipts. The inbox channel writes each message's `delivered` receipt
+ *     right after the message, so this read normally carries exactly the
+ *     listed messages' receipts, and the receipt read no longer waits for the
+ *     message read to answer (objectstack#35410).
  *   - Only for a listed notification id that read did NOT carry, a follow-up
  *     read narrowed to those ids, `$top` = their count (objectui#7392's exact
  *     read). A message whose receipt was written later than its delivery, or
