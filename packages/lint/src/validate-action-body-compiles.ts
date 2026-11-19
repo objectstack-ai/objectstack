@@ -37,12 +37,23 @@
  * The runtime's engine is QuickJS; this rule's is the host's (V8 on Node). Both
  * implement the same early errors, and over a probe of 36 bodies the two agreed
  * on every redeclaration, every grammar error, every strict-mode error and every
- * misplaced `new.target` / `super`. They disagreed in one place: a regular
- * expression literal. Node 22's V8 refuses duplicate named capture groups
- * (`/(?<a>x)|(?<a>y)/`), which QuickJS accepts and runs. A regular-expression
- * failure is therefore reported as a `warning`: the two dialects are where a
- * host refusal measurably does not predict a runtime refusal, and an `error`
- * there would refuse a body that runs. Every other compile failure is an
+ * misplaced `new.target` / `super`. They disagree inside the PATTERN of a
+ * regular-expression literal: Node 22's V8 refuses duplicate named capture
+ * groups (`/(?<a>x)|(?<a>y)/`) and modifier groups (`/(?i:a)/`), both of which
+ * QuickJS accepts and runs. A failure V8 reports against a pattern — its
+ * sentence names the literal, `Invalid regular expression: /PATTERN/FLAGS:
+ * REASON` — is therefore a `warning`: that is where a host refusal measurably
+ * does not predict a runtime refusal, and an `error` there would refuse a body
+ * that runs.
+ *
+ * The literal's own TOKEN is not a dialect question. A literal that never closes
+ * on its line (`return /abc;` — V8 `Invalid regular expression: missing /`) and
+ * a flag set that is not one (`/a/gg`, `/a/zz`, `/a/uv` — V8 `Invalid regular
+ * expression flags`) are refused by QuickJS as well (`unexpected end of regexp`,
+ * `unexpected line terminator in regexp`, `invalid regular expression flags`),
+ * and over 55 single characters and every ordered pair of the eight flags the
+ * two engines agreed on all 119 flag sets. So only the pattern shape takes
+ * the warning arm, and every other compile failure — these two included — is an
  * `error`. The disagreement in the other direction (syntax the host accepts and
  * QuickJS does not, such as newer grammar) is a missed finding, never a false
  * one; at run time the action then answers a coded `500` naming itself and the
@@ -59,7 +70,10 @@ import { collectActionBodies } from './validate-action-body-writes.js';
 export const ACTION_BODY_DOES_NOT_COMPILE = 'action-body-does-not-compile';
 
 export interface ActionBodyCompileFinding {
-  /** `error`, except a regular-expression literal the host refuses (`warning`; see the module note). */
+  /**
+   * `error`, except a regular-expression PATTERN the host refuses (`warning`; see the module note). A
+   * literal that never closes, or whose flags are not a flag set, is an `error`.
+   */
   severity: 'error' | 'warning';
   rule: string;
   /** e.g. `action "decide_approval_step" › body`. */
@@ -116,8 +130,20 @@ export function hostCompileFailure(text: string): HostCompileFailure | undefined
   }
 }
 
-/** The host's sentence for a regular-expression literal it refuses (V8 and SpiderMonkey both open so). */
-const REGEXP_FAILURE = /^SyntaxError: Invalid regular expression/;
+/**
+ * V8's sentence for a regular-expression PATTERN it refuses, which names the
+ * literal: `Invalid regular expression: /PATTERN/FLAGS: REASON`. The one
+ * `warning` arm. The literal's token errors open with the same three words and
+ * are not this shape (`Invalid regular expression: missing /`, `Invalid regular
+ * expression flags`), so they stay `error`, and so does any other sentence.
+ */
+const REGEXP_PATTERN_FAILURE = /^SyntaxError: Invalid regular expression: \//;
+
+/** V8's sentence for a regular-expression literal that never closes on its line. */
+const REGEXP_UNTERMINATED = /^SyntaxError: Invalid regular expression: missing \//;
+
+/** V8's sentence for a regular-expression literal whose flags are not a flag set. */
+const REGEXP_FLAGS = /^SyntaxError: Invalid regular expression flags/;
 
 /** A redeclaration the host names (`Identifier 'input' has already been declared`), and the name. */
 const REDECLARED = /^SyntaxError: Identifier '([^']+)' has already been declared/;
@@ -137,7 +163,9 @@ export function validateActionBodyCompiles(stack: Record<string, unknown>): Acti
     if (!failure) continue;
 
     const at = failure.line !== undefined ? `, line ${failure.line}` : '';
-    const regexp = REGEXP_FAILURE.test(failure.error);
+    const regexp = REGEXP_PATTERN_FAILURE.test(failure.error);
+    const unterminated = REGEXP_UNTERMINATED.test(failure.error);
+    const flags = REGEXP_FLAGS.test(failure.error);
     const redeclared = REDECLARED.exec(failure.error)?.[1];
     const parameter = redeclared !== undefined && (ACTION_BODY_PARAMETERS as readonly string[]).includes(redeclared)
       ? redeclared
@@ -159,8 +187,14 @@ export function validateActionBodyCompiles(stack: Record<string, unknown>): Acti
           `\`const params = ctx.input || {}\``
         : regexp
           ? 'Rewrite the regular expression in a form both engines accept, or build it with new RegExp(…) at run time'
-          : `Fix body.source so it compiles as the statements of an async function whose parameters are ` +
-            `${ACTION_BODY_PARAMETERS.map((p) => `\`${p}\``).join(' and ')}`,
+          : unterminated
+            ? 'A `/` opens a regular-expression literal that never closes on its line: close it with `/`, write a ' +
+              '`/` inside it as `\\/`, or, if the `/` is a division, give it a left-hand operand'
+            : flags
+              ? 'A regular-expression literal\'s flags are letters from `dgimsuvy`, each at most once, and never ' +
+                '`u` with `v`'
+              : `Fix body.source so it compiles as the statements of an async function whose parameters are ` +
+                `${ACTION_BODY_PARAMETERS.map((p) => `\`${p}\``).join(' and ')}`,
     });
   }
 

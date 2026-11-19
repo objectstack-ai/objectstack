@@ -24,7 +24,8 @@ export const entry: SemanticMigration = {
     + '(the context): read the params as input, or give the local another name (const params = ctx.input || {}); '
     + 'var input = … also compiles. Fix any other compile error the finding names at the line of body.source it '
     + 'names. Refused at error as `action-body-does-not-compile` (422 INVALID_METADATA at the doors). A regular '
-    + 'expression literal the host engine refuses is reported at warning, never refused.',
+    + 'expression whose pattern the host engine refuses is reported at warning, never refused; a literal that never '
+    + 'closes or whose flags are not a flag set is refused (action-body-regexp-literal-token-refused).',
   reason:
     'The runtime never runs body.source as a script of its own: it compiles it inside an async arrow function with '
     + 'the parameters input and ctx, and a source that redeclares one of them, or otherwise fails to compile there, '
@@ -33,7 +34,7 @@ export const entry: SemanticMigration = {
     + 'and then EVERY run of the action failed, answering an opaque 500 INTERNAL_ERROR on the /actions door and on '
     + 'MCP run_action for as long as it stayed deployed. The rule compiles the source inside the expression the '
     + 'runtime builds, from the same function, with the host JavaScript engine and without running it. The host '
-    + 'engine and the runtime\'s QuickJS agreed on every early error probed except regular-expression literals, '
+    + 'engine and the runtime\'s QuickJS agreed on every early error probed except regular-expression patterns, '
     + 'hence the warning there. Such a body never ran, so no run of it ever succeeded and no stored row changes '
     + 'shape. Hook and job bodies, which run in a different wrapper, are not judged. No first-party stack (example '
     + 'apps, skills, docs samples) carries such a body today. There is no mechanical rewrite: renaming a local is '
