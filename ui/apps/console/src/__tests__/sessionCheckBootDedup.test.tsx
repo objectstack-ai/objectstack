@@ -23,6 +23,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import { AuthProvider, useAuth } from '@object-ui/auth';
 import { preflightAuth } from '../lib/auth-preflight';
+import { readConsoleDiscovery } from '../lib/early-discovery';
+import { getSharedDiscovery } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 
 const TOKEN = 'tok_valid';
 const EARLY_SLOT = Symbol.for('objectui.earlySessionCheck');
@@ -339,5 +342,60 @@ describe('one page, one server origin', () => {
     runEarlySessionCheck(productionHtml);
 
     expect(sessionCalls()[0]![0]).toBe('/api/v1/auth/get-session');
+  });
+});
+
+describe('discovery starts at parse time beside get-session, and the console reads that request (objectstack#34211)', () => {
+  const DISCOVERY_SLOT = Symbol.for('objectui.earlyDiscovery');
+  const SERVER = 'https://api.example.test';
+  const discoveryCalls = () => fetchStub.mock.calls.filter(([input]) => urlOf(input).includes('/discovery'));
+
+  beforeEach(() => {
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+  });
+  afterEach(() => {
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+  });
+
+  it('is sent in the same parse pass as get-session, before any bundle code runs', () => {
+    localStorage.setItem('auth-session-token', TOKEN);
+    runScript('applyEarlyBranding');
+    runEarlySessionCheck();
+    runScript('startEarlyDiscovery');
+
+    const urls = fetchStub.mock.calls.map(([input]) => urlOf(input));
+    expect(urls).toEqual(['/api/v1/runtime/config', '/api/v1/auth/get-session', '/api/v1/discovery']);
+  });
+
+  it('main.tsx starts the console reader on every boot, over the same server base', () => {
+    expect(mainSource).toContain('void readConsoleDiscovery(SERVER_BASE)');
+  });
+
+  it("the console reader takes the parse-time request, and the adapter's connect joins it: one discovery per load", async () => {
+    runScript('startEarlyDiscovery', applyViteHtmlEnv(indexHtml, { VITE_SERVER_URL: SERVER }));
+    await settle();
+
+    const consoleRead = readConsoleDiscovery(SERVER);
+    // `ObjectStackAdapter.connect()` asks the same shared cache with a fetcher of its own.
+    const adapterFetcher = vi.fn(async () => ({ from: 'adapter' }));
+    const adapterRead = getSharedDiscovery(SERVER, adapterFetcher);
+
+    expect(await consoleRead).toBeNull();
+    expect(await adapterRead).toBeNull();
+    expect(adapterFetcher).not.toHaveBeenCalled();
+    expect(discoveryCalls()).toHaveLength(1);
+    expect(discoveryCalls()[0]![0]).toBe(`${SERVER}/api/v1/discovery`);
+  });
+
+  it('a failed parse-time request is not reused: the reader asks the server itself', async () => {
+    fetchStub.mockImplementationOnce(async () => json({ error: 'boom' }, 503));
+    runScript('startEarlyDiscovery');
+    await settle();
+
+    await readConsoleDiscovery('');
+
+    expect(discoveryCalls()).toHaveLength(2);
   });
 });
