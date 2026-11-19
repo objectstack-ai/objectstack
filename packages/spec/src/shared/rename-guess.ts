@@ -2,17 +2,24 @@
 
 /**
  * The rename guess an unknown key is offered — ONE rule, read by every
- * suggester in this package.
+ * unknown-key suggester in this package.
  *
- * Four doors answer an unknown key with "did you mean": the shared
- * `strictUnknownKeyError` (every `strictObject` surface), `ObjectSchema.create()`
- * (`data/object.zod.ts`), `defineSeed` (`data/seed.zod.ts`), and, through the
- * first, the value shapes of `data/field-value.zod.ts` that
- * `data/default-value-shape.ts` reads back. They used to carry the budget
- * `max(2, len/3)` as four hand-copied expressions, so when the short-key screen
- * below was settled on the first door the other three kept answering a short key
- * with an unrelated one. {@link suggestRename} is now the only spelling of the
- * budget and the screen; a door that needs a rename guess calls it.
+ * The doors that answer an unknown key with "did you mean" all call
+ * {@link suggestRename}: the shared `strictUnknownKeyError` (every
+ * `strictObject` surface, including the value shapes of
+ * `data/field-value.zod.ts` that `data/default-value-shape.ts` reads back),
+ * `ObjectSchema.create()` (`data/object.zod.ts`), `defineSeed`
+ * (`data/seed.zod.ts`) and the authoring-key lint `defineStack` and the CLI
+ * report through (`data/authoring-key-lint.ts`). The last three used to spell
+ * their own budget — two copies of `max(2, len/3)` without the short-key screen
+ * below, and a flat distance of 3 — so after the screen was settled on the
+ * first door they kept answering a short key with an unrelated one. This module
+ * is now the only spelling of the budget and the screen; `suggestions.test.ts`
+ * fails on a source file that spells either again.
+ *
+ * Out of its reach on purpose: suggesters that rank a closed VALUE vocabulary
+ * rather than guess a key's rename — the enum-value hint in `error-map.zod.ts`
+ * and `suggestFieldType` — keep `findClosestMatches`' own default.
  *
  * A leaf module on purpose: it imports nothing, so `suggestions.zod.ts` (which
  * `strict-object.ts` imports, which nearly every closed schema imports) can read

@@ -311,9 +311,10 @@ describe('suggestRename — the one rename rule', () => {
     expect(suggestRename('', ['a', 'b'])).toBeUndefined();
   });
 
-  // The class guard: a suggester that computes its own budget is the copy this
-  // rule replaced. Comments that QUOTE the budget are prose and are skipped.
-  it('no other source file in the package spells the budget itself', () => {
+  // The class guard: a suggester that computes its own budget, or hands
+  // `findClosestMatches` its own distance, is the copy this rule replaced.
+  // Comments that QUOTE the budget are prose and are skipped.
+  it('no other source file in the package spells the budget or passes its own distance', () => {
     const srcRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
     const offenders: string[] = [];
     const walk = (dir: string): void => {
@@ -325,7 +326,8 @@ describe('suggestRename — the one rename rule', () => {
         readFileSync(path, 'utf8').split('\n').forEach((line, i) => {
           const code = line.trim();
           if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return;
-          if (/Math\.max\(\s*2\s*,\s*Math\.floor\(/.test(code)) offenders.push(`${relative(srcRoot, path)}:${i + 1}`);
+          if (/Math\.max\(\s*2\s*,\s*Math\.floor\(/.test(code)
+            || /findClosestMatches\([^)]*,[^)]*,/.test(code)) offenders.push(`${relative(srcRoot, path)}:${i + 1}`);
         });
       }
     };
