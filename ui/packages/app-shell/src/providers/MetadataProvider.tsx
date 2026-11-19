@@ -189,7 +189,11 @@ const NAMES_ONLY_SCOPE = '';
  * by-name envelope (no `sortability`), shares no request with the adapter's
  * `getObjectSchema` (objectui#13044), and cannot tell an absent object from a
  * refused one (`OBJECT_PACKAGE_DISABLED`), so a route's reader never takes
- * its answer for its own.
+ * its absences for its own: a name it left out is still asked by name. The
+ * one thing a route's reader does take from it is a definition it SERVED
+ * (objectstack#35306): the list door serves that definition through the same
+ * gate, mask and translation as the by-name door, and the by-name envelope's
+ * extras never reach a scope.
  */
 const NAMES_BATCH_SCOPE: unique symbol = Symbol('names-batch');
 
@@ -1953,6 +1957,12 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           }
         }
       }
+      // objectstack#35306 — the definition the presence read (the batched
+      // names scope) answered for `name`, once that read has answered it
+      // served; `undefined` while it is asked, absent, failed or never asked.
+      const presence = batched ? undefined : scopesRef.current.get(NAMES_BATCH_SCOPE);
+      const presentDefinition = (name: string): unknown =>
+        presence?.names.get(name) === 'answered' ? presence.items.find((it: any) => it?.name === name) : undefined;
       let namesSettled = true;
       const failedNames: string[] = [];
       const toBatch: string[] = [];
@@ -1990,6 +2000,28 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
               if (bundled.state === 'hit') {
                 entry.names.set(name, 'answered');
                 entry.items = [...entry.items, bundled.value];
+                continue;
+              }
+            } else {
+              // objectstack#35306 — the other way round: a name the presence
+              // read has answered SERVED is answered with the definition that
+              // read carried, and not asked again by name. The list door
+              // serves an object's definition through the same per-caller
+              // gate, mask and translation as the by-name door, and its
+              // switched-off actions beside it (`ingestObjectList`); what the
+              // by-name envelope adds (`sortability`, `cascadeDeleteObjects`)
+              // rides the adapter's own copy, never a scope's
+              // (`cloneServedObject`). So a lookup target the presence read
+              // answered costs no second request. Only a served answer is
+              // taken: a name the presence read left out may be
+              // absent or refused, which only a by-name read tells apart
+              // (`NAMES_BATCH_SCOPE`), so it is asked by name as before. Never
+              // under the draft preview, whose reads must see the drafts.
+              const present = previewClientRef.current ? undefined : presentDefinition(name);
+              if (present) {
+                entry.names.set(name, 'answered');
+                entry.items = [...entry.items, present];
+                if (entry.missing.includes(name)) entry.missing = entry.missing.filter((n) => n !== name);
                 continue;
               }
             }
