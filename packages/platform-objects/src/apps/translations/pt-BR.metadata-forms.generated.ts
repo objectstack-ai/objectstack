@@ -1893,6 +1893,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memória (MB)",
         helpText: "Limite de memória por invocação (MB, máx. 256)"
       },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que a ação escreve nos registros, indexadas pela chave snake_case que o corpo dela pede com ctx.text (por exemplo email_subject). O corpo recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para o corpo JavaScript (L2) de uma ação script; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que a ação escreve quando o corpo dela pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo subject): o corpo pede ctx.text(key, { subject }) e um marcador {{ subject }} mostra o valor. Ausente: a frase é texto simples"
+      },
       params: {
         label: "Parâmetros",
         helpText: "Parâmetros de entrada do usuário (mostrar um formulário antes de executar)"

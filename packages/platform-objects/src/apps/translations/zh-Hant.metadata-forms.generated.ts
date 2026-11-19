@@ -1893,6 +1893,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "記憶體（MB）",
         helpText: "單次呼叫記憶體上限（MB，最大 256）"
       },
+      texts: {
+        label: "文字",
+        helpText: "操作寫入記錄的句子，以其內文透過 ctx.text 請求的 snake_case 鍵為鍵（例如 email_subject）。內文取得依組織語言翻譯的宣告句子，無翻譯時退回宣告的句子。適用於 script 操作的 JavaScript（L2）內文；運算式內文宣告會被拒絕"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "內文請求此鍵時操作寫入的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "texts.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 subject）：內文請求 ctx.text(key, { subject })，{{ subject }} 預留位置即顯示該值。不填：句子為純文字"
+      },
       params: {
         label: "參數",
         helpText: "執行前向使用者收集的輸入參數"

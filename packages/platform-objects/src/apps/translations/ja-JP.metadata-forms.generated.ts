@@ -1893,6 +1893,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "メモリ（MB）",
         helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
+      texts: {
+        label: "テキスト",
+        helpText: "アクションがレコードに書き込む文。本文が ctx.text で要求する snake_case のキー（例: email_subject）をキーとします。本文には宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。script アクションの JavaScript（L2）本文で使用可能。expression 本文では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "本文がこのキーを要求したときにアクションが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: subject）。本文が ctx.text(key, { subject }) を要求すると、{{ subject }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
       params: {
         label: "パラメーター",
         helpText: "ユーザー入力パラメーター（実行前にフォームを表示）"

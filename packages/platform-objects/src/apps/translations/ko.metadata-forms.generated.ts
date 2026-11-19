@@ -1893,6 +1893,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "메모리(MB)",
         helpText: "호출당 메모리 상한(MB, 최대 256)"
       },
+      texts: {
+        label: "텍스트",
+        helpText: "작업이 레코드에 쓰는 문장으로, 본문이 ctx.text로 요청하는 snake_case 키(예: email_subject)를 키로 합니다. 본문은 선언된 메시지를 조직의 언어로 번역해 받으며, 번역이 없으면 선언된 메시지를 받습니다. script 작업의 JavaScript(L2) 본문용이며, expression 본문에서는 거부됩니다"
+      },
+      "texts.message": {
+        label: "메시지",
+        helpText: "본문이 이 키를 요청할 때 작업이 쓰는 문장입니다. 일반 텍스트이며, 항목이 params를 선언하면 {{ name }} 자리 표시자에 선언된 매개변수가 채워집니다"
+      },
+      "texts.params": {
+        label: "매개변수",
+        helpText: "문장에 채울 수 있는 이름(예: subject)입니다. 본문이 ctx.text(key, { subject })를 요청하면 {{ subject }} 자리 표시자에 그 값이 표시됩니다. 없으면 문장은 일반 텍스트입니다"
+      },
       params: {
         label: "매개변수",
         helpText: "사용자 입력 매개변수(실행 전에 양식 표시)"

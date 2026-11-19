@@ -1893,6 +1893,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
       },
+      texts: {
+        label: "Texts",
+        helpText: "Sentences the action writes into records, keyed by the snake_case key its body asks for with ctx.text (e.g. email_subject). The body gets the declared message in the organization's language, translated, with the declared message as the fallback. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "The sentence the action writes when its body asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "texts.params": {
+        label: "Params",
+        helpText: "Names the sentence may fill (e.g. subject): the body asks for ctx.text(key, { subject }), and a {{ subject }} hole renders it. Absent: the sentence is plain text"
+      },
       params: {
         label: "Params",
         helpText: "User input parameters (show form before executing)"

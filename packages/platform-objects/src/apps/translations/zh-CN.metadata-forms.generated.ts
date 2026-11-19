@@ -1893,6 +1893,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "内存（MB）",
         helpText: "单次调用内存上限（MB，最大 256）"
       },
+      texts: {
+        label: "文本",
+        helpText: "操作写入记录的句子，以其正文通过 ctx.text 请求的 snake_case 键为键（例如 email_subject）。正文得到按组织语言翻译的声明句子，无翻译时回退为声明的句子。适用于 script 操作的 JavaScript（L2）正文；表达式正文声明会被拒绝"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "正文请求此键时操作写入的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "texts.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 subject）：正文请求 ctx.text(key, { subject })，{{ subject }} 占位符即显示该值。不填：句子为纯文本"
+      },
       params: {
         label: "参数",
         helpText: "执行前向用户收集的输入参数"

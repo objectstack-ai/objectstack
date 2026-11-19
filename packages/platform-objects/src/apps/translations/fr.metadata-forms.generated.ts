@@ -1893,6 +1893,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Mémoire (Mo)",
         helpText: "Plafond de mémoire par appel (Mo, 256 max.)"
       },
+      texts: {
+        label: "Textes",
+        helpText: "Les phrases que l’action écrit dans les enregistrements, indexées par la clé snake_case que son corps demande avec ctx.text (par ex. email_subject). Le corps reçoit le message déclaré dans la langue de l’organisation, traduit, avec le message déclaré comme repli. Pour le corps JavaScript (L2) d’une action script ; refusé sur un corps expression"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "La phrase que l’action écrit lorsque son corps demande cette clé. Texte brut, sauf si l’entrée déclare des params : un espace réservé {{ name }} reçoit alors un paramètre déclaré"
+      },
+      "texts.params": {
+        label: "Paramètres",
+        helpText: "Les noms que la phrase peut remplir (par ex. subject) : le corps demande ctx.text(key, { subject }), et un espace réservé {{ subject }} en affiche la valeur. Absent : la phrase est du texte brut"
+      },
       params: {
         label: "Paramètres",
         helpText: "Paramètres saisis par l’utilisateur (afficher un formulaire avant l’exécution)"
