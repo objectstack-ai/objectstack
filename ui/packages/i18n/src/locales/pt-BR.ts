@@ -1612,7 +1612,6 @@ const pt = {
     widgetForbiddenMessage: "Você não tem permissão para ver os dados deste widget.",
     allWidgetsForbiddenMessage: "Você não tem permissão para ver os dados deste painel.",
     details: "Detalhes",
-    exportCsv: "Exportar CSV",
     openInList: "Abrir na lista",
     filters: {
       label: "Filtros do painel",

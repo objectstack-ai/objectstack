@@ -269,7 +269,7 @@ service is installed:
 |:---|:---|
 | `list_objects` / `describe_object` | Discover which objects exist and their fields |
 | `validate_expression` | Check a CEL expression against an object's schema before authoring it into a formula, validation, or flow condition |
-| `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default) |
+| `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default); `expand` and `related` read related records in the same call |
 | `aggregate_records` | Grouped aggregation (registered when the active driver supports it) |
 | `create_record` / `update_record` / `delete_record` | Write data |
 | `delete_records` | Delete many records of one object, by a filter or an id list, at most 200 per call (an OAuth token needs both `data:read` and `data:write`) |
@@ -312,6 +312,55 @@ names the groups and the order that picks each group's row:
   connection, MongoDB) the call is refused with `INVALID_QUERY` before anything
   is read, as it is for an object with an `afterFind` hook or object-scoped read
   middleware.
+
+### A record with its related records: `expand` and `related`
+
+`query_records` takes `expand`: up to 3 of the object's lookup, master-detail,
+user or tree fields. Each one comes back as the record it names, one level
+deep:
+
+```json
+{ "objectName": "crm_opportunity", "expand": ["account", "owner_id"] }
+```
+
+`get_record` takes `related`: up to 3 child objects that point at the record,
+each answered as a list of at most 20 rows (`limit` lowers it):
+
+```json
+{
+  "objectName": "crm_account",
+  "recordId": "acc_1",
+  "related": [
+    { "object": "crm_opportunity", "orderBy": [{ "field": "close_date", "order": "desc" }] },
+    { "object": "crm_activity", "field": "account", "limit": 5 }
+  ]
+}
+```
+
+- The answer is then `{ record, related: [{ object, field, records, total, hasMore }] }`.
+  A list with more rows than came back also carries `truncated: true`.
+- `field` is the child's field that points at the record. It can be left out
+  when the child has exactly one such field.
+- A related list is filtered only by the link to the record. It takes the
+  child's own `fields` and `orderBy`, and no other filter.
+- Every expanded or related object is read as you, under that object's
+  permissions, row-level security and field masking. A field you may not read is
+  not offered for `expand` or as a link.
+- The record and each related list name the fields withheld from them in
+  `withheldFields`, as a plain `get_record` and `query_records` do.
+- Every object a new read shape reaches is judged by the MCP read guard exactly
+  as the object the call names. An object the guard refuses (a system object
+  that is not opted into AI reads) refuses the whole call with
+  `PERMISSION_DENIED` before anything is read. A related object that is not
+  served to you refuses it too. An expanded field is different: when the guard
+  admits its object but you may not read the record it names (no permission on
+  that object, or a row it hides from you), the call is answered and the field
+  keeps its stored id.
+- Each related list carries the delegation notice (`delegationNarrowed`,
+  `warning`) that `query_records` carries when the agent ceiling narrowed the
+  read.
+- A name that is not a relationship field, or a `field` that does not point at
+  the record, is refused with `INVALID_FIELD`.
 
 ### Governed metrics and the `initialize` instructions
 

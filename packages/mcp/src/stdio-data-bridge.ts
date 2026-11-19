@@ -59,7 +59,9 @@
  *
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
  * to the engine; this bridge is engine-only. So the HTTP tools additionally get
- * that layer's existence probes, its spec-shaped receipts and `expand`/`select`.
+ * that layer's existence probes, its spec-shaped receipts and `select`
+ * (`expand` is served here since #35145, built as that layer builds it:
+ * {@link stdioExpandMap}).
  * (That layer's create-side `readonly` strip used to head this list; since the
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the
@@ -132,6 +134,10 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+// [#35145] What a reference field points at, and whether that object serves
+// the read an expansion is (`get`): the spec's one arbiter of each, the pair
+// the data door's expand gate asks.
+import { REFERENCE_VALUE_TYPES, canServeApiOperation, referenceTargetOf } from '@objectstack/spec/data';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
@@ -303,6 +309,74 @@ interface ObjectDef {
 }
 
 /**
+ * The engine's order-cut-count read option for `aggregate`
+ * (`@objectstack/objectql`, `aggregate-order-cut.ts`), spelled `Symbol.for`
+ * because this package does not depend on the engine at runtime. A symbol, so
+ * no tool argument can carry it.
+ */
+const STDIO_AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+/**
+ * The engine's one-row-per-group read option (`@objectstack/objectql`,
+ * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
+ * on the engine at runtime. A symbol, so no tool argument can carry it.
+ */
+const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
+/**
+ * [#35145] `query_records`' `expand` on this transport, as the data door
+ * builds it (`assertExpandTargetsExist`, then `servedExpand`): each name is a
+ * reference field of the object as the caller is served it (`served`), else
+ * the door's `400 INVALID_FIELD`; a target whose declaration does not serve
+ * `get` is withheld, and its field answers as the stored id. The map is the
+ * engine's own `expand`, which reads each target in one batched `id IN (...)`
+ * read under the target's permissions, row and field security.
+ */
+async function stdioExpandMap(
+  reads: StdioObjectReads,
+  object: string,
+  served: ObjectDef | undefined,
+  names: readonly string[],
+): Promise<Record<string, { object: string }> | undefined> {
+  const out: Record<string, { object: string }> = {};
+  for (const name of names) {
+    const def = served?.fields && Object.prototype.hasOwnProperty.call(served.fields, name)
+      ? served.fields[name]
+      : undefined;
+    let target: string | undefined;
+    try {
+      target = def && typeof def.type === 'string' && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
+    } catch {
+      target = undefined;
+    }
+    if (!target) {
+      const err = new Error(
+        def === undefined
+          ? `Unknown field '${name}' on object '${object}'. 'expand' resolves a reference field into the related record.`
+          : `Field '${name}' on object '${object}' is not a relationship: only lookup / master_detail / user / tree `
+            + 'fields can be expanded.',
+      ) as Error & { code: string; status: number; field: string; object: string; param: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = name;
+      err.object = object;
+      err.param = 'expand';
+      throw err;
+    }
+    let declared: ObjectDef | undefined;
+    try {
+      declared = await readObjectDeclaration(reads, target);
+    } catch (err) {
+      // A target whose package is disabled serves nothing: withheld.
+      if (isObjectPackageDisabledRefusal(err)) continue;
+      throw err;
+    }
+    if (!canServeApiOperation(declared?.enable as EnableLike | undefined, 'get')) continue;
+    out[name] = { object: target };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
  * Unwrap what the engine's read path resolves to.
  *
  * Same shape-tolerance as the ADR-0101 record reader next door: an engine may
@@ -311,13 +385,6 @@ interface ObjectDef {
  * spelling the existing stdio reader already accepts, kept identical so the two
  * readers on this transport cannot disagree about what a row list is.
  */
-/**
- * The engine's one-row-per-group read option (`@objectstack/objectql`,
- * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
- * on the engine at runtime. A symbol, so no tool argument can carry it.
- */
-const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
-
 function unwrapRows(res: unknown): Array<Record<string, unknown>> {
   const rows =
     res && typeof res === 'object' && 'value' in (res as Record<string, unknown>)
@@ -1408,6 +1475,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       if (opts?.orderBy) query.orderBy = opts.orderBy;
       if (typeof opts?.limit === 'number') query.limit = opts.limit;
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
+      // [#35145] `expand`, built as the data door builds it (`stdioExpandMap`).
+      if (Array.isArray(opts?.expand) && opts.expand.length > 0) {
+        const expand = await stdioExpandMap(reads, object, (await servedView.getObject(object)) as ObjectDef | undefined, opts.expand);
+        if (expand) query.expand = expand;
+      }
       // [#21207] The content-hash columns are served keyed, or not at all.
       const digest = keyedDigest?.();
       if (opts?.latestPer) {
@@ -1657,7 +1729,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   }
 
   if (typeof engine.aggregate === 'function') {
-    bridge.aggregate = async (object, opts) => {
+    // [aggregate order and cut] `orderCut`, when set, is the engine's
+    // order-cut-count request, handed on its read option after every gate
+    // below; the caller reads the engine's outcome off it.
+    const runAggregate = async (
+      object: string,
+      opts: Parameters<NonNullable<McpDataBridge['aggregate']>>[1],
+      orderCut?: object,
+    ): Promise<unknown[]> => {
       const context = await resolvePrincipal();
       // `aggregate` is a list-class read: an object whose whitelist excludes
       // `list` must not leak row statistics through GROUP BY either. The
@@ -1688,14 +1767,45 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // compiles — the two `as unknown as` casts this line used to carry
       // existed only because the engine option declared `groupBy: string[]`
       // while reading structured buckets.
-      const rows = await engine.aggregate(object, {
-        ...(opts?.where ? { where: opts.where } : {}),
-        ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
-        aggregations: opts.aggregations,
-        ...(opts?.timezone ? { timezone: opts.timezone } : {}),
-        context,
-      });
+      const rows = await engine.aggregate(
+        object,
+        {
+          ...(opts?.where ? { where: opts.where } : {}),
+          ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
+          aggregations: opts.aggregations,
+          ...(opts?.timezone ? { timezone: opts.timezone } : {}),
+          context,
+        },
+        ...(orderCut !== undefined
+          ? [{ [STDIO_AGGREGATE_ORDER_CUT]: orderCut } as Parameters<IDataEngine['aggregate']>[2]] as const
+          : [] as const),
+      );
       return rows ?? [];
+    };
+    bridge.aggregate = (object, opts) => runAggregate(object, opts);
+    // [aggregate order and cut] The same read, through the same gates, ordered,
+    // cut and counted by the driver's own statement; the engine's outcome slot
+    // is read back — a read that comes back without it was not served by the
+    // driver's statement, and its rows are no answer.
+    bridge.aggregateGroups = async (object, opts) => {
+      const orderCut: {
+        orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
+        limit?: number;
+        outcome?: { kind?: unknown; totalGroups?: unknown };
+      } = {
+        orderBy: opts.orderBy,
+        ...(typeof opts.limit === 'number' ? { limit: opts.limit } : {}),
+      };
+      const { orderBy: _orderBy, limit: _limit, ...read } = opts;
+      const rows = await runAggregate(object, read, orderCut);
+      const totalGroups = orderCut.outcome?.totalGroups;
+      if (orderCut.outcome?.kind !== 'served' || typeof totalGroups !== 'number') {
+        throw new Error(
+          `aggregate_records on '${object}': the ordered and cut aggregate came back without being served by the `
+          + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+        );
+      }
+      return { rows, totalGroups };
     };
   }
 

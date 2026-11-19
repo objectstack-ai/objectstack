@@ -48,6 +48,9 @@ import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+// The engine's order-cut-count read option for `aggregate` (and the request it
+// carries): `aggregate_records`' ranking form rides to the engine on it.
+import { AGGREGATE_ORDER_CUT, type AggregateOrderCutRequest } from '@objectstack/objectql';
 import { LATEST_PER, type LatestPerRequest } from '@objectstack/objectql';
 import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
@@ -1205,6 +1208,10 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
+            // [#35145] `query_records`' `expand`: the names, which `findData`
+            // lowers, gates (`assertExpandTargetsExist`, `servedExpand`) and
+            // the engine expands in one batched read per field, as on REST.
+            if (Array.isArray(o?.expand) && o.expand.length > 0) query.expand = o.expand;
             if (!o?.latestPer) return await callData('query', { object, query }, driver, envId, ec);
             // [latest per group] One row per group rides to the engine on the
             // engine's own symbol key (never a wire key), through `findData`,
@@ -1286,6 +1293,41 @@ export function buildMcpBridge(
                 ec,
             );
             return res?.rows ?? [];
+        },
+        /**
+         * [aggregate order and cut] `aggregate_records` with an `orderBy` /
+         * `limit`: the same engine door as `aggregate` above, with the
+         * engine's request on its own symbol key (never a wire key). `callData`
+         * reads the engine's outcome back and answers its `totalGroups`; a read
+         * the driver's statement did not serve is refused there.
+         */
+        aggregateGroups: async (object: string, o: any) => {
+            const orderCut: AggregateOrderCutRequest = {
+                orderBy: o.orderBy,
+                ...(typeof o?.limit === 'number' ? { limit: o.limit } : {}),
+            };
+            const res: any = await callData(
+                'aggregate',
+                {
+                    object,
+                    where: o?.where,
+                    groupBy: o?.groupBy,
+                    aggregations: o?.aggregations,
+                    timezone: o?.timezone,
+                    [AGGREGATE_ORDER_CUT]: orderCut,
+                },
+                undefined,
+                envId,
+                ec,
+            );
+            if (typeof res?.totalGroups !== 'number') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${object}' came back without its group count, so its `
+                        + 'rows are not the answer and none is returned.',
+                };
+            }
+            return { rows: res?.rows ?? [], totalGroups: res.totalGroups };
         },
         // [#35138] The caller's locale ladder for a sentence the record tools
         // compose (`ifNotRecorded`): this request's, as the dataset tools'

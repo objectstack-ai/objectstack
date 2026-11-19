@@ -912,6 +912,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.destructive-still-shown-by.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts",
       "verb": "findOne",
       "pinned": 5
@@ -4995,6 +5000,11 @@
       "file": "packages/rest/src/meta-dashboard-view-i18n-explicit-override.test.ts",
       "verb": "findOne",
       "pinned": 2
+    },
+    {
+      "file": "packages/rest/src/meta-destructive-still-shown-by-flat-issues.test.ts",
+      "verb": "findOne",
+      "pinned": 1
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
