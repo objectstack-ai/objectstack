@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import type { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { ADVISORY_SAMPLE_SIZE } from './stored-expression-backfill.js';
 import { announceSummaryHoles } from './summary-hole-announce.js';
@@ -110,16 +111,18 @@ const v2 = {
 async function bootOver(d: ReturnType<typeof makeDriver>) {
   const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
   const warn = vi.spyOn((kernel as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger, 'warn');
-  await kernel.use({
+  const store: Plugin = {
     name: 'qx-store-plugin', type: 'driver', version: '1.0.0',
-    init: async (ctx: any) => { ctx.registerService('driver.memory', d.driver); },
-  } as any);
-  await kernel.use(new ObjectQLPlugin());
-  await kernel.use({
-    name: 'qx-app-plugin', version: '1.0.0', dependencies: ['com.objectstack.engine.objectql'],
+    init: async (ctx: PluginContext) => { ctx.registerService('driver.memory', d.driver); },
+  };
+  const app: Plugin = {
+    name: 'qx-app-plugin', version: '1.0.0',
     init: async () => {},
-    start: async (ctx: any) => { ctx.getService('objectql').registerApp(v2); },
-  } as any);
+    start: async (ctx: PluginContext) => { ctx.getService<ObjectQL>('objectql').registerApp(v2); },
+  };
+  await kernel.use(store);
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(app);
   const writesBefore = d.writes.length;
   await kernel.bootstrap();
   const said = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[summary-holes]'));
