@@ -1,10 +1,11 @@
 # ADR-0157: Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the organization default, otherwise it refuses; formulas and the approval clock read it in the same release
 
-**Status**: Proposed (2026-11-19). **This record declares; it implements nothing** — no schema, no object, no code, no changeset. Three cards implement it: [#35355](https://github.com/objectstack-ai/objectstack/issues/35355), [#35356](https://github.com/objectstack-ai/objectstack/issues/35356) and [#35357](https://github.com/objectstack-ai/objectstack/issues/35357). `docs/adr/**` is a Tier H governed surface (Prime Directive #14): the maintainer's merge adopts this record, and until then every decision below is a proposal.
+**Status**: Proposed (2026-11-19; revised the same day to record the maintainer's rulings on the six questions the first draft left open, now D8–D13). **This record declares; it implements nothing** — no schema, no object, no code, no changeset. Three cards implement it: [#35355](https://github.com/objectstack-ai/objectstack/issues/35355), [#35356](https://github.com/objectstack-ai/objectstack/issues/35356) and [#35357](https://github.com/objectstack-ai/objectstack/issues/35357). `docs/adr/**` is a Tier H governed surface (Prime Directive #14): the maintainer's merge adopts this record, and until then every decision below is a proposal.
 
 - **Date**: 2026-11-19
 - **Card**: [#35354](https://github.com/objectstack-ai/objectstack/issues/35354) (p1), the first slice of the epic [#35340](https://github.com/objectstack-ai/objectstack/issues/35340).
 - **Decided by**: the maintainer, 2026-11-19 05:47Z, on #35340, verbatim 「同意 p1」, recorded in ruling comment [`7000950747`](https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747). The sub-cards were approved at 06:03Z with 「同意」 and 「都是 p1」. The ruling's own text is the authority this record executes; where the two differ in words, the ruling wins and this record is corrected.
+- **Open questions ruled**: the maintainer, 2026-11-19 08:11–08:13Z, on the seat's decision cards. Q1 and Q2 are recorded in ruling record [`7003541720`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003541720) (pick 「不算，并提前提醒」); Q3 to Q6 in ruling record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086) (picks 「每条写全时段」 and 「全按推荐」). They are D8 to D13.
 - **Unfreezes**: the business-hours half of #13655 (ruling record 5478756633, cited from [#13801](https://github.com/objectstack-ai/objectstack/issues/13801); #13655 itself answers 404 to this session). That half was frozen until a named external user asked. The ruling counts the pull from the platform's own suites (the hotcrm case SLA matrix, hotsrm delivery dates, the production suite) as meeting that condition. The freeze's second constraint stands and is D4 here.
 - **Reverses**: the in-seat finding on #13801 (comment [`5506987580`](https://github.com/objectstack-ai/objectstack/issues/13801#issuecomment-5506987580)) that a clock marker on `timeoutHours` would be inert. That finding held only while one clock existed; with two clocks the marker has a reader (D5).
 - **Builds on**: [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md) (`sys_exchange_rate`: organization-scoped runtime data that an administrator writes and that every change audits — the precedent for D1, and `ERR_HOME_CURRENCY_UNSET`, the precedent for refusing rather than guessing in D2). [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove: a calendar nobody reads, an inherited column nobody reads and a clock key with one value are all inert — D2, D4, D5). [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D1, D3 and D6 (a first-party capability owns its `sys_*` objects; which package owns the two objects here is #35355's to settle against it). [ADR-0053](./0053-date-and-datetime-semantics.md) (an exception's date is a calendar day, never an instant; time-zone arithmetic goes through the shared DST-safe primitive). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (every refusal below answers with a ledger code that the implementing card registers).
@@ -16,8 +17,8 @@
 
 Three kinds of text feed this record, and each section says which kind it carries.
 
-1. **Ruled.** The seven design points of ruling `7000950747`, restated as seven items in the Scope of #35354. [Decision](#decision) carries only these, one D-item per Scope item, in the ruling's own terms.
-2. **Analysis the ruling read.** The design analysis for #35340 (project file `card-35340/design-analysis.md`, outside this repository). It supplies the context and the alternatives. A detail that appears only there is not ruled: this record lists such details under [Open questions](#open-questions), never as a decision.
+1. **Ruled.** The seven design points of ruling `7000950747`, restated as seven items in the Scope of #35354. [Decision](#decision) carries only these, one D-item per Scope item (D1–D7), in the ruling's own terms, and the maintainer's rulings on the six questions the first draft left open (D8–D13), records `7003541720` and `7003566086` on #35354.
+2. **Analysis the ruling read.** The design analysis for #35340 (project file `card-35340/design-analysis.md`, outside this repository). It supplies the context and the alternatives. A detail that appears only there is not ruled: this record lists such details as [open implementation points](#open-implementation-points), never as a decision. The seat's decision analysis of the six questions (project file `objectstack-seat5/area-ux/data-1/decision-adr0157-q1-q6.md`) is text of this kind too: D8–D13 carry only what the two ruling records say.
 3. **Readings.** Current behaviour, read on `objectstack-ai/objectstack` at `3819afec` (2026-11-19) and cited by symbol anchor (`path#symbol`). Nothing below was run.
 
 ## Context
@@ -38,7 +39,7 @@ The hotcrm case SLA matrix counts wall-clock hours and warns about it in prose (
 
 ## Decision
 
-Each D-item records one item of the ruling, in the ruling's own terms. Where writing the item down met a choice the ruling does not make, the item says so and points to an [open question](#open-questions); it does not pick.
+Each D-item records one item of the ruling, in the ruling's own terms. Where writing an item down met a choice the first ruling did not make, the choice went to the maintainer as an open question; D8–D13 record those rulings, and each of D1–D7 names the D-item that completes it.
 
 ### D1 — Calendars are organization-editable runtime data
 
@@ -51,7 +52,7 @@ Packages reference a calendar by code and may ship seed rows. One calendar servi
 
 A calendar is never package metadata: holidays change every year, and a metadata change travels through a publish. The weekly pattern sits on the calendar row and the exceptions in their own table, so a holiday is a row an administrator adds, not a release.
 
-Not ruled, and listed: how an exception's own periods combine with the weekly pattern on its date, and whether a date may carry two exceptions ([Q3](#q3--the-shape-of-an-exception-and-of-a-period)); and whether a package's seed rows may overwrite an organization's edits on a later install ([Q6](#q6--may-a-package-seed-overwrite-an-organizations-edit)).
+Completed by D10 (an exception row carries its date's full working periods, one row per date) and D13 (package seed rows follow the existing seed contract).
 
 ### D2 — Resolution: explicit code, then the organization default, then refuse
 
@@ -65,7 +66,7 @@ A consumer resolves its calendar in this order, and in no other:
 
 **Business-unit inheritance is deferred.** `sys_business_unit.timezone` has no reader today; another inherited column nobody reads would be inert under ADR-0049. Regions and plants are not platform objects: a suite maps them to calendar codes and passes the code.
 
-Not ruled, and listed: what a refusal does inside the approval sweep, which has no caller to answer ([Q2](#q2--what-a-refusal-does-in-the-approval-sweep)).
+Completed by D9 (what a refusal does inside the approval sweep, which has no caller to answer).
 
 ### D3 — Holiday data: entered or imported by the organization; a calendar says how far it is maintained
 
@@ -73,7 +74,7 @@ In the first cut, holiday and make-up-day rows are entered by the organization o
 
 A CN holidays and 调休 data set comes later, as a marketplace data package. **It is never in platform core**, and the platform ships no per-country holiday data.
 
-Not ruled, and listed: whether crossing the maintained-through date warns or refuses, and whether the answer differs by consumer ([Q1](#q1--past-the-maintained-through-date-warn-or-refuse)).
+Completed by D8 (crossing the maintained-through date refuses, and Setup gives notice ahead of time).
 
 ### D4 — First consumers: three formula functions and the approval clock, in the same release as the objects
 
@@ -94,7 +95,7 @@ The approval escalation gains `clock: 'wall_clock' | 'working_time'` and an opti
 
 `working_time` resolves its calendar through D2: the `calendar` code if written, otherwise the organization default, otherwise refuse.
 
-Not ruled, and listed: whether a `working_time` deadline is computed once or recomputed on every sweep, so that a holiday entered later moves it ([Q5](#q5--is-a-working-time-deadline-fixed-or-recomputed)).
+Completed by D9 (the sweep when the due time cannot be computed) and D12 (the `working_time` deadline is recomputed on every sweep).
 
 ### D6 — Pushdown: working-day functions evaluate in memory only
 
@@ -107,15 +108,64 @@ A refused filter fails loudly, at run time. The lint exists so an author learns 
 - **`timezone` is required** on every calendar. Setup prefills it from the organization's effective time zone; the stored value is the calendar's own, and the computation reads only that value. One organization may run plants in different zones.
 - **A period that crosses midnight is refused** in the first cut. A period's end is later than its start, on the same local day. Which day a night shift belongs to is rostering, and rostering is out of scope.
 
-Not ruled, and listed: whether a period may end at `24:00` ([Q3](#q3--the-shape-of-an-exception-and-of-a-period)), and how `addWorkingHours` counts a period on a daylight-saving transition day ([Q4](#q4--daylight-saving-days-in-addworkinghours)).
+Completed by D10 (`24:00` is a legal period end) and D11 (a daylight-saving transition day counts elapsed time).
+
+### D8 — Past the maintained-through date: refuse, and give notice ahead of time (Q1 = C)
+
+Ruled in record [`7003541720`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003541720), Q1 letter C.
+
+- **A computation whose result or span crosses a calendar's maintained-through date is refused**, with a stable code. There is no fallback to the weekly pattern alone, and none to wall-clock time (D2).
+- **Setup gives notice ahead of time**: it marks a calendar whose maintained-through date is near as needing maintenance, before refusals start. How far ahead is #35355's default.
+- **A formula due date that meets the refusal is blank**, never a guess from the weekly pattern. On a read this is what a failed formula evaluation already looks like: the field reads blank and the engine logs one line naming the object, the field and the error (`packages/objectql/src/engine-formula-fault-log.test.ts`). The customer sees a blank cell, not an error page. Precedent: a missing exchange rate refuses and stores no fallback value (ADR-0144 D5).
+- **A write-time computed due-date column (D6) that meets the refusal** is not settled here; see [Open implementation points](#open-implementation-points).
+
+### D9 — The approval sweep skips, retries and shows why; the publish-time lint checks static errors only (Q2 = C)
+
+Ruled in record [`7003541720`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003541720), Q2 letter C.
+
+- **When the sweep cannot compute a `working_time` due time** (no calendar resolves under D2, or D8 refuses the computation), it does not escalate the request and tries again on the next sweep. Once an administrator fixes the calendar, the next sweep recovers with no other step.
+- **Where the due time is displayed, it shows 「日历算不出」 with the reason**: the calendar was not found, or it is not maintained to that date.
+- **The publish-time check covers static authoring errors only**, such as a `calendar` code written without `clock: 'working_time'`. It does not check whether the named calendar exists: calendars are per-organization runtime data, and the approval lint is a pure function of the stack (`packages/lint/src/validate-approval-approvers.ts`). #35357's Scope sentence that a `working_time` escalation with no resolvable calendar "is a lint/validation error" is read under this decision.
+- Not chosen: skip and log only (A); a publish-time check that the calendar exists (B). Refusing at submit time was not offered: together with D8 it would block every approval whose deadline crosses the year end until the next year's holidays are entered.
+
+### D10 — An exception row carries its date's full working periods (Q3 = A)
+
+Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086), pick 「每条写全时段」, Q3 letter A.
+
+- **An `off` row has no periods** and means the whole date is off.
+- **An `on` row must carry that date's full working periods.** A half day is an `on` row with shortened periods. An `on` row never borrows a weekday's periods: with borrowing, a later edit to that weekday would silently rewrite past make-up days.
+- **One row per calendar and date.**
+- **`24:00` is a legal period end**, validated by the calendar itself, because the platform's time parser refuses a zone-naive `24:00` (`packages/core/src/utils/import-coerce.ts`). A period's end is later than its start (D7).
+
+### D11 — A daylight-saving transition day counts elapsed time (Q4 = A)
+
+Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086), pick 「全按推荐」, Q4 letter A.
+
+- **Working hours are counted as elapsed time.** Each local period is mapped to instants and its real duration counted, as `wall_clock` counts elapsed milliseconds. On a transition day a period can be an hour shorter or longer than its clock-face length.
+- **Local times convert to instants only through the shared DST-safe primitive** (ADR-0053). A local time the zone skips, or one it passes twice, resolves the way that primitive already does and pins in its tests, to the earlier candidate instant (`packages/core/src/utils/datetime.ts#zonedWallClockToUtcMs`). Working calendars add no rule of their own.
+- China has no daylight saving; only calendars whose periods cover a transition hour see a difference.
+
+### D12 — A working-time deadline is recomputed on every sweep (Q5 = A)
+
+Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086), Q5 letter A. It is the approved Scope of #35357: "recompute each sweep rather than storing it".
+
+- **The `working_time` due time is recomputed from `created_at` on every sweep and never stored.** A holiday entered after a request opened moves that request's deadline. The displayed due time and the sweep use one function, as the wall-clock due time does today (`packages/plugins/plugin-approvals/src/approval-service.ts#slaDueAt`).
+- Escalation stays single-shot: a request already escalated is not escalated again, or recalled, when its calendar changes.
+
+### D13 — Calendar seed rows follow the existing seed contract (Q6)
+
+Ruled in record [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086), pick 「全按推荐」: no new rule.
+
+- **No calendar-specific seeding rule.** The seed contract stands as ruled in record `6631016988` on #30081 (`packages/spec/src/data/seed.zod.ts`): a seed is create-only by default, so an organization's edits survive a replay, and a row is overwritten only when the package declares `mode: 'upsert'`.
+- Whether the later CN holidays data package declares `upsert`, to correct rows it has already landed, is that package's card to decide with its real data.
 
 ## Enforcement
 
 | Decision | Enforced by |
 |:--|:--|
-| D1 objects, seed by code; D2 resolver and its refusal code; D3 maintained-through and import; D7 required time zone and the midnight refusal | [#35355](https://github.com/objectstack-ai/objectstack/issues/35355) — the two objects, the calendar service, the Setup page and the exception import |
-| D4 formula functions; D6 pushdown refusal and lint | [#35356](https://github.com/objectstack-ai/objectstack/issues/35356) — `addWorkingDays`, `workingDaysBetween`, `addWorkingHours` |
-| D4 approval clock; D5 the key, its default and the rewritten describe text | [#35357](https://github.com/objectstack-ai/objectstack/issues/35357) — `escalation.clock` and `escalation.calendar` |
+| D1 objects, seed by code; D2 resolver and its refusal code; D3 maintained-through and import; D7 required time zone and the midnight refusal; D8 the refusal past maintained-through and the Setup notice; D10 the exception row shape and period validation; D13 seeding under the existing seed contract | [#35355](https://github.com/objectstack-ai/objectstack/issues/35355) — the two objects, the calendar service, the Setup page and the exception import |
+| D4 formula functions; D6 pushdown refusal and lint; D8 a refused formula due date reads blank; D11 elapsed counting, with pinned spring-forward and fall-back tests; open implementation point 1 | [#35356](https://github.com/objectstack-ai/objectstack/issues/35356) — `addWorkingDays`, `workingDaysBetween`, `addWorkingHours` |
+| D4 approval clock; D5 the key, its default and the rewritten describe text; D9 skip, retry, the displayed reason and the static-only lint; D11 elapsed counting; D12 recompute on every sweep | [#35357](https://github.com/objectstack-ai/objectstack/issues/35357) — `escalation.clock` and `escalation.calendar` |
 | D4 the release pairing | all three, held as ADR-0144 D9 holds its pairs |
 
 Each implementing change leaves this record's id in its code at the load-bearing spots (Prime Directive #13). The acceptance slice after the three is the hotcrm case SLA matrix counting against a calendar.
@@ -129,69 +179,12 @@ Each implementing change leaves this record's id in its code at the load-bearing
 
 Shift rostering, finite-capacity scheduling, payroll calendars and fiscal periods. Per-country holiday data in platform core. Calendar arithmetic in SQL. A clock key on every duration key. Flipping the default clock.
 
-## Open questions
+## Open implementation points
 
-The ruling does not answer these. Each is put to the maintainer through the owning seat; the implementing card that meets one does not pick an answer on its own. Each option says what it costs; the seat's recommendation follows.
+The maintainer ruled every open question of the first draft (D8–D13). Two implementation points remain. Neither is a maintainer question: the card named settles each under its own contract review, and this record does not decide them.
 
-### Q1 — Past the maintained-through date: warn or refuse?
-
-The ruling says computing past the date "warns or refuses".
-
-- **A — refuse everywhere.** The calendar service answers a stable code for any computation whose result or range crosses the date. A formula evaluation fails; the approval sweep meets Q2. Strictest; a forgotten year-end import stops deadlines being computed at all.
-- **B — warn everywhere.** The service computes with the weekly pattern alone past the date and logs a warning. Nothing stops; a deadline that crossed an unentered holiday is wrong and looks right.
-- **C — refuse in formulas, warn in Setup ahead of time.** The service refuses as in A, and Setup shows a calendar whose date is near as needing maintenance, so an administrator sees it before the refusals start.
-
-Recommendation: **C**. It keeps D2's rule that no deadline is silently computed on the wrong clock, and turns the refusal into a notice an administrator meets first.
-
-### Q2 — What a refusal does in the approval sweep
-
-A formula can answer an error to its caller. The escalation sweep has no caller: when a `working_time` request's calendar does not resolve (D2) or the computation is refused (Q1), the sweep must still do something with the request.
-
-- **A — skip and report.** The sweep does not escalate the request, logs at error level with the code, and tries again on the next sweep. A request can sit past its true deadline until an administrator fixes the calendar.
-- **B — also refuse at publish.** As A, and a flow whose escalation names a `calendar` code that does not resolve in the publishing organization is refused at publish. Catches the misspelled code early; cannot catch a calendar deleted after publish, so A is still needed.
-
-Recommendation: **B**. Wall-clock escalation is not an option under D2.
-
-### Q3 — The shape of an exception and of a period
-
-The ruling says "dated off/on overrides" with optional periods, and refuses periods crossing midnight. It does not say:
-
-- whether an `on` exception without periods is allowed, and whose hours it takes (a 调休 Saturday works a normal day, but the weekly pattern has no "normal day" field);
-- whether an `off` exception may carry periods (a half-day holiday);
-- whether one date may carry two exceptions;
-- whether `24:00` is a legal period end.
-
-- **A — an exception's periods are the date's complete working periods.** `off` never carries periods and means the whole date is off. `on` must carry its periods. A half-day holiday is an `on` row with the shortened periods. One exception per calendar and date. `24:00` is legal as an end. Every stored row says exactly what its date works; a data package's make-up days get their hours from the import, which asks the administrator which weekday to copy.
-- **B — `on` without periods copies a weekday.** As A, but an `on` row may name a weekday whose periods it takes. Shorter rows; one more column, and an edit to that weekday silently changes past make-up days.
-
-Recommendation: **A**. One rule a reader can check against the row alone.
-
-### Q4 — Daylight-saving days in `addWorkingHours`
-
-Periods are local `HH:mm`. On a transition day a local period can be an hour shorter or longer than its clock-face length.
-
-- **A — count elapsed time.** Map each local period to instants with the shared DST-safe primitive (ADR-0053) and count real elapsed time; a local time that does not exist moves forward. Matches how `wall_clock` already counts elapsed milliseconds.
-- **B — count clock-face time.** A 09:00–17:00 period is always eight working hours. Simpler to explain; the result instant can land an hour away from the elapsed answer.
-
-Recommendation: **A**, with a pinned test on a spring-forward and a fall-back day. China has no daylight saving; the question matters for calendars elsewhere.
-
-### Q5 — Is a working-time deadline fixed or recomputed?
-
-#35357's Scope says the sweep recomputes the deadline from `created_at` on every sweep. The ruling does not say.
-
-- **A — recompute on every sweep.** A holiday entered after a request opened moves that request's deadline. Display and sweep call one function. The escalation's audit row records the deadline as computed when it fired.
-- **B — fix at creation.** Store the deadline on the request when it opens. A later holiday does not move it; the stored value can be wrong for the rest of the request's life.
-
-Recommendation: **A**, as #35357 states. The same staleness question applies to the write-time `datetime` columns of D6: a column computed before a holiday was entered keeps its old value until the record is written again. That is the author's column, and teaching it belongs with #35356.
-
-### Q6 — May a package seed overwrite an organization's edit?
-
-Packages may seed calendar rows (D1), and the rows are organization-editable. The seed contract (`packages/spec/src/data/seed.zod.ts`) defaults to `mode: 'ignore'`, which inserts a missing row and leaves an existing one as it is; `upsert` overwrites on every replay.
-
-- **A — `ignore` only for calendar rows.** A package seeds a starting calendar; after the first load the organization owns it.
-- **B — the package's choice.** A package may declare `upsert` to keep its rows current, and every replay then undoes the organization's edits to them.
-
-Recommendation: **A**. "Org-editable" means an install never takes an edit back.
+1. **A write-time computed due-date column that meets a D8 refusal** (#35356's contract review): the write fails, or the column is stored blank. A formula read is already settled by D8: blank, plus one log line, not an error.
+2. **A blank maintained-through date** (#35355): whether the field is required, and what a blank means. Under D3 a blank must not read as "no holidays from here on".
 
 ## Consequences
 
@@ -199,10 +192,13 @@ Recommendation: **A**. "Org-editable" means an install never takes an edit back.
 - **A missing calendar is an error, not a wall-clock answer.** An organization that uses a working-time consumer must keep a default calendar, or name one at every consumer.
 - **The calendar must be maintained.** The maintained-through date makes a stale calendar visible instead of quietly wrong; somebody enters next year's holidays every year until the data package exists.
 - **A working-day deadline is not filterable unless stored.** Authors who need to filter or aggregate on a working-day due time compute it at write time into a `datetime` column.
+- **An unmaintained calendar blanks deadlines.** From the day a deadline's span crosses the maintained-through date, formula due dates read blank and working-time escalations wait with 「日历算不出」 until an administrator extends the calendar (D8, D9). The longer a suite's typical span, the earlier in the year this starts; the Setup notice exists for it.
+- **Calendar edits move open deadlines.** Under D12 a holiday added later pushes an open request's deadline out, and a holiday removed or a period lengthened brings it in, so the next sweep may escalate several requests at once.
 - **Two calendars in the product until the gantt follow-up lands.**
 
 ## References
 
 - Ruling [`7000950747`](https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747) on #35340; card #35354; implementing cards #35355, #35356, #35357.
+- Ruling records [`7003541720`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003541720) (Q1, Q2) and [`7003566086`](https://github.com/objectstack-ai/objectstack/issues/35354#issuecomment-7003566086) (Q3–Q6) on #35354; the seed contract ruling `6631016988` on #30081.
 - #13801 and its in-seat ruling `5506987580`; the #13655 freeze (ruling record 5478756633).
 - ADR-0029, ADR-0049, ADR-0053, ADR-0112, ADR-0144.

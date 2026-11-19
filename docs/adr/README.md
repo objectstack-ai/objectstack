@@ -224,7 +224,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
 | [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
-| [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Proposed — 2026-11-19. This record declares; it implements nothing — no sc… | 2026-11-19 | — | — |
+| [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Proposed — 2026-11-19; revised the same day to record the maintainer's rul… | 2026-11-19 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
