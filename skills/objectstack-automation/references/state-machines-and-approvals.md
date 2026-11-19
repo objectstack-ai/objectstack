@@ -11,8 +11,7 @@ Since **ADR-0020** there is **no `workflow` metadata type** and no
 validation rule** in the object's `validations` array: a flat `field` +
 `{ from: [allowedTo] }` transition table. It is **enforced on the write path** —
 an update whose `field` moves to a state not listed for the current state is
-rejected with the rule's `message`. A `from` state mapped to `[]` is a declared
-dead-end.
+rejected with the rule's `message`.
 
 <!-- os:check -->
 ```typescript
@@ -36,7 +35,7 @@ const rule: StateMachineValidation = {
 
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
-  are N separate `state_machine` rules, one per field.
+  are N separate `state_machine` rules.
 - **`initialStates`** (optional) gates INSERT: a record created with its
   state field outside this list is rejected. `transitions` only governs
   updates, so without it a record can be born mid-flow (e.g. created already
@@ -55,6 +54,8 @@ Notes:
   you want guarded rather than relying on an implicit "any → any".
 - Predicate conditions in sibling rules evaluate against the merged record in
   the **`record.<field>`** CEL scope (bare field names do not resolve).
+- **An AI-gated irreversible transition** pairs this rule with a lock on
+  `field`: **objectstack-ai** → Common Pitfalls.
 
 ### Approvals (Flow Nodes)
 
@@ -260,8 +261,7 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 **`record` and bare field names are NOT available and fail the node loudly.**
 Everywhere else on this platform `record` means "the record at event time" — at an
 approval node that phrase is ambiguous between two different times, so you must
-say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
-over from conditions.
+say which one: `current.x` or `trigger.x`.
 
 Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
 result (present-but-empty field/variable) triggers `onEmptyApprovers`. A

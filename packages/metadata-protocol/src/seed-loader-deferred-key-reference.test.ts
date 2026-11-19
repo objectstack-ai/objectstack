@@ -256,3 +256,120 @@ describe('seed: a key reference empty on the first load holds one row across loa
     expect(store.dkr_tag.every((r) => /^gen-/.test(r.id))).toBe(true);
   });
 });
+
+/**
+ * [#34856] A row that landed while a reference in its key was still empty, and
+ * that a person then deleted, stays deleted — as a row whose key was complete
+ * at landing does. The record of landed rows (`landedKeys: 'honour'`) recorded
+ * nothing for a key with an empty component, so such a row was never recorded
+ * and the next load inserted it again (measured before the fix with exactly
+ * these loads: back on the next load, whether the person was still missing or
+ * had signed up since). It is now recorded under the id it lands with, derived
+ * from its key as AUTHORED: the one identity a load can compute both while the
+ * reference is still empty and after it resolves. A person's delete removes the
+ * row from the store directly, as the app's own delete would.
+ */
+
+/** One load by a fresh loader, keeping the landed-key record in `landedKeys` mode. */
+async function loadWith(engine: IDataEngine, seeds: any[], landedKeys: 'honour' | 'reseed' = 'honour') {
+  return new SeedLoaderService(engine, createMetadata(), createLogger() as never, { landedKeys })
+    .load({ seeds, config: CONFIG });
+}
+
+/** A person deletes the seeded task named `name` in the app. */
+function deleteTask(store: Record<string, any[]>, name: string): void {
+  const before = store.dkr_task.length;
+  store.dkr_task = store.dkr_task.filter((r) => r.name !== name);
+  expect(store.dkr_task.length).toBe(before - 1);
+}
+
+describe('seed: a row whose key reference was empty at landing stays deleted (#34856)', () => {
+  for (const mode of ['ignore', 'upsert'] as const) {
+    it(`${mode}: deleted while the person is still missing, it is not inserted again`, async () => {
+      const { engine, store } = createEngine();
+      const seeds = [taskSeed(mode, [{ name: 'Onboard', assignee: 'Alice', notes: 'first week' }])];
+
+      await loadWith(engine, seeds);
+      expect(store.dkr_task).toHaveLength(1);
+      deleteTask(store, 'Onboard');
+      const second = await loadWith(engine, seeds);
+      await loadWith(engine, seeds);
+
+      expect(store.dkr_task).toHaveLength(0);
+      expect(second.success).toBe(true);
+      expect(second.summary.totalSkipped).toBe(1);
+      expect(second.summary.totalInserted).toBe(0);
+    });
+
+    it(`${mode}: deleted, then the person signs up, it is still not inserted again`, async () => {
+      const { engine, store } = createEngine();
+      const seeds = [taskSeed(mode, [{ name: 'Onboard', assignee: 'Alice', notes: 'first week' }])];
+
+      await loadWith(engine, seeds);
+      deleteTask(store, 'Onboard');
+      signUp(store, 'Alice');
+      const second = await loadWith(engine, seeds);
+      await loadWith(engine, seeds);
+
+      expect(store.dkr_task).toHaveLength(0);
+      expect(second.summary.totalSkipped).toBe(1);
+      expect(second.summary.totalInserted).toBe(0);
+    });
+  }
+
+  it('the row is recorded under the id it landed with, derived from its key as authored', async () => {
+    const { engine, store } = createEngine();
+    await loadWith(engine, [taskSeed('ignore', [{ name: 'Onboard', assignee: 'Alice' }])]);
+
+    expect(store.dkr_task).toHaveLength(1);
+    expect(store.dkr_task[0].id).toMatch(/^seed_/);
+    expect(store.sys_seed_landed_key).toEqual([
+      expect.objectContaining({ object_name: 'dkr_task', seed_key: JSON.stringify([['id', store.dkr_task[0].id]]) }),
+    ]);
+  });
+
+  it('CONTROL: a row whose key was complete at landing, deleted, stays deleted as before', async () => {
+    const { engine, store } = createEngine();
+    signUp(store, 'Alice');
+    const seeds = [taskSeed('ignore', [{ name: 'Onboard', assignee: 'Alice' }])];
+
+    await loadWith(engine, seeds);
+    expect(store.dkr_task[0].id).toMatch(/^gen-/);
+    deleteTask(store, 'Onboard');
+    const second = await loadWith(engine, seeds);
+
+    expect(store.dkr_task).toHaveLength(0);
+    expect(second.summary.totalSkipped).toBe(1);
+  });
+
+  it('CONTROL: a deferred-key row never landed here still lands, beside one a person deleted', async () => {
+    const { engine, store } = createEngine();
+    await loadWith(engine, [taskSeed('ignore', [{ name: 'Onboard', assignee: 'Alice' }])]);
+    deleteTask(store, 'Onboard');
+
+    // An upgrade adds a second record to the seed, its key reference empty too.
+    const upgraded = [taskSeed('ignore', [
+      { name: 'Onboard', assignee: 'Alice' },
+      { name: 'Review', assignee: 'Alice' },
+    ])];
+    const second = await loadWith(engine, upgraded);
+    await loadWith(engine, upgraded);
+
+    expect(store.dkr_task.map((r) => r.name)).toEqual(['Review']);
+    expect(second.summary.totalInserted).toBe(1);
+    expect(second.summary.totalSkipped).toBe(1);
+  });
+
+  it('CONTROL: a deliberate re-seed brings the deleted deferred-key row back', async () => {
+    const { engine, store } = createEngine();
+    const seeds = [taskSeed('ignore', [{ name: 'Onboard', assignee: 'Alice' }])];
+
+    await loadWith(engine, seeds);
+    deleteTask(store, 'Onboard');
+    await loadWith(engine, seeds, 'reseed');
+
+    expect(store.dkr_task).toHaveLength(1);
+    expect(store.dkr_task[0].name).toBe('Onboard');
+    expect(store.dkr_task[0].assignee ?? null).toBeNull();
+  });
+});
