@@ -326,7 +326,7 @@ code still outstanding for that user: a completed reset, the user's own
 what one that was never issued answers (`400 INVALID_TOKEN` at
 `reset-password`); a link or code requested after the change works as usual.
 
-A change to a user's password also ends the access issued before it. An
+A change to a user's password also ends the following, issued before it. An
 email-change link minted before the change answers what a link that was never
 issued answers at `GET /api/v1/auth/verify-email` (`401 INVALID_TOKEN`, or the
 `error=INVALID_TOKEN` redirect to its callback), and a second-factor challenge

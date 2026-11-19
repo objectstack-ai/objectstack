@@ -171,7 +171,6 @@ async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
   return after.includes(code);
 }
 
-/** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 /**
  * What a wrong password answers at `door`: better-auth's own refusal there
  * (1.7.12), its code read off the vendor's own tables — `BASE_ERROR_CODES` for
@@ -224,6 +223,7 @@ async function endSessionsOnceThePasswordIsWritten(this: Pick<AfterHookHost, 'lo
   await endSessionsAfterCredentialWrite(internal, subject, changeDoor ? (installed as string) : undefined);
 }
 
+/** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // ── A credential change ends access issued before it ──────────────
   // FIRST: a password sign-in during which the account's password changed
@@ -389,6 +389,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     }
   }
 
+  // ── A credential change ends access issued before it ──────────────
+  // Ahead of the password-change after-effects below, which return.
+  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
+
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.
   //
@@ -400,10 +404,6 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // only when the before-hook's reuse and forced-change checks ran for that
   // same account. The history entry is the old hash those checks read, so it
   // is appended only to the account it was read from.
-  // ── A credential change ends access issued before it ──────────────
-  // Ahead of the password-change after-effects, which return.
-  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
-
   if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
     let succeeded: boolean;
     try {

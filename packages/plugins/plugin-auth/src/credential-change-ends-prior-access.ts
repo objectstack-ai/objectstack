@@ -5,8 +5,9 @@
  *
  * ## The rule
  *
- * Once an account's password is set, nothing issued for that account before
- * the change grants access after it:
+ * Once an account's password changes, the following, issued for that account
+ * before the change, no longer grant access after it — this list is the whole
+ * of what the rule covers:
  *
  *  - an email-change link — the token `POST /change-email` mails (better-auth
  *    1.7.12, `routes/update-user.mjs`), any token carrying `updateTo` — minted
