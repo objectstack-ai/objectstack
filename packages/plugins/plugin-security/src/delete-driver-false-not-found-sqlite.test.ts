@@ -121,7 +121,7 @@ async function boot(binding: Binding) {
   return { engine, release, arrival, afterDelete, recomputed, deletedEvents };
 }
 
-const deleteLine = (engine: ObjectQL, id: string) => engine.delete(LINE, { where: { id }, ...SYS } as never);
+const deleteLine = (engine: ObjectQL, id: string) => engine.delete(LINE, { where: { id }, context: { isSystem: true } } as never);
 const outcome = (p: Promise<unknown>) =>
   p.then((value) => ({ value }), (error: any) => ({ code: error?.code, status: error?.status }));
 const settledWithin = (p: Promise<unknown>, ms: number) =>
