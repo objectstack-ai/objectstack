@@ -46,8 +46,9 @@ ObjectStack provides lifecycle events organized by operation type:
 > bulk write hands hooks **no** row-scoping predicate: it lives on the engine-internal
 > `OperationContext.ast`, so the RLS / sharing filters composed onto it bind
 > the driver call itself, where no handler can widen them — scope a batch through
-> `options.where` at the caller. Both phases dispatch **once per matched row**
-> (ADR-0058 Addendum II; see `condition` below). And there is
+> `options.where` at the caller. Both phases dispatch **once per matched row**,
+> each on a single-record-shaped context whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names that row and
+> whose `previous` is that row's pre-image (ADR-0058 Addendum II). And there is
 > no `beforeCount`/`beforeAggregate`: read authorization and
 > row filtering belong to **RLS / permission rules**, and field masking to
 > **field-level metadata** — declarative mechanisms that apply everywhere, rather than
@@ -220,7 +221,7 @@ CEL has no overload for does **not** degrade to "the hook did not fire" — it
 ```jsonc
 body: {
   language: 'js',                 // 'js' = L2 sandboxed script | 'expression' = L1 pure formula
-  source: "/* function body */",  // the FUNCTION BODY only — not a module
+  source: "/* function body */",
   capabilities: ['api.read', 'api.write', 'log'],  // default: []
   timeoutMs: 250,                 // optional, ≤ 30000 (hook default 250ms, action 5000ms)
   memoryMb: 32,                   // optional, ≤ 256 (best-effort under QuickJS)
@@ -253,7 +254,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
-| `ctx.email` | `{ send }` | Gated by `email.send`; not in a hook body. |
+| `ctx.email` | `{ send }` | Gated by `email.send`. |
 | `ctx.activity` | `{ append }` | Gated by `activity.append`. |
 | `ctx.notice` | `(message) => void` | **Tell the saver what this save set in motion** — answered as the create/update `notice`, shown on the save toast. No capability; insert/update only; last call wins. [`rules/lifecycle.md` § Save Notice](../rules/lifecycle.md#save-notice). |
 | `ctx.text` | `(key, params?) => Promise<string>` | A declared sentence in the organization's language — [`texts`](#declared-texts-texts). |
@@ -322,9 +323,9 @@ set of legal tokens (`HookBodyCapability`) is exactly seven:
 
 | Token | Unlocks |
 |:--|:--|
-| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
+| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`. |
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` |
-| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on one datasource**: commit on return, rollback on throw. A write in it to an object on another datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit already open (the one the hook's write runs in, or a caller's) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Pair it with `api.write`. |
+| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on the default datasource**: commit on return, rollback on throw. A write in it to an object on any other datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit already open (the one the hook's write runs in, or a caller's) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 | `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
@@ -470,7 +471,7 @@ interface HookContext {
   // Engine access
   ql: IDataEngine;       // ObjectQL engine instance
   api?: ScopedContext;   // Cross-object CRUD API
-  notice?: (message: string) => void; // Save notice: rules/lifecycle.md § Save Notice
+  notice?: (message: string) => void;
 
   // User info shortcut (undefined for system / unauthenticated writes)
   user?: {
@@ -868,7 +869,7 @@ read by the whole organization: declare it in `texts` and ask for it with
 texts: { follow_up_subject: { message: 'Follow up with lead: {{ lead }}', params: ['lead'] } },
 // afterInsert body (capabilities: ['api.write']):
 const subject = await ctx.text('follow_up_subject', { lead: ctx.input.name });
-await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.input.id });
+await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.result.id });
 ```
 
 - In the **organization's** language (Setup → Localization, else the app's
@@ -878,7 +879,7 @@ await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.input.id
 - An unreadable Localization setting rejects `ctx.text`; catch it to write anyway.
 - Only declared keys: another is refused at save if asked for literally, else as
   a `500`. A string the hook builds itself is written as it is.
-- Translation key: [objectstack-i18n](../../objectstack-i18n/SKILL.md).
+- Translation key `hooks.<hook>.texts.<key>.message`; the bundle: [objectstack-i18n](../../objectstack-i18n/SKILL.md).
 
 ---
 
