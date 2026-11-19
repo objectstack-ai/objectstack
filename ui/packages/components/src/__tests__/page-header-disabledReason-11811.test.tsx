@@ -36,6 +36,9 @@ import { I18nProvider } from '@object-ui/i18n';
 // cold transform is billed to `hookTimeout`
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
+// Paid at collection, not inside a case's clock: `react-page` reaches this
+// dependency through a dynamic import (`pnpm check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const REASON_EN = 'Not available for this record';
 const REASON_ZH = '对此记录不可用';
