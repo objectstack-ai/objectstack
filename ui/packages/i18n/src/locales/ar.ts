@@ -1310,6 +1310,8 @@ const ar = {
     manageViewsDescription: "إعادة ترتيب جميع طرق عرض هذا الكائن أو إعادة تسميتها أو تثبيتها أو حذفها.",
     searchViews: "البحث في العروض",
     addNewView: "إضافة عرض جديد",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "حُفظ هذا العرض كمسودة خارج هذا التطبيق، لأنه لا يمكن استخدام حزمة تخصيص التطبيق هنا. لا يحتسبه شريط مسودات هذا التطبيق ولا ينشره: انشره من الصفحة الرئيسية.",
     done: "تم",
     noViewsFound: "لا توجد عروض تطابق بحثك.",
     // objectstack#27594 — the list title's view switcher.

@@ -8,8 +8,8 @@
  * component reads the returned handlers.
  */
 
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import type { useNavigate } from 'react-router-dom';
+import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
@@ -20,10 +20,39 @@ import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import type { RuntimeCreateApp } from './runtime-metadata-persistence.js';
+import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import { dispatchViewPatches } from './objectViewOptions.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+
+/**
+ * objectstack#35624 — the app a view created here is saved into
+ * (`RuntimePersistCtx.app`): the routed app's package by the draft preview
+ * bar's own rule (`draftBarPackageOf`), so the bar counts and publishes the
+ * view the create wrote. When the create could not be saved into the app, the
+ * author is told where it went instead.
+ */
+export function useRuntimeCreateApp(t: ReturnType<typeof useObjectTranslation>['t']): RuntimeCreateApp {
+    const { appName } = useParams();
+    const { apps } = useMetadata();
+    const packageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
+    // Memoised for cost only: the create reads the two fields, never the identity.
+    return useMemo(
+        () => ({
+            packageId,
+            onSavedOutsideApp: () => {
+                toast.info(t('view.savedOutsideApp', {
+                    defaultValue:
+                        'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
+                }));
+            },
+        }),
+        [packageId, t],
+    );
+}
 
 export function useObjectViewViewCrud({
     dataSource,
@@ -66,6 +95,7 @@ export function useObjectViewViewCrud({
     activeViewId: string | undefined;
     baseView: ReturnType<typeof buildViewTabs>[number];
 }) {
+    const createApp = useRuntimeCreateApp(t);
     // objectui#12504 — no toolbar control writes the shared view. The sort and
     // the column layout (objectui#12418), the density and the Hide Fields
     // popover (objectui#12474) are the user's own list state (`listPrefs`), and
@@ -175,6 +205,8 @@ export function useObjectViewViewCrud({
                     // `useAdapter()`) so the seam can drop the object's view keys.
                     dataSource,
                     objectName,
+                    // objectstack#35624 — saved into the app it was made in.
+                    app: createApp,
                 });
             }
             setShowViewConfigPanel(false);
@@ -209,7 +241,7 @@ export function useObjectViewViewCrud({
             });
             return false;
         }
-    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t]);
+    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t, createApp]);
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
