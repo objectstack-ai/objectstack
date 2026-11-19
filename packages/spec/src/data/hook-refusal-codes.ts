@@ -448,8 +448,9 @@ const TEXT_CALL = new RegExp(
 
 /**
  * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)`,
- * `ctx.text?.('key', …)` or `ctx.text!('key', …)` — in first-seen order: the cases a save can decide. A key that arrives any
- * other way (a variable, a computed value) is left to the run-time refusal.
+ * `ctx.text?.('key', …)` or `ctx.text!('key', …)` — in first-seen order:
+ * the cases a save can decide. A key that arrives any other way (a variable,
+ * a computed value) is left to the run-time refusal.
  * Comments and longer strings are blanked first, as for a refusal code.
  */
 export function hookTextKeysAskedIn(source: string): string[] {
