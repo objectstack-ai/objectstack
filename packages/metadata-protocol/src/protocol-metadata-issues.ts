@@ -188,34 +188,39 @@ function selectUnionBranches(
 /**
  * One issue → its `issues[]` entries, appended to `out`.
  *
- * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
- * bare `"Invalid input"`) FOLLOWED by the entries of the branches that explain
- * it, with `path` resolved against the union's own — branch paths are RELATIVE
- * to it, which is the trap #5014 paid for: a branch issue's `path` names a slot
- * inside the union member, not inside the document.
+ * An ordinary issue is one entry. An `invalid_union` is REPLACED by the entries
+ * of the branches that explain it, with `path` resolved against the union's own
+ * — branch paths are RELATIVE to it, which is the trap #5014 paid for: a branch
+ * issue's `path` names a slot inside the union member, not inside the document.
+ *
+ * [#35400] The union's own entry (zod's bare `"Invalid input"`) is emitted only
+ * when that expansion appended NO entry — every branch a bare kind mismatch,
+ * zod's "matched multiple" `errors: []`, or the depth bound reached — because
+ * then it is the whole answer. When at least one entry follows, the head names
+ * no slot the entries below it do not name better and carries no prescription,
+ * so it is dropped, at every depth: a refused save's `issues[]` holds located
+ * causes, read by `path` and `code`, never by position. This reverses the
+ * "strictly additive, `issues[0]` unmoved" design #5364 shipped (released in
+ * 17.0.0), by the maintainer's ruling on #35400. Both spec walks KEEP the head
+ * (`formatZodIssue` prints it as the parent line of an indented tree,
+ * `zodIssuesToFields` emits it as `invalid_shape`); that asymmetry is recorded
+ * in `union-branch-policy.cross-package-parity.test.ts` §4.
  *
  * [#8783] A {@link CONTAINER_ISSUE_CODES} issue descends the same way and for
- * the same reason, into `issue.issues` instead of `issue.errors`, with two
+ * the same reason, into `issue.issues` instead of `issue.errors`, with three
  * differences: nothing is ranked (a container has one inner schema, so every
- * issue it raised is true — see the note on the code set), and the descent is
- * only taken when the issue's own code says the payload is a container's. That
- * second half is what keeps this targeted: an `issues` array hanging off any
- * other code is left alone, so the walk did not become "descend whatever
- * nests".
- *
- * The wrapper's entry is kept rather than replaced — for the union and the
- * container alike: it is the only entry naming the slot the client sent,
- * existing consumers already read it, and when nothing below is informative it
- * is still the whole answer. So the expansion is strictly ADDITIVE — no entry
- * that shipped before this changed is gone or renumbered, only newly
- * accompanied. Both spec walks were measured to do the same before #8783 copied
- * them (`formatZodIssue` prints the wrapper line then the indented detail;
- * `zodIssuesToFields` emits the `invalid_shape` wrapper then the detail entry).
+ * issue it raised is true — see the note on the code set); the descent is only
+ * taken when the issue's own code says the payload is a container's, so an
+ * `issues` array hanging off any other code is left alone and the walk did not
+ * become "descend whatever nests"; and the container's own entry is KEPT ahead
+ * of what it explains, because its code is the one place that says the KEY was
+ * refused (`invalid_key`) rather than the value under it.
  *
  * `seen` de-duplicates entries *within one top-level issue*: two branches that
- * reject the same key with the same words say it once. Expanded entries — union
- * and container heads alike — are exempt, since two same-path wrapper entries
- * can head genuinely different sub-trees.
+ * reject the same key with the same words say it once. Expanded heads — union
+ * and container alike — are exempt, since two same-path wrapper entries can
+ * head genuinely different sub-trees; a union head emitted because nothing
+ * below explained it stays exempt too, exactly as the spec walks treat it.
  *
  * Deliberate divergence from the spec-side renderer: where it prints a trailing
  * "… and N more branches rejected this value", this emits nothing. That line is
@@ -255,19 +260,24 @@ function collectMetadataIssues(
         const key = JSON.stringify([entry.path, entry.code, entry.message]);
         if (seen.has(key)) return;
         seen.add(key);
+        out.push(entry);
+        return;
     }
-    out.push(entry);
-    if (!expandable) return;
 
     if (branches.length > 0) {
+        const before = out.length;
         for (const branch of selectUnionBranches(branches)) {
             for (const nested of branch) {
                 collectMetadataIssues(nested, path, depth + 1, seen, out);
             }
         }
+        // [#35400] The head only when nothing followed it; it would have stood
+        // at index `before` either way, so pushing it now keeps its position.
+        if (out.length === before) out.push(entry);
         return;
     }
 
+    out.push(entry);
     // Unranked, and every one of them: see {@link CONTAINER_ISSUE_CODES}.
     for (const nested of contained) {
         collectMetadataIssues(nested, path, depth + 1, seen, out);
@@ -304,7 +314,10 @@ function collectMetadataIssues(
  *
  * Branch selection is described on {@link selectUnionBranches} and is identical
  * to the other copies by construction; the container descent is described on
- * {@link CONTAINER_ISSUE_CODES}.
+ * {@link CONTAINER_ISSUE_CODES}. What this envelope does NOT share with them is
+ * the union's own entry: it is dropped wherever an entry below explains it
+ * (#35400, on {@link collectMetadataIssues}), so `issues[0]` of a refused view
+ * save is the first located cause, not that rootless line.
  */
 export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
     if (!Array.isArray(issues)) return [];
