@@ -39,7 +39,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 /** Controllable principal verdict, keyed by action (`can()` is permissive by default). */
@@ -93,11 +93,17 @@ vi.mock('sonner', () => ({
 // a plugin bundle. Same posture as the sibling RecordDetailView render tests.
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: () => null,
+  ListView: (props: any) => {
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+  },
 }));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ObjectView: () => null,
+  ObjectView: (props: any) =>
+    // objectstack#35548 — the list (and the view bar the switcher leads) is drawn through `renderListView`.
+    props.renderListView?.({ schema: props.schema ?? {}, dataSource: props.dataSource, onEdit: props.onEdit, className: '', refreshKey: 0 }) ?? null,
   ViewTabBar: () => null,
   ManageViewsDialog: () => null,
 }));
@@ -167,8 +173,17 @@ function renderList(objects: any[]) {
   );
 }
 
-const importButton = () =>
-  document.querySelector('[data-testid="object-view-import-button"]') as HTMLButtonElement | null;
+/**
+ * Import is an entry of the page bar's ⋮ menu since objectstack#35548 (beside
+ * the description and the favorites entry): opens the menu, then reads the
+ * entry. A greyed entry is Radix's `data-disabled`, read here as `disabled`.
+ */
+const importButton = () => {
+  const more = document.querySelector('[data-testid="object-view-more-actions"]');
+  if (more && more.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(more, { key: 'Enter' });
+  const item = document.querySelector('[data-testid="object-view-import-button"]');
+  return item ? { disabled: item.hasAttribute('data-disabled') } : null;
+};
 
 beforeEach(() => {
   principal = {};

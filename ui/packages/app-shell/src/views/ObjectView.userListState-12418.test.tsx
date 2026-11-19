@@ -126,7 +126,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
   ListView: (props: any) => {
     listProps = props;
-    return null;
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
   },
 }));
 
@@ -518,13 +520,21 @@ describe('the user\'s state follows them, and only them (objectui#12418)', () =>
     expect(await overflowTestIds()).not.toContain('object-view-reset-view-button');
   });
 
-  it('with no favorites entry (no app segment), no ⋯ is drawn: the way back is the marker beside the title', async () => {
+  it('with no favorites entry (no app segment), the ⋯ offers no reset: the way back is the marker beside the title', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family, SYSTEM_ID, { app: false });
     await listReady();
 
-    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+    // objectstack#35548 — the page bar's ⋮ also holds the description and
+    // Import, so it is drawn; it carries no favorites entry and no reset.
+    const more = screen.queryByRole('button', { name: 'More actions' });
+    if (more) {
+      fireEvent.keyDown(more, { key: 'Enter' });
+      const entries = screen.queryAllByRole('menuitem').map((el) => (el.textContent ?? '').trim());
+      expect(entries.some((text) => /favorites|reset/i.test(text))).toBe(false);
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    }
     await resetToView(['sort']);
     await wait(700);
     expect(screen.queryByTestId('list-personalized-marker')).toBeNull();

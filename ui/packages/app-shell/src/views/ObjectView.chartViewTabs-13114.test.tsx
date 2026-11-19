@@ -193,11 +193,12 @@ describe('objectui#13114 — a chart view keeps the view switcher', () => {
 
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
-    expect(screen.queryByTestId('list-toolbar-leading')).toBeNull();
+    // objectstack#35548 — on a list face the switcher leads the view bar.
+    expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('list-view-switcher'))).toBe(true);
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
   });
 
-  it('a chart face carries its description on the switcher; a grid face draws it as the list\'s info control', async () => {
+  it('the description rides on the switcher on a chart face and on a grid face alike (objectstack#35548)', async () => {
     setViewportWidth(1440);
     mountProjects('budget_chart');
     await chartFace();
@@ -208,8 +209,8 @@ describe('objectui#13114 — a chart view keeps the view switcher', () => {
     chooseView('all');
     await listToolbar();
 
-    expect(screen.getByTestId('list-view-switcher').hasAttribute('title')).toBe(false);
-    expect(screen.getByTestId('view-description-info')).toHaveAttribute('title', 'Every project');
+    expect(screen.getByTestId('list-view-switcher')).toHaveAttribute('title', 'Every project');
+    expect(screen.queryByTestId('view-description-info')).toBeNull();
   });
 
   it('on a phone the one switcher heads the chart face, outside the page header a phone does not draw', async () => {

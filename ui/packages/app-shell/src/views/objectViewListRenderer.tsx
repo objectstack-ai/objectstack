@@ -8,7 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
-import { useCallback, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
@@ -166,6 +166,16 @@ export function useObjectViewListRenderer({
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
+    // objectstack#35548 — the switcher leads the view bar at every width. The
+    // page builds a new switcher element on every render; read through this
+    // store, it re-draws itself without re-rendering the list (a `?recordId=`
+    // step must leave the list alone, objectstack#27545 Target 5). The relay
+    // keys only on whether there is one.
+    const [leadStore] = useState(() => createLeadStore(phoneTitle));
+    useLayoutEffect(() => {
+        leadStore.set(phoneTitle);
+    });
+    const hasPhoneTitle = phoneTitle != null;
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -341,9 +351,9 @@ export function useObjectViewListRenderer({
             // list's view bar's height (objectstack#27058, objectstack#35548).
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
-                    {phoneTitle != null && (
+                    {hasPhoneTitle && (
                         <div className="border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center min-w-0 bg-background">
-                            {phoneTitle}
+                            <ViewBarLead store={leadStore} />
                         </div>
                     )}
                     {chartFace}
@@ -737,7 +747,7 @@ export function useObjectViewListRenderer({
             // objectstack#27058 — not on a phone: the title switcher is the
             // phone's one view control, and the Display menu drops its Layout
             // row there.
-            showViewSwitcher: (phoneTitle == null || wideViewport)
+            showViewSwitcher: (!hasPhoneTitle || wideViewport)
                 && ((viewDef.appearance ?? listSchema.appearance)?.allowedVisualizations?.length ?? 0) > 1,
             // Toolbar policy — one vocabulary (#2890). Stored views may still
             // carry the legacy bare `show*` flags, so each side is run through
@@ -1106,15 +1116,44 @@ export function useObjectViewListRenderer({
                 // filter / sort / options tools (objectstack#27058,
                 // objectstack#35548). The switcher shows the list's own record
                 // count and layout, which only the list knows.
-                toolbarLeading={phoneTitle == null ? null : ({ recordCount, layout }) => (
+                toolbarLeading={hasPhoneTitle ? ({ recordCount, layout }) => (
                     <ListRecordCountContext.Provider value={{ count: recordCount, layout }}>
-                        {phoneTitle}
+                        <ViewBarLead store={leadStore} />
                     </ListRecordCountContext.Provider>
-                )}
+                ) : null}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
+}
+
+/** The page's current view-bar lead (the switcher), read by `ViewBarLead`. */
+interface LeadStore {
+    get: () => ReactNode;
+    set: (next: ReactNode) => void;
+    subscribe: (listener: () => void) => () => void;
+}
+
+function createLeadStore(initial: ReactNode): LeadStore {
+    let current = initial;
+    const listeners = new Set<() => void>();
+    return {
+        get: () => current,
+        set: (next) => {
+            if (Object.is(next, current)) return;
+            current = next;
+            listeners.forEach((listener) => listener());
+        },
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+    };
+}
+
+/** Draws the store's lead, re-rendering on its own when the page hands a new one. */
+function ViewBarLead({ store }: { store: LeadStore }) {
+    return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
 }

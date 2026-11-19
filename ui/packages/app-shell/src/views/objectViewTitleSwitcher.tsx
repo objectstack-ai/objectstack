@@ -88,7 +88,7 @@ export interface ObjectViewTitleSwitcherProps {
     activeViewId: string;
     /** The title's text: the open view's label, or the object's when none is open. */
     activeLabel: string;
-    /** The open view's description, the title's tooltip (a chart face's; a list draws its own). */
+    /** The open view's description, the trigger's tooltip (objectstack#35548: on every face). */
     description?: string;
     onViewChange: (viewId: string) => void;
     /** The reader's pinned view for this object, if any. */
@@ -321,7 +321,7 @@ export function ObjectViewTitleSwitcher({
                         )}
                         <span className="truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
                         {count !== null && (
-                            <span className="shrink-0 font-normal tabular-nums text-muted-foreground" data-testid="list-view-switcher-count">
+                            <span className="shrink-0 font-normal tabular-nums text-muted-foreground max-sm:hidden" data-testid="list-view-switcher-count">
                                 {count.toLocaleString(displayLocale)}
                             </span>
                         )}
@@ -481,13 +481,14 @@ export function useObjectViewTitleSwitcher({
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
 }) {
-    // objectui#12528 — the view's description is shown once. A list face
-    // draws it itself, as the info control at the start of its toolbar row
-    // (`ListView`, with no leading node from the host). A chart face has no
-    // such row, so there it rides on the switcher, as the title's tooltip:
-    // resolved the way `ListView` resolves the same text (`pickLocalized` on
-    // the display locale), and gated on the same switch the relay hands
-    // `ListView` as `appearance.showDescription`: `false` shows it nowhere.
+    // objectui#12528 — the view's description is shown once. It rides on the
+    // switcher, as the trigger's tooltip, on every face: since
+    // objectstack#35548 the switcher leads the list's view bar (the list's
+    // `toolbarLeading`), and a list with a leading node draws no info control
+    // of its own. Resolved the way `ListView` resolves the same text
+    // (`pickLocalized` on the display locale), and gated on the same switch
+    // the relay hands `ListView` as `appearance.showDescription`: `false`
+    // shows it nowhere.
     const displayLocale = useDisplayLocale();
     const viewItems: ViewTabItem[] = views.map((view: any) => {
         const saved = savedViews.find((sv: any) => viewRowId(sv) === view.id);
@@ -560,7 +561,7 @@ export function useObjectViewTitleSwitcher({
             views={switcherViews}
             activeViewId={openViewId}
             activeLabel={titleLabel}
-            description={openView?.type === 'chart' ? openView.description : undefined}
+            description={openView?.description}
             onViewChange={handleViewChange}
             pinnedViewId={pinnedViewId}
             onPinnedViewChange={setPinnedViewId}

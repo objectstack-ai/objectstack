@@ -1153,6 +1153,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         isEnvironmentList,
         toolbarBar,
         viewAccess,
+        titleSwitcher,
     });
 
     // The list itself: one element whether or not a record is open

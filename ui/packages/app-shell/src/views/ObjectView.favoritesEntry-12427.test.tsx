@@ -156,7 +156,11 @@ async function mountList(metadata: ReturnType<typeof metadataWith>): Promise<voi
   await screen.findByRole('heading', { level: 1 }, { timeout: 5000 });
 }
 
-/** Opens the header's overflow menu and returns its entries' text. */
+/**
+ * Opens the header's overflow menu and returns its entries' text. Since
+ * objectstack#35548 the ⋮ also holds Import (and the object's description, a
+ * label, not a menu item), ahead of the favorites entry.
+ */
 async function openOverflow(): Promise<string[]> {
   fireEvent.keyDown(screen.getByRole('button', { name: 'More actions' }), { key: 'Enter' });
   return (await screen.findAllByRole('menuitem')).map((el) => (el.textContent ?? '').trim());
@@ -185,7 +189,7 @@ describe('ObjectView: the favorites entry is in the header overflow, not a star 
     const trigger = screen.getByTestId('object-view-more-actions');
     expect(trigger).toHaveAccessibleName('More actions');
     expect(trigger.textContent).toBe('');
-    expect(await openOverflow()).toEqual(['Add to favorites']);
+    expect(await openOverflow()).toEqual(['Import', 'Add to favorites']);
   });
 });
 
@@ -200,7 +204,7 @@ describe('ObjectView: the entry pins the app\'s own navigation entry for this li
     expect([pin.id, pin.type, pin.navId, pin.pinned]).toEqual(['nav:nav_projects', 'nav', 'nav_projects', true]);
     expect(stored().some((f) => f.id.startsWith('object:'))).toBe(false);
 
-    expect(await openOverflow()).toEqual(['Remove from favorites']);
+    expect(await openOverflow()).toEqual(['Import', 'Remove from favorites']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from favorites' }));
     await waitFor(() => expect(stored()).toEqual([]));
   });
@@ -218,6 +222,6 @@ describe('ObjectView: the entry pins the app\'s own navigation entry for this li
       'Projects',
       '/apps/demo/showcase_project',
     ]);
-    expect(await openOverflow()).toEqual(['Remove from favorites']);
+    expect(await openOverflow()).toEqual(['Import', 'Remove from favorites']);
   });
 });

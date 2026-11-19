@@ -170,9 +170,9 @@ async function listTitle(lang: Lang, objectName: string, objects = OBJECTS[lang]
     </I18nProvider>,
   );
   const heading = await screen.findByRole('heading', { level: 1 }, { timeout: 5000 });
-  // The title is the view switcher; the list body is stubbed, so it reports
-  // no count and the heading holds the label alone.
-  expect(within(heading).getByTestId('list-view-switcher')).toBeInTheDocument();
+  // objectstack#35548 — the page bar's heading names the object alone; the
+  // view switcher leads the list's view bar below it.
+  expect(within(heading).queryByTestId('list-view-switcher')).toBeNull();
   return heading.textContent ?? '';
 }
 

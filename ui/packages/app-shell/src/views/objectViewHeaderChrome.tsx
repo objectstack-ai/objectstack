@@ -6,7 +6,7 @@
  * hook. Every input is passed in; the component reads the returned values.
  */
 
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { Plus, Lock } from 'lucide-react';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
@@ -37,6 +37,7 @@ export function useObjectViewHeaderChrome({
     isEnvironmentList,
     toolbarBar,
     viewAccess,
+    titleSwitcher,
 }: {
     objectCanCreate: ReturnType<typeof useObjectViewToolbarAffordances>['objectCanCreate'];
     createVisible: ReturnType<typeof useObjectViewToolbarAffordances>['createVisible'];
@@ -54,6 +55,12 @@ export function useObjectViewHeaderChrome({
     isEnvironmentList: ReturnType<typeof useObjectViewToolbarAffordances>['isEnvironmentList'];
     toolbarBar: ReturnType<typeof useObjectViewHeaderToolbar>['toolbarBar'];
     viewAccess: ReturnType<typeof useMetaItemRefusal>;
+    /**
+     * The view switcher (objectstack#35548): it leads the list's view bar, so
+     * the refused-view face, which draws no list, draws the bar's switcher
+     * itself — the reader's way to another view.
+     */
+    titleSwitcher?: ReactNode;
 }) {
     // The header's primary action, drawn the same in both of the header's
     // faces (below). [#5153] `objectCanCreate && createVisible` — the
@@ -143,7 +150,6 @@ export function useObjectViewHeaderChrome({
     };
     const foldedHeaderActions = !isEnvironmentList && (showCreate || primaryToolbarAction) ? (
         <>
-            {createButton}
             {/* One inline slot at every width: `toolbarBar` keeps none below
                 `md` (`mobileMaxVisible: 0`), which would send the primary into
                 a second `⋯` beside the menu's. */}
@@ -151,13 +157,21 @@ export function useObjectViewHeaderChrome({
                 <ListHeaderActionBar schema={{ ...toolbarBar, actions: [primaryToolbarAction], maxVisible: 1, mobileMaxVisible: 1 }} />
             )}
             <ListHeaderActionBar schema={foldedMenuBar} />
+            {/* New last, as in the unfolded bar (objectstack#35548). */}
+            {createButton}
         </>
     ) : undefined;
 
     // objectui#12112 — the list area for a view the server refused: said as a
     // permission refusal, in the server's own sentence, which names the view.
     const refusedViewFace = viewAccess.refusal ? (
-        <div className="h-full flex items-center justify-center p-8">
+        <div className="flex h-full flex-col">
+        {titleSwitcher && (
+            <div className="flex h-10 shrink-0 items-center border-b px-4" data-testid="refused-view-bar">
+                {titleSwitcher}
+            </div>
+        )}
+        <div className="flex flex-1 items-center justify-center p-8">
             <Empty data-testid="view-access-denied">
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
                     <Lock className="h-6 w-6 text-muted-foreground" />
@@ -165,6 +179,7 @@ export function useObjectViewHeaderChrome({
                 <EmptyTitle>{t('list.loadErrorForbiddenTitle')}</EmptyTitle>
                 {viewAccess.refusal.message && <EmptyDescription>{viewAccess.refusal.message}</EmptyDescription>}
             </Empty>
+        </div>
         </div>
     ) : null;
 
