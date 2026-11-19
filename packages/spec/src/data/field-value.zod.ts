@@ -430,8 +430,10 @@ export const LocationValueSchema = lazySchema(() => strictObject(
       + 'dropped — the value parsed green with the key gone, so the mistake surfaced only as a '
       + 'blank on screen.',
     // The retired spec-only spelling (see the module header). The two entries
-    // play DIFFERENT roles and neither is optional. The fallback budget is
-    // `Math.max(2, Math.floor(key.length / 3))` (`shared/suggestions.zod.ts`).
+    // play DIFFERENT roles and neither is optional. The fallback is
+    // `suggestRename` (`shared/rename-guess.ts`, the package's one rename
+    // rule): budget `max(2, floor(len / 3))`, and at five characters or fewer
+    // one edit counting an adjacent swap as one.
     //
     //  - `longitude` → `lng` is the unreachable case: 6 edits against a budget
     //    of 3, and no other declared member is closer, so without this entry
@@ -441,7 +443,7 @@ export const LocationValueSchema = lazySchema(() => strictObject(
     //    a declared member 2 edits away, inside the budget, so the bare
     //    fallback answers `latitude` → `altitude`. This entry OVERRULES a
     //    confident wrong answer rather than filling a gap, which is the other
-    //    job an alias does: `aliases[aliasProbe(key)] ?? findClosestMatches(…)`
+    //    job an alias does: `aliases[aliasProbe(key)] ?? suggestRename(…)`
     //    consults the table first and wins outright.
     //
     // The value contract has refused the pair since ADR-0104 D1, so the rename

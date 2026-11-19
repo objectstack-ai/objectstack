@@ -193,3 +193,26 @@ describe('defineSeed holds a `columns` key to the same column set (#25761)', () 
     expect(error.message).toContain('columns: `stauts` is not a field of `crm_lead`');
   });
 });
+
+/**
+ * `defineSeed` answers an unknown record key with the package's ONE rename rule
+ * (`shared/rename-guess.ts`). It used to pass `max(2, len/3)` to
+ * `findClosestMatches` itself, without the short-key screen, so a short key was
+ * offered any column two unrelated edits away.
+ */
+describe('defineSeed — a short unknown key gets the shared rename rule', () => {
+  it('a short key two unrelated edits from a column is offered nothing', () => {
+    // `kind` → `id` is two deletions, inside the old budget of 2.
+    const rows: Record<string, unknown>[] = [{ first_name: 'Gil', kind: 'web' }];
+    const error = refusalOf(() => defineSeed(Lead, { externalId: 'first_name', records: rows }));
+    expect(error.message).toContain('records[0]: `kind` is not a field of `crm_lead`.\n');
+    expect(error.message).not.toContain('Did you mean');
+  });
+
+  it('a genuine one-edit slip on a short key is still answered', () => {
+    // An adjacent swap counts as one edit.
+    const rows: Record<string, unknown>[] = [{ first_name: 'Hal', queeu: 'support' }];
+    const error = refusalOf(() => defineSeed(Lead, { externalId: 'first_name', records: rows }));
+    expect(error.message).toContain("records[0]: `queeu` is not a field of `crm_lead`. Did you mean 'queue'?");
+  });
+});

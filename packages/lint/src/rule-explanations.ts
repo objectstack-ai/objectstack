@@ -6338,7 +6338,8 @@ const STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION: RuleExplanation = {
       'empty `initialStates` list is the same as none: the engine reads it as no entry contract.',
     '`initialStates` lists the states a record may be created in, and the server refuses an insert in any ' +
       'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process. ' +
-      'A machine with `active: false` is not run, so it is not reported.',
+      'A machine with `active: false` is not run, so it is not reported; nor is one whose `events` leave out ' +
+      '`insert`, because the engine never runs it on create and would never read its `initialStates`.',
   ],
 };
 

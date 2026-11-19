@@ -331,6 +331,9 @@ export function ReportDefaultInspector({
   locale,
   datasetCatalogOverride,
   serverSchema,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: ReportDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
 
@@ -699,6 +702,9 @@ export function ReportDefaultInspector({
             hiddenFields={['type', 'label', 'name', 'dataset', 'values', 'rows', 'columns', 'chart']}
             readOnly={readOnly}
             widgetContext={widgetContext}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={onInlineIssueFieldsChange}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         ) : (

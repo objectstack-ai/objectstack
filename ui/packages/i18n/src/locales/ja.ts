@@ -528,6 +528,14 @@ const ja = {
     bulkAllMatchingSelectedCapped: "該当する {{total}} 件のうち、処理されるのは先頭の {{cap}} 件のみです。",
     bulkSelectedAllMatchesCapped: "{{cap}} 件を選択中（該当 {{total}} 件中）",
     bulkActions: "一括操作",
+    // objectstack#35554 — the list page bar while rows are selected.
+    selectedCount: "{{count}} 件を選択中",
+    selectedCount_one: "{{count}} 件を選択中",
+    selectedCount_other: "{{count}} 件を選択中",
+    selectedAllLoaded: "このページの {{count}} 件がすべて選択されています。",
+    selectedAllLoaded_one: "このページの {{count}} 件がすべて選択されています。",
+    selectedAllLoaded_other: "このページの {{count}} 件がすべて選択されています。",
+    selectAllTotal: "該当する {{total}} 件すべてを選択",
     bulk: {
       confirmDefault: "{{count}} 件のレコードに適用されます。",
       confirmDefault_one: "{{count}} 件のレコードに適用されます。",
@@ -4851,6 +4859,12 @@ const ja = {
       shown: 'ビューに表示',
       hidden: '非表示のフィールド',
       empty: '一致するフィールドがありません',
+      addable: 'まだビューにない',
+      add: '{{label}}を追加',
+      show: '{{label}}を表示',
+      hide: '{{label}}を非表示',
+      move: '{{label}}を移動',
+      moveHint: 'ドラッグするか上下の矢印キーで順序を変更',
     },
     filter: {
       advanced: '詳細フィルター',

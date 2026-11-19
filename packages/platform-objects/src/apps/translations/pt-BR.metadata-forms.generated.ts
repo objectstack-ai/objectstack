@@ -1897,6 +1897,42 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memória (MB)",
         helpText: "Limite de memória por invocação (MB, máx. 256)"
       },
+      refusals: {
+        label: "Recusas",
+        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o corpo da ação lança (por exemplo SIGN_IN_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Para o corpo JavaScript (L2) de uma ação script; recusado em um corpo de expressão"
+      },
+      "refusals.message": {
+        label: "Mensagem",
+        helpText: "A frase que o usuário lê quando o corpo lança este código. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "Status HTTP da recusa (400–499). Ausente: 400"
+      },
+      "refusals.reasons": {
+        label: "Motivos",
+        helpText: "Outras frases sob este mesmo código, indexadas pelo motivo snake_case que o corpo lança junto com o código ({ code, reason }). O código e o status enviados continuam sendo os desta entrada; um motivo não declarado aqui é recusado. Ausente: um motivo lançado não é lido"
+      },
+      "refusals.reasons.message": {
+        label: "Mensagem",
+        helpText: "A frase que o usuário lê quando o corpo lança este motivo sob o código. Seus marcadores {{ }} seguem os params da entrada"
+      },
+      "refusals.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que a ação escreve nos registros, indexadas pela chave snake_case que o corpo dela pede com ctx.text (por exemplo email_subject). O corpo recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para o corpo JavaScript (L2) de uma ação script; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que a ação escreve quando o corpo dela pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo subject): o corpo pede ctx.text(key, { subject }) e um marcador {{ subject }} mostra o valor. Ausente: a frase é texto simples"
+      },
       params: {
         label: "Parâmetros",
         helpText: "Parâmetros de entrada do usuário (mostrar um formulário antes de executar)"

@@ -23,6 +23,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
@@ -4954,40 +4955,6 @@ function snakeCaseToLabel(name: string): string {
     .join(' ');
 }
 
-/** Levenshtein edit distance — backs the "did you mean" hint for typo'd keys. */
-function editDistance(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0),
-  );
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[a.length][b.length];
-}
-
-/** Closest known key within a small edit distance, for typo hints (`indexs` → `indexes`). */
-function suggestKey(unknown: string, knownKeys: string[]): string | undefined {
-  let best: string | undefined;
-  let bestDist = Infinity;
-  for (const key of knownKeys) {
-    const d = editDistance(unknown.toLowerCase(), key.toLowerCase());
-    if (d < bestDist) {
-      bestDist = d;
-      best = key;
-    }
-  }
-  // Only suggest when the keys are genuinely close (guards against noise).
-  return best !== undefined && bestDist <= Math.max(2, Math.floor(unknown.length / 3))
-    ? best
-    : undefined;
-}
-
 /**
  * Builds a precise, fixable error for unknown top-level keys on
  * `ObjectSchema.create()` — the metadata-shape analogue of ADR-0032's "no
@@ -5000,7 +4967,10 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
   const lines = unknownKeys.map((key) => {
     const guidance = UNKNOWN_KEY_GUIDANCE[key];
     if (guidance) return `  • ${guidance}`;
-    const suggestion = suggestKey(key, knownKeys);
+    // The package's one rename rule (`shared/rename-guess.ts`): the same budget
+    // and short-key screen every `strictObject` refusal answers with, so a
+    // short key is never offered an unrelated one here either.
+    const suggestion = suggestRename(key, knownKeys);
     return suggestion
       ? `  • \`${key}\` is not an ObjectSchema field — did you mean \`${suggestion}\`?`
       : `  • \`${key}\` is not an ObjectSchema field.`;
