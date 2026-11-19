@@ -80,6 +80,42 @@ export interface RegistrationHost {
   readonly unavailableDatasources: ObjectQL['unavailableDatasources'];
 }
 
+/**
+ * [#35228 ruling A, runtime arm A1] The one error line a package body owes when
+ * it carries two or more `objectExtensions` entries for one target: one line
+ * per (package, target), naming the target, the package and every entry's
+ * index. The registry keeps one extension of a target per package (the extend
+ * splice replaces the package's previous contribution, which a reload relies
+ * on), so only the last entry's fields register. The ruling keeps that outcome
+ * for a body built before authoring refused it — the line reports the loss and
+ * the fix, and the body is neither refused nor merged.
+ */
+function logSameTargetObjectExtensions(
+  logger: ObjectQL['logger'],
+  packageId: string,
+  extensions: readonly unknown[],
+): void {
+  const indicesByTarget = new Map<string, number[]>();
+  for (const [i, ext] of extensions.entries()) {
+    const target = ext !== null && typeof ext === 'object' ? (ext as { extend?: unknown }).extend : undefined;
+    if (typeof target !== 'string' || !target) continue;
+    indicesByTarget.set(target, [...(indicesByTarget.get(target) ?? []), i]);
+  }
+  for (const [target, indices] of indicesByTarget) {
+    if (indices.length < 2) continue;
+    const positions = indices.map((i) => `objectExtensions[${i}]`);
+    const named = `${positions.slice(0, -1).join(', ')} and ${positions[positions.length - 1]}`;
+    logger.error(
+      `Package '${packageId}' declares ${indices.length} objectExtensions entries for object '${target}' ` +
+        `(${named}): one extension of an object registers per package, so only the last entry's fields ` +
+        `(${positions[positions.length - 1]}) are served and the fields of the others are missing, while the ` +
+        `package keeps loading. Merge them into a single objectExtensions entry for '${target}' and rebuild the package.`,
+      undefined,
+      { package: packageId, target, entries: indices },
+    );
+  }
+}
+
 /** The bodies of the "Package, app, plugin, driver and datasource registration" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class RegistrationFacet {
   /** The body of `ObjectQL#registerApp`; the method's docblock there is its contract. */
@@ -319,6 +355,17 @@ export class RegistrationFacet {
       // 2b. Register object extensions (fields added to objects owned by other packages)
       if (Array.isArray(manifest.objectExtensions) && manifest.objectExtensions.length > 0) {
           this.logger.debug('Registering object extensions', { id, count: manifest.objectExtensions.length });
+          // [#35228 ruling A, runtime arm A1] One extension of a target per
+          // package: each entry below REPLACES the package's earlier
+          // contribution to its target (the registry's extend splice, which a
+          // reload depends on), so a body carrying two entries for one target
+          // registers only the last one's fields. Authoring refuses that body
+          // now (`stack.zod.ts`, the #22934 identity check at every door); one
+          // built before that still loads, as the ruling keeps it, and says
+          // what it lost — at `error`, because the boot looks healthy while
+          // the earlier entries' fields are absent. Once per (package, target).
+          // Neither refused nor merged: the outcome is unchanged.
+          logSameTargetObjectExtensions(this.logger, id, manifest.objectExtensions);
           for (const ext of manifest.objectExtensions) {
               const targetFqn = ext.extend;
               const priority = ext.priority ?? 200;
