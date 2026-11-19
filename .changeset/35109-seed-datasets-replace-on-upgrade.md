@@ -5,7 +5,7 @@
 
 fix(runtime, cloud-connection): an upgrade replaces the package's seed datasets on the shared replay list
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The shared `seed-datasets` list that per-organization seed replay reads was append-only. After a package was upgraded in a running process, the superseded version's datasets stayed on the list until a restart, so every organization founded in between replayed the old and the new version's seed sets. When the upgrade changed an object's `fallback: true` set, the two marked sets refused that object's fallback choice, and a dataset declaring `dependsOn` that object refused the whole load for an organization whose locale no set lists.
