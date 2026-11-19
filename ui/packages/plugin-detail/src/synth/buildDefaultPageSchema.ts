@@ -226,10 +226,10 @@ export interface BuildPageOptions {
     isPrimary?: boolean;
     /**
      * The list is the record's own body (objectstack#27055, Target 8):
-     * `relatedList: 'primary'`, or a `master_detail` FK declaring `inlineEdit`
-     * and no `relatedList`. Drawn as a full-width table section in the Details
-     * tab, right after the first field section, instead of in the Related tab /
-     * related column. Absent: `isPrimary` decides. The host computes it from
+     * `relatedList: 'primary'`, or a `master_detail` FK declaring no
+     * `relatedList` (objectstack#35597; `inlineEdit` no longer required). Drawn
+     * as a full-width table section in the Details tab, before the field
+     * sections, instead of in the Related tab / related column. Absent: `isPrimary` decides. The host computes it from
      * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
      * (objectstack#27478) — the one predicate, which the spec's refusal of a
      * field group naming a side card reads too (no spec key of its own).
@@ -808,9 +808,12 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
  *    the spec refuses a group naming a side card or a hidden list, by the same
  *    `isBodyTableRelationship` the host computes `isBody` with);
- *  - every other body table goes right after the FIRST field section
- *    (conventionally 基本信息), stacked in the order given; with one section
- *    or none, after the details.
+ *  - every other body table goes BEFORE the field sections (objectstack#35597,
+ *    the maintainer's 「关键字段下面」: under the header strip's stage bar and key
+ *    fields, above the field groups), stacked in the order given — the
+ *    parent's `relatedLists`, then the derived order. With no section at all
+ *    the details node leads (it draws the object's highlight fields) and the
+ *    tables follow it. (objectstack#27069 drew them after the FIRST section.)
  *
  * The details node is split around the tables: each run of consecutive
  * sections is one `record:details`. A section names its group by `group` (the
@@ -856,7 +859,9 @@ export function bodyTablePlacement(
   };
 
   if (placed.length === 0 && resolved.length <= 1) {
-    return [buildDefaultDetails(def, sections, hideFields), ...bodies];
+    return resolved.length === 0
+      ? [buildDefaultDetails(def, sections, hideFields), ...bodies]
+      : [...bodies, buildDefaultDetails(def, sections, hideFields)];
   }
 
   // Lay the sections and the tables out in one sequence, then fold each run
@@ -867,12 +872,11 @@ export function bodyTablePlacement(
   const flushPlacedBefore = (index: number) => {
     while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
   };
-  resolved.forEach((section, i) => {
+  for (const node of unplaced) slots.push({ table: node });
+  resolved.forEach((section) => {
     flushPlacedBefore(sectionGroupIndex(section));
     slots.push({ section });
-    if (i === 0) for (const node of unplaced) slots.push({ table: node });
   });
-  if (resolved.length === 0) for (const node of unplaced) slots.push({ table: node });
   while (next < placed.length) slots.push({ table: placed[next++].node });
 
   const out: any[] = [];
