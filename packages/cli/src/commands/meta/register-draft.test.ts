@@ -17,9 +17,16 @@
  *    the protocol `mode: 'draft'`, the stored row is `state: 'draft'`, no
  *    active row is written, and the draft is listed by `GET /meta/_drafts?package=P`
  *    — the read Studio's Changes lists a package's drafts from.
+ *  - After that save the command reads the draft back,
+ *    `GET /meta/:type/:name?package=P&state=draft`, and prints the publish
+ *    verdict the runtime folds into its `_diagnostics`: `valid: true` for a
+ *    clean view, `valid: false` with `title-format-retired` for an object
+ *    carrying the retired `titleFormat`, on the text and JSON faces.
+ *  - `--mode draft` naming no package is refused before any request (ruling
+ *    D4): no client is made and nothing reaches the wire.
  *  - Unflagged, and `--mode publish`, the request is the one this command
- *    always sent: no query string, an active row, no draft. The negative
- *    control for the case above.
+ *    always sent: no query string, an active row, no draft, and no read
+ *    after it. The negative control for the cases above.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -40,7 +47,13 @@ import {
 } from '@objectstack/platform-objects';
 import { RestServer } from '@objectstack/runtime';
 import { ObjectStackClient } from '@objectstack/client';
-import MetaRegister, { draftSaveLines, metaRegisterOptions } from './register.js';
+import MetaRegister, {
+  DRAFT_NEEDS_PACKAGE_REFUSAL,
+  draftPublishVerdictOf,
+  draftSaveLines,
+  draftVerdictLines,
+  metaRegisterOptions,
+} from './register.js';
 
 const stub = vi.hoisted(() => ({
   client: undefined as any,
@@ -115,6 +128,14 @@ const TASK = {
     id: { name: 'id', type: 'text' as const, primaryKey: true, label: 'ID' },
     name: { name: 'name', type: 'text' as const, label: 'Name' },
   },
+};
+
+/** An object a publish refuses: it carries the retired `titleFormat`. */
+const RETIRED_TITLE_OBJECT = {
+  name: 'invoice_34777',
+  label: 'Invoice',
+  titleFormat: '{name}',
+  fields: { name: { name: 'name', type: 'text', label: 'Name' } },
 };
 
 const VIEW = (name: string, label: string) => ({
@@ -293,6 +314,9 @@ function dataFile(body: unknown): string {
 /** The last `PUT` the client put on the wire. */
 const lastPut = (wire: WireRecord[]) => wire.filter((w) => w.method === 'PUT').at(-1)!;
 
+/** Every request on the wire, as `METHOD path?query`. */
+const requests = (wire: WireRecord[]) => wire.map((w) => `${w.method} ${w.pathname}${w.search}`);
+
 // ---------------------------------------------------------------------------
 // The declared surface
 // ---------------------------------------------------------------------------
@@ -311,7 +335,6 @@ describe('[#34777] the `--mode` flag `os meta register` declares', () => {
     expect(metaRegisterOptions({})).toBeUndefined();
     expect(metaRegisterOptions({ mode: undefined })).toBeUndefined();
     expect(metaRegisterOptions({ mode: 'publish' })).toBeUndefined();
-    expect(metaRegisterOptions({ mode: 'draft' })).toEqual({ mode: 'draft' });
     expect(metaRegisterOptions({ mode: 'draft', package: PKG, force: false })).toEqual({ mode: 'draft', packageId: PKG });
     expect(metaRegisterOptions({ mode: 'publish', package: PKG })).toEqual({ packageId: PKG });
   });
@@ -322,8 +345,32 @@ describe('[#34777] the `--mode` flag `os meta register` declares', () => {
     expect(head).toContain('not published');
     expect(head).toContain('hmac-sha256:ab');
     expect(review).toContain(`/studio/${PKG}/interfaces?changes=review`);
-    const [, unbound] = draftSaveLines({ type: 'view', name: 'v' });
-    expect(unbound).toContain('--package');
+  });
+
+  it('[ruling D4] `--mode draft` naming no package is refused, and the refusal names `--package <id>`', () => {
+    expect(() => metaRegisterOptions({ mode: 'draft' })).toThrow(DRAFT_NEEDS_PACKAGE_REFUSAL);
+    expect(DRAFT_NEEDS_PACKAGE_REFUSAL).toContain('--package <id>');
+    // `--mode publish` names no package and is not refused: the rule is the draft's.
+    expect(() => metaRegisterOptions({ mode: 'publish' })).not.toThrow();
+  });
+
+  it('`draftPublishVerdictOf` reads `item._diagnostics` only off the draft the save stored', () => {
+    const read = (version: string | null, diagnostics?: unknown) => ({
+      type: 'object', name: 'o', version, item: { name: 'o', ...(diagnostics ? { _diagnostics: diagnostics } : {}) },
+    }) as any;
+    const refused = { valid: false, errors: [{ path: 'titleFormat', message: 'retired', code: 'title-format-retired' }] };
+    expect(draftPublishVerdictOf(read('v1', refused), 'v1')).toEqual({
+      verdict: { valid: false, errors: refused.errors, warnings: [] },
+    });
+    // Another row's answer (the published item, or a later draft) is no verdict of this draft.
+    const other = draftPublishVerdictOf(read('v2', refused), 'v1');
+    expect(other.verdict).toBeNull();
+    expect(other.unread).toContain('version v2');
+    expect(draftPublishVerdictOf(read(null, refused), 'v1').verdict).toBeNull();
+    expect(draftPublishVerdictOf(read('v1'), 'v1').unread).toContain('no publish verdict');
+    const lines = draftVerdictLines({ valid: false, errors: refused.errors, warnings: [] });
+    expect(lines.head).toContain('valid: false');
+    expect(lines.errors).toEqual(['title-format-retired at titleFormat: retired']);
   });
 });
 
@@ -341,6 +388,12 @@ describe('[#34777] `os meta register --mode draft` against the real save door', 
     expect(run.out).toContain('Draft saved: view/draft_view');
     expect(run.out).toContain(`/studio/${PKG}/interfaces?changes=review`);
     expect(run.out).not.toContain('Metadata registered');
+    // The save, then the strict draft read of the same package, and nothing else.
+    expect(requests(wire)).toEqual([
+      `PUT /api/v1/meta/view/draft_view?package=${PKG}&mode=draft`,
+      `GET /api/v1/meta/view/draft_view?package=${PKG}&state=draft`,
+    ]);
+    expect(run.out).toContain('Publish verdict: valid: true, 0 error(s)');
     // The probe: the door read `?mode=draft` and handed the protocol a draft save.
     expect(lastPut(wire).search).toBe(`?package=${PKG}&mode=draft`);
     expect(saveRequests.at(-1).mode).toBe('draft');
@@ -361,6 +414,41 @@ describe('[#34777] `os meta register --mode draft` against the real save door', 
     const payload = JSON.parse(run.out);
     expect(payload.state).toBe('draft');
     expect(typeof payload.version).toBe('string');
+    expect(payload.publishVerdict).toEqual({ valid: true, errors: [], warnings: [] });
+    expect(payload).not.toHaveProperty('publishVerdictUnread');
+  }, 60_000);
+
+  it('a draft a publish refuses: the verdict prints `valid: false` with `title-format-retired`, the draft still stored', async () => {
+    const { engine } = await bootDoor();
+
+    const text = await runCli(['object', '--data', dataFile(RETIRED_TITLE_OBJECT), '--package', PKG, '--mode', 'draft']);
+    expect(text.exitCode).toBe(0);
+    expect(text.out).toContain('Draft saved: object/invoice_34777');
+    expect(text.out).toContain('Publish verdict: valid: false');
+    expect(text.out).toMatch(/title-format-retired/);
+    expect((await labelsByPackage(engine, 'invoice_34777'))[PKG]?.state).toBe('draft');
+
+    const json = await runCli(['object', '--data', dataFile(RETIRED_TITLE_OBJECT), '--package', PKG, '--mode', 'draft', '--format', 'json']);
+    expect(json.exitCode).toBe(0);
+    const payload = JSON.parse(json.out);
+    expect(payload.state).toBe('draft');
+    expect(payload.publishVerdict.valid).toBe(false);
+    expect(payload.publishVerdict.errors.map((e: any) => e.code)).toContain('title-format-retired');
+  }, 60_000);
+
+  it('[ruling D4] `--mode draft` without `--package`: refused with exit 1, no client made, nothing on the wire', async () => {
+    const { saveRequests, wire } = await bootDoor();
+
+    const text = await runCli(['view', '--data', dataFile(VIEW('unbound_draft', 'U')), '--mode', 'draft']);
+    expect(text.exitCode).toBe(1);
+    expect(text.out).toContain('--package <id>');
+    const json = await runCli(['view', '--data', dataFile(VIEW('unbound_draft', 'U')), '--mode', 'draft', '--format', 'json']);
+    expect(json.exitCode).toBe(1);
+    expect(JSON.parse(json.out).error).toBe(DRAFT_NEEDS_PACKAGE_REFUSAL);
+
+    expect(stub.createCalls).toBe(0);
+    expect(wire).toEqual([]);
+    expect(saveRequests).toEqual([]);
   }, 60_000);
 
   it('UNFLAGGED and `--mode publish`: no query string, an active row, and no draft — the request this command always sent', async () => {
@@ -378,6 +466,8 @@ describe('[#34777] `os meta register --mode draft` against the real save door', 
     expect(lastPut(wire).search).toBe('');
     expect(saveRequests.at(-1)).not.toHaveProperty('mode');
 
+    // No read after either save: the draft read-back is the draft's alone.
+    expect(requests(wire).filter((r) => !r.startsWith('PUT '))).toEqual([]);
     expect(await labelsByPackage(engine, 'plain_view')).toEqual({ '': { label: 'P', state: 'active' } });
     expect(await labelsByPackage(engine, 'published_view')).toEqual({ '': { label: 'Q', state: 'active' } });
     expect((await client.meta.listDrafts()).drafts).toEqual([]);

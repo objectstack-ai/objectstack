@@ -2968,7 +2968,11 @@ other items of the same type sees no such item, and a rule that walks every
 collection is listed as not run even where it would have judged the item alone.
 The exit code reads as a project run's (`--strict` included). It does not
 combine with a configuration path, `--score` or `--eval`. Stage the item for
-review with `os meta register <type> --data view.json --package <id> --mode draft`.
+review with `os meta register <type> --data view.json --package <id> --mode draft`:
+the draft is stored into that package's Studio Changes, nothing is published, and
+the command reads the draft back and prints the publish verdict the runtime serves
+on it (`valid`, its errors and warnings; `publishVerdict` on `--format json`).
+`--mode draft` without `--package` is refused before any request.
 
 It does not replace `os validate`: `os lint` never parses the stack against the
 Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
