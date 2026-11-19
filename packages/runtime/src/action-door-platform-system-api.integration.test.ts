@@ -198,12 +198,12 @@ describe("what the published user-grants seeds derive from the action door's api
     it(`${name}: the seeded api is served by all three layers, and an insert into sys_member through platformSystemApi on it is refused`, async () => {
       const engine = await boot();
       const seeded: any = await seed(actionApi(engine));
-      expect(seeded[ACTION_DOOR_ORIGIN]).toBe(true);
-      expect(seeded[SERVED_BY_READ_SEAM]).toBe(true);
-      expect(seeded[SERVED_BY_LANDED_WRITE_ANSWER]).toBe(true);
 
       expectIdentityRefused(await refusal(() => platformSystemApi(seeded)!.object('sys_member').insert(ROWS.sys_member('seeded'))), 'sys_member');
       expect(await stored(engine, 'sys_member', 'seeded')).toBe(null);
+      expect(seeded[ACTION_DOOR_ORIGIN]).toBe(true);
+      expect(seeded[SERVED_BY_READ_SEAM]).toBe(true);
+      expect(seeded[SERVED_BY_LANDED_WRITE_ANSWER]).toBe(true);
     }, 30000);
   }
 });
