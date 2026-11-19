@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/platform-objects': minor
+'@objectstack/metadata-core': minor
 ---
 
 feat(spec): `userActions.transfer`, the per-object switch for the Change Owner action, and its structural eligibility
@@ -18,5 +19,7 @@ An object can now say whether it offers the Change Owner action. The action is n
 The switch gates the dedicated action, not the raw write: a plain `owner_id` update stays governed by `allowTransfer` alone, so import mappings and hooks are unaffected. To block every change of owner, declare `owner_id` `readonly`.
 
 The Studio object form gains a Change Owner row under User Actions, with its label and help text translated in every shipped locale.
+
+The served object document classifies `userActions.transfer` beside the four CRUD entries: for a caller who cannot read a field, a `transfer` predicate that names it is removed and the switch with its other predicate stays, as for `edit` and `delete`, instead of the whole entry being dropped.
 
 Nothing reads the switch at runtime yet. The Change Owner endpoint and the console action come in follow-up changes, so the liveness ledger grades `userActions.transfer` `planned` and `os lint` / `os validate` warn an author who sets it that nothing honours it yet. The key is new, so no stored object carries it and nothing needs migrating.
