@@ -21,7 +21,8 @@
  * ## What it reads — REST through `gh api`, every page, and one `git ls-remote`
  *
  *   1. the PR row; on an OPEN PR whose `mergeable_state` is `unknown`, re-read up to `--rereads` times (bounded);
- *   2. every review — the newest per reviewer, and which of them are on the head commit;
+ *   2. every review — the newest per reviewer: those on the head commit, and apart from them, with state and login,
+ *      those on an older commit (an APPROVED on any commit counts, AGENTS.md Prime Directive 14);
  *   3. the timeline, every page — the last merge-queue event;
  *   4. the queue refs and the base branch's tip (`git ls-remote`, zero quota) — the position, only while a ref exists;
  *   5. the head's check-runs (`filter=latest`, every page, the platform's count checked), judged with
@@ -39,8 +40,9 @@
  *   1  `--self-test` failed
  *   2  usage
  *   3  a PR row could not be read — nothing printed for it but the gap
- *   4  INCOMPLETE — a leg did not answer (named on the line), or an open PR's `mergeable_state` was still `unknown`
- *      after the bounded re-reads; ⛔ never read as a clean line
+ *   4  INCOMPLETE — a leg did not answer (named on the line), an open PR's `mergeable_state` was still `unknown`
+ *      after the bounded re-reads, or a queue ref contradicts the timeline's last queue event; ⛔ never read as a
+ *      clean line
  *
  * ## Self-test
  *
@@ -100,7 +102,7 @@ export const UNREAD_LEGS = Object.freeze([
 // The pure core
 // ---------------------------------------------------------------------------
 
-/** The newest review per reviewer, and the ones on `head`. */
+/** The newest review per reviewer: the ones on `head`, and apart from them the ones on an older commit. */
 export function reviewsAtHead(reviews, head) {
   const newest = new Map();
   for (const r of reviews ?? []) {
@@ -113,8 +115,16 @@ export function reviewsAtHead(reviews, head) {
     approved: at.filter((r) => r.state === 'APPROVED').map((r) => r.user.login).sort(),
     changes: at.filter((r) => r.state === 'CHANGES_REQUESTED').map((r) => r.user.login).sort(),
     dismissed: at.filter((r) => r.state === 'DISMISSED').map((r) => r.user.login).sort(),
-    older: [...newest.values()].filter((r) => r.commit_id !== head).length,
+    older: [...newest.values()]
+      .filter((r) => r.commit_id !== head)
+      .map((r) => ({ login: r.user.login, state: r.state, commit: r.commit_id ?? null }))
+      .sort((a, b) => a.login.localeCompare(b.login)),
   };
+}
+
+/** The older-commit reviews as the line prints them: `APPROVED b@dddddddddd`. */
+export function olderReviewsText(older) {
+  return older.map((r) => `${r.state} ${r.login}@${String(r.commit).slice(0, 10)}`).join(', ');
 }
 
 /** The last merge-queue event on a timeline, or null. */
@@ -151,8 +161,8 @@ export function queueLeg({ pr, event, refs, baseSha }) {
   const q = refs ? queueChain(refs, baseSha) : null;
   const mine = q ? q.entries.find((e) => e.pr === pr.number) : null;
   const pos = mine && q.chain.includes(mine) ? `position ${q.chain.indexOf(mine) + 1} of ${q.chain.length}` : mine ? `a queue ref exists but is off the chain from ${String(baseSha).slice(0, 10)} (position unread)` : null;
-  if (!event) return { text: mine ? `queue: no queue event on the timeline, yet a queue ref exists (${pos}) — re-read` : 'queue: never queued (no queue event)' };
-  if (event.event === 'removed_from_merge_queue') return { text: `queue: not in queue (removed ${event.at})${mine ? ` — yet a queue ref exists (${pos}); re-read` : ''}` };
+  if (!event) return mine ? { text: `queue: no queue event on the timeline, yet a queue ref exists (${pos}) — re-read`, gap: 'a queue ref exists with no queue event on the timeline, so membership is unread' } : { text: 'queue: never queued (no queue event)' };
+  if (event.event === 'removed_from_merge_queue') return mine ? { text: `queue: not in queue (removed ${event.at}) — yet a queue ref exists (${pos}); re-read`, gap: 'a queue ref exists after the last queue event removed the PR, so membership is unread' } : { text: `queue: not in queue (removed ${event.at})` };
   if (!q) return { text: `queue: in queue (added ${event.at}), position unread`, gap: 'the queue refs could not be listed, so the position is unread' };
   return { text: `queue: in queue (added ${event.at}), ${pos ?? 'no queue ref for it now (a ref answers a build, not membership) — position unread'}` };
 }
@@ -190,7 +200,7 @@ export function readPrState({ repo, number, get = ghApi, lsRemote = gitLsRemote,
   } else {
     rv = reviewsAtHead(reviews.value, head);
     const parts = [rv.approved.length ? `APPROVED ${rv.approved.join(',')}` : null, rv.changes.length ? `CHANGES_REQUESTED ${rv.changes.join(',')}` : null, rv.dismissed.length ? `DISMISSED ${rv.dismissed.join(',')}` : null].filter(Boolean);
-    reviewText = `reviews at ${String(head).slice(0, 10)}: ${parts.join('; ') || 'none'}${rv.older ? ` (${rv.older} reviewer(s) newest on an older commit)` : ''}`;
+    reviewText = `reviews at ${String(head).slice(0, 10)}: ${parts.join('; ') || 'none'}${rv.older.length ? ` · newest on an older commit: ${olderReviewsText(rv.older)} (an APPROVED counts on any commit)` : ''}`;
   }
 
   const timeline = readPaged(get, `/repos/${repo}/issues/${number}/timeline`);
@@ -257,7 +267,8 @@ export function readPrState({ repo, number, get = ghApi, lsRemote = gitLsRemote,
       mergeable_reads: reads,
       queue: queue.text,
       queue_event: event,
-      reviews_at_head: rv,
+      reviews_at_head: rv ? { approved: rv.approved, changes: rv.changes, dismissed: rv.dismissed } : null,
+      reviews_older: rv ? rv.older : null,
       checks: judged && judged.kind !== 'unreadable' ? { kind: judged.kind, success: judged.success ?? 0, expected_skips: judged.expected?.length ?? 0, unexpected_skips: (judged.unexpected ?? []).map((u) => u.name), other: judged.other ?? [], pending: (judged.pending ?? []).map((p) => p.name) } : null,
       commit_status: status.ok ? { state: status.value.state, total_count: status.value.total_count } : null,
       auto_merge: pr.auto_merge ?? null,
@@ -438,8 +449,8 @@ export function main(argv, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
   'mergeable_state: unknown is re-read, bounded, and never printed as a reading': 5,
-  'the queue: the timeline decides membership, the parent-tip chain the position': 8,
-  'reviews: the newest per reviewer, at the head commit': 4,
+  'the queue: the timeline decides membership, the parent-tip chain the position': 9,
+  'reviews: the newest per reviewer, at the head commit and apart from it on older ones': 6,
   'checks and status: the head, every page, the count checked': 6,
   'the line and the CLI: usage, exits and the footer': 7,
 });
@@ -517,7 +528,9 @@ export function selfTest() {
     const noRef = read(fixture({ timeline: { 7: [added] } }));
     t('in queue with no ref: membership stands, the position is unread, and that is not a gap', [noRef.exit, noRef.line.includes('no queue ref for it now (a ref answers a build, not membership) — position unread')], [EXIT_OK, true]);
     const contradict = read(fixture({ timeline: { 7: [added, removed] }, ls_remote: refs }));
-    t('a ref that contradicts the timeline is printed, not resolved', contradict.line.includes('— yet a queue ref exists (position 2 of 3); re-read'), true);
+    t('⭐ a ref after the last event removed the PR contradicts the timeline: printed, not resolved, INCOMPLETE exit 4', [contradict.exit, contradict.line.includes('— yet a queue ref exists (position 2 of 3); re-read'), contradict.line.includes('INCOMPLETE: a queue ref exists after the last queue event removed the PR')], [EXIT_INCOMPLETE, true, true]);
+    const noEvent = read(fixture({ ls_remote: refs }));
+    t('⭐ a ref with no queue event on the timeline contradicts it: INCOMPLETE exit 4, never a clean line', [noEvent.exit, noEvent.line.includes('queue: no queue event on the timeline, yet a queue ref exists (position 2 of 3) — re-read'), noEvent.gaps], [EXIT_INCOMPLETE, true, ['a queue ref exists with no queue event on the timeline, so membership is unread']]);
     const lsDown = read(fixture({ timeline: { 7: [added] }, ls_remote: null }));
     t('⭐ unlisted queue refs on an in-queue PR leave the position unread and make it INCOMPLETE', [lsDown.exit, lsDown.gaps[0]], [EXIT_INCOMPLETE, 'the queue refs could not be listed, so the position is unread']);
     const tl = read(fixture({ timeline: { 7: null } }));
@@ -525,13 +538,16 @@ export function selfTest() {
     t('a broken chain leaves the stranded entries off it', queueChain(refs.filter((r) => !r.ref.includes('pr-5-')), MAIN).chain.length, 0);
   }
 
-  battery('reviews: the newest per reviewer, at the head commit');
+  battery('reviews: the newest per reviewer, at the head commit and apart from it on older ones');
   {
     const rv = (login, state, commit, at) => ({ user: { login }, state, commit_id: commit, submitted_at: at });
     const r = reviewsAtHead([rv('a', 'CHANGES_REQUESTED', HEAD, '1'), rv('a', 'APPROVED', HEAD, '2'), rv('b', 'APPROVED', sha('d'), '1'), rv('c', 'COMMENTED', HEAD, '3')], HEAD);
-    t('⭐ the newest review per reviewer counts; an approval on an older commit is not at head', [r.approved, r.changes, r.older], [['a'], [], 1]);
+    t('⭐ the newest review per reviewer counts; an approval on an older commit is not at head, and is kept with its state and login', [r.approved, r.changes, r.older], [['a'], [], [{ login: 'b', state: 'APPROVED', commit: sha('d') }]]);
     t('a comment-only review is neither', reviewsAtHead([rv('c', 'COMMENTED', HEAD, '3')], HEAD).approved, []);
-    t('the line names the approvals at head and the older ones', read(fixture({ reviews: { 7: [rv('a', 'APPROVED', HEAD, '2'), rv('b', 'APPROVED', sha('d'), '1')] } })).line.includes(`reviews at ${HEAD.slice(0, 10)}: APPROVED a (1 reviewer(s) newest on an older commit)`), true);
+    t('the line names the approvals at head and, apart from them, the older ones by state and login', read(fixture({ reviews: { 7: [rv('a', 'APPROVED', HEAD, '2'), rv('b', 'APPROVED', sha('d'), '1')] } })).line.includes(`reviews at ${HEAD.slice(0, 10)}: APPROVED a · newest on an older commit: APPROVED b@${sha('d').slice(0, 10)} (an APPROVED counts on any commit)`), true);
+    const moved = read(fixture({ reviews: { 7: [rv('m', 'APPROVED', sha('d'), '1'), rv('x', 'CHANGES_REQUESTED', sha('e'), '2')] } }));
+    t('⭐ approve, then a merge of main moves the head: the line still says who approved, never only a count', [moved.exit, moved.line.includes(`reviews at ${HEAD.slice(0, 10)}: none · newest on an older commit: APPROVED m@${sha('d').slice(0, 10)}, CHANGES_REQUESTED x@${sha('e').slice(0, 10)}`)], [EXIT_OK, true]);
+    t('--json carries the older reviews apart from the at-head ones', JSON.parse(quiet(main)(['--pr', '7', '--json'], { readers: fixtureReaders(fixture({ reviews: { 7: [rv('m', 'APPROVED', sha('d'), '1')] } }), REPO) }).out).prs[0].reviews_older, [{ login: 'm', state: 'APPROVED', commit: sha('d') }]);
     t('unreadable reviews are INCOMPLETE', read(fixture({ reviews: { 7: null } })).exit, EXIT_INCOMPLETE);
   }
 

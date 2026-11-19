@@ -38,7 +38,7 @@
 - 该 op 实测离队见 `readings-queue.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
 - 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `readings-ci.md`「红检查先读日志」。
-- 挂 auto-merge/入队前读 K = PRBASE 至 origin/main 的首父提交数,现读 `landing-k.mjs --pr N`。
+- 挂 auto-merge/入队前读 K(PRBASE 至 origin/main 首父提交数)与任何 K 两腿,读 `landing-k.mjs --pr N`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
 - K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
 - 或共享预算 PR 遇 PRBASE 后 main 碰同本输入或账本;封闭两本,输入:账本:

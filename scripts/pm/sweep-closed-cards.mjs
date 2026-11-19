@@ -136,15 +136,17 @@
  *     `MERGE_AUTO_CLOSE_SECONDS` of the merge (a later one is listed as a hand close). REST carries no closer field (the
  *     auto-close's `closed` event reads `commit_id: null`), so this tie is the reading — the actor and the seconds
  *     after the merge are printed so the seat can tell a hand close inside the window from the merge's.
- *   - Extra = closed by the merge, named by no closing keyword = a SILENT CLOSE, exit 1. A named target still open is
- *     printed, not an alarm.
+ *   - Extra = closed by the merge, named by no closing keyword = a SILENT CLOSE, exit `EXIT_SILENT_CLOSE` (4). A named
+ *     target still open is printed, not an alarm.
+ *   - Settling: an unnamed card reaches the candidates only through the search, and neither the platform's close nor
+ *     the search index has landed in the first moments after a merge. While the merge is younger than
+ *     `MERGE_SETTLE_SECONDS` the run is UNJUDGED (exit 2) and names the time to re-run; ⛔ never the clean verdict.
  *
- * Its exits: 0 every card closed by the merge is a named target · 1 a silent close (each named) · 2 a candidate's
- * timeline or the search did not answer, so a silent close may be unread (never a 0) · 3 the PR is unreadable or
- * not merged. Exit 1 is also this file's usage code; both are a non-zero a seat reads, never a clean answer.
+ * Its exits: 0 every card closed by the merge is a named target · 4 a silent close (each named) · 2 the merge is
+ * still inside the settle window, or a candidate's timeline or the search did not answer, so a silent close may be
+ * unread (never a 0) · 3 the PR is unreadable or not merged · 1 usage.
  * Not read: issues in OTHER repositories a cross-repo keyword closed (the targets are read with the shared parser,
- * which binds this repository's numbers only, so no second closing-keyword parser lives here),
- * and a card the search index has not caught up with in the first seconds after a merge (re-run).
+ * which binds this repository's numbers only, so no second closing-keyword parser lives here).
  *
  * ## Cost
  *
@@ -189,6 +191,8 @@ const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 1;
 export const EXIT_UNJUDGED = 2;
+/** `--pr N` only: a card the merge closed that no closing keyword names. 3 is `EXIT_PREREQUISITE_NOT_MET`. */
+export const EXIT_SILENT_CLOSE = 4;
 
 /**
  * The re-exec guard, per script rather than shared with the sweeper: two
@@ -531,6 +535,11 @@ export const MERGE_CLOSE_WINDOW_SECONDS = 600;
  * folded card lands minutes later (measured 112 s on the same merge). A later close is listed, not charged.
  */
 export const MERGE_AUTO_CLOSE_SECONDS = 60;
+/**
+ * How old a merge must be before `--pr N` judges it: the auto-close bound above plus four minutes for the search index,
+ * the one read an unnamed card reaches the candidates through. Younger ⇒ UNJUDGED with the time to re-run.
+ */
+export const MERGE_SETTLE_SECONDS = 300;
 export const SILENT_CLOSE_PHRASE = '预期外从 open 消失的即被闭合关键词静默误关的卡;每次合并读 `sweep-closed-cards.mjs --pr N`。';
 export const LANDING_OPERATIONS_PATH = '.claude/skills/pm-dispatch/references/landing-operations.md';
 
@@ -560,9 +569,12 @@ export function mergeCloseTie(issue, timeline, { prNumber, mergeSha, mergedAtMs 
  * `candidates`: `[{ number, issue, timeline, error? }]` (targets and in-window closes, each once).
  * `search`: `{ ok, error?, listed, total, incomplete }`.
  */
-export function judgeMergeCloses({ pr, candidates, search }) {
+export function judgeMergeCloses({ pr, candidates, search, nowMs = Date.now() }) {
   const targets = [...closingKeywordTargets(pr.body ?? '').keys()].map(Number).sort((a, b) => a - b);
   const mergedAtMs = Date.parse(pr.merged_at);
+  const settleAtMs = mergedAtMs + MERGE_SETTLE_SECONDS * 1000;
+  const settling = !Number.isFinite(mergedAtMs) || nowMs < settleAtMs;
+  const rerunAt = Number.isFinite(mergedAtMs) ? new Date(settleAtMs).toISOString().replace(/\.\d{3}Z$/, 'Z') : null;
   const closedByMerge = [];
   const namedOpen = [];
   const namedNotByMerge = [];
@@ -586,8 +598,9 @@ export function judgeMergeCloses({ pr, candidates, search }) {
   const silent = closedByMerge.filter((c) => !c.named);
   if (!search.ok) unjudged.push({ number: null, detail: `the in-window closed-issue search did not answer (${search.error})` });
   else if (search.incomplete || search.listed < search.total) unjudged.push({ number: null, detail: `the in-window search listed ${search.listed} of ${search.total} closed issue(s)${search.incomplete ? ' (the platform flagged the result incomplete)' : ''}` });
-  const exitCode = silent.length ? EXIT_USAGE : unjudged.length ? EXIT_UNJUDGED : EXIT_OK;
-  return { targets, closedByMerge, silent, namedOpen, namedNotByMerge, laterHandCloses, unjudged, exitCode };
+  if (settling) unjudged.push({ number: null, settling: true, detail: rerunAt ? `the merge is ${Math.max(0, Math.round((nowMs - mergedAtMs) / 1000))}s old, inside the ${MERGE_SETTLE_SECONDS}s settle window: the platform's close and the search index may not have landed — re-run at or after ${rerunAt} (in ${Math.ceil((settleAtMs - nowMs) / 1000)}s)` : `the merge time \`${pr.merged_at}\` does not parse, so the settle window is unread` });
+  const exitCode = silent.length ? EXIT_SILENT_CLOSE : unjudged.length ? EXIT_UNJUDGED : EXIT_OK;
+  return { targets, closedByMerge, silent, namedOpen, namedNotByMerge, laterHandCloses, unjudged, settling, rerunAt, exitCode };
 }
 
 export function renderMergeCloses(pr, j) {
@@ -599,8 +612,9 @@ export function renderMergeCloses(pr, j) {
   for (const c of j.namedNotByMerge) L.push(`  · #${c.number} named, closed but not by this merge (${c.why})`);
   for (const c of j.laterHandCloses) L.push(`  · #${c.number} ${c.named ? 'named' : 'not named'}, referenced by this PR, closed by ${c.actor ?? '?'} — ${c.why}`);
   for (const u of j.unjudged) L.push(`  · UNREAD ${u.number ? `#${u.number}` : ''} — ${u.detail}`);
-  L.push('Not read by this mode: a card in another repository a cross-repo keyword closed; a card the search index has not caught up with in the first seconds after a merge (re-run).');
-  if (j.silent.length) L.push(`✗ SILENT CLOSE — ${j.silent.map((c) => `#${c.number}`).join(', ')} closed by this merge with no closing keyword naming it; reopen and restore its state. Exit ${EXIT_USAGE}.`);
+  L.push('Not read by this mode: a card in another repository a cross-repo keyword closed.');
+  if (j.silent.length) L.push(`✗ SILENT CLOSE — ${j.silent.map((c) => `#${c.number}`).join(', ')} closed by this merge with no closing keyword naming it; reopen and restore its state. Exit ${EXIT_SILENT_CLOSE}.`);
+  else if (j.settling && j.rerunAt) L.push(`⚠️  UNJUDGED — the merge is younger than ${MERGE_SETTLE_SECONDS}s, so a silent close may not be readable yet; re-run at or after ${j.rerunAt}. ⛔ Not a clean answer. Exit ${EXIT_UNJUDGED}.`);
   else if (j.unjudged.length) L.push(`⚠️  UNJUDGED — a read did not answer, so a silent close may be unread. ⛔ Not a clean answer. Exit ${EXIT_UNJUDGED}.`);
   else L.push(`✓ every card closed by this merge is a named target. Exit ${EXIT_OK}.`);
   return L.join('\n');
@@ -1044,7 +1058,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the exit register: nothing to do is never an alarm': 7,
   'the report: what a reader is told, and what it refuses to imply': 7,
   'the CLI: the one decision a typo must never make': 8,
-  '--pr N: a card the merge closed that no closing keyword names is a silent close': 13,
+  '--pr N: a card the merge closed that no closing keyword names is a silent close': 19,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -1246,12 +1260,15 @@ export function selfTest() {
     const xref = (n, body = '', mergedAt = AT) => ({ event: 'cross-referenced', source: { issue: { number: n, body, state: 'closed', pull_request: { merged_at: mergedAt } } } });
     const closed = (number, timeline) => ({ number, issue: { number, state: 'closed', title: `card ${number}` }, timeline });
     const ok = { ok: true, listed: 2, total: 2, incomplete: false };
-    const clean = judgeMergeCloses({ pr, candidates: [closed(10, [xref(500), closedEv('2026-11-19T14:56:31Z')])], search: ok });
+    const nowMs = Date.parse(AT) + 3600 * 1000;
+    const judge = (args) => judgeMergeCloses({ nowMs, ...args });
+    const clean = judge({ pr, candidates: [closed(10, [xref(500), closedEv('2026-11-19T14:56:31Z')])], search: ok });
     t('a named target closed by the merge is clean, exit 0', clean.exitCode === EXIT_OK && clean.closedByMerge.length === 1 && clean.silent.length === 0);
-    const partOf = judgeMergeCloses({ pr, candidates: [closed(10, [xref(500), closedEv('2026-11-19T14:56:31Z')]), closed(11, [xref(500), closedEv('2026-11-19T14:56:32Z')])], search: ok });
-    t('⭐ a `Part of` card the merge closed is a SILENT CLOSE, exit 1, named', partOf.exitCode === EXIT_USAGE && partOf.silent.map((c) => c.number).join() === '11');
+    const partOf = judge({ pr, candidates: [closed(10, [xref(500), closedEv('2026-11-19T14:56:31Z')]), closed(11, [xref(500), closedEv('2026-11-19T14:56:32Z')])], search: ok });
+    t('⭐ a `Part of` card the merge closed is a SILENT CLOSE, exit 4, named', partOf.exitCode === EXIT_SILENT_CLOSE && partOf.silent.map((c) => c.number).join() === '11' && renderMergeCloses(pr, partOf).includes(`Exit ${EXIT_SILENT_CLOSE}.`));
+    t('the silent close has its own exit code, apart from usage, unjudged and the unmet prerequisite', EXIT_SILENT_CLOSE === 4 && new Set([EXIT_OK, EXIT_USAGE, EXIT_UNJUDGED, EXIT_PREREQUISITE_NOT_MET, EXIT_SILENT_CLOSE]).size === 5);
     t('the targets are read with the H7 parser: a backticked keyword binds nothing', partOf.targets.join() === '10');
-    const viaCommit = judgeMergeCloses({ pr, candidates: [closed(13, [{ event: 'referenced', commit_id: MERGE }, closedEv('2026-11-19T14:56:33Z')])], search: ok });
+    const viaCommit = judge({ pr, candidates: [closed(13, [{ event: 'referenced', commit_id: MERGE }, closedEv('2026-11-19T14:56:33Z')])], search: ok });
     t('⭐ a keyword in the squashed commit message (a referenced event on the merge commit) is tied to the merge', viaCommit.silent.map((c) => c.number).join() === '13' && viaCommit.silent[0].why === 'the merge commit references it');
     const byCommitId = mergeCloseTie({ number: 14, state: 'closed' }, [closedEv('2026-11-19T14:56:33Z', { commit_id: MERGE })], { prNumber: 500, mergeSha: MERGE, mergedAtMs: Date.parse(AT) });
     t('a closed event carrying the merge commit is tied to it', byCommitId.byThisMerge === true);
@@ -1259,18 +1276,34 @@ export function selfTest() {
     t('⭐ a card another PR merged in the same window closes by its body is not charged to this merge', other.byThisMerge === false && other.otherPr === 501);
     const late = mergeCloseTie({ number: 16, state: 'closed' }, [xref(500), closedEv('2026-11-19T16:00:00Z')], { prNumber: 500, mergeSha: MERGE, mergedAtMs: Date.parse(AT) });
     t('a close outside the window is not this merge\'s', late.byThisMerge === false);
-    const hand = judgeMergeCloses({ pr, candidates: [closed(18, [xref(500), closedEv('2026-11-19T14:58:19Z')])], search: ok });
+    const hand = judge({ pr, candidates: [closed(18, [xref(500), closedEv('2026-11-19T14:58:19Z')])], search: ok });
     t('⭐ a card this PR only cross-references, closed minutes after the merge, is a listed hand close, not a silent close', hand.exitCode === EXIT_OK && hand.laterHandCloses.length === 1 && renderMergeCloses(pr, hand).includes('#18 not named, referenced by this PR'));
     const untied = mergeCloseTie({ number: 17, state: 'closed' }, [closedEv('2026-11-19T14:56:40Z')], { prNumber: 500, mergeSha: MERGE, mergedAtMs: Date.parse(AT) });
     t('a card closed in the window with nothing tying it to this merge is not charged to it', untied.byThisMerge === false);
-    const openTarget = judgeMergeCloses({ pr, candidates: [{ number: 10, issue: { number: 10, state: 'open' }, timeline: [] }], search: ok });
+    const openTarget = judge({ pr, candidates: [{ number: 10, issue: { number: 10, state: 'open' }, timeline: [] }], search: ok });
     t('a named target still open is printed, not an alarm', openTarget.exitCode === EXIT_OK && openTarget.namedOpen.length === 1 && renderMergeCloses(pr, openTarget).includes('#10 named, still OPEN'));
-    const unread = judgeMergeCloses({ pr, candidates: [{ number: 11, error: 'GET … -> HTTP 502' }], search: ok });
+    const unread = judge({ pr, candidates: [{ number: 11, error: 'GET … -> HTTP 502' }], search: ok });
     t('⭐ an unreadable candidate timeline is UNJUDGED, exit 2, never a clean 0', unread.exitCode === EXIT_UNJUDGED && renderMergeCloses(pr, unread).includes('⛔ Not a clean answer'));
-    const shortSearch = judgeMergeCloses({ pr, candidates: [], search: { ok: true, listed: 1, total: 3, incomplete: false } });
+    const shortSearch = judge({ pr, candidates: [], search: { ok: true, listed: 1, total: 3, incomplete: false } });
     t('⭐ a search that listed fewer than it counts is UNJUDGED, exit 2', shortSearch.exitCode === EXIT_UNJUDGED);
+    const young = judgeMergeCloses({ pr, candidates: [closed(10, [xref(500), closedEv('2026-11-19T14:56:31Z')])], search: ok, nowMs: Date.parse(AT) + 20 * 1000 });
+    const youngText = renderMergeCloses(pr, young);
+    t('⭐ a merge younger than the settle window is UNJUDGED, exit 2, with the time to re-run — never the clean verdict', young.exitCode === EXIT_UNJUDGED && young.rerunAt === '2026-11-19T15:01:27Z' && youngText.includes('re-run at or after 2026-11-19T15:01:27Z') && !youngText.includes('✓ every card'), youngText.split('\n').slice(-1)[0]);
+    const edge = judgeMergeCloses({ pr, candidates: [], search: ok, nowMs: Date.parse(AT) + MERGE_SETTLE_SECONDS * 1000 });
+    t('the window closes at the bound: a run at merged_at + MERGE_SETTLE_SECONDS judges', edge.exitCode === EXIT_OK && edge.settling === false);
+    const youngSilent = judgeMergeCloses({ pr, candidates: [closed(11, [xref(500), closedEv('2026-11-19T14:56:32Z')])], search: ok, nowMs: Date.parse(AT) + 20 * 1000 });
+    t('a silent close already readable inside the window is still the alarm, exit 4', youngSilent.exitCode === EXIT_SILENT_CLOSE);
+    const noTime = judgeMergeCloses({ pr: { ...pr, merged_at: 'not a time' }, candidates: [], search: ok, nowMs });
+    t('a merge time that does not parse leaves the window unread: UNJUDGED, exit 2', noTime.exitCode === EXIT_UNJUDGED);
     t('`--pr N` parses in both spellings, and refuses --write and --all-time beside it', parseOptions(['--pr', '35482']).options.pr === 35482 && parseOptions(['--pr=#7']).options.pr === 7 && parseOptions(['--pr=7', '--write']).ok === false && parseOptions(['--pr=7', '--all-time']).ok === false && parseOptions(['--pr=x']).ok === false && parseOptions([]).options.pr === null);
-    t('⭐ landing-operations.md still says the rule this mode reads, with the pointer here', readFileSync(new URL(`../../${LANDING_OPERATIONS_PATH}`, import.meta.url), 'utf8').includes(SILENT_CLOSE_PHRASE));
+    let landingText = null;
+    let landingError = '';
+    try {
+      landingText = readFileSync(new URL(`../../${LANDING_OPERATIONS_PATH}`, import.meta.url), 'utf8');
+    } catch (err) {
+      landingError = `${LANDING_OPERATIONS_PATH} could not be read (${err.code ?? err.message}) — moved or split?`;
+    }
+    t('⭐ landing-operations.md still says the rule this mode reads, with the pointer here', landingText !== null && landingText.includes(SILENT_CLOSE_PHRASE), landingError || undefined);
   }
 
   // -- the floor -------------------------------------------------------------

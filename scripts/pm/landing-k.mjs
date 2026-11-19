@@ -22,9 +22,9 @@
  *   1. K = `git rev-list --count --first-parent PRBASE..origin/main`.
  *   2. PRBASE = the `Affected-set diff base` that the LAST GREEN PR run's Test Core printed
  *      (`scripts/ci/select-shard-packages.sh` spells the line; every `Test Core (k/N)` shard and the planner print it),
- *      ⛔ never that run's start time. "Green" = the run's `Test Core` aggregate job concluded `success`; "PR run" = a
- *      `pull_request` run of `ci.yml` whose head is one of this PR's commits (a branch name is reused across PRs, so
- *      the branch alone never decides).
+ *      ⛔ never that run's start time; the diff base is read from the selector step only (`SELECTOR_STEP`). "Green" =
+ *      the run's `Test Core` aggregate job concluded `success`; "PR run" = a `pull_request` run of `ci.yml` whose head
+ *      is one of this PR's commits (a branch name is reused across PRs, so the branch alone never decides).
  *   3. K ≥ 15 ⇒ merge main first and wait for a green re-run. `behind` alone is not a reason (the K decides).
  *   4. At any K, the locale leg: a label PR, when a new locale pack landed on main after PRBASE. A new locale pack is a
  *      file ADDED under a `translations/` directory in `PRBASE..main` whose locale (the file name up to its first dot)
@@ -88,6 +88,12 @@ export const TEST_CORE_PLAN = 'Plan Test Core shards';
 /** `select-shard-packages.sh` spells it `Affected-set diff base: <sha>  (<why>)`; the log prefixes a timestamp. */
 export const DIFF_BASE_LINE = /Affected-set diff base: ([0-9a-f]{40})\s+\(([^)\n]*)\)/;
 export const DIFF_BASE_SOURCE = 'scripts/ci/select-shard-packages.sh';
+/**
+ * The diff base is read from the selector step only: the job-log section that opens with this step header (the first
+ * line of the `run:` block of `ci.yml`'s planner and shard steps) and runs to the next step header.
+ */
+export const SELECTOR_STEP = 'bash scripts/ci/select-shard-packages.sh';
+export const STEP_HEADER = /##\[group\]Run (.*)$/;
 /** How many run-list pages and runs one reading walks before it says it found no green run. */
 export const MAX_RUN_PAGES = 5;
 export const MAX_RUNS_INSPECTED = 30;
@@ -123,10 +129,38 @@ export const UNREAD_LEGS = Object.freeze([
 // The pure core
 // ---------------------------------------------------------------------------
 
-/** The diff base a Test Core log printed, or null. */
+/** The diff base one printed line carries, or null. */
 export function parseDiffBase(logText) {
   const m = DIFF_BASE_LINE.exec(String(logText ?? ''));
   return m ? { sha: m[1], why: m[2].trim(), line: m[0] } : null;
+}
+
+/**
+ * The diff base a Test Core job log printed, read from the selector step only.
+ * `{ ok: true, base }` | `{ ok: false, why }` — no selector step, no line in it, or more than one distinct base.
+ */
+export function readSelectorDiffBase(logText) {
+  const lines = String(logText ?? '').split('\n');
+  const inStep = [];
+  const all = new Set();
+  let step = null;
+  let sawStep = false;
+  for (const l of lines) {
+    const h = STEP_HEADER.exec(l);
+    if (h) {
+      step = h[1].trim();
+      if (step === SELECTOR_STEP) sawStep = true;
+      continue;
+    }
+    const b = parseDiffBase(l);
+    if (!b) continue;
+    all.add(b.sha);
+    if (step === SELECTOR_STEP) inStep.push(b);
+  }
+  if (all.size > 1) return { ok: false, why: `prints ${all.size} distinct \`Affected-set diff base\` values (${[...all].map((x) => x.slice(0, 10)).join(', ')}), so none is read` };
+  if (!sawStep) return { ok: false, why: `has no \`Run ${SELECTOR_STEP}\` step` };
+  if (!inStep.length) return { ok: false, why: 'carries no `Affected-set diff base` line in its selector step' };
+  return { ok: true, base: inStep[0] };
 }
 
 /** The surface the two translation gates count, as a predicate over one repo path. */
@@ -274,9 +308,9 @@ export function readPrBase({ repo, pr, commits, get, getText }) {
     const job = sources[0];
     const log = getText(`/repos/${repo}/actions/jobs/${job.id}/logs`);
     if (!log.ok) return { ok: false, gap: `the log of \`${job.name}\` (job ${job.id}, run ${run.id}) could not be read — expired or refused (${log.error})` };
-    const base = parseDiffBase(log.value);
-    if (!base) return { ok: false, gap: `the log of \`${job.name}\` (job ${job.id}, run ${run.id}) carries no \`Affected-set diff base\` line` };
-    return { ok: true, run, job, base };
+    const read = readSelectorDiffBase(log.value);
+    if (!read.ok) return { ok: false, gap: `the log of \`${job.name}\` (job ${job.id}, run ${run.id}) ${read.why}` };
+    return { ok: true, run, job, base: read.base };
   }
   const why = runs.truncated ? ` (the run list was cut at ${MAX_RUN_PAGES} pages)` : '';
   return { ok: false, gap: `no completed pull_request ${CI_WORKFLOW} run on this PR's commits has a green \`${TEST_CORE_GATE}\` (${mine.length} run(s) on its commits, ${inspected} inspected)${why}` };
@@ -503,12 +537,12 @@ export function main(argv, deps = {}) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the rule text: every phrase this file is built from is in the file that writes it': 4,
-  'PRBASE: the last green Test Core run on this PR, its log line, never a branch alone': 7,
+  'the rule text: every phrase this file is built from is in the file that writes it': 5,
+  'PRBASE: the last green Test Core run on this PR, its log line, never a branch alone': 10,
   'K: the count, the hold at 15, and a clone that cannot count': 6,
   'the locale leg: a new pack after PRBASE under a label PR, at any K': 6,
   'the shared-budget leg: the same book on both sides, at any K': 5,
-  'fail closed: every unread leg is exit 3, never 0': 7,
+  'fail closed: every unread leg is exit 3, never 0': 8,
   'the CLI: usage, exits and the footer': 7,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
@@ -548,7 +582,9 @@ export function selfTest() {
   const MAIN = sha('a');
   const HEAD = sha('c');
   const OLD = sha('d');
-  const log = (s = BASE) => `2026-11-19T13:07:09.7414776Z Affected-set diff base: ${s}  (merge-base of origin/main and HEAD)\n`;
+  const stepLine = (cmd) => `2026-11-19T13:07:09.5000000Z ##[group]Run ${cmd}\n`;
+  const baseLine = (s = BASE) => `2026-11-19T13:07:09.7414776Z Affected-set diff base: ${s}  (merge-base of origin/main and HEAD)\n`;
+  const log = (s = BASE) => `${stepLine(SELECTOR_STEP)}${baseLine(s)}`;
   const job = (id, name, conclusion = 'success') => ({ id, name, status: 'completed', conclusion });
   const greenJobs = [job(11, 'Plan Test Core shards'), job(12, 'Test Core (1/10)'), job(13, TEST_CORE_GATE)];
   const fixture = (over = {}) => {
@@ -575,6 +611,8 @@ export function selfTest() {
     t('⭐ landing-operations.md still says what this file encodes (a reworded K block reds here)', RULE_PHRASES.filter((p) => !text(LANDING_PATH).includes(p)), []);
     t('⭐ the shard selector still prints the line PRBASE is read from', parseDiffBase(text(DIFF_BASE_SOURCE).split('\n').find((l) => l.includes('echo "Affected-set diff base:')).replace('$SCM_BASE', BASE).replace(/^\s*echo "/, '')) !== null, true);
     t('both closed books still exist where the rule names their ledgers', BUDGET_BOOKS.filter((b) => !existsSync(join(REPO_ROOT, b.ledger))).map((b) => b.ledger), []);
+    const runFirstLines = text(`.github/workflows/${CI_WORKFLOW}`).split('\n').filter((l, i, all) => /^\s+run: \|\s*$/.test(all[i - 1] ?? '') && l.trim() === SELECTOR_STEP).length;
+    t('⭐ ci.yml\'s planner and shard steps still open their run block with the selector, the step the diff base is read from', runFirstLines >= 2, true);
     t('ci.yml still names the aggregate, the shard and the planner jobs this file reads', [TEST_CORE_GATE, 'Test Core (${{ matrix.shard }}/10)', TEST_CORE_PLAN].filter((n) => !text(`.github/workflows/${CI_WORKFLOW}`).includes(`name: ${n}`)), []);
   }
 
@@ -591,6 +629,12 @@ export function selfTest() {
     t('with no shard log, the planner of the same run is read (it prints the same line)', planOnly.prbase?.job, TEST_CORE_PLAN);
     const running = read(fixture({ runs: [{ id: 4, head_sha: HEAD, status: 'in_progress', created_at: '2026-11-19T16:00:00Z' }, ...fixture().runs] }));
     t('a run still in progress is not the last green run', running.prbase?.run, 2);
+    const otherStep = read(fixture({ logs: { 12: `${stepLine('pnpm install --frozen-lockfile')}${baseLine()}${stepLine(SELECTOR_STEP)}no line here\n` } }));
+    t('⭐ the diff base is read from the selector step only: a line another step printed is not read, exit 3', [otherStep.exit, otherStep.prbase, otherStep.gaps[0]?.endsWith('carries no `Affected-set diff base` line in its selector step')], [EXIT_CANT_ANSWER, null, true]);
+    const twoBases = read(fixture({ logs: { 12: `${stepLine('pnpm install --frozen-lockfile')}${baseLine(sha('e'))}${log()}` } }));
+    t('⭐ a log that prints two distinct diff bases is exit 3, neither read', [twoBases.exit, twoBases.prbase, twoBases.gaps[0]?.includes('prints 2 distinct `Affected-set diff base` values')], [EXIT_CANT_ANSWER, null, true]);
+    const sameTwice = read(fixture({ logs: { 12: `${stepLine('pnpm install --frozen-lockfile')}${baseLine()}${log()}${stepLine('node scripts/partition-test-shards.mjs')}` } }));
+    t('the same base printed again outside the step still reads, from the selector step', [sameTwice.exit, sameTwice.prbase?.sha], [EXIT_OK, BASE]);
     t('the text names the run, the job and the reason', renderText(ok).includes(`PRBASE ${BASE.slice(0, 10)} (merge-base of origin/main and HEAD) — from \`Test Core (1/10)\` of run 2`), true);
   }
 
@@ -642,7 +686,9 @@ export function selfTest() {
   {
     const expired = read(fixture({ logs: { 12: null } }));
     t('⭐ an expired log is exit 3 with the job named', [expired.exit, expired.gaps[0].includes('could not be read — expired or refused (HTTP 410 Gone)')], [EXIT_CANT_ANSWER, true]);
-    const noLine = read(fixture({ logs: { 12: 'nothing here' } }));
+    const noStep = read(fixture({ logs: { 12: baseLine() } }));
+    t('⭐ a log with no selector step is exit 3, its line unread', [noStep.exit, noStep.gaps[0]?.endsWith(`has no \`Run ${SELECTOR_STEP}\` step`)], [EXIT_CANT_ANSWER, true]);
+    const noLine = read(fixture({ logs: { 12: `${stepLine(SELECTOR_STEP)}nothing here` } }));
     t('⭐ a log without the line is exit 3', [noLine.exit, noLine.gaps[0].includes('carries no `Affected-set diff base` line')], [EXIT_CANT_ANSWER, true]);
     const noGreen = read(fixture({ jobs: { 2: greenJobs.map((j) => ({ ...j, conclusion: 'failure' })) } }));
     t('no green Test Core on the PR is exit 3', [noGreen.exit, noGreen.gaps[0].startsWith('no completed pull_request ci.yml run')], [EXIT_CANT_ANSWER, true]);
