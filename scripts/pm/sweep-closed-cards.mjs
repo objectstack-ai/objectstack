@@ -142,7 +142,8 @@
  * Its exits: 0 every card closed by the merge is a named target · 1 a silent close (each named) · 2 a candidate's
  * timeline or the search did not answer, so a silent close may be unread (never a 0) · 3 the PR is unreadable or
  * not merged. Exit 1 is also this file's usage code; both are a non-zero a seat reads, never a clean answer.
- * Not read: issues in OTHER repositories a cross-repo keyword closed (`owner/repo#N` targets are listed by number),
+ * Not read: issues in OTHER repositories a cross-repo keyword closed (the targets are read with the shared parser,
+ * which binds this repository's numbers only, so no second closing-keyword parser lives here),
  * and a card the search index has not caught up with in the first seconds after a merge (re-run).
  *
  * ## Cost
@@ -561,7 +562,6 @@ export function mergeCloseTie(issue, timeline, { prNumber, mergeSha, mergedAtMs 
  */
 export function judgeMergeCloses({ pr, candidates, search }) {
   const targets = [...closingKeywordTargets(pr.body ?? '').keys()].map(Number).sort((a, b) => a - b);
-  const crossRepo = [...String(pr.body ?? '').matchAll(/\b(?:clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*([\w.-]+\/[\w.-]+#\d+)/gi)].map((m) => m[1]);
   const mergedAtMs = Date.parse(pr.merged_at);
   const closedByMerge = [];
   const namedOpen = [];
@@ -587,12 +587,12 @@ export function judgeMergeCloses({ pr, candidates, search }) {
   if (!search.ok) unjudged.push({ number: null, detail: `the in-window closed-issue search did not answer (${search.error})` });
   else if (search.incomplete || search.listed < search.total) unjudged.push({ number: null, detail: `the in-window search listed ${search.listed} of ${search.total} closed issue(s)${search.incomplete ? ' (the platform flagged the result incomplete)' : ''}` });
   const exitCode = silent.length ? EXIT_USAGE : unjudged.length ? EXIT_UNJUDGED : EXIT_OK;
-  return { targets, crossRepo, closedByMerge, silent, namedOpen, namedNotByMerge, laterHandCloses, unjudged, exitCode };
+  return { targets, closedByMerge, silent, namedOpen, namedNotByMerge, laterHandCloses, unjudged, exitCode };
 }
 
 export function renderMergeCloses(pr, j) {
   const L = [`sweep-closed-cards --pr ${pr.number} — merged ${pr.merged_at} as ${String(pr.merge_commit_sha).slice(0, 10)} · REPORT ONLY, nothing written`];
-  L.push(`closing-keyword targets in the body: ${j.targets.map((n) => `#${n}`).join(', ') || 'none'}${j.crossRepo.length ? ` · in other repositories (not read): ${j.crossRepo.join(', ')}` : ''}`);
+  L.push(`closing-keyword targets in the body (this repository): ${j.targets.map((n) => `#${n}`).join(', ') || 'none'}`);
   L.push(`closed by this merge: ${j.closedByMerge.length ? '' : 'none'}`);
   for (const c of j.closedByMerge) L.push(`  · #${c.number} ${c.named ? 'named' : '⚠️ NOT NAMED — silent close'} · closed ${c.closedAt} (${c.secondsAfter}s after the merge) by ${c.actor ?? '?'} · ${c.why} — ${String(c.title).slice(0, 80)}`);
   for (const c of j.namedOpen) L.push(`  · #${c.number} named, still OPEN after the merge`);
