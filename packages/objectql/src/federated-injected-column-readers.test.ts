@@ -460,6 +460,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'declines to declare the __search companion column on an object the sync seam issues no DDL for; it reads no row',
   },
+  // The update stamps an all-dropped update leaves unwritten: a set of payload KEYS, judged
+  // against the payload in hand, never a column read.
+  'engine-update.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
+  'engine-update.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'having-filter.ts#declaredReferenceNames :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
