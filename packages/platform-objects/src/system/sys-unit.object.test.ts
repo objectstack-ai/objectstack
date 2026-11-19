@@ -118,12 +118,16 @@ describe('sys_unit — declaration (ADR-0158 U3)', () => {
       expect(affordances).toMatchObject({ create: true, edit: true, delete: false });
     });
 
-    it('serves list, read, create and update on the data API, and refuses a delete or a bulk write there', () => {
+    it('serves list, read, create and update on the data API, batched or not, and refuses a delete either way', () => {
       // `apiExposureDenialReason` is the function the REST door turns into its 405.
       expect(SysUnit.enable?.apiEnabled).toBe(true);
-      expect(SysUnit.enable?.apiMethods).toEqual(['get', 'list', 'create', 'update']);
+      expect(SysUnit.enable?.apiMethods).toEqual(['get', 'list', 'create', 'update', 'bulk']);
       for (const op of ['get', 'list', 'create', 'update']) expect(apiExposureDenialReason(SysUnit.enable, op), op).toBeNull();
-      for (const op of ['delete', 'bulk']) expect(apiExposureDenialReason(SysUnit.enable, op), op).toBe('method-not-allowed');
+      for (const child of ['create', 'update']) {
+        expect(apiExposureDenialReason(SysUnit.enable, 'bulk', { bulkChild: child }), child).toBeNull();
+      }
+      expect(apiExposureDenialReason(SysUnit.enable, 'delete')).toBe('method-not-allowed');
+      expect(apiExposureDenialReason(SysUnit.enable, 'bulk', { bulkChild: 'delete' })).toBe('method-not-allowed');
     });
   });
 

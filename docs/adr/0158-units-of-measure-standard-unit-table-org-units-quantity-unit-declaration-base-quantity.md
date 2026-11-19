@@ -598,8 +598,9 @@ amended with each answer, the way ADR-0144's open items were.
     answering [#35466](https://github.com/objectstack-ai/objectstack/issues/35466): **a deleted code stays retired.**
     L1's delete is spelled as a one-way `retired` flag on the row. The row is never removed, so it keeps holding the
     organization-scoped unique key on `code`, and the same code can never be created again with another dimension,
-    ratio or label; the hazard above cannot arise. The mechanism, each part pinned: the data API serves no delete and
-    no bulk write on `sys_unit` (`enable.apiMethods` is `get`, `list`, `create`, `update`), Setup offers no Delete
+    ratio or label; the hazard above cannot arise. The mechanism, each part pinned: the data API serves no delete on
+    `sys_unit`, single or batched (`enable.apiMethods` is `get`, `list`, `create`, `update`, `bulk`, and a batch admits
+    only a granted verb), Setup offers no Delete
     (`userActions.delete: false`), and a rule refuses clearing `retired` once set. Rows resting on a retired unit keep
     their code and stored conversion, as L1 states for a deleted unit. Two consequences are left to their cards: the
     membership card (U5, [Open item](#open-items) 9) refuses a new save with a retired code, as L1's delete bullet

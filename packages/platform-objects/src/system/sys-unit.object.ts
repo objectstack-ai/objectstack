@@ -285,8 +285,9 @@ export const SysUnit = ObjectSchema.create({
     searchable: false,
     apiEnabled: true,
     // Retiring is the delete (Open item 11): the generic data API serves no
-    // delete and no bulk door, so no request can free a code.
-    apiMethods: ['get', 'list', 'create', 'update'],
+    // delete, so no request can free a code. `bulk` batches only the verbs
+    // granted here (`bulk ∧ child`), so a batched delete is refused too.
+    apiMethods: ['get', 'list', 'create', 'update', 'bulk'],
     // A unit is reference data, not a discussion surface.
     feeds: false,
   },
