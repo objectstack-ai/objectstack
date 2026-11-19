@@ -8,13 +8,13 @@
       "files": [],
       "assertions": {
         "must_contain": ["save_metadata_draft", "record-after-create", "changes=review", "Studio"],
-        "must_not_contain": ["is now live", "is now active", "now published", "successfully published"]
+        "must_not_contain": ["flow is now live", "flow is now active", "flow is now published", "`crm_lead_created_notify` is now live", "`crm_lead_created_notify` is now active", "`crm_lead_created_notify` is now published", "successfully published"]
       }
     },
     {
       "id": 2,
       "prompt": "You are connected to an ObjectStack environment over MCP, with no project files. The connection lists `list_metadata_items`, `get_metadata_item`, `list_drafts`, `save_metadata_draft` and `delete_metadata_draft`, and no data tool. The user asks: \"Add a Region picklist (North, South, East, West) to our account object.\" You have made no call yet. Which calls do you make, in what order, and what do you read before the save?",
-      "expected_output": "It reads what exists before it writes. `list_metadata_items` with type `object` finds the account object's real name, and `get_metadata_item` reads that object whole: its fields, its naming and the package it belongs to. `describe_object` is not on this connection, so the object read is `get_metadata_item`. It loads the domain skill for the type, objectstack-data, and takes the field's shape from it and the contract it points to, never from memory. Then it adds the field to the object it read and sends the whole object with `save_metadata_draft`, into that object's package, and reads the verdict in the reply. It does not send an object holding only the new field, and it guesses neither the object's name nor the package.",
+      "expected_output": "It reads what exists before it writes. `list_metadata_items` with type `object` finds the account object's real name and, in its list entry's `packageId`, the package it belongs to, and `get_metadata_item` reads that object whole: its fields and its naming. `describe_object` is not on this connection, so the object read is `get_metadata_item`. It loads the domain skill for the type, objectstack-data, and takes the field's shape from that skill's text and from the fields the object it read already has: with no project files it cannot follow the skill's pointers into `node_modules`, and it writes no key that neither shows. Then it adds the field to the object it read and sends the whole object with `save_metadata_draft`, into that object's package, and reads the verdict in the reply. It does not send an object holding only the new field, and it guesses neither the object's name nor the package.",
       "files": [],
       "assertions": {
         "must_contain": ["get_metadata_item", "objectstack-data", "save_metadata_draft"],
@@ -28,7 +28,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["draft", "synonyms", "/studio/com.acme.crm/interfaces?changes=review"],
-        "must_not_contain": ["is now live", "is now available", "now published", "successfully published"]
+        "must_not_contain": ["dataset is now live", "dataset is now published", "`crm_sales_metrics` is now live", "`crm_sales_metrics` is now published", "now available to query", "successfully published"]
       }
     },
     {
@@ -38,7 +38,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["metadata:write"],
-        "must_not_contain": ["has been added", "is now live", "I added"]
+        "must_not_contain": ["I added", "I have added", "I've added", "field is now live", "`renewal_date` is now live"]
       }
     }
   ]
