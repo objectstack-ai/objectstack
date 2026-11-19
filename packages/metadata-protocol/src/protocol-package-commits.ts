@@ -2352,7 +2352,9 @@ export class ProtocolPackageCommitsFacet {
                 version: await host.receiptVersion(result.version),
                 seq: result.seq,
                 restoredFromVersion: request.toVersion,
-                message: `Reverted to version ${request.toVersion} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+                // [#34681 rider 1] Naming the package of the row it restored,
+                // as the delete's receipt names the row it removed.
+                message: `Reverted to version ${request.toVersion}${rollbackPackageId !== null ? ` (package=${rollbackPackageId})` : ''} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
                 // Omitted, never `[]`, when there is nothing to report: a clean
                 // rollback's answer bytes are unchanged.
                 ...(advisories.length > 0 ? { advisories } : {}),

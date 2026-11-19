@@ -3,18 +3,23 @@
 // [#34681, epic ruling 6781691009, #34348 ruling (b), ADR-0150 D3/D5] A
 // bundled type's name no package ships, held as stored rows at one member by a
 // base package and a package that declares it (#34441 cell 2): the read naming
-// no package serves the base's row, and the five write doors naming no package
-// now answer as the same request naming that base does. The bare save (the
-// REST door and in process, publish and draft mode), the bare per-item
-// publish, the bare history read, the bare delete and the bare draft discard
-// each land in, or answer for, the base's row; the dependent's row stays where
-// it is, read and written at its own `?package=`. Driven on a booted kernel
-// (the real protocol, metadata service, registry and `sys_metadata` store).
+// no package serves the base's row, and the seven doors naming no package
+// that write or address one row now answer as the same request naming that
+// base does. The bare save (the REST door and in process, publish and draft
+// mode), the bare per-item publish, the bare delete and draft discard, and
+// the bare history, diff and rollback each land in, or answer for, the base's
+// row; the dependent's row stays where it is, read and written at its own
+// `?package=`. A read-only base is answered for as named, at every door. The base is judged as named:
+// bound to an id no installed package has, the bare save in either mode is
+// refused 422 WRITABLE_PACKAGE_REQUIRED as `?package=<base>` is. Driven on a
+// booted kernel (the real protocol, metadata service, registry and
+// `sys_metadata` store).
 //
-// FROM (`main` 8596c80eda, measured through these doors before the change):
-// with the read serving the base's row (200), the bare save, draft save,
-// publish, history, delete and draft discard each refused 409
-// RESOURCE_CONFLICT naming both packages.
+// FROM (measured through these doors before the change, `main` 8596c80eda;
+// the diff and rollback at `main` 90d943c7f5): with the read serving the
+// base's row (200), the bare save, draft save, publish, history, diff,
+// rollback, delete and draft discard each refused 409 RESOURCE_CONFLICT
+// naming both packages.
 //
 // Measured beside it, unchanged by this change and pinned as they read:
 // - after the bare delete removes the base's row, the bare read serves the
@@ -50,6 +55,9 @@ const U = 'com.qa.writeother';
 // Authored (writable) packages: WD declares WA.
 const WA = 'com.qa.authoredbase';
 const WD = 'com.qa.authoredaddon';
+// An id no installed package has, declared by the installed authored package GD.
+const GHOST = 'com.qa.ghostbase';
+const GD = 'com.qa.ghostaddon';
 
 interface ManifestDoor { register(artifact: unknown): Promise<void> | void }
 interface Booted { kernel: ObjectKernel; engine: ObjectQL; root: string; protocol: any }
@@ -84,12 +92,13 @@ async function boot(file: string): Promise<Booted> {
     await engine.syncSchemas();
     engine.registry.installPackage({ id: WA, name: WA, version: '1.0.0', type: 'app' } as any, 'authored');
     engine.registry.installPackage({ id: WD, name: WD, version: '1.0.0', type: 'app', dependencies: { [WA]: '*' } } as any, 'authored');
+    engine.registry.installPackage({ id: GD, name: GD, version: '1.0.0', type: 'app', dependencies: { [GHOST]: '*' } } as any, 'authored');
     return { kernel, engine, root, protocol: kernel.getService('protocol') };
 }
 
 // A bundled type's non-canonical member carries its `bundle_member` key column, as the save door writes it.
-const layRow = (engine: ObjectQL, type: string, name: string, packageId: string | null, metadata: Record<string, unknown>) => engine.insert('sys_metadata', {
-    type, name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state: 'active', version: 1,
+const layRow = (engine: ObjectQL, type: string, name: string, packageId: string | null, metadata: Record<string, unknown>, state: 'active' | 'draft' = 'active') => engine.insert('sys_metadata', {
+    type, name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state, version: 1,
     ...(type === 'email_template' && metadata.locale !== 'en-US' ? { bundle_member: metadata.locale } : {}),
     metadata: JSON.stringify({ name, ...metadata }),
 }, { context: { isSystem: true } } as any);
@@ -172,6 +181,7 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
             const published = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'w_mail' }));
             expect(published.resolved, JSON.stringify(published)).toMatchObject({ success: true });
             expect(await rowsOf(b.engine, 'w_mail')).toEqual([`active:${WD}:addon en`, `active:${WA}:drafted`]);
+            expect(await bareRead(b, 'w_mail')).toEqual([200, 'drafted', WA]);
             // The history naming no package is the base's versions, as `?package=` naming it reads them.
             const bare = await settle(b.protocol.historyMetaItem({ type: 'email_template', name: 'w_mail' }));
             const named = await settle(b.protocol.historyMetaItem({ type: 'email_template', name: 'w_mail', packageId: WA }));
@@ -216,6 +226,64 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
             expect(await bareRead(b, 'w_del')).toEqual([200, 'addon en', WD]);
         });
 
+        it('a base bound to an id no installed package has, which an installed dependent declares: the bare draft save is refused 422 as ?package=<base> and the bare publish-mode save are, writing nothing', async () => {
+            await layPair(b.engine, 'ghost_mail', GHOST, GD);
+            expect(await bareRead(b, 'ghost_mail')).toEqual([200, 'base en', GHOST]);
+            for (const mode of ['publish', 'draft'] as const) {
+                const named = await saveOf(b, 'ghost_mail', 'edited', { mode, packageId: GHOST });
+                const bare = await saveOf(b, 'ghost_mail', 'edited', { mode });
+                expect([mode, 'named', named.code, named.status], JSON.stringify(named)).toEqual([mode, 'named', 'WRITABLE_PACKAGE_REQUIRED', 422]);
+                expect([mode, 'bare', bare.code, bare.status], JSON.stringify(bare)).toEqual([mode, 'bare', 'WRITABLE_PACKAGE_REQUIRED', 422]);
+                expect(bare.message).toContain(GHOST);
+            }
+            expect(await rowsOf(b.engine, 'ghost_mail')).toEqual([`active:${GD}:addon en`, `active:${GHOST}:base en`]);
+        });
+
+        it('two bare deletes in a row: the first removes the base\'s row and the read then serves the dependent\'s, the second removes the dependent\'s', async () => {
+            await layPair(b.engine, 'w_del2', WA, WD);
+            const first = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'w_del2' }));
+            expect(first.resolved, JSON.stringify(first)).toMatchObject({ success: true, reset: true });
+            expect(first.resolved.message).toContain(`(package=${WA})`);
+            expect(await rowsOf(b.engine, 'w_del2')).toEqual([`active:${WD}:addon en`]);
+            expect(await bareRead(b, 'w_del2')).toEqual([200, 'addon en', WD]);
+            const second = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'w_del2' }));
+            expect(second.resolved, JSON.stringify(second)).toMatchObject({ success: true, reset: true });
+            expect(second.resolved.message).toContain(`(package=${WD})`);
+            expect(await rowsOf(b.engine, 'w_del2')).toEqual([]);
+            expect((await bareRead(b, 'w_del2'))[0]).toBe(404);
+        });
+
+        it('the bare draft read and the bare discard address the same draft, the base\'s, with the dependent\'s draft beside it', async () => {
+            await layPair(b.engine, 'w_drafts', WA, WD);
+            expect((await saveOf(b, 'w_drafts', 'base drafted', { mode: 'draft' })).resolved).toMatchObject({ success: true });
+            expect((await saveOf(b, 'w_drafts', 'addon drafted', { mode: 'draft', packageId: WD })).resolved).toMatchObject({ success: true });
+            expect(await rowsOf(b.engine, 'w_drafts')).toEqual([`active:${WD}:addon en`, `active:${WA}:base en`, `draft:${WD}:addon drafted`, `draft:${WA}:base drafted`]);
+            const readDraft = await settle(b.protocol.getMetaItem({ type: 'email_template', name: 'w_drafts', state: 'draft' }));
+            expect(readDraft.resolved?.item?.subject, JSON.stringify(readDraft)).toBe('base drafted');
+            const discarded = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'w_drafts', state: 'draft' }));
+            expect(discarded.resolved, JSON.stringify(discarded)).toMatchObject({ success: true, reset: true });
+            expect(await rowsOf(b.engine, 'w_drafts')).toEqual([`active:${WD}:addon en`, `active:${WA}:base en`, `draft:${WD}:addon drafted`]);
+        });
+
+        it('a read-only base: the bare delete, draft discard and rollback answer what ?package=<base> answers, never 409 naming both', async () => {
+            const outcome = (answer: any) => (answer.resolved !== undefined ? ['resolved', answer.resolved.success] : [answer.code, answer.status]);
+            const seen: Record<string, unknown> = {};
+            for (const [label, packageId] of [['bare', undefined], ['named', A]] as const) {
+                const name = `ro_destroy_${label}`;
+                await layPair(b.engine, name, A, D);
+                await layRow(b.engine, 'email_template', name, A, template('en-US', 'base drafted'), 'draft');
+                const at = packageId === undefined ? {} : { packageId };
+                const discard = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name, state: 'draft', ...at }));
+                const rollback = await settle(b.protocol.rollbackMetaItem({ type: 'email_template', name, toVersion: 1, ...at }));
+                const remove = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name, ...at }));
+                seen[label] = { discard: outcome(discard), rollback: outcome(rollback), remove: outcome(remove), rows: await rowsOf(b.engine, name) };
+                if (label === 'bare') {
+                    for (const answer of [discard, rollback, remove]) expect(answer.code, JSON.stringify(answer)).not.toBe('RESOURCE_CONFLICT');
+                }
+            }
+            expect(seen.bare, JSON.stringify(seen)).toEqual(seen.named);
+        });
+
         const versionedPair = async (name: string) => {
             await layPair(b.engine, name, WA, WD);
             for (const subject of ['v1', 'v2']) {
@@ -241,6 +309,8 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
             expect(versions.length, 'one stored version of the base\'s v1').toBe(1);
             const rolled = await settle(b.protocol.rollbackMetaItem({ type: 'email_template', name: 'rb_mail', toVersion: versions[0] }));
             expect(rolled.resolved, JSON.stringify(rolled)).toMatchObject({ success: true });
+            // [rider 1] The receipt names the package of the row it restored, as the delete's names the row it removed.
+            expect(rolled.resolved.message).toContain(`(package=${WA})`);
             expect(await rowsOf(b.engine, 'rb_mail')).toEqual([`active:${WD}:addon v1`, `active:${WA}:v1`]);
             expect(await bareRead(b, 'rb_mail')).toEqual([200, 'v1', WA]);
         });

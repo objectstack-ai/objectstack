@@ -7874,9 +7874,12 @@ export class ObjectStackProtocolImplementation implements
      * write that names no package addresses, read from the item's stored rows
      * at `state`. The item's own package when those rows are bound to exactly
      * one, else the package-unbound row. `candidates` is every distinct
-     * binding, sorted; two or more is a name several packages hold, which the
-     * doors refuse ({@link packagelessAddressAmbiguityRefusal}) and for which
-     * `packageId` is `null`. `unbound` says whether a package-unbound row sits
+     * binding, sorted; two or more is a name several packages hold, for which
+     * `packageId` is `null` and which the doors refuse
+     * ({@link packagelessAddressAmbiguityRefusal}) unless the read naming no
+     * package serves the row-held base: there they address the base's row,
+     * as the request naming it does ({@link packagelessRowHeldBaseAddress},
+     * #34681). `unbound` says whether a package-unbound row sits
      * beside them, which is what a delete of a package's row leaves served.
      *
      * The one resolution its three readers take, so they cannot disagree:
@@ -7966,7 +7969,11 @@ export class ObjectStackProtocolImplementation implements
      *    too, and those drafts are addressed by naming their package.
      *  - bound to two or more packages: `ambiguous`, refused by both doors
      *    with the refusal the draft save answers
-     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`).
+     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`),
+     *    except where the read naming no package serves the row-held base:
+     *    there the draft save, the per-item publish and the draft discard
+     *    address the base's draft, as the request naming the base does
+     *    ({@link packagelessRowHeldBaseAddress}, #34681).
      *  - bound to none (an item never published into a package): the
      *    package-unbound draft. With no such draft, the one package's draft
      *    when exactly one package holds a draft (the only draft the read
@@ -9620,7 +9627,10 @@ export class ObjectStackProtocolImplementation implements
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
      * name two row slots hold, or one the bare plain read refuses, is refused
-     * `409` naming every holder when no package is named, and `packageId`
+     * `409` naming every holder when no package is named, except where the
+     * bare read serves the row-held base: there the base's versions are read,
+     * as naming the base reads them (#34681,
+     * {@link packagelessRowHeldBaseAddress}). `packageId`
      * reads that holder's versions alone: its own, plus those attributed to
      * no package or to the environment while it is the name's only slot
      * (`protocol-history-slots.ts`). A name one holder holds reads as before.
@@ -11061,7 +11071,9 @@ export class ObjectStackProtocolImplementation implements
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
      * name two row slots hold is refused `409` naming every holder when no
      * package is named, with nothing written (so is a name the bare plain
-     * read refuses); `packageId` restores into that holder's row (its own,
+     * read refuses), except where the bare read serves the row-held base:
+     * there the rollback restores into the base's row, as naming the base
+     * does (#34681, {@link packagelessRowHeldBaseAddress}); `packageId` restores into that holder's row (its own,
      * its pair's declared override, or the package-less row its read falls
      * back to), and the version must be that holder's: another holder's, or
      * one attributed to no package or to the environment while another slot

@@ -897,6 +897,11 @@ export class ProtocolSaveFacet {
         // draft save writes the base's draft, as the save naming that base
         // does ({@link packagelessRowHeldBaseAddress}). Otherwise the
         // ambiguous address is left to the repository's `409`, as before.
+        // `followedBase` keeps the base for the two rules below that judge a
+        // draft save's inherited package (the named-base rule and the late
+        // override re-judgment): the base is judged exactly as the save
+        // naming it is, an id no installed package has refused `422`.
+        let followedBase: string | undefined;
         if (draftAddress?.kind === 'ambiguous') {
             const base = await packagelessRowHeldBaseAddress(
                 host, singularType, request.name, itemDiscriminator(singularType, request.item),
@@ -904,6 +909,7 @@ export class ProtocolSaveFacet {
             if (base !== undefined) {
                 request = { ...request, packageId: base };
                 draftAddress = undefined;
+                followedBase = base;
             }
         }
         // [ADR-0150 D4] The environment's own action draft is one slot per
@@ -945,7 +951,7 @@ export class ProtocolSaveFacet {
         // repository's `409`, as before. See {@link uninstalledNamedBaseRefusal}.
         if (namedNoPackage && request.source === undefined && request.writeFace !== 'package-duplicate') {
             const inherited = mode === 'draft'
-                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                ? followedBase ?? (draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null)
                 : request.packageId ?? null;
             const unboundInherited = host.uninstalledNamedBaseRefusal(
                 { type: singularType, name: request.name, packageId: inherited },
@@ -2009,7 +2015,7 @@ export class ProtocolSaveFacet {
             && request.writeFace !== 'package-duplicate'
         ) {
             const inheritedPackage = mode === 'draft'
-                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                ? followedBase ?? (draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null)
                 : request.packageId ?? null;
             if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
                 lateOverrideVerdict = host.overrideWriteVerdict({ ...request, packageId: inheritedPackage });

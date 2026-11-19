@@ -17,7 +17,10 @@
  *    by more than one row slot — two packages', or a package's beside the
  *    package-less row — is refused `409` naming every holder
  *    (`ambiguous-in-environment`), before any row is read or written: nothing
- *    picks one (ADR-0150 D3, epic red line 2). So is a name the bare plain
+ *    picks one (ADR-0150 D3, epic red line 2), except where the bare read
+ *    serves the row-held base (#34441 cell 2): there the door addresses the
+ *    base's slot, as naming the base does (#34681,
+ *    `packagelessRowHeldBaseAddress`). So is a name the bare plain
  *    read refuses (ADR-0150 D5: a holder in code counts, so two packages
  *    shipping the name are two holders while only one has saved a row): the
  *    registry's resolver (`resolveItem`, the one the plain read asks) throws
