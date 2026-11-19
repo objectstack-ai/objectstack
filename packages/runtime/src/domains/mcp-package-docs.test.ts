@@ -20,6 +20,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 const CRM = 'com.example.crm';
 const HR = 'com.example.hr';
