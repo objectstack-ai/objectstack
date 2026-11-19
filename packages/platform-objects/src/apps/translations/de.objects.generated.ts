@@ -72,6 +72,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Passwortänderung erforderlich",
         help: "Wenn aktiviert, muss der Benutzer sein Passwort ändern, bevor er fortfahren kann. Wird aktiviert, wenn ein Administrator das Konto anlegt oder importiert oder sein Passwort zurücksetzt; vom System verwaltet."
       },
+      dev_seed_credential: {
+        label: "Entwicklungs-Seed-Zugangsdaten",
+        help: "Wird bei einem Konto gesetzt, das der Entwicklungs-Seed angelegt hat. Solange sein Passwort noch das Seed-Passwort ist, verweigert ein Produktionsserver seine Anmeldung und jede neue Sitzung; os user set-password setzt ein neues Passwort und löscht den Wert. Vom System verwaltet; wird beim Lesen nie zurückgegeben."
+      },
       mfa_required_at: {
         label: "MFA erforderlich seit",
         help: "Wann die erzwungene MFA erstmals für diesen Benutzer galt (Uhr für die Übergangsfrist). Grundlage für mfa_required; vom System verwaltet."

@@ -173,7 +173,7 @@
  * decides whether either file's constants exist yet. One cell is added, for
  * the one surface post-stamped never writes: a `pr_create` body the platform
  * stored as the bytes sent followed by exactly the session-URL footer block
- * (`PR_CREATE_FOOTER_TAIL`) — `platform-readings.md`'s fourth shape, where the
+ * (`PR_CREATE_FOOTER_TAIL`) — `readings-write-shapes.md`'s fourth shape, where the
  * sent body is a strict prefix of the stored one. It forgives an append after
  * EVERY byte sent and nothing inside them.
  *
@@ -502,7 +502,7 @@
  *     needs the token and the proxy route the send needs, and the process re-execs for it the way the send does.
  *
  * `comment_edit` takes no trailer: a comment is a post, never a pull request body. Send no footer of your own: the
- * read-back reads a pull's edited body `identical`, stored === sent, nothing appended (`platform-readings.md`, the
+ * read-back reads a pull's edited body `identical`, stored === sent, nothing appended (`readings-write-shapes.md`, the
  * relay `issue_patch` line), and a footer after the trailer leaves a body the second rule above refuses.
  *
  * ## The kind rule — no pm state added to a pull request, no `pm:awaiting-merge` added to an issue (#31253)
@@ -1365,7 +1365,7 @@ export const READ_BACK_LOCATORS = Object.freeze({
 
 /**
  * The tail the platform appends to a `pr_create` body that does not already
- * end in the block — `.claude/skills/pm-dispatch/references/platform-readings.md`,
+ * end in the block — `.claude/skills/pm-dispatch/references/readings-write-shapes.md`,
  * the fourth shape: a rule plus ONE session-URL footer, the sent body a strict
  * prefix of the stored one, 90/91 bytes (the session id's length). A pattern
  * only because the session id varies; everything around it is literal.

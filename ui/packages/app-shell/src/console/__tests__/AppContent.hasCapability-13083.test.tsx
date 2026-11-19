@@ -4,6 +4,13 @@
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
+ *
+ * Since objectstack#35249 the surface's field list reads the static `hidden`
+ * only, and the form judges `visibleWhen` under the scope the provider around
+ * it publishes. So each arm reads the field list (the field is listed) and the
+ * form's verdict over that published scope (`formVerdict`): the binding this
+ * card added now has to hold in the provider's scope, the one place left that
+ * evaluates the gate.
  */
 
 /**
@@ -40,14 +47,21 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 // The reporter's dedupe `Set` is module state: reset it so every arm's
 // "nothing reported" is a reading, not a leftover from an earlier arm.
 import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
+// Not on the `@object-ui/react` barrel: the SAME module instance the provider publishes through.
+import { usePredicateScope } from '../../../../react/src/hooks/useExpression';
+import { resolveFieldRuleState } from '@object-ui/core';
 
-const { modalSchemas } = vi.hoisted(() => ({ modalSchemas: [] as Array<{ fields: string[] }> }));
+const { modalSchemas, publishedScopes } = vi.hoisted(() => ({
+  modalSchemas: [] as Array<{ fields: string[] }>,
+  publishedScopes: [] as Record<string, unknown>[],
+}));
 
 /** The probe: the global modal's schema is where the filtered field list lands. */
 vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ModalForm: ({ schema }: { schema: { fields: string[] } }) => {
     modalSchemas.push(schema);
+    publishedScopes.push(usePredicateScope());
     return <div data-testid="modal-form" />;
   },
 }));
@@ -164,6 +178,21 @@ const withPermissions = (caps: string[]) => (
 );
 
 const lastFields = (): string[] => modalSchemas[modalSchemas.length - 1].fields;
+const lastScope = (): Record<string, unknown> => publishedScopes[publishedScopes.length - 1];
+
+/**
+ * The verdict the FORM reaches on `roster_note` under the scope the provider
+ * around it publishes. Since objectstack#35249 the field list reads the static
+ * `hidden` only and the form judges `visibleWhen`, through
+ * `resolveFieldRuleState`, with that scope — so this is the call that decides
+ * whether the gate bites. `faulted` is read apart from `visible`: a fault fails
+ * OPEN, so `visible: true` alone cannot tell a granted gate from a broken one.
+ */
+const formVerdict = (): { visible: boolean; faulted: boolean } => {
+  const st = resolveFieldRuleState({ visibleWhen: cel(PREDICATE) }, {}, {}, undefined, lastScope());
+  return { visible: st.visible, faulted: st.faults.visibleWhen !== undefined };
+};
+
 
 let warnings: string[];
 beforeEach(() => {
@@ -183,23 +212,26 @@ describe('console record-form modal: a field gated on current_user.hasCapability
     await waitFor(() => expect(modalSchemas.length).toBeGreaterThan(0));
     expect(lastFields()).toContain('name');
     expect(lastFields()).toContain('roster_note');
+    expect(formVerdict()).toEqual({ visible: true, faulted: false });
     expect(warnings.filter((w) => w.includes('hasCapability'))).toEqual([]);
   });
 
   it('NON-HOLDER: hidden, with nothing reported — a verdict, not a fault', async () => {
     render(withPermissions(['setup.access']));
     await waitFor(() => expect(modalSchemas.length).toBeGreaterThan(0));
-    expect(lastFields()).toContain('name');
-    expect(lastFields()).not.toContain('roster_note');
+    // Listed (the list reads `hidden` only); the form hides it — a verdict.
+    expect(lastFields()).toEqual(expect.arrayContaining(['name', 'roster_note']));
+    expect(formVerdict()).toEqual({ visible: false, faulted: false });
     expect(warnings.filter((w) => w.includes('hasCapability'))).toEqual([]);
   });
 
   it('CONTROL — NOT LOADED: the predicate still FAULTS loudly, never a silent answer', async () => {
     render(createModal());
     await waitFor(() => expect(modalSchemas.length).toBeGreaterThan(0));
-    // Fail-open field gate on a fault (the shipped field policy): shown, and
-    // the fault is reported naming the predicate.
+    // Fail-open on a fault (the shipped field policy): shown, and the fault is
+    // reported naming the predicate.
     expect(lastFields()).toContain('roster_note');
+    expect(formVerdict()).toEqual({ visible: true, faulted: true });
     expect(warnings.some((w) => w.includes(PREDICATE))).toBe(true);
   });
 });

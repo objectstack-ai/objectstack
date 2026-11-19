@@ -332,9 +332,11 @@ export interface ExprSchemaHint {
    * prove is the field. So does an expression that reads the `input` root,
    * which a flow does not bind to the row the types describe.
    *
-   * The verdict is an error under the `-run-may-fail` arm: the envelope faults
-   * wherever the field holds the text the runtime keeps for it, and the
-   * engine's value evaluator throws on that fault, so the run fails there.
+   * The verdict is an error under the `-value-run-may-fail` arm: the envelope
+   * faults wherever the field holds the text the runtime keeps for it, and the
+   * engine's value evaluator throws on that fault, so the run fails at the step
+   * that computes the value (no condition runs there, so the sentence names the
+   * value, never a condition).
    *
    * Both doors set it with the same inputs — `@objectstack/lint`'s
    * `validateStackExpressions` and `@objectstack/service-automation`'s
@@ -676,6 +678,16 @@ function typeSoundnessIssue(
  * everywhere.
  */
 type DateArm = 'run-fails' | 'run-may-fail' | 'fail-closed' | 'fail-open';
+/**
+ * The outcome arms of the date-text verdicts: a {@link DateArm}, or
+ * `value-run-may-fail`, a flow value envelope's
+ * ({@link flowValueEnvelopeDateTextIssue}). An envelope is no condition: the
+ * step computes a value, and the run fails when that value is computed, so its
+ * sentence and its codes are its own (`date-text-call-value-run-may-fail`,
+ * `date-text-arithmetic-value-run-may-fail`). The `date-arithmetic` family
+ * never reaches an envelope, so it has no such arm.
+ */
+type DateTextArm = DateArm | 'value-run-may-fail';
 function dateArm(
   scope: 'record' | 'flattened',
   faultOutcome: ExprSchemaHint['faultOutcome'],
@@ -691,11 +703,19 @@ function dateArm(
  * [#30016, #30250, #30494] The fault clause of a date verdict whose fault does
  * not read null; `held` names what a flow condition's field holds at run time.
  * An advisory rule's is the type mismatch's own `fail-open` clause, word for
- * word: one outcome, one sentence.
+ * word: one outcome, one sentence. A flow value envelope's
+ * (`value-run-may-fail`) names the value being computed and the step, never a
+ * condition: the engine's value evaluator throws on the fault, so the run
+ * fails at the step that computes it.
  */
-function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): string {
+function dateArmFault(arm: DateTextArm, ref: string | null, held: 'date' | 'text'): string {
   if (arm === 'fail-closed') return `this faults at runtime, and here ${DATE_FAIL_CLOSED_CLAUSE}`;
   if (arm === 'fail-open') return `this faults at runtime, and here ${TYPE_MISMATCH_FAULT_ARMS['fail-open'].clause}`;
+  if (arm === 'value-run-may-fail') {
+    return `this faults wherever ${ref ?? 'the field'} holds ${held === 'date' ? 'the date' : 'that text'} ` +
+      'when the value is computed, and a flow value that cannot be computed fails the run: the flow stops at ' +
+      'this step and the work the flow exists to do is not done (it does not read null).';
+  }
   const fails =
     'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the ' +
     'work the flow exists to do is not done (it does not read null).';
@@ -712,8 +732,9 @@ function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): 
  *    `record.end_date - record.start_date` (either field kind), `record.d -
  *    duration('24h')` — so the expression reads null (in a flow condition the
  *    run fails instead, on a fail-closed site the write is refused, and on an
- *    advisory rule the rule is skipped: `flowArm`, #30016, #30250, #30494).
- *    Any role.
+ *    advisory rule the rule is skipped, and in a flow value envelope the run
+ *    fails when the value is computed: `flowArm`, #30016, #30250, #30494,
+ *    #34660). Any role.
  *  - `date-duration-value`: a formula (`value` role) that computes a
  *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
  *    serialises as `{}`. A predicate that COMPARES a duration
@@ -729,7 +750,7 @@ function dateTextIssue(
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
-  flowArm: DateArm | null,
+  flowArm: DateTextArm | null,
   dateOnlyFields: ReadonlySet<string>,
   recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
@@ -791,7 +812,8 @@ function dateTextIssue(
  * Timestamp typing passes it and the evaluator faults on it on every row
  * (`found no matching overload for 'isoDate(string)'`), so it takes the date
  * verdicts' grade and outcome sentence (`flowArm`): `date-text-call`, or its
- * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` arm. The
+ * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` /
+ * `-value-run-may-fail` arm. The
  * prescription is the call with the field parsed by `date(…)`, which the check
  * proved clean. [#34363] `timestamp(<date field>)` — the string overload,
  * which checks clean on the text and faults on a `YYYY-MM-DD` one on every
@@ -803,7 +825,7 @@ function dateTextCallIssue(
   source: string,
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
-  flowArm: DateArm | null,
+  flowArm: DateTextArm | null,
   dateOnlyFields: ReadonlySet<string>,
   recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
@@ -889,8 +911,10 @@ function recordRootDateTextIssue(
  * field at all, so it never takes a verdict. The order is
  * {@link typeSoundnessIssue}'s: a shape the Timestamp typing already faults on
  * (`record.due_date + 1`, `record.note * 2`) is another family's, so the
- * date-text check is not asked about it. The outcome is `run-may-fail`, the
- * arm that names the field as the condition of the fault.
+ * date-text check is not asked about it. The outcome is `value-run-may-fail`
+ * (#34660): it names the field as the condition of the fault, as `run-may-fail`
+ * does, and says the run fails when the value is computed, since no condition
+ * runs at a value slot.
  */
 function flowValueEnvelopeDateTextIssue(
   source: string,
@@ -903,7 +927,7 @@ function flowValueEnvelopeDateTextIssue(
   if (!tree || readRootMembers(tree, ['input']).length > 0) return null;
   if (firstTypeMismatch(source, celFieldTypes, 'record')) return null;
   const dateOnly = new Set(Object.keys(fieldTypes).filter((name) => fieldTypes[name] === 'date'));
-  const found = dateTextIssue(source, celFieldTypes, 'record', 'value', 'run-may-fail', dateOnly);
+  const found = dateTextIssue(source, celFieldTypes, 'record', 'value', 'value-run-may-fail', dateOnly);
   return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found.issue : null;
 }
 

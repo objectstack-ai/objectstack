@@ -65,6 +65,7 @@ import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
 import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
 import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-manager-sign-in-lockout.js';
+import { refuseDevSeedCredentialSession, stampDevSeedCredential } from './dev-seed-credential.js';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
 import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
 
@@ -120,6 +121,12 @@ export function composeDatabaseHooks(
   const stamp = async (account: any, ctx: any) => {
     await clearUnlink(account, ctx);
     await this.stampIdentitySource(account, ctx);
+    // The development seed's stamp, on the password credential of an account
+    // the seed creates (`dev-seed-credential.ts`). Never throws.
+    await stampDevSeedCredential(this.config.dataEngine as never, account, {
+      error: (message, meta) => this.audienceLogError(message, meta),
+      warn: (message, meta) => this.config.logger?.warn?.(message, meta),
+    });
   };
   // [ADR-0151 D2] An AI service account holds no password and no sign-in
   // provider link. Asked FIRST, before the host's own `create.before`, for
@@ -379,6 +386,10 @@ export function composeDatabaseHooks(
     // session for that account, with the answer password sign-in gives. See
     // auth-manager-sign-in-lockout.ts.
     await refuseLockedAccountSession.call(this, session, ctx, userRow);
+    // A server outside development mode opens no session for an account the
+    // development seed created while it still has its seed password, on any
+    // door (`dev-seed-credential.ts`).
+    await refuseDevSeedCredentialSession(this.config.dataEngine as never, session);
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
