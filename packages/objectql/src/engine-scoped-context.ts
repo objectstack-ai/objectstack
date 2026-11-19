@@ -44,7 +44,7 @@ import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzG
 import type { EngineTransactionInfo, EngineTransactionOptions } from '@objectstack/core';
 import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
-import { forgetTrioTransactionScope, recordTrioTransactionScope } from './engine-execute-transactions.js';
+import { closeTrioTransactionScope, recordTrioTransactionScope } from './engine-execute-transactions.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
 import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnits, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
@@ -377,7 +377,7 @@ export class ScopedContextFacet {
       if (driver.commit) await driver.commit(handle);
       else if (driver.commitTransaction) await driver.commitTransaction(handle);
     } finally {
-      forgetTrioTransactionScope(handle);
+      closeTrioTransactionScope(handle);
     }
     settleTrioCommitQueue(handle, true);
   }
@@ -393,7 +393,7 @@ export class ScopedContextFacet {
       if (driver.rollback) await driver.rollback(handle);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
     } finally {
-      forgetTrioTransactionScope(handle);
+      closeTrioTransactionScope(handle);
     }
   }
 
