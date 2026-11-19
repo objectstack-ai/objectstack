@@ -8,7 +8,7 @@
  * `resolveObjectName`, `judgeFilter`, `isSystemLedgerObject`,
  * `resolveDatasourceBinding`, `resolveEffectiveDatasource`,
  * `resolveMappedDatasource`, `setDatasourceMapping`, `init` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `engine.ts` whole (split by #30012 and #30571).
  *
  * A MOVE, not a redesign. {@link SecretsAndRoutingFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -59,6 +59,7 @@ export interface SecretsAndRoutingHost {
   datasourceMapping: ObjectQL['datasourceMapping'];
   readonly defaultDriver: ObjectQL['defaultDriver'];
   readonly drivers: ObjectQL['drivers'];
+  getDriver: ObjectQL['getDriver'];
   readonly logger: ObjectQL['logger'];
   readonly manifests: ObjectQL['manifests'];
   readonly relatedSchemaOf: ObjectQL['relatedSchemaOf'];
@@ -140,7 +141,7 @@ export class SecretsAndRoutingFacet {
   }
 
   /** The body of `ObjectQL#judgeFilter`; the method's docblock there is its contract. */
-  static judgeFilter(this: Pick<SecretsAndRoutingHost, '_registry' | 'relatedSchemaOf' | 'resolveObjectName'>, objectName: string, where: EngineQueryOptions['where'], options?: EngineFilterJudgementOptions): EngineFilterJudgement {
+  static judgeFilter(this: Pick<SecretsAndRoutingHost, '_registry' | 'relatedSchemaOf' | 'resolveObjectName' | 'getDriver'>, objectName: string, where: EngineQueryOptions['where'], options?: EngineFilterJudgementOptions): EngineFilterJudgement {
     const object = this._registry.getObject(objectName) ? this.resolveObjectName(objectName) : objectName;
     return judgeWhereAdmission(
       object,
@@ -149,6 +150,17 @@ export class SecretsAndRoutingFacet {
       this._registry.getObject(object),
       options?.context,
       this.relatedSchemaOf,
+      // [#33876] The object's driver, for its DECLARED capabilities only
+      // (`judgeWhereAdmission`). A name this engine routes to no driver
+      // answers `null`: that verdict is not judged here, and execution
+      // raises its own routing error.
+      (name) => {
+        try {
+          return this.getDriver(name);
+        } catch {
+          return null;
+        }
+      },
     );
   }
 

@@ -41,11 +41,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Cambio de acceso de administrador de plataforma",
           action_invocation: "Invocación de acción",
           package_uninstall: "Desinstalación de paquete",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "Importación de paquete no administrado",
+          credential_use: "Uso de credencial",
+          scim_refused: "Solicitud SCIM rechazada",
+          audit_signing_key_change: "Cambio de clave de firma de auditoría",
+          dataset_query: "Consulta de conjunto de datos",
+          scim_manager_unresolved: "Responsable SCIM no resuelto"
         }
       },
       user_id: {

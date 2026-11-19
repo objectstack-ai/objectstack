@@ -737,6 +737,49 @@ export class MetadataManager implements IMetadataService {
   // `package-slotted-store.ts`), whose key also names the package.
   private registry = new Map<string, Map<string, unknown>>();
 
+  /**
+   * [#34206, ADR-0156 D2] This manager's change counter, moved by every path
+   * that changes what {@link get} / {@link getDiagnosed} / {@link list} can
+   * answer: an in-memory store write or drop ({@link writeRegistryEntry},
+   * {@link deleteRegistryEntries}), every stored-set mutation the manager
+   * learns of ({@link invalidateListCache}: local writes, repository events,
+   * a cluster peer's write, HMR and artifact ingest, a watched file), a new
+   * loader, a new type registry, and every announcement to watchers. Read it
+   * through {@link revision}; compared, never interpreted. What it cannot
+   * see: a loader whose backing store changes with nobody telling this
+   * manager (a file edited with no watcher running), which a cache keyed on
+   * it bounds with its own time limit (ADR-0156 D1 (b)).
+   */
+  private changeRevision = 0;
+
+  /** See {@link changeRevision}. */
+  get revision(): number {
+    return this.changeRevision;
+  }
+
+  /**
+   * [#34206, ADR-0156 D5] A reading of every loader's backing store that
+   * moves when something outside this process changes what the loader would
+   * answer, for a cache's confirmation: the loaders in order, each by its own
+   * `changeMark()`. A `memory:` loader is in-process and written through this
+   * manager ({@link revision} sees it), so it contributes nothing. A loader
+   * of any other protocol that keeps no mark makes the whole answer
+   * `undefined`: nothing this manager can read says whether it moved.
+   */
+  async loaderChangeMark(): Promise<string | undefined> {
+    const marks: string[] = [];
+    for (const loader of this.loaders.values()) {
+      if (loader.contract.protocol === 'memory:') continue;
+      if (typeof loader.changeMark !== 'function') return undefined;
+      try {
+        marks.push(`${loader.contract.name}=${await loader.changeMark()}`);
+      } catch {
+        return undefined;
+      }
+    }
+    return JSON.stringify(marks);
+  }
+
   // Type registry for metadata type info
   private typeRegistry: MetadataTypeRegistryEntryParsed[] = [];
 
@@ -1014,6 +1057,7 @@ export class MetadataManager implements IMetadataService {
    */
   setTypeRegistry(entries: MetadataTypeRegistryEntryParsed[]): void {
     this.typeRegistry = entries;
+    this.changeRevision++;
   }
 
   /**
@@ -1162,6 +1206,7 @@ export class MetadataManager implements IMetadataService {
   registerLoader(loader: MetadataLoader) {
     assertWritableLoaderContract(loader);
     this.loaders.set(loader.contract.name, loader);
+    this.changeRevision++;
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
 
@@ -1373,6 +1418,7 @@ export class MetadataManager implements IMetadataService {
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
+    this.changeRevision++;
     return existed;
   }
 
@@ -1382,6 +1428,7 @@ export class MetadataManager implements IMetadataService {
     if (!typeStore) return;
     for (const key of keys ?? storeKeysNamed(typeStore, type, name)) typeStore.delete(key);
     if (typeStore.size === 0) this.registry.delete(type);
+    this.changeRevision++;
   }
 
   /**
@@ -2057,6 +2104,7 @@ export class MetadataManager implements IMetadataService {
    * the registry was empty and the loader was not.
    */
   private invalidateListCache(type: string): void {
+    this.changeRevision++;
     this.listCache.delete(type);
     this.inflightListReads.delete(type);
     // [#5089] The endpoint index is a cache of the same stored set, so it goes
@@ -4461,6 +4509,7 @@ export class MetadataManager implements IMetadataService {
   }
 
   private notifyWatchersLocal(type: string, event: MetadataWatchEvent) {
+    this.changeRevision++;
     const callbacks = this.watchCallbacks.get(type);
     if (!callbacks) return;
 

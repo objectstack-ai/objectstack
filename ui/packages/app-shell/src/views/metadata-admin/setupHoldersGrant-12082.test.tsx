@@ -106,6 +106,7 @@ function answer(objects: MePermissionsAuthenticatedResponse['objects']): MePermi
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects,
     fields: {},

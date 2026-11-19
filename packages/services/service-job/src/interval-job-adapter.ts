@@ -2,7 +2,14 @@
 
 import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions, JobRunTrigger } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
-import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
+import {
+  DEFAULT_SHUTDOWN_DRAIN_MS,
+  drainExpiredMessage,
+  drainScheduledFires,
+  openScheduledFire,
+  skippedTickMessage,
+  type ScheduledFire,
+} from './scheduled-fire.js';
 
 /**
  * Internal record for a scheduled job.
@@ -30,6 +37,12 @@ export interface IntervalJobAdapterOptions {
    * interval jobs run and cron jobs do nothing.
    */
   logger?: { warn(message: string, ...args: unknown[]): void };
+  /**
+   * How long `destroy()` waits for a scheduled run already in flight before it
+   * returns without it, in milliseconds (default 10000). Keep it inside the
+   * kernel's `shutdownTimeout`, which every plugin's teardown shares.
+   */
+  shutdownDrainMs?: number;
 }
 
 /**
@@ -58,10 +71,12 @@ export class IntervalJobAdapter implements IJobService {
   private readonly logger?: IntervalJobAdapterOptions['logger'];
   /** job name → its timer-fired run still in flight, if any (#31811). See {@link IntervalJobAdapter.runScheduled}. */
   private readonly scheduledInFlight = new Map<string, ScheduledFire>();
+  private readonly shutdownDrainMs: number;
 
   constructor(options: IntervalJobAdapterOptions = {}) {
     this.maxExecutions = options.maxExecutions ?? 100;
     this.logger = options.logger;
+    this.shutdownDrainMs = options.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
   }
 
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
@@ -175,7 +190,21 @@ export class IntervalJobAdapter implements IJobService {
   }
 
   /**
-   * Stop all active timers. Call during plugin destroy phase.
+   * Stop all active timers, then wait for the scheduled runs still in flight.
+   * Call during plugin destroy phase.
+   *
+   * The kernel destroys plugins in reverse order, so the plugins this one
+   * depends on — the driver among them — are destroyed AFTER this returns. A
+   * scheduled run handed back still executing therefore meets a released
+   * driver: its body fails and its run record cannot be settled. So the
+   * timers stop and the registrations go first (a tick racing this finds no
+   * job and does not fire), and then this waits for every scheduled fire the
+   * in-flight latch holds — for at most `shutdownDrainMs`, so one slow run
+   * cannot spend the kernel's whole shutdown budget. A run still going when
+   * the bound passes is named in one `warn` and left to finish on its own;
+   * `DbJobAdapter` settles its run row before the driver goes.
+   *
+   * Manual `trigger()` runs are not waited for: their caller awaits them.
    */
   async destroy(): Promise<void> {
     for (const record of this.jobs.values()) {
@@ -185,6 +214,10 @@ export class IntervalJobAdapter implements IJobService {
       }
     }
     this.jobs.clear();
+    const leftRunning = await drainScheduledFires(this.scheduledInFlight, this.shutdownDrainMs);
+    if (leftRunning.length > 0) {
+      this.logger?.warn(drainExpiredMessage('IntervalJobAdapter', leftRunning, this.shutdownDrainMs));
+    }
   }
 
   /**
@@ -194,17 +227,21 @@ export class IntervalJobAdapter implements IJobService {
    * goes straight to `executeJob` and neither checks nor sets it.
    */
   private async runScheduled(record: JobRecord): Promise<void> {
+    // A tick of a registration that is gone — cancelled, replaced, or cleared
+    // by `destroy()` — starts nothing.
+    if (this.jobs.get(record.name) !== record) return;
     const running = this.scheduledInFlight.get(record.name);
     if (running) {
       this.logger?.warn(skippedTickMessage('IntervalJobAdapter', record.name, running));
       return;
     }
-    const fire: ScheduledFire = { startedAt: new Date().toISOString() };
+    const { fire, finish } = openScheduledFire();
     this.scheduledInFlight.set(record.name, fire);
     try {
       await this.executeJob(record, 'schedule');
     } finally {
       if (this.scheduledInFlight.get(record.name) === fire) this.scheduledInFlight.delete(record.name);
+      finish();
     }
   }
 

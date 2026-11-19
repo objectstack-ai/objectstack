@@ -44,6 +44,7 @@ import {
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  servedLocaleObjectView,
   stdioObjectView,
   type StdioObjectReads,
   type StdioDatasetToolsService,
@@ -816,6 +817,10 @@ export class MCPServerPlugin implements Plugin {
           // registered during `init()`, so an absence now is final (ADR-0116),
           // and the tools must be registered before the transport attaches.
           datasetTools: datasetToolsService(ctx),
+          // [ADR-0149 D2] The i18n service the saved datasets are localized
+          // with, resolved at each use as the protocol is; a host that
+          // registers none serves them untranslated.
+          i18n: () => optionalService('i18n'),
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the
@@ -897,12 +902,19 @@ export class MCPServerPlugin implements Plugin {
       // object-schema mask (`callerObjectView`), the view the tools read, so
       // a resource never names a field the tools withhold. With no principal
       // (this process starts no stdio transport) the view is the bare one.
+      // [#34995] …in the locale the object tools speak: the served view,
+      // localized through the wrapper the stdio bridge's `list_objects` /
+      // `describe_object` read (`servedLocaleObjectView`), with the same i18n
+      // service, so a resource and a tool answer one object with one label.
       const objectView = stdioObjectView({ metadataService, protocol: protocolReads });
       setRuntimeObjectView(
         this.runtime,
-        schemaPrincipal
-          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads, schemaReadDelegates })
-          : objectView,
+        servedLocaleObjectView(
+          schemaPrincipal
+            ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads, schemaReadDelegates })
+            : objectView,
+          { i18n: () => optionalService('i18n'), protocol: protocolReads },
+        ),
       );
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each

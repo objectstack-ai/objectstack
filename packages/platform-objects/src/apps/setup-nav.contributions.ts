@@ -38,53 +38,26 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_system_overview', type: 'dashboard', label: 'System Overview', dashboardName: 'system_overview', icon: 'activity' },
     ],
   },
-  {
-    // No unfiltered Packages entry here (#25098, ruling 甲 amending #23892 B):
-    // the full `developer:packages` list is a development surface, so its one
-    // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
-    // reaches installed packages through the marketplace-filtered "Installed
-    // Apps" door (`nav_marketplace_installed`, `developer:packages` with
-    // `params: { source: 'marketplace' }`), which
-    // `@objectstack/cloud-connection` contributes to this group wherever the
-    // marketplace capability is present. `setup-packages-door.test.ts` pins
-    // both halves.
-    app: 'setup',
-    group: 'group_apps',
-    priority: BASE_PRIORITY,
-    items: [
-      // Packaged actions are OPERATIONAL state — on/off per packaged action
-      // (ADR-0126 §7.4: "Studio keeps the editing; Setup gets the operational
-      // state"). ADR-0146 D4 keeps the action switch here while the flow
-      // switch moved onto the flow's item in Studio, and its clone became
-      // Studio's New similar (D11 retired Setup's packaged FLOWS page). The
-      // console binds `automation:packaged-actions` to the packaged-actions
-      // page (objectui app-shell `builtinComponents`). The entry lives HERE,
-      // not in service-automation: the page's data source is the
-      // `sys_metadata_activation` ledger this package registers (#12419), and
-      // the action switches work on compositions with no automation service —
-      // a nav entry riding that service would hide a page that still works
-      // there.
-      //
-      // `visible` gives the entry the audience of its page's own data read
-      // (#33224). The page reads `/data/sys_metadata_activation`, and a member
-      // who may not read that ledger was shown an entry whose page renders only
-      // `activation ledger HTTP 403`. Being the first entry the Setup app
-      // serves, it was also their LANDING page: the console's object-read prune
-      // judges `type: 'object'` entries only, so nothing else hid this
-      // `component` one. The console's sidebar and its landing walk ask this
-      // predicate with the member's `/auth/me/permissions` map, so such a member
-      // now neither sees the entry nor lands on it. A member who reads the
-      // ledger is shown it as before.
-      {
-        id: 'nav_packaged_actions',
-        type: 'component',
-        label: 'Packaged Actions',
-        componentRef: 'automation:packaged-actions',
-        icon: 'zap',
-        visible: "current_user.can('sys_metadata_activation', 'read')",
-      },
-    ],
-  },
+  // No `group_apps` entry ships from this package.
+  //
+  // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
+  // full `developer:packages` list is a development surface, so its one
+  // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
+  // reaches installed packages through the marketplace-filtered "Installed
+  // Apps" door (`nav_marketplace_installed`, `developer:packages` with
+  // `params: { source: 'marketplace' }`), which
+  // `@objectstack/cloud-connection` contributes to this group wherever the
+  // marketplace capability is present. `setup-packages-door.test.ts` pins
+  // both halves.
+  //
+  // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
+  // amendment of 2026-11-17): a packaged action's on/off switch for this
+  // deployment is on the action, in its app in Studio (the object's Actions
+  // view, a standalone action's item page), the way D4 put the flow switch on
+  // the flow. The `nav_packaged_actions` entry and its
+  // `automation:packaged-actions` page retired, as `nav_packaged_automation`
+  // did under D11; the console sends the old URL to Studio.
+  // `setup-packaged-actions-nav.test.ts` pins both retirements.
   {
     app: 'setup',
     group: 'group_people_org',
@@ -172,7 +145,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `@objectstack/service-settings` (`setup-nav-hub-parity.test.ts`).
       { id: 'nav_settings_mail', type: 'url', label: 'Mail Delivery', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_sms', type: 'url', label: 'SMS Delivery', url: '/apps/setup/system/settings/sms', icon: 'message-square', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
+      // [#33891] A cloud-managed environment's file storage is the hosting
+      // platform's: the settings doors refuse the page there
+      // (`@objectstack/service-settings` `cloud-managed-settings.ts`), so the
+      // entry is not drawn. `features` is a root every nav entry binds.
+      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'], visible: 'features.cloudManaged != true' },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered

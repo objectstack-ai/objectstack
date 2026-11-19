@@ -1634,13 +1634,13 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. |
+| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. A list that leaves out 'comment' while `showCommentInput` is not false is refused: such a feed never shows a comment, so the composer would take posts it then hides — add 'comment' or set `showCommentInput: false`. |
 | **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
 | **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
 | **limit** | `integer` | optional (default: `20`) | Number of items to load per page |
 | **showCompleted** | `boolean` | optional (default: `false`) | Include completed activities |
 | **unifiedTimeline** | `boolean` | optional (default: `true`) | Mix field changes and comments in one timeline (Airtable style) |
-| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom |
+| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom. Needs a `types` that admits 'comment' (or no `types`): beside a `types` that leaves it out, set this false. |
 | **enableMentions** | `boolean` | optional (default: `true`) | Enable @mentions in comments |
 | **enableReactions** | `boolean` | optional (default: `false`) | Enable emoji reactions on feed items |
 | **enableThreading** | `boolean` | optional (default: `false`) | Enable threaded replies on comments |
@@ -1714,13 +1714,13 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. |
+| **types** | `(Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| …> \| string)[]` | optional | Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. A list that leaves out 'comment' while `showCommentInput` is not false is refused: such a feed never shows a comment, so the composer would take posts it then hides — add 'comment' or set `showCommentInput: false`. |
 | **filterMode** | `Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>` | optional (default: `"all"`) | Default activity filter |
 | **showFilterToggle** | `boolean` | optional (default: `true`) | Show filter dropdown in panel header |
 | **limit** | `integer` | optional (default: `20`) | Number of items to load per page |
 | **showCompleted** | `boolean` | optional (default: `false`) | Include completed activities |
 | **unifiedTimeline** | `boolean` | optional (default: `true`) | Mix field changes and comments in one timeline (Airtable style) |
-| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom |
+| **showCommentInput** | `boolean` | optional (default: `true`) | Show "Leave a comment" input at the bottom. Needs a `types` that admits 'comment' (or no `types`): beside a `types` that leaves it out, set this false. |
 | **enableMentions** | `boolean` | optional (default: `true`) | Enable @mentions in comments |
 | **enableReactions** | `boolean` | optional (default: `false`) | Enable emoji reactions on feed items |
 | **enableThreading** | `boolean` | optional (default: `false`) | Enable threaded replies on comments |
@@ -1765,7 +1765,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **columns** | `integer` | optional | Field-grid columns for this section (1-4). Omitted → the renderer derives the width. |
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `icon`, `description`, `collapsible`, `defaultCollapsed`). Must name a declared group — checked by reference diagnostics. |
 | **fields** | `string[]` | optional | Field names rendered in this section, in order. Omit only when `group` supplies the members instead. |
-| **hideEmpty** | `boolean` | optional | Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row. |
+| **hideEmpty** | `boolean` | optional | Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row. |
 | **collapsible** | `boolean` | optional | Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off). |
 | **showBorder** | `boolean` | optional | Draw this section's card chrome (renderer default: derived — on for a titled section, off for an untitled one). Set `false` for a borderless titled section, or `true` for a bordered untitled one. |
 | **defaultCollapsed** | `boolean` | optional | Start a `collapsible: true` section collapsed (renderer default: expanded). Consulted only when `collapsible` is on — a non-collapsible section never reads its collapse state. |

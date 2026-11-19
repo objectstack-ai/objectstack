@@ -9,9 +9,11 @@ import {
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
   summaryFunctionReadsField,
+  LookupFilterRecordReferenceSchema,
   type SelectOption,
   type CurrencyConfig,
 } from './field.zod';
+import { parseFilterAST } from './filter.zod';
 import { ObjectSchema } from './object.zod';
 import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
 
@@ -2877,5 +2879,174 @@ describe('Choice source — a `select` / `radio` needs `options` or `picklist` (
     const empty = Field.select([], { label: 'Status' });
     expect(empty.options).toEqual([]);
     expect(choiceIssue({ name: 'status', ...empty })?.code).toBe('custom');
+  });
+});
+
+// [#34009] A lookupFilters value that reads the record being edited
+// (`{ $record }`), and `orEmpty`. The picker that resolves both is a ui-lane
+// follow-up and the by-name server refusal a server-lane one; this suite pins
+// the contract both will be written against.
+describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () => {
+  const priceBookLookup = (lookupFilters: unknown[]) => FieldSchema.safeParse({
+    name: 'price_book', label: 'Price Book', type: 'lookup', reference: 'crm_price_book', lookupFilters,
+  });
+  const issuesOf = (r: ReturnType<typeof priceBookLookup>) =>
+    r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+
+  /** The downstream CRM's ruling, as the card writes it. */
+  const CARD_EXAMPLE = [
+    { field: 'is_active', operator: 'eq', value: true },
+    { field: 'valid_from', operator: 'lte', value: { $record: 'date' }, orEmpty: true },
+    { field: 'valid_to', operator: 'gte', value: { $record: 'date' }, orEmpty: true },
+    { field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' }, orEmpty: true },
+  ];
+
+  it("parses the card's four-entry example, every key kept", () => {
+    const r = priceBookLookup(CARD_EXAMPLE);
+    expect(issuesOf(r)).toEqual([]);
+    expect(r.success && r.data.lookupFilters).toEqual(CARD_EXAMPLE);
+  });
+
+  it('keeps every comparand that parsed before: a bare literal, a list, a date placeholder, a $now anchor, a $field reference', () => {
+    const r = priceBookLookup([
+      { field: 'status', operator: 'eq', value: 'active' },
+      { field: 'region', operator: 'in', value: ['north', 'south'] },
+      { field: 'valid_to', operator: 'gte', value: '{today}' },
+      { field: 'valid_from', operator: 'lte', value: { $now: true, addDays: 0 } },
+      { field: 'list_price', operator: 'gt', value: { $field: 'floor_price' } },
+      { field: 'owner', operator: 'eq', value: '{current_user_id}' },
+    ]);
+    expect(issuesOf(r)).toEqual([]);
+  });
+
+  it('refuses a $record path with two lookup hops, at the path', () => {
+    const r = priceBookLookup([{ field: 'cb_market', operator: 'eq', value: { $record: 'account.parent.cb_market' } }]);
+    expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.value.$record']);
+    expect(issuesOf(r)[0].message).toMatch(/one lookup hop/);
+  });
+
+  it('refuses a $record path that is not snake_case machine names', () => {
+    for (const path of ['', 'Account.Market', 'account..cb_market', 'account.cb_market.', 1]) {
+      const r = priceBookLookup([{ field: 'cb_market', operator: 'eq', value: { $record: path } }]);
+      expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.value.$record']);
+    }
+  });
+
+  it('refuses a $record value under in, notIn or contains, at the value', () => {
+    for (const operator of ['in', 'notIn', 'contains']) {
+      const r = priceBookLookup([{ field: 'cb_market', operator, value: { $record: 'account.cb_market' } }]);
+      expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.value']);
+      expect(issuesOf(r)[0].message).toContain(`not with "${operator}"`);
+    }
+  });
+
+  it('refuses a { $record } as a member of an in or notIn list, at that member', () => {
+    for (const operator of ['in', 'notIn']) {
+      const r = priceBookLookup([{ field: 'cb_market', operator, value: ['domestic', { $record: 'account.cb_market' }] }]);
+      expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.value.1']);
+      expect(issuesOf(r)[0].message).toContain('never a member of a list');
+    }
+  });
+
+  it('refuses orEmpty on in, notIn or contains, at orEmpty, and accepts it on the six comparisons', () => {
+    for (const operator of ['in', 'notIn', 'contains']) {
+      const value = operator === 'contains' ? 'gold' : ['gold'];
+      const r = priceBookLookup([{ field: 'tier', operator, value, orEmpty: true }]);
+      expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.orEmpty']);
+    }
+    for (const operator of ['eq', 'ne', 'gt', 'lt', 'gte', 'lte']) {
+      expect(issuesOf(priceBookLookup([{ field: 'tier', operator, value: 2, orEmpty: true }]))).toEqual([]);
+    }
+  });
+
+  it('refuses a key beside $record with the strict-object guidance text', () => {
+    const r = priceBookLookup([{ field: 'valid_to', operator: 'gte', value: { $record: 'date', addDays: 30 } }]);
+    const issues = issuesOf(r);
+    expect(issues.map((i) => i.path)).toEqual(['lookupFilters.0.value']);
+    expect(issues[0].message).toContain('this lookupFilters record reference');
+    expect(issues[0].message).toContain('carries no offset');
+  });
+
+  it("names orEmpty for a near-miss spelling of it, through the entry's strict-object aliases", () => {
+    const r = priceBookLookup([{ field: 'valid_to', operator: 'gte', value: '{today}', orNull: true }]);
+    expect(issuesOf(r)).toHaveLength(1);
+    expect(issuesOf(r)[0].message).toContain('orEmpty');
+  });
+
+  it('keeps { $field } and { $record } apart: the reference schema refuses a $field-only object', () => {
+    expect(LookupFilterRecordReferenceSchema.safeParse({ $record: 'account.cb_market' }).success).toBe(true);
+    expect(LookupFilterRecordReferenceSchema.safeParse({ $field: 'cb_market' }).success).toBe(false);
+  });
+
+  it('is refused by the shared filter door as an operator comparand when it reaches a server unresolved', () => {
+    // What today's picker sends for an unresolved ordering entry. The shared
+    // door refuses it in the INVALID_FILTER envelope, so a picker that does
+    // not resolve { $record } can never answer rows with it.
+    for (const operator of ['$eq', '$ne', '$gt', '$lt', '$gte', '$lte']) {
+      let envelope: unknown;
+      try { parseFilterAST({ valid_from: { [operator]: { $record: 'date' } } }); } catch (e) { envelope = e; }
+      expect(envelope).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    }
+  });
+
+  it('lets the eq shorthand the picker sends through the shared door unchanged (refused later, by the engine\'s token pass)', () => {
+    // The card's market entry: the picker lowers `eq` to the shorthand
+    // { field: value }, so an unresolved { $record } arrives as
+    // { cb_market: { $record } }. The door reads that object as filter
+    // structure and passes it through as it is; the engine's token pass
+    // (`resolveFilterTokens`, `@objectstack/core`) then refuses it by name,
+    // INVALID_FILTER / 400 naming the field and the path, before any driver
+    // is asked (pinned in `packages/core/src/utils/filter-tokens.test.ts`).
+    const shorthand = { cb_market: { $record: 'account.cb_market' } };
+    expect(parseFilterAST(shorthand)).toEqual(shorthand);
+  });
+
+  /**
+   * The acceptance scenario: a quote dated 2027-01-05 for an export customer
+   * must not be offered the 2026 Q4 book. The fixture writes out what the
+   * picker is told to send — each { $record } replaced by the edited record's
+   * value, each orEmpty entry widened to "or the column is null" — and runs
+   * it over four books with a test-local evaluator of that flat shape.
+   */
+  describe('the 2027-01-05 quote vs the 2026 Q4 book', () => {
+    const quote = { date: '2027-01-05', account: { cb_market: 'export' } };
+    const books = [
+      { name: '2026 Q4', is_active: true, valid_from: '2026-10-01', valid_to: '2026-12-31', cb_market: 'export' },
+      { name: '2027 export', is_active: true, valid_from: '2027-01-01', valid_to: null, cb_market: 'export' },
+      { name: '2027 domestic', is_active: true, valid_from: '2027-01-01', valid_to: null, cb_market: 'domestic' },
+      { name: 'generic', is_active: true, valid_from: null, valid_to: null, cb_market: null },
+    ];
+    type Entry = { field: string; operator: string; value: unknown; orEmpty?: boolean };
+    const readPath = (record: Record<string, any>, path: string) =>
+      path.split('.').reduce<any>((v, k) => (v == null ? undefined : v[k]), record);
+    const OPS: Record<string, (a: any, b: any) => boolean> = {
+      eq: (a, b) => a === b, ne: (a, b) => a !== b, gt: (a, b) => a != null && a > b,
+      lt: (a, b) => a != null && a < b, gte: (a, b) => a != null && a >= b, lte: (a, b) => a != null && a <= b,
+    };
+    /** What the picker sends: entries with their $record replaced, empty ones left out. */
+    const resolveForPicker = (entries: Entry[], record: Record<string, any>): Entry[] =>
+      entries.flatMap((e) => {
+        const ref = e.value && typeof e.value === 'object' && '$record' in (e.value as object)
+          ? readPath(record, (e.value as { $record: string }).$record) : e.value;
+        return ref == null || ref === '' ? [] : [{ ...e, value: ref }];
+      });
+    const offered = (entries: Entry[]) => books
+      .filter((b) => entries.every((e) => OPS[e.operator]((b as any)[e.field], e.value)
+        || (e.orEmpty === true && (b as any)[e.field] == null)))
+      .map((b) => b.name);
+
+    it('offers the export and generic books, never the 2026 Q4 one', () => {
+      const parsed = priceBookLookup(CARD_EXAMPLE);
+      expect(parsed.success).toBe(true);
+      const sent = resolveForPicker(CARD_EXAMPLE as Entry[], quote);
+      expect(sent.map((e) => e.value)).toEqual([true, '2027-01-05', '2027-01-05', 'export']);
+      expect(offered(sent)).toEqual(['2027 export', 'generic']);
+    });
+
+    it('leaves an entry out while its value is empty — the account has no market yet', () => {
+      const sent = resolveForPicker(CARD_EXAMPLE as Entry[], { date: '2027-01-05', account: { cb_market: null } });
+      expect(sent.map((e) => e.field)).toEqual(['is_active', 'valid_from', 'valid_to']);
+      expect(offered(sent)).toEqual(['2027 export', '2027 domestic', 'generic']);
+    });
   });
 });

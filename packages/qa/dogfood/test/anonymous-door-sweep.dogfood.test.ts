@@ -472,6 +472,18 @@ describe('ADR-0138 D2 class 2: share links', () => {
     const after = await send(stack, 'GET', `/api/v1/share-links/${link.token}/resolve`);
     expect(DOOR_CLASSES[1]!.expect!(after), 'a revoked token is no door').toBeUndefined();
   });
+
+  it('hold the class-2 doors a catch-all serves to the class answer, each reached by its own path', async () => {
+    const keys = new Set(population.map((p) => keyOf(p.route)));
+    const doors = DOOR_CLASSES[1]!.servedByCatchAll ?? [];
+    expect(doors.length, 'class 2 names no door behind a catch-all: this leg would be vacuous').toBeGreaterThan(0);
+    for (const door of doors) {
+      expect(keys.has(door.catchAll), `${door.method} ${door.path} rides ${door.catchAll}, which is not in the population`).toBe(true);
+      const res = await send(stack, door.method, door.path, { body: JSON.stringify({}) });
+      expect(res.status, `${door.method} ${door.path} answered 404: the catch-all does not serve it`).not.toBe(404);
+      expect(DOOR_CLASSES[1]!.expect!(res), `${door.method} ${door.path}`).toBeUndefined();
+    }
+  });
 });
 
 describe('ADR-0138 D2 class 3: the public book and doc metadata reads', () => {

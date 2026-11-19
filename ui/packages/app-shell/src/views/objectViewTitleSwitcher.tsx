@@ -1,7 +1,8 @@
 /**
  * The view switcher of the Console `ObjectView` (`./ObjectView.tsx`): the list
  * title is the switcher (objectstack#27594). The title reads
- * 「VIEW LABEL ▾ · COUNT」 and opens a dropdown — a search box, then the
+ * 「VIEW LABEL ▾」, with no record count beside it (objectstack#34603: the
+ * list's footer says how many records it holds), and opens a dropdown — a search box, then the
  * reader's pinned view (📌), the views they opened lately, and every view, the
  * authored ones first — so an object with many views is switched the way it is
  * with two. It replaced the flat view-tab row (`ViewTabBar`), which overflowed
@@ -71,8 +72,6 @@ export interface ObjectViewTitleSwitcherProps {
     activeViewId: string;
     /** The title's text: the open view's label, or the object's when none is open. */
     activeLabel: string;
-    /** The records the open view matched, when the list reported them. */
-    count?: number;
     /** The open view's description, the title's tooltip (a chart face's; a list draws its own). */
     description?: string;
     onViewChange: (viewId: string) => void;
@@ -124,7 +123,6 @@ export function ObjectViewTitleSwitcher({
     views,
     activeViewId,
     activeLabel,
-    count,
     description,
     onViewChange,
     pinnedViewId = null,
@@ -141,8 +139,6 @@ export function ObjectViewTitleSwitcher({
 }: ObjectViewTitleSwitcherProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
-    // The count is formatted in the display locale, never the machine's (objectui#9909).
-    const displayLocale = useDisplayLocale();
 
     const byId = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
     const all = useMemo(() => authoredFirst(views), [views]);
@@ -394,11 +390,6 @@ export function ObjectViewTitleSwitcher({
                     )}
                 </PopoverContent>
             </Popover>
-            {typeof count === 'number' && (
-                <span className="shrink-0 font-normal text-muted-foreground" data-testid="list-view-switcher-count">
-                    · {count.toLocaleString(displayLocale)}
-                </span>
-            )}
         </span>
     );
 }
@@ -426,7 +417,6 @@ export function useObjectViewTitleSwitcher({
     pinnedViewId,
     setPinnedViewId,
     appSegment,
-    viewTotal,
     personalViewIds,
     onSavePersonalView,
     onRenamePersonalView,
@@ -451,8 +441,6 @@ export function useObjectViewTitleSwitcher({
     setPinnedViewId: (viewId: string | null) => void;
     /** The app segment of the route, for the ☆ (`/apps/APP/...`). */
     appSegment: string | undefined;
-    /** The records the list reported for a view, when it did. */
-    viewTotal: { viewId: string; total: number } | null;
     /** The ids of the reader's own views among `views` (objectstack#29635). */
     personalViewIds: ReadonlySet<string>;
     onSavePersonalView?: () => void;
@@ -538,7 +526,6 @@ export function useObjectViewTitleSwitcher({
             views={switcherViews}
             activeViewId={openViewId}
             activeLabel={titleLabel}
-            count={viewTotal && viewTotal.viewId === openViewId ? viewTotal.total : undefined}
             description={openView?.type === 'chart' ? openView.description : undefined}
             onViewChange={handleViewChange}
             pinnedViewId={pinnedViewId}

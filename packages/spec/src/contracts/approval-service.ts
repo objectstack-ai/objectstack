@@ -411,7 +411,14 @@ export interface ApprovalRequestRow {
    *   routed to an unstaffed position, or whose approvers have all since left,
    *   which would otherwise leave the request undecidable and the record locked
    *   forever. Clients OR it into the decision actions' `visible` gate; the
-   *   service re-checks the same privilege before applying any override.
+   *   service re-checks the same privilege before applying any override. The
+   *   override never APPROVES a request the caller submitted, so the approve
+   *   lever reads `can_override_approve` instead.
+   * - `can_override_approve` — `can_override`, except on a request the caller
+   *   submitted: the override never approves its actor's own request, and the
+   *   approve door refuses one with `403 FORBIDDEN`. Added beside
+   *   `can_override`, which keeps its meaning for reject / reassign / recall.
+   *   Optional only because a server that predates it does not send it.
    *
    * Absent when the row is surfaced outside a service read with a user context
    * (e.g. a raw data-API grid); a `record.viewer.*` predicate then fails closed.
@@ -420,6 +427,7 @@ export interface ApprovalRequestRow {
     can_act: boolean;
     is_submitter: boolean;
     can_override: boolean;
+    can_override_approve?: boolean;
   };
 }
 
@@ -879,6 +887,17 @@ export interface ApprovalDecisionResult {
    * Those four facts are the published way to read the posture this member
    * declares — a caller holding only the status code reads a bare 500 as "the
    * decision did not happen", and the row IS terminal.
+   *
+   * When the run stranded because the step after the decision was REFUSED —
+   * a record hook's declared refusal, a validation rule, a permission — the
+   * same body also carries that refusal (#34579): `innerRefusal`
+   * (`{ code, message }`, the engine's `AutomationResult.innerRefusal`,
+   * ruling B′ on #24914) and the refusal's marked `userMessage`, the text an
+   * approver can read. Both are absent when the run met no refusal (a fault),
+   * and neither moves the status code or the four facts. A flow author who
+   * wants such a refusal handled rather than stranded draws a `fault` edge
+   * from that step: the engine routes the refusal down it like any run-time
+   * failure, and the decision then answers normally.
    *
    * ⛔ They are not members of this result and must never be added to it:
    * they ride the ERROR, so declaring them here would declare a success shape

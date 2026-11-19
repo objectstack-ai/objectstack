@@ -967,7 +967,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       refusals: {
         label: "拒绝目录",
-        helpText: "拒绝目录，以正文抛出的 SCREAMING_SNAKE 错误码为键（例如 CLEAN_VERSION_REQUIRED）。调用方读到声明的提示语（按其语言翻译）和声明的状态码。仅适用于 JavaScript（L2）正文"
+        helpText: "拒绝目录，以钩子抛出的 SCREAMING_SNAKE 错误码为键（例如 CLEAN_VERSION_REQUIRED）。调用方读到声明的提示语（按其语言翻译）和声明的状态码。适用于 JavaScript（L2）正文或处理器；表达式正文声明会被拒绝"
       },
       "refusals.message": {
         label: "提示语",

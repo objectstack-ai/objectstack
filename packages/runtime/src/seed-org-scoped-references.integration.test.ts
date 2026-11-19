@@ -174,10 +174,15 @@ async function boot(options: BootOptions) {
     seen.push({ name: hctx.input?.data?.name, session: hctx.session, rowOrganization: hctx.result?.organization_id });
   }, { object: 'crm_deal' });
 
+  // The metadata service serves what the author wrote: an object that relies
+  // on the injected `owner_id` / `organization_id` does not carry them here.
+  // Only the engine's registry holds the enriched definition (`definitions`
+  // above), so serving that from the stub would hide every defect of a loader
+  // that reads the authored definition and forgets an injected column.
   const metadata = {
-    getObject: vi.fn(async (name: string) => definitions.find((d: any) => d.name === name)),
-    listObjects: vi.fn(async () => definitions),
-    getObjects: vi.fn(async () => definitions),
+    getObject: vi.fn(async (name: string) => objects.find((d: any) => d.name === name)),
+    listObjects: vi.fn(async () => objects),
+    getObjects: vi.fn(async () => objects),
     get: vi.fn(async () => undefined),
     list: vi.fn(async () => []),
     exists: vi.fn(async () => false),
@@ -640,5 +645,64 @@ describe('a dataset OF a global object (tenancy disabled) replays per organizati
 
     expect(result.errors).toEqual([]);
     expect((await rowsOf(engine, 'crm_country')).filter((r) => r.name === 'Peru')).toHaveLength(1);
+  });
+});
+
+describe('#33791 the injected owner column resolves like a declared person lookup', () => {
+  /** `owner_id` and the declared `rep` of each deal, by deal name. */
+  const peopleOf = (rows: Row[]) =>
+    Object.fromEntries(rows.map((r) => [r.name, { owner_id: r.owner_id ?? null, rep: r.rep ?? null }]));
+
+  it('the harness serves the authored deal, which has no owner_id; the registry injects one', async () => {
+    const { engine, metadata } = await boot({ posture: 'single', data: [] });
+    const authored = (await metadata.getObject('crm_deal')) as { fields: Record<string, unknown> };
+    expect(Object.keys(authored.fields)).not.toContain('owner_id');
+    expect(Object.keys(engine.registry.getObject('crm_deal')?.fields ?? {})).toContain('owner_id');
+  });
+
+  it('a single boot resolves a member named in owner_id to that member, as it resolves the declared rep', async () => {
+    const { dealsOf } = await boot({ posture: 'single', data: [deals([{ name: 'Deal 1', owner_id: 'Zhang Wei', rep: 'Zhang Wei' }])] });
+    expect(peopleOf(await dealsOf())).toEqual({ 'Deal 1': { owner_id: 'usr_zhang', rep: 'usr_zhang' } });
+  });
+
+  it('a walled replay resolves a member per organization; a non-member is NULL with the same error rep gets', async () => {
+    const { replayer, dealsOf } = await boot({
+      posture: 'isolated',
+      data: [deals([{ name: 'Deal 1', owner_id: 'Wang Fang', rep: 'Wang Fang' }, { name: 'Deal 2', owner_id: 'Zhang Wei', rep: 'Zhang Wei' }])],
+    });
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect(peopleOf(await dealsOf(ORG_NORTH))).toEqual({
+      'Deal 1': { owner_id: 'usr_wang_north', rep: 'usr_wang_north' },
+      'Deal 2': { owner_id: 'usr_zhang', rep: 'usr_zhang' },
+    });
+    // Zhang Wei is not a member of South: neither column borrows him, and the
+    // owner is NULL (a first-admin handoff can claim it), never his name as text.
+    expect(peopleOf(await dealsOf(ORG_SOUTH))).toEqual({
+      'Deal 1': { owner_id: 'usr_wang_south', rep: 'usr_wang_south' },
+      'Deal 2': { owner_id: null, rep: null },
+    });
+    const errors = south.errors as Array<{ message: string; field?: string }>;
+    expect(errors.map((e) => e.field).sort()).toEqual(['owner_id', 'rep']);
+    for (const e of errors) expect(e.message).toContain(`not a member of organization ${ORG_SOUTH}`);
+  });
+
+  it('a direct load pinned to an organization (the install path) resolves owner_id through that organization', async () => {
+    const { engine, metadata, logger, dealsOf } = await boot({ posture: 'isolated', data: [] });
+    const loader = new SeedLoaderService(engine as any, metadata as any, logger as any);
+    const result = await loader.load({
+      seeds: [deals([{ name: 'Installed', owner_id: 'Wang Fang' }])],
+      config: { multiPass: true, organizationId: ORG_SOUTH },
+    } as any);
+    expect(result.errors).toEqual([]);
+    expect((await dealsOf(ORG_SOUTH))[0].owner_id).toBe('usr_wang_south');
+  });
+
+  it('CONTROL — a load with no organization resolves owner_id unscoped, as it resolves rep', async () => {
+    const { dealsOf } = await boot({ posture: 'single', organizations: false, data: [deals([{ name: 'Deal 1', owner_id: 'Zhang Wei', rep: 'Zhang Wei' }])] });
+    expect(peopleOf(await dealsOf())).toEqual({ 'Deal 1': { owner_id: 'usr_zhang', rep: 'usr_zhang' } });
   });
 });

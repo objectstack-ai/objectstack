@@ -60,7 +60,7 @@ function respond(input: unknown): Promise<Response> {
   }
   if (url.includes('/auth/me/permissions')) {
     return Promise.resolve(json({
-      authenticated: true, userId: USER.id, tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false,
+      authenticated: true, userId: USER.id, tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false, objectsUsingQueues: [],
     }));
   }
   if (url.includes('/me/apps')) return Promise.resolve(json({ apps: APPS }));

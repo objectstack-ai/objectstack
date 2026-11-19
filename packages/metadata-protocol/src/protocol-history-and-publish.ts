@@ -5,7 +5,7 @@
  * `ObjectStackProtocolImplementation`: the bodies of `historyMetaItem`,
  * `publishMetaItem`, `publishMetaItemUnaudited`, `promoteDraftForPublish`,
  * `runPublishSideEffects`, `publishPackageDrafts`, `discardPackageDrafts` moved
- * out of `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
+ * out of `protocol.ts` whole (split by #29998 and #32068).
  *
  * A MOVE, not a redesign. `ProtocolHistoryAndPublishFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -31,7 +31,7 @@ import type { MetadataItem } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { serveStoredHashTokens, servedContentHash } from './metadata-redaction.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import type { OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
@@ -45,6 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+import { environmentActionPublishSlotRefusal } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -124,7 +125,7 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * active row stored, its history append then failed) is not in `landed` — the
  * promotion threw — and is the store's own non-atomicity on such a runtime.
  */
-async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
     repo: SysMetadataRepository;
     landed: ReadonlyArray<LandedPromotion>;
     /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
@@ -139,9 +140,15 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
     for (const item of [...args.landed].reverse()) {
         const ref = { type: item.singularType, name: item.d.name, org: 'env' } as unknown as Parameters<SysMetadataRepository['get']>[0];
         // Per item, as the revert derives it: a runtime item is not refused by
-        // the artifact-override gate on its way back out.
-        const intent: 'override-artifact' | 'runtime-only' =
-            host.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
+        // the artifact-override gate on its way back out. [ADR-0150 D2] Per
+        // write, as the promotion derived it: a package's own permission set
+        // beside another namespace's shipped one is a runtime item to the
+        // package each write addresses (`isOwnPermissionSetWrite`).
+        const intentFor = (packageId: string | null): 'override-artifact' | 'runtime-only' =>
+            host.isArtifactBacked(item.singularType, item.d.name)
+                && !isOwnPermissionSetWrite(host.engine, item.singularType, item.d.name, packageId)
+                ? 'override-artifact' : 'runtime-only';
+        const intent = intentFor(item.packageId);
         try {
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
@@ -177,7 +184,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
             const pending = await args.repo.get(ref, { state: 'draft', packageId: draftKey, ...memberOption(item.d.member) });
             if (!pending) {
                 await args.repo.put(ref, item.promotedDraft.body, {
-                    parentVersion: null, actor, source, message, intent, state: 'draft', packageId: draftKey,
+                    parentVersion: null, actor, source, message, intent: intentFor(draftKey), state: 'draft', packageId: draftKey,
                 });
                 // No registry entry serves a draft row: the heal re-derives this
                 // item's entry from the active rows the store now serves, the
@@ -664,7 +671,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -884,6 +891,17 @@ export class ProtocolHistoryAndPublishFacet {
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
+        // [ADR-0150 D4, ruling 6902014292] The environment's own action
+        // draft is promoted into the one package-unbound active row of the
+        // name: when that row is a holder's customization, the publish would
+        // move it off the holder's object, so it is refused, never moved, as
+        // the saves are ({@link environmentActionPublishSlotRefusal}). Asked
+        // whether the caller named no package or stated `packageId: null`:
+        // both promote the package-unbound draft into that row.
+        if (draftKey === null && promoteInto === null && draftForGate) {
+            const slotRefusal = await environmentActionPublishSlotRefusal(host, singularType, request.name, draftForGate.body);
+            if (slotRefusal) throw slotRefusal;
+        }
         // [ADR-0029 D9.9, #23630] …and the save door's representability
         // refusal, asked of the row this promotion writes: an `object` row
         // bound to a package that does not own the object. A draft save is
@@ -1251,7 +1269,7 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(draftForGate ? { judged: { body: draftForGate.body, packageId: promoteInto } } : {}),
             };
         }
-        const artifactBacked = host.isArtifactBacked(singularType, request.name);
+        const artifactBacked = host.isArtifactBacked(singularType, request.name) && !isOwnPermissionSetWrite(host.engine, singularType, request.name, promoteInto);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
         const ref = {
@@ -1599,7 +1617,10 @@ export class ProtocolHistoryAndPublishFacet {
          * objects must have rows, views must be readable, dashboard widgets'
          * dataset selections must execute and return data. `issues` carries
          * BuildIssue-shaped findings (layer 'runtime') for the agent / chat
-         * health surfaces; probes never fail the publish itself.
+         * health surfaces; probes never fail the publish itself. Each finding
+         * has the agent's `message` / `fix` and the person's `userMessage`,
+         * which the probe composes in the request's language from
+         * `userTextLocales` (ruling record 6929121584).
          */
         probes?: import('./build-probes.js').BuildProbeReport;
         /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
@@ -2635,7 +2656,8 @@ export class ProtocolHistoryAndPublishFacet {
         // artifact — so "Published!" can never again mean "and silently
         // broken". Best-effort by design: a probe crash is swallowed (the
         // publish already happened and must report as such), and findings ride
-        // the response for the agent / chat health card to act on.
+        // the response for the agent / chat health card to act on: `message`
+        // and `fix` for the agent, `userMessage` for the person.
         let probes: import('./build-probes.js').BuildProbeReport | undefined;
         if (published.length > 0) {
             try {
@@ -2651,6 +2673,11 @@ export class ProtocolHistoryAndPublishFacet {
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,
                     ...(request.context !== undefined ? { context: request.context } : {}),
+                    // [ruling record 6929121584] The request's own locales:
+                    // the probe composes each finding's `userMessage` under
+                    // the ladder the door already states for this publish.
+                    ...(request.userTextLocales !== undefined
+                        ? { userTextLocales: request.userTextLocales } : {}),
                 });
             } catch {
                 probes = undefined;

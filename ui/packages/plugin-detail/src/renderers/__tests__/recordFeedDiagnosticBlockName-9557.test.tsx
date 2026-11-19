@@ -155,11 +155,18 @@ describe('the rendered blocks address their own authors (objectui#9557)', () => 
     mount(nodeFor('record:discussion', { filterMode: BAD_MODE, types: [BAD_TYPE] }));
 
     const mode = warningsAbout(warn, BAD_MODE);
-    const types = warningsAbout(warn, BAD_TYPE);
+    const typesAll = warningsAbout(warn, BAD_TYPE);
+    // A `types` without `comment` also raises the withheld-composer warning
+    // (objectstack#34525), which quotes the same `types`; the leg reads the
+    // unrecognised-entry channel, and every message stays under this block's name.
+    const types = typesAll.filter((m) => m.includes('unrecognised'));
     expect(mode).toHaveLength(1);
     expect(types).toHaveLength(1);
     for (const m of [...mode, ...types]) {
       expect(m.startsWith('[record:discussion] ')).toBe(true);
+    }
+    for (const m of [...mode, ...typesAll]) {
+      expect(m.startsWith('[record:discussion')).toBe(true);
       expect(m).not.toContain('[record:activity]');
     }
   });

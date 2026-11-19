@@ -26,7 +26,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -60,7 +60,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { notifyDataChanged } from '@object-ui/react';
 import { ConnectAgent } from './ConnectAgentWidget';
-import { combineConnectedReads, type ConnectedEntry } from './connectedAccess';
+import { combineConnectedReads, useConnectedAccess, type ConnectedEntry } from './connectedAccess';
 
 type Row = Record<string, unknown>;
 type Client = {
@@ -301,5 +301,60 @@ describe('§6 combineConnectedReads', () => {
     const d = entry({ id: 'd', kind: 'apiKey', lastUsedAt: '2026-11-03T00:00:00.000Z', lastUsedPrecision: 'moment' });
     const result = combineConnectedReads({ state: 'ready', value: [a, b, c] }, { state: 'ready', value: [d] });
     expect(result.state === 'ready' && result.entries.map((e) => e.id)).toEqual(['d', 'b', 'a', 'c']);
+  });
+});
+
+/**
+ * objectstack#28085 — Home mounts more than one reader of this answer (the
+ * Connect an AI Assistant card and the administrator's checklist), and they
+ * mount at different moments of one load. Every reader mounted at the same
+ * time shares one pair of reads; a page mounted after the last reader left
+ * reads afresh.
+ */
+describe('§7 one pair of reads per page, however many readers', () => {
+  function Reader({ id }: { id: string }) {
+    const access = useConnectedAccess();
+    return <div data-testid={id}>{access.state === 'ready' ? String(access.connected) : access.state}</div>;
+  }
+
+  it('two readers mounted together send each request once', async () => {
+    granted = [DESKTOP];
+    render(<><Reader id="a" /><Reader id="b" /></>);
+    await waitFor(() => expect(screen.getByTestId('a')).toHaveTextContent('true'));
+    expect(screen.getByTestId('b')).toHaveTextContent('true');
+    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(findMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reader mounting after the answer landed joins it instead of asking again', async () => {
+    granted = [DESKTOP];
+    const { rerender } = render(<Reader id="a" />);
+    await waitFor(() => expect(screen.getByTestId('a')).toHaveTextContent('true'));
+    rerender(<><Reader id="a" /><Reader id="late" /></>);
+    expect(screen.getByTestId('late')).toHaveTextContent('true');
+    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(findMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a change to either record re-reads it once for every reader', async () => {
+    render(<><Reader id="a" /><Reader id="b" /></>);
+    await waitFor(() => expect(screen.getByTestId('a')).toHaveTextContent('false'));
+    keyRows = [{ ...LIVE_KEY }];
+    act(() => notifyDataChanged({ objectName: 'sys_api_key' }));
+    await waitFor(() => expect(screen.getByTestId('b')).toHaveTextContent('true'));
+    expect(screen.getByTestId('a')).toHaveTextContent('true');
+    expect(findMock).toHaveBeenCalledTimes(2);
+    expect(listMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a page mounted after every reader left reads afresh', async () => {
+    const first = render(<Reader id="a" />);
+    await waitFor(() => expect(screen.getByTestId('a')).toHaveTextContent('false'));
+    first.unmount();
+    granted = [DESKTOP];
+    render(<Reader id="again" />);
+    await waitFor(() => expect(screen.getByTestId('again')).toHaveTextContent('true'));
+    expect(listMock).toHaveBeenCalledTimes(2);
+    expect(findMock).toHaveBeenCalledTimes(2);
   });
 });

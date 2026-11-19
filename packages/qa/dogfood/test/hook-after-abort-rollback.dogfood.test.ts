@@ -15,9 +15,11 @@
 // hook answers REST's sanitised `500 INTERNAL_ERROR` (its terminal branch) on
 // both sides of the fix; what this file pins is what is STORED.
 //
-// One more case the unit made necessary: an `async: true` hook is started
-// inside the unit and writes after it commits. It used to inherit the finished
-// handle and lose its write ("Transaction query already complete", measured).
+// One more case the unit made necessary: an `async: true` hook fired inside
+// the unit. It used to start inside the unit, inherit the finished handle and
+// lose its write ("Transaction query already complete", measured). Since
+// #33760 it starts only after the unit commits, and not at all on a rollback;
+// the positive control below still reads its late note.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';

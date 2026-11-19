@@ -71,6 +71,10 @@ export const SysOrganization = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/create',
+      // Hidden while cloud-managed: creating an organization makes the caller
+      // its owner, and membership is the hosting organisation's there; the
+      // door refuses (409 RESOURCE_CONFLICT).
+      visible: 'features.cloudManaged != true',
       successMessage: 'Organization created',
       refreshAfter: true,
       // Hidden when the deployment is provisioned in single-org mode
@@ -132,6 +136,9 @@ export const SysOrganization = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/delete',
       recordIdParam: 'organizationId',
+      // Hidden while cloud-managed: deleting ends every membership, and the
+      // door refuses there (409 RESOURCE_CONFLICT).
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'multiOrgEnabled',
       // `organization/delete` admits the owner alone (ADR-0108 D1).
       requiresMembershipReach: 'delete_organization',
@@ -242,6 +249,9 @@ export const SysOrganization = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/leave',
       recordIdParam: 'organizationId',
+      // Hidden while cloud-managed: leaving ends a membership, which is the
+      // hosting organisation's there; the door refuses (409 RESOURCE_CONFLICT).
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'multiOrgEnabled',
       // Names what is lost (#24021's copy half, ruling 6228318638 item 2).
       confirmText: 'Leave this organization? You will lose access to its environments and members.',

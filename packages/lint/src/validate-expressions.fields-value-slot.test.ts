@@ -88,7 +88,10 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
   it.each(NODE_TYPES.flatMap((t) => [
     [t, 'no `source`', { dialect: 'cel' }, EVALUATED_EXPRESSION_SOURCE_REQUIRED],
     [t, 'a whitespace-only `source`', { dialect: 'cel', source: '   ' }, EVALUATED_EXPRESSION_SOURCE_REQUIRED],
-    [t, 'a `template` dialect', { dialect: 'template', source: 'Hi {name}' }, 'only the `cel` dialect'],
+    // A `template` envelope is the field's TEXT form (ruling 6913660232 on
+    // #34062), judged as a text slot below; a dialect that is neither is still
+    // a malformed value envelope.
+    [t, 'a dialect neither `cel` nor `template`', { dialect: 'cron', source: '0 * * * *' }, 'only the `cel` dialect'],
     [t, 'CEL that does not parse', { dialect: 'cel', source: 'price *' }, ''],
     [t, 'an unknown function', { dialect: 'cel', source: 'nosuchfn(price)' }, ''],
   ] as const))('%s: %s — rule `expression-invalid`, severity `error`, at `config.fields.total`', (nodeType, _what, envelope, detail) => {
@@ -106,6 +109,16 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
     if (detail) expect(f!.message).toContain(detail);
     // It gates: `os validate` exits non-zero on it.
     expect(splitBySeverity(findings).errors).toHaveLength(1);
+  });
+
+  it.each(NODE_TYPES)('%s: a `template` envelope is judged as the field\'s text — a single-brace token is a located error there', (nodeType) => {
+    const findings = validate(nodeType, crud(nodeType, { subject: 'Quote', total: { dialect: 'template', source: 'Hi {name}' } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.rule).toBe(EXPRESSION_INVALID);
+    expect(findings[0]!.severity).toBe('error');
+    expect(findings[0]!.where).toContain(`node 'w' (${nodeType}) ${nodeType} field text at config.fields.total`);
+    // CONTROL: the same envelope with its `{{ }}` spelling is clean.
+    expect(validate(nodeType, crud(nodeType, { subject: 'Quote', total: { dialect: 'template', source: 'Hi {{ name }}' } }))).toEqual([]);
   });
 
   it.each(NODE_TYPES)('%s: a valid envelope, the run user as `current_user`, a date macro\'s CEL string form and literals are clean', (nodeType) => {

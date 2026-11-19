@@ -10,7 +10,7 @@
  * `composeReadableIdsAtBoundary`, `refuseUncomposableReadableIdsClasses`,
  * `uncomposableReadableIdsParent`, `resolveFormulaRelated`,
  * `serveFormulaField`, `formulaOptionLabels`, `formulaFaultSink` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `engine.ts` whole (split by #30012 and #30987).
  *
  * A MOVE, not a redesign. {@link SecurityResolversFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -35,6 +35,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { isPlannedRelationLeaf } from './relation-semi-join.js';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import type { EngineQueryOptions, QueryAST } from '@objectstack/spec/data';
 import { collectComposableReadableIds, describeReadableIdsLeaf, readableIdsRefusalError } from './filter-comparand-shape.js';
@@ -220,7 +221,7 @@ export class SecurityResolversFacet {
    * aggregations' own filters are judged here too, so a leaf a middleware
    * wrote there is refused rather than evaluated in memory.
    */
-  static async composeReadableIdsAtBoundary<A extends QueryAST>(this: Pick<SecurityResolversHost, 'composeReadableIdsChain' | 'logger' | 'readableIdsSecurityReported' | 'resolveReadableIdsSecurity'>, object: string, operation: 'find' | 'findOne' | 'count' | 'aggregate', ast: A, context: ExecutionContext | undefined): Promise<A> {
+  static async composeReadableIdsAtBoundary<A extends QueryAST>(this: Pick<SecurityResolversHost, 'composeReadableIdsChain' | 'logger' | 'readableIdsSecurityReported' | 'resolveReadableIdsSecurity'>, object: string, operation: 'find' | 'findOne' | 'count' | 'aggregate', ast: A, context: ExecutionContext | undefined, driverOptions?: unknown): Promise<A> {
     if (operation === 'aggregate') {
       collectComposableReadableIds(object, operation, ast.having, 'having');
       const aggregations = Array.isArray(ast.aggregations) ? ast.aggregations : [];
@@ -232,7 +233,11 @@ export class SecurityResolversFacet {
     if (sites.length === 0) return ast;
 
     const security = this.resolveReadableIdsSecurity();
-    if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
+    // A planned relation leaf asks the security service nothing
+    // (`relation-semi-join.ts`): a read whose leaves are all planned neither
+    // reports the missing service nor spends the once-only report.
+    const asksSecurity = sites.some((site) => !isPlannedRelationLeaf(site.leaf));
+    if (asksSecurity && security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
       this.readableIdsSecurityReported.add(security.kind);
       this.logger.warn(
         `[ObjectQL] ${operation}('${object}') composes a ReadableIds leaf with no usable "security" service ` +
@@ -241,7 +246,7 @@ export class SecurityResolversFacet {
         'Reported once for this engine; later leaves are answered the same way.',
       );
     }
-    const chain: ReadableIdsChain = { object, operation, security, context, answers: new Map() };
+    const chain: ReadableIdsChain = { object, operation, security, context, answers: new Map(), driverOptions };
     const where = await this.composeReadableIdsChain(chain, ast.where, sites, []);
     return { ...ast, where };
   }

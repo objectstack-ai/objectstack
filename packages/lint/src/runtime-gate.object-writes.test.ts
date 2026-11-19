@@ -35,8 +35,10 @@
  * harness (issue #4716, comment 5328421898). They are permanent here so the
  * evidence the exemption rests on cannot rot silently.
  */
+import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { describe, expect, it } from 'vitest';
 import { AUTHORING_RULES } from './authoring-rules.js';
+import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import {
   runRuntimeAuthoringRules,
@@ -189,6 +191,12 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateRlsPredicateEnforceability',
       'validateMembershipKeyDeclarations',
       'validateRuleCompilability',
+      // Joins with its card's acceptance ("refused at validate, build or
+      // publish"): an object write carries its inline `actions[]`, the second
+      // place an action body is published, so a body that does not compile
+      // in the runtime's wrapper is refused here as at the `action` door. Its
+      // door cases are in `validate-action-body-compiles.test.ts`.
+      'validateActionBodyCompiles',
       'validateRuleSchemaFormats',
     ]);
   });
@@ -564,6 +572,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateRlsPredicateEnforceability', // [#25234] — see the roster pin above
       'validateMembershipKeyDeclarations', // [#25234]
       'validateRuleCompilability',
+      'validateActionBodyCompiles', // see the roster pin above
       'validateRuleSchemaFormats',
     ]);
   });
@@ -638,6 +647,205 @@ describe('the object write door refuses a write that serves two visible fields u
       { objects: stored },
     );
     expect(sibling.errors, JSON.stringify(sibling.errors)).toEqual([]);
+  });
+});
+
+/**
+ * #33644 — the `object_extension` door judges the clash an extension adds to
+ * the object it extends. The door hands the written entry and the target as
+ * the registry SERVES it (the injected columns carried as declared fields, the
+ * written package's own stored extension left out), which `served()` stands
+ * in for; the differential charges the write only with a clash its entry
+ * creates.
+ */
+describe('the object_extension door refuses an extension that adds a field under a label its target already shows', () => {
+  const TARGET = {
+    name: 'xl_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: { subject: { type: 'text', label: 'Subject' }, status: { type: 'text', label: 'Status' } },
+  };
+  const served = (obj: Record<string, unknown> = TARGET) => applyInjectedSystemColumns(obj);
+  const ext = (fields: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+    extend: 'xl_ticket',
+    fields,
+    ...over,
+  });
+  const gateExtension = (item: unknown, objects: unknown[] = [served()], storedObjectExtensions?: unknown[]) =>
+    runRuntimeAuthoringRules({
+      type: 'object_extension',
+      item,
+      context: { objects },
+      ...(storedObjectExtensions !== undefined ? { storedObjectExtensions: storedObjectExtensions as never } : {}),
+    });
+  const labelErrors = (result: ReturnType<typeof gateExtension>) =>
+    result.errors.filter((e) => e.rule === 'field-label-duplicate');
+  const atBuild = (stack: Record<string, unknown>) => lintDuplicateFieldLabels(stack).map((f) => f.message);
+
+  it('the rule is on the object_extension door, and still on the object door', () => {
+    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name)).toContain('lintDuplicateFieldLabels');
+    expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('lintDuplicateFieldLabels');
+  });
+
+  it('⭐ LIT — an extension field labelled like the injected owner_id in zh-CN is REFUSED, naming the target, both fields and the label', () => {
+    const item = ext({ assignee: { type: 'user', label: '负责人' } });
+    const result = gateExtension(item);
+    const errs = labelErrors(result);
+    expect(errs, JSON.stringify(result.errors)).toHaveLength(1);
+    expect(errs[0]!.severity).toBe('error');
+    expect(errs[0]!.where).toBe('object "xl_ticket"');
+    // Located on the target, keyed by name on the wire.
+    expect(errs[0]!.path).toBe('objects.xl_ticket.fields');
+    expect(errs[0]!.message).toContain("'assignee' and 'owner_id' under one label \"负责人\" when read in locale zh-CN");
+    // Read back to the authored shape, the served owner_id is named as the
+    // platform's column, as the build names it.
+    expect(errs[0]!.message).toContain("'owner_id' is a column the platform adds");
+    // The build's finding over the same entry, byte for byte.
+    expect(atBuild({ objects: [TARGET], objectExtensions: [item] })).toEqual([errs[0]!.message]);
+  });
+
+  it('⭐ LIT — an extension field labelled like one of the target\'s own fields is REFUSED in the authored pass', () => {
+    const errs = labelErrors(gateExtension(ext({ topic: { type: 'text', label: 'Subject' } })));
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.message).toContain("object \"xl_ticket\" shows fields 'subject' and 'topic' under one label \"Subject\", so");
+  });
+
+  it('⭐ LIT — an extension whose own two fields share a label the target does not show is REFUSED, naming both fields', () => {
+    const item = ext({ a__c: { type: 'number', label: 'Region' }, b__c: { type: 'text', label: 'Region' } });
+    expect(TARGET.fields).not.toHaveProperty('region');
+    const result = gateExtension(item);
+    const errs = labelErrors(result);
+    expect(errs, JSON.stringify(result.errors)).toHaveLength(1);
+    expect(errs[0]!.path).toBe('objects.xl_ticket.fields');
+    expect(errs[0]!.message).toContain("object \"xl_ticket\" shows fields 'a__c' and 'b__c' under one label \"Region\", so");
+    expect(atBuild({ objects: [TARGET], objectExtensions: [item] })).toEqual([errs[0]!.message]);
+    // The control: the same two fields under labels of their own publish.
+    const own = gateExtension(ext({ a__c: { type: 'number', label: 'Region' }, b__c: { type: 'text', label: 'Region code' } }));
+    expect(labelErrors(own), JSON.stringify(own.errors)).toEqual([]);
+  });
+
+  it('the door\'s hint offers no translation bundle for a clash only a locale shows (the door reads none); the build\'s still does', () => {
+    const item = ext({ assignee: { type: 'user', label: '负责人' } });
+    const errs = labelErrors(gateExtension(item));
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.message).toContain('when read in locale zh-CN');
+    expect(errs[0]!.hint).not.toContain('translation bundle');
+    expect(errs[0]!.hint).toContain('Give each visible field its own label');
+    const build = lintDuplicateFieldLabels({ objects: [TARGET], objectExtensions: [item] });
+    expect(build).toHaveLength(1);
+    expect(build[0]!.hint).toContain('(in the translation bundle too, for a locale only a translation clashes in)');
+  });
+
+  it('an unrelated extension write (a label of its own, or the clashing field hidden) is not charged (the controls)', () => {
+    for (const item of [
+      ext({ escalation_level: { type: 'number', label: 'Escalation Level' } }),
+      ext({ assignee: { type: 'user', label: '处理人' } }),
+      ext({ assignee: { type: 'user', label: '负责人', hidden: true } }),
+    ]) {
+      const result = gateExtension(item);
+      expect(result.rulesRun).toContain('lintDuplicateFieldLabels');
+      expect(labelErrors(result), JSON.stringify(result.errors)).toEqual([]);
+    }
+  });
+
+  it('the target\'s own object save is not blamed for a clash an extension write was refused for', () => {
+    const refused = gateExtension(ext({ assignee: { type: 'user', label: '负责人' } }));
+    expect(labelErrors(refused)).toHaveLength(1);
+    // Refused, the entry is not stored, so the target is served as before;
+    // its own save is judged on the body it sends and is clean.
+    const save = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { ...TARGET, description: 'edited' },
+      context: { objects: [served()] },
+    });
+    expect(save.rulesRun).toContain('lintDuplicateFieldLabels');
+    expect(save.errors, JSON.stringify(save.errors)).toEqual([]);
+  });
+
+  it('a clash the target already carries is not charged to an extension write that does not create it (the differential)', () => {
+    const clashing = {
+      ...TARGET,
+      fields: { ...TARGET.fields, phone: { type: 'phone', label: 'Phone' }, mobile: { type: 'phone', label: 'Phone' } },
+    };
+    // The control: the target's clash is real, the build reports it.
+    expect(atBuild({ objects: [clashing] })).toHaveLength(1);
+    const unrelated = gateExtension(ext({ escalation_level: { type: 'number', label: 'Escalation Level' } }), [served(clashing)]);
+    expect(labelErrors(unrelated), JSON.stringify(unrelated.errors)).toEqual([]);
+    // An entry that joins the clash changes it, and is charged.
+    const joins = labelErrors(gateExtension(ext({ fax: { type: 'phone', label: 'Phone' } }), [served(clashing)]));
+    expect(joins).toHaveLength(1);
+    expect(joins[0]!.message).toContain("'fax', 'mobile' and 'phone' under one label \"Phone\"");
+  });
+
+  it('folds the entry among the target\'s other packages\' extensions by priority, as the build does', () => {
+    // Another package's extension adds `region` at the default priority; the
+    // served target carries it as a plain field.
+    const other = { extend: 'xl_ticket', fields: { region: { type: 'text', label: 'Region' } } };
+    const servedWithOther = served({ ...TARGET, fields: { ...TARGET.fields, region: other.fields.region } });
+    const item = ext({ region: { type: 'text', label: 'Subject' } });
+    // A tie at one priority leaves the field out at the build: which
+    // definition wins is registration order.
+    expect(
+      atBuild({ objects: [TARGET], packages: [{ manifest: { objectExtensions: [other] } }, { manifest: { objectExtensions: [item] } }] }),
+    ).toEqual([]);
+    expect(labelErrors(gateExtension(item, [servedWithOther], [other]))).toEqual([]);
+    // Without the other packages' priorities the door would judge the written
+    // definition alone (the reading the stated extensions exist to correct).
+    expect(labelErrors(gateExtension(item, [servedWithOther]))).toHaveLength(1);
+    // A higher priority wins outright, at the build and at the door alike.
+    const winning = ext({ region: { type: 'text', label: 'Subject' } }, { priority: 210 });
+    expect(labelErrors(gateExtension(winning, [servedWithOther], [other]))).toHaveLength(1);
+  });
+
+  it('an entry that takes a member out of a clash the target already serves is not charged for what is left', () => {
+    // The target serves `subject` and `topic` under `Subject`, and another
+    // package's extension adds `region` under `Subject` too: one group of three.
+    const clashing = { ...TARGET, fields: { ...TARGET.fields, topic: { type: 'text', label: 'Subject' } } };
+    const other = { extend: 'xl_ticket', fields: { region: { type: 'text', label: 'Subject' } } };
+    const servedClash = served({ ...clashing, fields: { ...clashing.fields, region: other.fields.region } });
+    // The control: the three-member group is real, at the build.
+    expect(atBuild({ objects: [clashing], objectExtensions: [other] })).toEqual([
+      expect.stringContaining("'region', 'subject' and 'topic' under one label \"Subject\""),
+    ]);
+    for (const item of [
+      ext({ region: { type: 'text', label: 'Region' } }, { priority: 210 }),
+      ext({ region: { type: 'text', label: 'Subject', hidden: true } }, { priority: 210 }),
+      // A tie at the deciding priority leaves `region` out of the comparison.
+      ext({ region: { type: 'text', label: 'Region' } }),
+    ]) {
+      const result = gateExtension(item, [servedClash], [other]);
+      expect(result.rulesRun).toContain('lintDuplicateFieldLabels');
+      // `'subject' and 'topic'` is the target's own clash, smaller now.
+      expect(labelErrors(result), JSON.stringify(result.errors)).toEqual([]);
+    }
+    // Taking `region` out and putting a new field in under the label is a
+    // clash the entry creates, and is charged.
+    const swaps = labelErrors(gateExtension(
+      ext({ region: { type: 'text', label: 'Region' }, headline: { type: 'text', label: 'Subject' } }, { priority: 210 }),
+      [servedClash],
+      [other],
+    ));
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0]!.message).toContain("'headline', 'subject' and 'topic' under one label \"Subject\"");
+  });
+
+  it('a clashing extension already stored is not charged to the target\'s own object save; the build reports it on the target', () => {
+    const stored = { extend: 'xl_ticket', fields: { assignee: { type: 'user', label: '负责人' } } };
+    // Stored before the door judged extensions: the registry serves its field
+    // on the target.
+    const servedWithStored = served({ ...TARGET, fields: { ...TARGET.fields, assignee: stored.fields.assignee } });
+    const save = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { ...TARGET, description: 'edited' },
+      context: { objects: [servedWithStored] },
+    });
+    expect(save.rulesRun).toContain('lintDuplicateFieldLabels');
+    // The save is judged on the body it sends, which carries no extension field.
+    expect(save.errors, JSON.stringify(save.errors)).toEqual([]);
+    // At the build the stack's extension folds onto the declared target, and
+    // the clash is reported there.
+    const built = lintDuplicateFieldLabels({ objects: [TARGET], objectExtensions: [stored] });
+    expect(built.map((f) => f.where)).toEqual(['object "xl_ticket"']);
   });
 });
 

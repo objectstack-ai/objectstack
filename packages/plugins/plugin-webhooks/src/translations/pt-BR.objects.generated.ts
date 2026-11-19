@@ -53,7 +53,6 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Método HTTP",
         help: "Método HTTP usado na requisição de callback",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

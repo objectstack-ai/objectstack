@@ -7,21 +7,17 @@
  */
 
 import * as React from 'react';
-import { useDisplayLocale } from '@object-ui/i18n';
 import { cn, Badge, Button, useIsMobile } from '@object-ui/components';
-import { Stamp, Paperclip, Loader2, Send, ShieldAlert } from 'lucide-react';
+import { Stamp, Loader2, Send } from 'lucide-react';
 import { toast } from 'sonner';
-import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/react';
 import {
   isSubmitterOf,
   listApprovalActions,
   remindApprovalRequest,
   type ApprovalActionLite,
-  type ApprovalActionAttachmentLite,
   type ApprovalRequestLite,
 } from '../hooks/useRecordApprovals.js';
-import { isViaOverrideRow } from '../utils/approvalOverride.js';
 import {
   approverCopyFrom,
   approverDisplay,
@@ -38,6 +34,7 @@ import {
 import { ApprovalStepLine } from './approval-progress/ApprovalStepLine.js';
 import { DecisionProgressIndicator } from './approval-progress/DecisionProgressIndicator.js';
 import { eligibleApproverCount } from './approval-progress/eligibleApprovers.js';
+import { ApprovalActionTimeline } from './approval-progress/ApprovalActionTimeline.js';
 
 /**
  * RecordApprovalsPanel — the record page's read-only approval surface
@@ -99,20 +96,6 @@ const STATUS_CLASSES: Record<string, string> = {
   rejected: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400',
   recalled: 'border-border bg-muted text-muted-foreground',
   returned: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-400',
-};
-
-/** Timeline dot color per action kind — same palette as the Approval Center. */
-const ACTION_DOT: Record<string, string> = {
-  approve: 'bg-emerald-500',
-  reject: 'bg-destructive',
-  submit: 'bg-blue-500',
-  reassign: 'bg-indigo-500',
-  remind: 'bg-amber-500',
-  request_info: 'bg-amber-500',
-  comment: 'bg-slate-400',
-  escalate: 'bg-red-500',
-  revise: 'bg-violet-500',
-  resubmit: 'bg-blue-500',
 };
 
 /**
@@ -190,16 +173,6 @@ export function approverChips(
 }
 
 /**
- * `locale` is REQUIRED: the timeline's action times used to be formatted with
- * no tag, i.e. in the MACHINE's locale (objectui#9909). The panel passes
- * `useDisplayLocale()`.
- */
-function formatDate(s: string | null | undefined, locale: string): string {
-  if (!s) return '—';
-  try { return new Date(s).toLocaleString(locale); } catch { return s; }
-}
-
-/**
  * The step a request or a timeline row names, as a reader should see it: the
  * authored step label when there is one, else the node's machine name
  * prettified, else nothing. The headline and every timeline row draw their
@@ -229,7 +202,6 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
   className,
 }) => {
   const { t } = useObjectTranslation();
-  const displayLocale = useDisplayLocale();
   // objectstack#29070: on a phone Send reminder is a 44 px target (`lg`), not
   // the 24 px chip it is beside the approver chips on a desktop.
   const isMobile = useIsMobile();
@@ -330,30 +302,6 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
     }
   }, [pendingRequest, reloadActions, tr]);
 
-  /**
-   * Open a timeline attachment via its short-lived signed URL — same
-   * user-gesture-preserving dance as the Approval Center (framework#3266
-   * follow-up): open the tab synchronously, then point it at the URL.
-   */
-  const authFetch = React.useMemo(() => createAuthenticatedFetch(), []);
-  const openAttachment = React.useCallback(async (att: ApprovalActionAttachmentLite) => {
-    const win = window.open('', '_blank', 'noopener');
-    try {
-      const base = String((import.meta as any).env?.VITE_SERVER_URL || '').replace(/\/$/, '');
-      const res = await authFetch(`${base}/api/v1/storage/files/${encodeURIComponent(att.id)}/url`);
-      if (!res.ok) throw new Error(`HTTP_${res.status}`);
-      const body = await res.json().catch(() => null);
-      const raw = body?.data?.url ?? body?.url;
-      if (!raw) throw new Error('NO_URL');
-      const url = /^https?:\/\//i.test(raw) ? raw : `${base}${raw}`;
-      if (win) win.location.href = url;
-      else window.open(url, '_blank', 'noopener');
-    } catch {
-      win?.close();
-      toast.error(tr('attachmentOpenFailed', 'Could not open the attachment — please try again'));
-    }
-  }, [authFetch, tr]);
-
   // After all hooks: an unavailable plugin or a record with no requests
   // renders no chrome at all.
   if (!available || requests.length === 0 || !headline) return null;
@@ -368,25 +316,6 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
       default: return status;
     }
   };
-
-  const actionText = (a: ApprovalActionLite): string =>
-    a.action === 'submit' ? tr('actSubmit', 'Submitted')
-      : a.action === 'approve' ? tr('actApprove', 'Approved')
-      : a.action === 'reject' ? tr('actReject', 'Rejected')
-      : a.action === 'recall' ? tr('actRecall', 'Recalled')
-      : a.action === 'reassign' ? tr('actReassign', 'Reassigned')
-      : a.action === 'remind' ? tr('actRemind', 'Reminder sent')
-      : a.action === 'request_info' ? tr('actRequestInfo', 'Requested more info')
-      : a.action === 'comment' ? tr('actComment', 'Commented')
-      : a.action === 'escalate' ? tr('actEscalate', 'SLA escalated')
-      : a.action === 'revise' ? tr('actRevise', 'Sent back for revision')
-      : a.action === 'resubmit' ? tr('actResubmit', 'Resubmitted')
-      : a.action;
-
-  const actorName = (a: ApprovalActionLite): string =>
-    a.actor_id === 'system:sla'
-      ? tr('systemSlaActor', 'System (SLA)')
-      : a.actor_name ?? formatIdentity(a.actor_id);
 
   /**
    * A timeline row's step label is its request's (objectui#13248). The server
@@ -502,88 +431,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
           <div className="text-[11px] text-muted-foreground mb-2">
             {tr('history', 'Activity')}
           </div>
-          {actionsLoading && actions.length === 0 ? (
-            <div className="text-xs text-muted-foreground flex items-center gap-2">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {tr('loadingMore', 'Loading…')}
-            </div>
-          ) : actions.length === 0 ? (
-            <div className="text-xs text-muted-foreground">{tr('noActions', 'No actions yet.')}</div>
-          ) : (
-            <ol className="relative space-y-3 pl-5 before:absolute before:left-[7px] before:top-1 before:bottom-1 before:w-px before:bg-border">
-              {actions.map((a) => (
-                <li key={a.id} className="relative text-xs">
-                  {/* objectui#5178 — an admin override does not wear the ordinary
-                      decision's dot. `approve` is emerald here, which is exactly
-                      the "byte-for-byte like an ordinary approval" the card
-                      reports; an override gets the amber attention dot instead,
-                      so the distinction survives a glance down the timeline. */}
-                  <span
-                    className={`absolute -left-[18px] top-1 h-3 w-3 rounded-full ring-2 ring-background ${
-                      isViaOverrideRow(a) ? 'bg-amber-500' : ACTION_DOT[a.action] ?? 'bg-muted-foreground'
-                    }`}
-                    aria-hidden
-                  />
-                  <div className="flex items-baseline gap-1.5 flex-wrap">
-                    <span className="font-medium">{actionText(a)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span title={a.actor_id || ''}>{actorName(a)}</span>
-                    {/* The marker framework#4466 wrote and nothing read. Only an
-                        explicit `via_override: true` earns it — see
-                        `isViaOverrideRow` for why "not recorded" must not
-                        render as either answer. */}
-                    {isViaOverrideRow(a) && (
-                      <Badge
-                        variant="outline"
-                        className="gap-1 border-amber-500/60 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                        title={tr('viaOverrideHint', 'The actor held no approver slot on this step — admitted by the admin-override path.')}
-                        data-testid="via-override-chip"
-                      >
-                        <ShieldAlert className="h-3 w-3" aria-hidden />
-                        {tr('viaOverrideChip', 'Admin override')}
-                      </Badge>
-                    )}
-                    {actionStepText(a) && (
-                      <span className="text-muted-foreground" data-testid="approval-action-step">
-                        · {actionStepText(a)}
-                      </span>
-                    )}
-                    <span className="ml-auto text-muted-foreground text-[10px]">
-                      {formatDate(a.created_at, displayLocale)}
-                    </span>
-                  </div>
-                  {a.action === 'reassign' && (a.reassign_from || a.reassign_to) && (
-                    <div className="text-muted-foreground mt-0.5">
-                      {tr('reassignFromTo', 'from {{from}} to {{to}}', {
-                        from: a.reassign_from_name ?? formatIdentity(a.reassign_from),
-                        to: a.reassign_to_name ?? formatIdentity(a.reassign_to),
-                      })}
-                    </div>
-                  )}
-                  {a.comment && (
-                    <div className="text-muted-foreground italic mt-0.5">"{a.comment}"</div>
-                  )}
-                  {Array.isArray(a.attachments) && a.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {a.attachments.map((att, i) => (
-                        <button
-                          key={att.id || i}
-                          type="button"
-                          onClick={() => void openAttachment(att)}
-                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                          title={att.name || att.id}
-                        >
-                          <Paperclip className="h-3 w-3" />
-                          {att.name
-                            || `${tr('attachmentChip', 'Attachment')}${a.attachments!.length > 1 ? ` ${i + 1}` : ''}`}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
+          <ApprovalActionTimeline actions={actions} loading={actionsLoading} stepText={actionStepText} />
         </div>
       </div>
     </div>

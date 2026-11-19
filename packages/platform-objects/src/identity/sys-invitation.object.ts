@@ -251,14 +251,18 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/accept-invitation',
       recordIdParam: 'invitationId',
-      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
+      // Hidden while cloud-managed: accepting creates a membership, which is
+      // the hosting organisation's there; the door refuses (409
+      // RESOURCE_CONFLICT). Decline stays: it writes no membership.
+      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending' && features.cloudManaged != true",
       successMessage: 'Invitation accepted',
       refreshAfter: true,
       // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
       ai: {
         exposed: true,
         description:
-          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address.',
+          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address. '
+          + 'While this deployment delivers email, the caller\'s address must also be verified: an unverified caller is refused with EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION and nothing is written, so ask the human to verify their email address first, then accept.',
       },
     },
     {

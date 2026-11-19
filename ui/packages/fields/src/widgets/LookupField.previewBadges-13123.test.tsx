@@ -91,7 +91,7 @@ function makeDataSource() {
   };
 }
 
-async function openPicker(columns: string[]): Promise<void> {
+async function openPicker(columns: string[], extra: { compact?: boolean } = {}): Promise<void> {
   const dataSource = makeDataSource();
   // Labelled, as the showcase's columns (derived from its `highlightFields`) are.
   const lookupColumns = columns.map((field) => ({ field, label: FIELDS[field].label }));
@@ -102,6 +102,7 @@ async function openPicker(columns: string[]): Promise<void> {
       // Read-only: the picker only reads, so the write members stay absent.
       dataSource={dataSource as never}
       field={{ reference: 'showcase_account', displayField: 'name', lookupColumns } as never}
+      {...extra}
     />,
   );
   await act(async () => {
@@ -173,26 +174,52 @@ describe('LookupField option preview: a badge is never cut (objectui#13123)', ()
 });
 
 /**
- * The line's layout, modelled: each column has a width, the segments sit 4px
- * apart, and a hidden segment takes no room. `lineWidth` is the line's box.
+ * The preview's layout, modelled: each column has a width, the segments sit
+ * 4px apart and wrap onto the next row (20px down) when they do not fit beside
+ * the one before, a hidden segment takes no room, and a badge wider than the
+ * line overflows it where a text column would shrink to it. `lineWidth` is the
+ * line's box.
  */
 const COLUMN_WIDTH: Record<string, number> = { status: 114, industry: 148, annual_revenue: 130 };
+const BADGES = new Set(['status', 'industry']);
 let lineWidth = 0;
 
+const isLine = (el: Element | null): el is HTMLElement => (el as HTMLElement | null)?.dataset?.testid === 'lookup-option-preview';
+const fieldOf = (segment: Element) =>
+  segment.querySelector('[data-lookup-preview]')?.getAttribute('data-lookup-preview') ?? '';
+
+/** Each shown segment's row offset, and the widest badge the line must hold. */
+function layoutOf(line: HTMLElement): { tops: Map<Element, number>; widest: number } {
+  const tops = new Map<Element, number>();
+  let x = 0;
+  let row = 0;
+  let widest = 0;
+  for (const segment of Array.from(line.children)) {
+    if ((segment as HTMLElement).hidden) continue;
+    const field = fieldOf(segment);
+    const natural = COLUMN_WIDTH[field] ?? 0;
+    const width = BADGES.has(field) ? natural : Math.min(natural, lineWidth);
+    if (BADGES.has(field)) widest = Math.max(widest, natural);
+    if (x > 0 && x + 4 + width > lineWidth) {
+      row += 1;
+      x = 0;
+    }
+    x += (x > 0 ? 4 : 0) + width;
+    tops.set(segment, row * 20);
+  }
+  return { tops, widest };
+}
+
 function stubLineLayout(): void {
-  const isLine = (el: HTMLElement) => el.dataset.testid === 'lookup-option-preview';
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
     return isLine(this) ? lineWidth : 0;
   });
   vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-    if (!isLine(this)) return 0;
-    const shown = Array.from(this.children).filter((s) => !(s as HTMLElement).hidden);
-    const content = shown.reduce((sum, s) => {
-      const field = s.querySelector('[data-lookup-preview]')?.getAttribute('data-lookup-preview') ?? '';
-      return sum + (COLUMN_WIDTH[field] ?? 0);
-    }, 0);
     // The browser reports the box's own width when the content is narrower.
-    return Math.max(lineWidth, content + 4 * Math.max(0, shown.length - 1));
+    return isLine(this) ? Math.max(lineWidth, layoutOf(this).widest) : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+    return isLine(this.parentElement) ? layoutOf(this.parentElement).tops.get(this) ?? 0 : 0;
   });
 }
 
@@ -216,11 +243,12 @@ function shownColumns(): string[] {
   return ['status', 'industry', 'annual_revenue'].filter((f) => !segmentOf(f).hidden);
 }
 
-describe('LookupField option preview: a column the line cannot hold leaves whole (objectui#13123)', () => {
+describe('LookupField option preview: a column the rows cannot hold leaves whole (objectui#13123)', () => {
   it.each([
-    // The card's width: both badges whole, the revenue column dropped.
-    [280, ['status', 'industry']],
-    [180, ['status']],
+    // The card's width: the revenue column wraps onto the second row whole.
+    [280, ['status', 'industry', 'annual_revenue']],
+    // One column a row: a third row is one too many, so revenue leaves.
+    [180, ['status', 'industry']],
     [600, ['status', 'industry', 'annual_revenue']],
     // Not even the first badge fits: the line drops it rather than cut it.
     [100, []],
@@ -244,15 +272,164 @@ describe('LookupField option preview: a column the line cannot hold leaves whole
     lineWidth = 180;
     stubLineLayout();
     await openPicker(['name', 'status', 'industry', 'annual_revenue']);
-    expect(shownColumns()).toEqual(['status']);
+    expect(shownColumns()).toEqual(['status', 'industry']);
     expect(lineObservers.length).toBeGreaterThan(0);
 
     lineWidth = 600;
     act(() => lineObservers.forEach((fire) => fire()));
     expect(shownColumns()).toEqual(['status', 'industry', 'annual_revenue']);
 
-    lineWidth = 280;
+    lineWidth = 100;
     act(() => lineObservers.forEach((fire) => fire()));
-    expect(shownColumns()).toEqual(['status', 'industry']);
+    expect(shownColumns()).toEqual([]);
+  });
+});
+
+/** The `·` that leads every column after the first. */
+function separatorOf(field: string): HTMLElement {
+  const sep = segmentOf(field).querySelector<HTMLElement>('[data-lookup-preview-separator]');
+  if (!sep) throw new Error(`no separator before ${field}`);
+  return sep;
+}
+
+describe('LookupField option preview: secondary columns stay told apart (objectstack#34362)', () => {
+  it('lets the preview wrap, so a column that does not fit opens the next row instead of cutting both', async () => {
+    await openPicker(['name', 'status', 'billing_email']);
+    const line = screen.getByTestId('lookup-option-preview');
+    expect(line.classList.contains('flex-wrap'), 'the preview no longer wraps').toBe(true);
+  });
+
+  it('drops the separator of a column that opens a row, and keeps it beside the column before', async () => {
+    lineWidth = 280;
+    stubLineLayout();
+    await openPicker(['name', 'status', 'industry', 'annual_revenue']);
+    // Row one: status, industry. Row two: revenue.
+    expect(separatorOf('industry').hidden).toBe(false);
+    expect(separatorOf('annual_revenue').hidden).toBe(true);
+  });
+
+  it('keeps every separator on one row', async () => {
+    lineWidth = 600;
+    stubLineLayout();
+    await openPicker(['name', 'status', 'industry', 'annual_revenue']);
+    expect(separatorOf('industry').hidden).toBe(false);
+    expect(separatorOf('annual_revenue').hidden).toBe(false);
+  });
+
+  it('gives a text value cut short its whole text as its title, and a whole value none', async () => {
+    const CUT = 'billing_email';
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('data-lookup-preview') === CUT ? 300 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('data-lookup-preview') === CUT ? 120 : 0;
+    });
+    await openPicker(['name', 'status', ...TEXT_COLUMNS]);
+
+    expect(valueOf(CUT).getAttribute('title')).toBe(ROW.billing_email);
+    expect(valueOf('annual_revenue').hasAttribute('title')).toBe(false);
+    // A badge keeps its own title; the fit never writes one onto its value.
+    expect(valueOf('status').hasAttribute('title')).toBe(false);
+  });
+});
+
+describe('LookupField picker popover: bound to the room it is given (objectstack#34362)', () => {
+  /** The listbox's scroll box, stubbed: `content` px of options in a `box` px list. */
+  function stubListScroll(box: number, content: number): void {
+    const isList = (el: HTMLElement) => el.getAttribute('role') === 'listbox';
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return isList(this) ? box : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return isList(this) ? content : 0;
+    });
+  }
+
+  it('is portaled out of the field, so no dialog body can clip it and Radix flips it against the viewport', async () => {
+    await openPicker(['name', 'status']);
+    const popover = screen.getByTestId('lookup-popover');
+    expect(screen.getByTestId('lookup-trigger').parentElement?.contains(popover)).toBe(false);
+    expect(popover.parentElement?.hasAttribute('data-radix-popper-content-wrapper')).toBe(true);
+  });
+
+  it('caps the popover at the available height Radix reports, and the list takes what the search row leaves', async () => {
+    await openPicker(['name', 'status']);
+    const popover = screen.getByTestId('lookup-popover');
+    for (const cls of ['flex', 'flex-col', 'max-h-(--radix-popover-content-available-height)']) {
+      expect(popover.classList.contains(cls), `popover lacks ${cls}`).toBe(true);
+    }
+    const search = screen.getByRole('combobox').closest('.p-2') as HTMLElement;
+    expect(search.classList.contains('shrink-0'), 'the search row gives up its height').toBe(true);
+    const list = screen.getByRole('listbox');
+    // `min-h-0` lets the list shrink below its 16rem cap; the cap still holds where there is room.
+    for (const cls of ['min-h-0', 'max-h-64', 'overflow-y-auto']) {
+      expect(list.classList.contains(cls), `list lacks ${cls}`).toBe(true);
+    }
+    expect((list.parentElement as HTMLElement).classList.contains('min-h-0'), 'the list wrapper does not shrink').toBe(true);
+  });
+
+  it('marks the list edge with more options past it, so a row cut there reads as scroll for more', async () => {
+    stubListScroll(256, 600);
+    await openPicker(['name', 'status']);
+    const list = screen.getByRole('listbox');
+    await waitFor(() => expect(screen.queryByTestId('lookup-list-more-below')).not.toBeNull());
+    expect(screen.queryByTestId('lookup-list-more-above')).toBeNull();
+
+    act(() => {
+      list.scrollTop = 344;
+      fireEvent.scroll(list);
+    });
+    expect(screen.queryByTestId('lookup-list-more-below')).toBeNull();
+    expect(screen.queryByTestId('lookup-list-more-above')).not.toBeNull();
+
+    act(() => {
+      list.scrollTop = 100;
+      fireEvent.scroll(list);
+    });
+    expect(screen.queryByTestId('lookup-list-more-below')).not.toBeNull();
+    expect(screen.queryByTestId('lookup-list-more-above')).not.toBeNull();
+  });
+
+  it('draws no edge marks when every option fits', async () => {
+    stubListScroll(256, 120);
+    await openPicker(['name', 'status']);
+    expect(screen.queryByTestId('lookup-list-more-below')).toBeNull();
+    expect(screen.queryByTestId('lookup-list-more-above')).toBeNull();
+  });
+
+  it('leaves room for the edge mark when the keyboard scrolls an option into view', async () => {
+    await openPicker(['name', 'status']);
+    expect(screen.getByRole('listbox').classList.contains('scroll-py-6')).toBe(true);
+  });
+});
+
+describe('LookupField picker popover: wide enough to read an option, never wider than the screen (objectstack#34601)', () => {
+  /**
+   * The width contract, as classes: jsdom has no layout. The trigger width
+   * stays the width, an 18rem floor keeps option names readable when the
+   * trigger is a narrow line-item grid cell, and the room Radix reports caps
+   * both the panel and the floor, so a narrow screen never puts the panel past
+   * its edge. The pixels were read in Chromium; the pull request records them.
+   */
+  const WIDTH = [
+    'w-[var(--radix-popover-trigger-width)]',
+    'min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))]',
+    'max-w-(--radix-popover-content-available-width)',
+  ];
+
+  it('floors a compact (grid-cell) trigger\'s popover at 18rem and caps it at the available width', async () => {
+    await openPicker(['name', 'status'], { compact: true });
+    const popover = screen.getByTestId('lookup-popover');
+    for (const cls of WIDTH) {
+      expect(popover.classList.contains(cls), `popover lacks ${cls}`).toBe(true);
+    }
+  });
+
+  it('gives a full-size trigger the same floor and cap', async () => {
+    await openPicker(['name', 'status']);
+    const popover = screen.getByTestId('lookup-popover');
+    for (const cls of WIDTH) {
+      expect(popover.classList.contains(cls), `popover lacks ${cls}`).toBe(true);
+    }
   });
 });

@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---
@@ -91,8 +91,7 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 ### `has()` is NOT a null check
 
 `has(record.x)` is **true whenever the key exists**, even when its value is
-`null`. To check for "value present and non-blank" use the stdlib helper
-`isBlank()` or compare to `null` explicitly.
+`null`.
 
 Every server-evaluated predicate — validation rules, `requiredWhen`, option
 `visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
@@ -187,6 +186,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `round(x)` | int | Round to the nearest integer |
 | `floor(x)` / `ceil(x)` | int | Round toward −∞ / +∞ (`floor(-1.2)` = −2, not −1) |
 | `min(a, b)` / `max(a, b)` | dyn | Smaller / larger operand (numeric comparison) |
+| `rmbUpper(x)` | string | Amount in Chinese capitals, rounded to 分: `rmbUpper(10500.5)` = `壹万零伍佰元伍角`; `''` for null |
 
 **Strings**
 
@@ -212,13 +212,13 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 | Function | Returns | Notes |
 |:---|:---|:---|
-| `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
+| `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null or an empty selection. A multi-select (`multiple: true`) reads each selected label in stored order, joined with `, `. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
-`double(x)`, `timestamp(s)`, `duration(s)`.
-
-If you need a helper that doesn't exist, prefer adding it to the stdlib
-(small, pure, dependency-free) over inlining a complex CEL expression.
+`double(x)`, `timestamp(s)`, `duration(s)`. `timestamp()` parses only a full
+ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
+(`date-text-call`), `+ duration(…)` included; shift a date with
+`isoDate(addDays(record.d, n))`.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
@@ -401,7 +401,7 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 
 > ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
 > insert event and **fails the write** there unless guarded by `previous != null
-> &&`; on update and delete events it is bound per matched row — see §5.
+> &&` (§5).
 
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
@@ -465,7 +465,6 @@ a bare string (auto-wrapped) or their helper, and read the same variable scope.
 | `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron, or one of `@yearly` `@annually` `@monthly` `@weekly` `@daily` `@hourly` `@reboot` | `Job.schedule.expression` (canonical) |
 | `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (a save and `os validate` refuse it; move it to `nameField`, ADR-0079) |
 
-`shared/expression.zod.ts` declares both surfaces and their carriers.
 Missing template paths render as the empty string. Move logic into a CEL field.
 A `currency` argument is a
 literal code (`currency:EUR`); only an email template may read it from the send's

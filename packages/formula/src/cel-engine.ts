@@ -1088,7 +1088,9 @@ const MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one',
  *                    conditions). Unlisted identifiers stay `dyn`
  *                    (`unlistedVariablesAreDyn: true`) so a flow variable never
  *                    faults — only a typed field misused does.
- * Built per call — cheap, and only used at build time.
+ *
+ * Memoized on its inputs ({@link TYPED_ENV_CACHE}): the env is a pure function
+ * of them and every caller only parses and checks against it.
  */
 function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
@@ -1102,6 +1104,54 @@ function buildTypedEnv(
    * reads the field.
    */
   recordRootTypes?: Readonly<Record<string, FieldCelType>>,
+): Environment {
+  const key = JSON.stringify([scope, temporal, fieldCelTypes, recordRootTypes ?? null]);
+  const cached = TYPED_ENV_CACHE.get(key);
+  if (cached) {
+    // Least-recently-used order: a hit moves to the young end.
+    TYPED_ENV_CACHE.delete(key);
+    TYPED_ENV_CACHE.set(key, cached);
+    return cached;
+  }
+  const env = createTypedEnv(fieldCelTypes, scope, temporal, recordRootTypes);
+  TYPED_ENV_CACHE.set(key, env);
+  if (TYPED_ENV_CACHE.size > TYPED_ENV_CACHE_LIMIT) {
+    TYPED_ENV_CACHE.delete(TYPED_ENV_CACHE.keys().next().value as string);
+  }
+  return env;
+}
+
+/**
+ * [#34756] The typed check envs {@link buildTypedEnv} has built, keyed on its
+ * inputs, least recently used first.
+ *
+ * Building one is not cheap: a fresh cel-js `Environment` clones the global
+ * registry and then registers the whole stdlib, the null comparisons and the
+ * temporal overloads one signature at a time. The runtime authoring gate runs
+ * the expression passes over the WHOLE stack on every metadata publish, and
+ * each expression asks for up to three of these envs. Measured on the
+ * showcase (one object publish): 903 builds for 97 distinct inputs, about
+ * 0.5 s of the publish request on an idle box, before this cache.
+ *
+ * Sharing an env is sound because nothing registers on one after it is built:
+ * every caller only `parse`s and `check`s against it, and neither changes
+ * what the env declares. ⛔ A new caller that registers on the returned env
+ * would leak that declaration into every later check with the same inputs —
+ * build a fresh one with {@link createTypedEnv} instead.
+ *
+ * Bounded so a long-lived process that sees many distinct field maps keeps a
+ * fixed footprint; the limit sits well above the distinct inputs one gate
+ * pass over the showcase asks for (97).
+ */
+const TYPED_ENV_CACHE = new Map<string, Environment>();
+const TYPED_ENV_CACHE_LIMIT = 512;
+
+/** {@link buildTypedEnv}'s uncached body: a fresh env for these inputs. */
+function createTypedEnv(
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  temporal: TemporalTyping,
+  recordRootTypes: Readonly<Record<string, FieldCelType>> | undefined,
 ): Environment {
   // `temporal` picks what a `date`/`datetime` field is declared as — see
   // {@link TemporalTyping}.
@@ -1522,12 +1572,15 @@ const CEL_NO_MATCHING_OVERLOAD_CODE = 'no_matching_overload';
 /**
  * A verdict of {@link firstDateTextCall}: the call as written, the date field
  * it is handed as written, and the call rewritten with that field parsed by
- * `date(…)` first.
+ * `date(…)` first — for `timestamp(<date-only field>)`, `date(…)` in place of
+ * the call, with `shift`, the whole-day shift that keeps the result a date
+ * (`isoDate(addDays(<field>, N))`).
  */
 export interface DateTextCall {
   readonly call: string;
   readonly reference: string;
   readonly rewrite: string;
+  readonly shift?: string;
 }
 
 /**
@@ -1558,11 +1611,23 @@ export interface DateTextCall {
  * message prescribes is proven, not guessed. Only the date fields are typed;
  * every other field stays `dyn`. Returns `null` when the source does not
  * parse or no call qualifies: anything else is another check's to report.
+ *
+ * [#34363] One call checks clean on the text and still faults on it:
+ * `timestamp(<field>)`, the string overload, handed a `date` field
+ * (`dateOnlyFields`, by name). Its text is `YYYY-MM-DD`, and `timestamp()`
+ * parses only a full RFC 3339 instant: the evaluator answers `timestamp()
+ * requires a string in ISO 8601 format` on every row, and `timestamp(null)`
+ * finds no overload. A `datetime` field's text IS such an instant, so it is
+ * not asked. There is no `timestamp(google.protobuf.Timestamp)` overload to
+ * wrap the field for, so the rewrite is `date(<field>)` in place of the call,
+ * and `shift` carries the whole-day shift the stdlib teaches,
+ * `isoDate(addDays(<field>, N))`, which reads the date text as it is.
  */
 export function firstDateTextCall(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
+  dateOnlyFields: ReadonlySet<string> = new Set(),
 ): DateTextCall | null {
   if (typeof source !== 'string' || !source.trim()) return null;
   const dateFields: Record<string, FieldCelType> = {};
@@ -1572,11 +1637,14 @@ export function firstDateTextCall(
     any ||= t === 'timestamp';
   }
   if (!any) return null;
+  const anyDateOnly = [...dateOnlyFields].some((name) => dateFields[name] === 'timestamp');
   try {
     const env = buildTypedEnv(dateFields, scope, 'text');
     const parsed = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
-    // The whole expression checking clean is the common case: nothing to find.
-    if ((parsed.check?.() as { valid?: boolean } | undefined)?.valid !== false) return null;
+    // The whole expression checking clean is the common case: nothing to find,
+    // unless a date-only field can reach `timestamp()`, which checks clean.
+    const wholeFaulted = (parsed.check?.() as { valid?: boolean } | undefined)?.valid === false;
+    if (!wholeFaulted && !anyDateOnly) return null;
     /** The check of one printed sub-expression: `true` clean, else the fault's code. */
     const checkOf = (node: unknown): true | string | undefined => {
       const r = env.parse(serialize(node as Parameters<typeof serialize>[0])).check?.() as
@@ -1601,8 +1669,24 @@ export function firstDateTextCall(
         : v.op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
           ? [args[1], ...(args[2] as unknown[])]
           : null;
+      // [#34363] `timestamp(<date-only field>)`: clean on the text, faults on it.
+      if (v.op === 'call' && Array.isArray(args) && args[0] === 'timestamp' && operands?.length === 1) {
+        const ref = typedFieldRef(operands[0], scope);
+        if (ref && dateFields[ref.name] === 'timestamp' && dateOnlyFields.has(ref.name)) {
+          const rewrite = wrapInDate(operands[0] as CelNode);
+          if (checkOf(rewrite) === true) {
+            verdict = {
+              call: serialize(v as Parameters<typeof serialize>[0]),
+              reference: ref.written,
+              rewrite: serialize(rewrite as Parameters<typeof serialize>[0]),
+              shift: `isoDate(addDays(${ref.written}, N))`,
+            };
+            return;
+          }
+        }
+      }
       const reference = operands?.map(dateRef).find((r): r is string => r !== null);
-      if (reference && checkOf(v) === CEL_NO_MATCHING_OVERLOAD_CODE) {
+      if (wholeFaulted && reference && checkOf(v) === CEL_NO_MATCHING_OVERLOAD_CODE) {
         // A fresh node around the same operands, each date field wrapped in `date(…)`.
         const wrap = (node: unknown): unknown => (dateRef(node) ? wrapInDate(node as CelNode) : node);
         const list = args as unknown[];

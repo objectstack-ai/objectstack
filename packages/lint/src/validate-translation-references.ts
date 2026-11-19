@@ -132,7 +132,9 @@
  * refusal catalogue: the hook must be one the stack defines (or a sibling
  * package's, through the artifact carrier), and the code one its `refusals`
  * declares — the body runner reads the key for a declared code and nothing
- * else. An unknown hook and an undeclared code are each an orphan.
+ * else. An unknown hook and an undeclared code are each an orphan. So is
+ * (#34374) a `hooks.<name>.texts.<key>` key over a text the hook's `texts`
+ * does not declare: `ctx.text` reads the key for a declared text only.
  *
  * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
  * toasts, are judged against the flow itself: `translateFlow` overlays a toast
@@ -184,6 +186,14 @@
  * id, one group keyed `all`) is what the tree serves where a package authors
  * no book of that name, so its keys resolve too.
  *
+ * ── Import mappings ──────────────────────────────────────────────────────
+ *
+ * `mappings.<name>` resolves against `Mapping.name`, the name
+ * `translateMapping` looks a served mapping up by, with the reports verdict:
+ * a name no package of this stack declares is an orphan,
+ * `translation-target-unknown` (`error`). The one leaf key below the name is
+ * the schema's `label` (strict).
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -229,7 +239,7 @@
  * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
  * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
  * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349),
- * `positions` and `permissions`, `reports`, and `books`.
+ * `positions` and `permissions`, `reports`, `books`, and `mappings`.
  *
  * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
  * answer different questions — what a sibling DECLARES, and what this package
@@ -247,7 +257,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spec';
-import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   deriveImplicitPackageBook,
@@ -289,6 +299,13 @@ const END_NODE_TYPE = 'end';
  * reason.
  */
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
+ * [ruling 6913660232] The nodes a `flows.<name>.records.*` key addresses: a
+ * `create_record` / `update_record` node, whose `fields` values the author may
+ * MARK as text. Local consts for {@link SCREEN_NODE_TYPE}'s reason.
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
 
 /**
  * The component a misplaced `components.<id>.items` key most often sits on: a
@@ -502,6 +519,13 @@ interface FlowFacts {
    */
   notices: Set<string>;
   /**
+   * [ruling 6913660232] Record-write node id → the fields whose value it
+   * MARKS as text (a `{ dialect: 'template', source }` envelope) — the only
+   * fields a `flows.<name>.records.<node_id>.fields.<field>` key translates.
+   * Every `create_record` / `update_record` node is listed, marking none or not.
+   */
+  records: Map<string, Set<string>>;
+  /**
    * The ids of the `approval` nodes — the nodes a
    * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
    */
@@ -550,6 +574,8 @@ interface Universe {
    */
   /** [#26170] Each hook's declared refusal codes, and (#33214) each code's declared reasons. */
   hooks: Map<string, Map<string, Set<string>>>;
+  /** [#34374] Each hook's declared text keys (`HookSchema.texts`) — what a `hooks.<name>.texts.<key>` key may name. */
+  hookTexts: Map<string, Set<string>>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -573,6 +599,8 @@ interface Universe {
   permissionSets: Set<string>;
   /** Report names (`Report.name`) a `reports.<name>` key may name. */
   reports: Set<string>;
+  /** Import-mapping names (`Mapping.name`) a `mappings.<name>` key may name. */
+  mappings: Set<string>;
   /**
    * Book name (`Book.name`) → the group `key`s a `books.<name>.groups.<key>`
    * key may name; the implicit per-package book included (#26690).
@@ -1614,6 +1642,7 @@ function buildUniverse(stack: AnyRec): Universe {
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
     const notices = new Set<string>();
+    const records = new Map<string, Set<string>>();
     const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
@@ -1630,6 +1659,14 @@ function buildUniverse(stack: AnyRec): Universe {
         }
         if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
         if (nodeType === SAVE_NOTICE_NODE_TYPE) notices.add(nodeId);
+        if (nodeType && RECORD_WRITE_NODE_TYPES.has(nodeType) && !records.has(nodeId)) {
+          const marked = new Set<string>();
+          const fields = isRec(node.config) ? asRecord(node.config.fields) : {};
+          for (const [fieldName, value] of Object.entries(fields)) {
+            if (isFlowTextEnvelopeShaped(value)) marked.add(fieldName);
+          }
+          records.set(nodeId, marked);
+        }
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1649,7 +1686,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, notices, approvals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, notices, records, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -1666,6 +1703,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // the artifact carrier; the declaration this leg is JUDGING keeps the slot,
   // the flows' decision.
   const hooks = new Map<string, Map<string, Set<string>>>();
+  const hookTexts = new Map<string, Set<string>>();
   const collectHookRecord = (hook: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const hookName = strName(hook.name);
     if (!hookName) return;
@@ -1675,6 +1713,8 @@ function buildUniverse(stack: AnyRec): Universe {
       codes.set(code, new Set(Object.keys(asRecord(isRec(entry) ? entry.reasons : undefined))));
     }
     hooks.set(hookName, codes);
+    // [#34374] The text keys `hooks.<name>.texts.<key>` may name.
+    hookTexts.set(hookName, new Set(Object.keys(asRecord(hook.texts))));
   };
   for (const hook of recordsOf(stack.hooks)) collectHookRecord(hook, { ownDeclaration: true });
   for (const hook of artifactProvidedRecords(stack, 'hooks')) {
@@ -1750,6 +1790,8 @@ function buildUniverse(stack: AnyRec): Universe {
   const permissionSets = namesOf('permissions');
   // `reports` carries disposition `concat` too, so a sibling's reports resolve.
   const reports = namesOf('reports');
+  // `mappings` carries disposition `concat` too, so a sibling's mappings resolve.
+  const mappings = namesOf('mappings');
 
   // ── Doc books: the names `books.<name>` may name, and their group keys (#26690) ──
   //
@@ -1783,6 +1825,7 @@ function buildUniverse(stack: AnyRec): Universe {
     dashboards,
     flows,
     hooks,
+    hookTexts,
     globalActions,
     actionOwners,
     picklists,
@@ -1790,6 +1833,7 @@ function buildUniverse(stack: AnyRec): Universe {
     positions,
     permissionSets,
     reports,
+    mappings,
     books,
     pages,
   };
@@ -2283,11 +2327,12 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         });
       }
 
-      // ── positions.<name> / permissions.<name> / reports.<name> ────────
+      // ── positions.<name> / permissions.<name> / reports.<name> / mappings.<name> ──
       const namedItemGroups = [
         { group: 'positions', noun: 'position', known: universe.positions, hint: "Match the key to a position's `name`, or drop it." },
         { group: 'permissions', noun: 'permission set', known: universe.permissionSets, hint: "Match the key to a permission set's `name`, or drop it." },
         { group: 'reports', noun: 'report', known: universe.reports, hint: "Match the key to a report's `name`, or drop it." },
+        { group: 'mappings', noun: 'import mapping', known: universe.mappings, hint: "Match the key to an import mapping's `name`, or drop it." },
       ] as const;
       for (const { group, noun, known, hint } of namedItemGroups) {
         for (const name of Object.keys(asRecord(rawData[group]))) {
@@ -2466,6 +2511,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Save-notice translations are keyed by the \`id\` of a \`save_notice\` node.`,
           );
         }
+        // ── flows.<name>.records.<node_id>.fields.<field> (ruling 6913660232) ──
+        for (const [nodeId, rawRecord] of Object.entries(asRecord(rawFlow.records))) {
+          const marked = flow.records.get(nodeId);
+          if (!marked) {
+            const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}"`,
+              `${flowPath}.records.${nodeId}`,
+              nodeType
+                ? `Translations are keyed to record write "${nodeId}", which flow "${flowName}" declares as ` +
+                  `${/^[aeiou]/.test(nodeType) ? 'an' : 'a'} \`${nodeType}\` node, not a \`create_record\` or ` +
+                  `\`update_record\`, so nothing resolves this key.`
+                : `Translations are keyed to record write "${nodeId}", a node id flow "${flowName}" does not ` +
+                  `declare, so the text it names keeps its authored language.` +
+                  suggest(nodeId, flow.records.keys()),
+              `Record-write translations are keyed by the \`id\` of a \`create_record\` or \`update_record\` node.`,
+            );
+            continue;
+          }
+          for (const fieldName of Object.keys(asRecord(isRec(rawRecord) ? rawRecord.fields : undefined))) {
+            if (marked.has(fieldName)) continue;
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}" · field "${fieldName}"`,
+              `${flowPath}.records.${nodeId}.fields.${fieldName}`,
+              `Translations are keyed to field "${fieldName}" of record write "${nodeId}" in flow ` +
+                `"${flowName}", whose \`fields\` value there is not marked as text, so nothing resolves this ` +
+                `key: only a \`{ dialect: 'template', source }\` value is written in the organization's language, ` +
+                `and a bare string is a value written as it is spelled.` +
+                suggest(fieldName, marked),
+              `Mark the value as text — \`{ dialect: 'template', source: '…' }\` — or drop the key.`,
+            );
+          }
+        }
         // ── flows.<name>.approvals.<node_id> ──────────────────────────────
         for (const nodeId of Object.keys(asRecord(rawFlow.approvals))) {
           if (flow.approvals.has(nodeId)) continue;
@@ -2496,7 +2574,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · hook "${hookName}"`,
             hookPath,
             `Translations are keyed to hook "${hookName}", which this stack does not define, so its ` +
-              `refusals keep their declared messages.` +
+              `refusals and texts keep their declared messages.` +
               suggest(hookName, universe.hooks.keys()),
             `Match the key to a hook's \`name\`, or drop it.`,
           );
@@ -2535,6 +2613,23 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(code, declared.keys()),
             `Refusal translations are keyed by a code the hook's \`refusals\` declares; declare it there, ` +
               `or drop the key.`,
+          );
+        }
+        // ── hooks.<name>.texts.<key> (#34374) ─────────────────────────────
+        const texts = universe.hookTexts.get(hookName) ?? new Set<string>();
+        for (const key of Object.keys(asRecord(rawHook.texts))) {
+          if (texts.has(key)) continue;
+          orphan(
+            `${inLocale} · hook "${hookName}" · text "${key}"`,
+            `${hookPath}.texts.${key}`,
+            texts.size === 0
+              ? `Translations are keyed to text "${key}", but hook "${hookName}" declares no \`texts\`, so ` +
+                `nothing resolves this key.`
+              : `Translations are keyed to text "${key}", a key hook "${hookName}" does not declare under ` +
+                `\`texts\`, so nothing resolves this key.` +
+                suggest(key, texts),
+            `Text translations are keyed by a key the hook's \`texts\` declares; declare it there, or drop ` +
+              `the key.`,
           );
         }
       }
@@ -2655,8 +2750,11 @@ interface ActionEntryContext {
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
  *   | `preflight.fields.<path>`           | `preflight.fields[].path`            | `resolveActionPreflight`        |
+ *   | `resultDialog.columns.<path>.<col>` / `preflight.columns.<path>.<col>` | that field's `columns[].path` | `resolveActionResultDialog` / `resolveActionPreflight` |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
+ *   | `refusals.<CODE>[.reasons.<REASON>]` | the action's `refusals` codes (and each code's `reasons`) | `resolveActionRefusal` (#34273) |
+ *   | `texts.<key>`                       | the action's `texts` keys            | `buildActionTextSurface` (#34374 PR2) |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
@@ -2684,8 +2782,100 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
   checkActionPreflightFields(findings, ctx);
+  checkActionAnswerTableColumns(findings, ctx, 'resultDialog');
+  checkActionAnswerTableColumns(findings, ctx, 'preflight');
   checkActionSubmitText(findings, ctx);
   checkActionCancelText(findings, ctx);
+  checkActionRefusals(findings, ctx);
+  checkActionTexts(findings, ctx);
+}
+
+/**
+ * [#34374 PR2] `texts.<key>` — the translations of the action's declared
+ * texts (`ActionSchema.texts`). The action body runner
+ * (`buildActionTextSurface`, `@objectstack/runtime`) reads them only for a key
+ * the action declares, so any other key is read by nothing: the bundle cannot
+ * add a text, only translate one — the hook texts' rule
+ * (`hooks.<hook>.texts.*`), in the action vocabulary.
+ */
+function checkActionTexts(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawTexts = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.texts : undefined);
+  if (Object.keys(rawTexts).length === 0) return;
+  const keys = new Set(Object.keys(asRecord(ctx.action.texts)));
+  for (const key of Object.keys(rawTexts)) {
+    if (keys.has(key)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · text "${key}"`,
+      path: `${ctx.path}.texts.${key}`,
+      message:
+        keys.size > 0
+          ? `Translations are keyed to text "${key}", a key ${ctx.subject} does not declare under ` +
+            `\`texts\`, so nothing resolves this key.` + suggest(key, keys)
+          : `Translations are keyed to text "${key}", but ${ctx.subject} declares no \`texts\`, ` +
+            `so nothing resolves this key.`,
+      hint:
+        `Text translations are keyed by a key the action's \`texts\` declares; declare it there, ` +
+        `or drop the key.`,
+    });
+  }
+}
+
+/**
+ * [#34273] `refusals.<CODE>` and `refusals.<CODE>.reasons.<REASON>` — the
+ * translations of the action's refusal catalogue (`ActionSchema.refusals`).
+ * The action body runner (`resolveActionRefusal`, `@objectstack/runtime`)
+ * reads them only for a code the catalogue declares, and a reason only under
+ * a code that declares it, so any other key is read by nothing: the bundle
+ * cannot add a refusal, only translate one — the hook catalogue's rule
+ * (`hooks.<hook>.refusals.*`), in the action vocabulary.
+ */
+function checkActionRefusals(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawRefusals = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.refusals : undefined);
+  if (Object.keys(rawRefusals).length === 0) return;
+  const declared = asRecord(ctx.action.refusals);
+  const codes = new Set(Object.keys(declared));
+  for (const [code, rawRefusal] of Object.entries(rawRefusals)) {
+    if (!codes.has(code)) {
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · refusal "${code}"`,
+        path: `${ctx.path}.refusals.${code}`,
+        message:
+          codes.size > 0
+            ? `Translations are keyed to refusal "${code}", a code ${ctx.subject} does not declare under ` +
+              `\`refusals\`, so nothing resolves this key.` + suggest(code, codes)
+            : `Translations are keyed to refusal "${code}", but ${ctx.subject} declares no \`refusals\`, ` +
+              `so nothing resolves this key.`,
+        hint:
+          `Refusal translations are keyed by a code the action's \`refusals\` declares; declare it there, ` +
+          `or drop the key.`,
+      });
+      continue;
+    }
+    const entry = declared[code];
+    const reasons = new Set(Object.keys(asRecord(isRec(entry) ? entry.reasons : undefined)));
+    for (const reason of Object.keys(asRecord(isRec(rawRefusal) ? rawRefusal.reasons : undefined))) {
+      if (reasons.has(reason)) continue;
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · refusal "${code}" · reason "${reason}"`,
+        path: `${ctx.path}.refusals.${code}.reasons.${reason}`,
+        message:
+          reasons.size > 0
+            ? `Translations are keyed to reason "${reason}", a reason refusal "${code}" of ${ctx.subject} does ` +
+              `not declare under \`reasons\`, so nothing resolves this key.` + suggest(reason, reasons)
+            : `Translations are keyed to reason "${reason}" of refusal "${code}", but ${ctx.subject} declares ` +
+              `no \`reasons\` under that code, so nothing resolves this key.`,
+        hint:
+          `Reason translations are keyed by a reason the code's \`reasons\` declares; declare it there, or ` +
+          `drop the key.`,
+      });
+    }
+  }
 }
 
 /**
@@ -3118,6 +3308,78 @@ function checkActionPreflightFields(findings: TranslationRefFinding[], ctx: Acti
             `so nothing reads this label.`,
       hint: `Match the key to a declared preflight field's literal \`path\` (dots included), or drop it.`,
     });
+  }
+}
+
+/**
+ * [#34652] `resultDialog.columns.<path>.<column_path>` and
+ * `preflight.columns.<path>.<column_path>` — a table field's column header
+ * labels, keyed by the LITERAL `path` of a field the block's `fields[]`
+ * declares and then the LITERAL `path` of one of that field's `columns[]`
+ * (dots included at both levels).
+ *
+ * The resolvers map over the declared fields and, inside a field, over its
+ * declared `columns[]`, looking each header up by those two paths; a field
+ * path no row declares, a field that declares no `columns` (any format but
+ * `table`), or a column path the field's `columns[]` does not list is never
+ * read.
+ */
+function checkActionAnswerTableColumns(
+  findings: TranslationRefFinding[],
+  ctx: ActionEntryContext,
+  block: 'resultDialog' | 'preflight',
+): void {
+  const rawBlock = isRec(ctx.rawAction) ? ctx.rawAction[block] : undefined;
+  const rawColumns = asRecord(isRec(rawBlock) ? rawBlock.columns : undefined);
+  const rawFieldPaths = Object.keys(rawColumns);
+  if (rawFieldPaths.length === 0) return;
+
+  const declaredBlock = isRec(ctx.action[block]) ? ctx.action[block] : undefined;
+  const tables = new Map<string, Set<string>>();
+  for (const field of declaredBlock && Array.isArray(declaredBlock.fields) ? declaredBlock.fields : []) {
+    if (!isRec(field) || typeof field.path !== 'string' || !Array.isArray(field.columns)) continue;
+    const columnPaths = new Set<string>();
+    for (const column of field.columns) {
+      if (isRec(column) && typeof column.path === 'string') columnPaths.add(column.path);
+    }
+    tables.set(field.path, columnPaths);
+  }
+
+  const noun = block === 'resultDialog' ? 'result' : 'preflight';
+  for (const fieldPath of rawFieldPaths) {
+    const fieldMember = `${ctx.path}.${block}.columns${memberPath(fieldPath)}`;
+    const columns = tables.get(fieldPath);
+    if (!columns) {
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · ${noun} table "${fieldPath}"`,
+        path: fieldMember,
+        message: !declaredBlock
+          ? `Headers are keyed to ${noun} field "${fieldPath}", but ${ctx.subject} declares no ` +
+            `\`${block}\`, so nothing reads them.`
+          : `Headers are keyed to ${noun} field "${fieldPath}", but ${ctx.subject}'s \`${block}.fields\` ` +
+            `has no \`format: 'table'\` field at that path, so they are never shown.` +
+            suggest(fieldPath, tables.keys()),
+        hint:
+          `Key the headers by the literal \`path\` of a table field (dots included), or drop them.`,
+      });
+      continue;
+    }
+    for (const columnPath of Object.keys(asRecord(rawColumns[fieldPath]))) {
+      if (columns.has(columnPath)) continue;
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · ${noun} table "${fieldPath}" · column "${columnPath}"`,
+        path: `${fieldMember}${memberPath(columnPath)}`,
+        message:
+          `A header is keyed to column "${columnPath}" of ${noun} table "${fieldPath}", which its ` +
+          `\`columns\` does not list, so it is never shown.` +
+          suggest(columnPath, columns),
+        hint: `Match the key to a declared column's literal \`path\` (dots included), or drop it.`,
+      });
+    }
   }
 }
 

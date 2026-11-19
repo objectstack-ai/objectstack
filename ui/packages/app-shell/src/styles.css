@@ -233,4 +233,18 @@
     box-shadow: none !important;
     border-color: #ccc !important;
   }
+
+  /* 7. Paper is light whatever the theme (objectstack#34446). The theme's
+   *    `.dark { color-scheme: dark }` (`@object-ui/components` index.css)
+   *    also darkens the CANVAS, the colour the browser paints under a
+   *    transparent root, and the canvas is what fills the sheet: the `@page`
+   *    margin band, and on a screen that is not a print page the whole sheet,
+   *    since rule 6 above leaves every box transparent. With "Background
+   *    graphics" on, Chromium printed that canvas as rgb(18, 18, 18): a dark
+   *    12 mm frame around a print page, black text on a dark sheet for a list.
+   *    A light colour scheme on paper makes the canvas white. The screen keeps
+   *    its dark scheme; this rule is inside `@media print`. */
+  .dark {
+    color-scheme: light;
+  }
 }

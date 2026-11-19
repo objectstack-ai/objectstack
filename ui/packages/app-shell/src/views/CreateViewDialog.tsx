@@ -61,7 +61,7 @@ import {
   PRIMARY_DATE_PREFERRED,
   END_DATE_PREFERRED,
   type FieldOption,
-} from '@object-ui/plugin-view';
+} from '@object-ui/plugin-view/core';
 import {
   LayoutGrid,
   KanbanSquare,
@@ -72,6 +72,7 @@ import {
   Map as MapIcon,
   BarChart3,
   ListTree,
+  CalendarClock,
   AlertCircle,
 } from 'lucide-react';
 
@@ -149,6 +150,7 @@ function buildViewTypeMeta(t: (k: string) => string): ViewTypeMeta[] {
     map:      { icon: MapIcon,          label: t('console.objectView.viewTypeMap'),      description: t('console.objectView.viewTypeMapDesc') },
     chart:    { icon: BarChart3,        label: t('console.objectView.viewTypeChart'),    description: t('console.objectView.viewTypeChartDesc') },
     tree:     { icon: ListTree,         label: t('console.objectView.viewTypeTree'),     description: t('console.objectView.viewTypeTreeDesc') },
+    timesheet: { icon: CalendarClock,   label: t('console.objectView.viewTypeTimesheet'), description: t('console.objectView.viewTypeTimesheetDesc') },
   };
   return (Object.entries(meta) as [ListViewVisualization, Omit<ViewTypeMeta, 'type'>][])
     .map(([type, row]) => ({ type, ...row }));
@@ -450,6 +452,30 @@ const REQUIRED_FIELDS_BY_TYPE: Record<string, RequiredFieldDef[]> = {
         f.rawType === 'tree' ||
         f.rawType === 'lookup' ||
         f.rawType === 'master_detail',
+    },
+  ],
+  // objectstack#34382 — the dialog picks ONE row field (`rowFields` is a list
+  // of one to three; more are added in the view's settings), the date field
+  // and the numeric value field the cells edit.
+  timesheet: [
+    {
+      key: 'rowFields',
+      i18nKey: 'console.objectView.timesheetRowField',
+      helpI18nKey: 'console.objectView.timesheetRowFieldHelp',
+      list: true,
+    },
+    {
+      key: 'dateField',
+      i18nKey: 'console.objectView.timesheetDateField',
+      helpI18nKey: 'console.objectView.timesheetDateFieldHelp',
+      filter: (f) => f.type === 'date',
+      preferred: PRIMARY_DATE_PREFERRED,
+    },
+    {
+      key: 'valueField',
+      i18nKey: 'console.objectView.timesheetValueField',
+      helpI18nKey: 'console.objectView.timesheetValueFieldHelp',
+      filter: (f) => f.rawType === 'number' || f.rawType === 'currency' || f.rawType === 'percent',
     },
   ],
   // grid has no strictly required fields at create time

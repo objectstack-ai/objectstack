@@ -36,6 +36,7 @@ import {
   isIndexDriftOp,
   parseIndexDdl,
   planDeclaredRenames,
+  latestPerDirectiveOf,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -52,6 +53,7 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport, remoteReadableIdsSemiJoin, type RemoteTenantScope } from './remote-transport.js';
+import { planRelaxedColumnDefinition } from './remote-relax-not-null.js';
 // [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
 // shared with the local face this class inherits, `driver-memory` and `driver-mongodb`.
 import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
@@ -602,14 +604,16 @@ function refuseRemoteDeferredDdl(): never {
  *
  * The entries that are DDL this transport can send as it stands: `drop_index`,
  * `create_index`, `recreate_index` and `replace_unique_index` (portable index
- * DDL on every dialect), and `drop_column` (`ALTER TABLE … DROP COLUMN`, which
- * SQLite and libSQL support since 3.35). A column's indexes go with it, in the
+ * DDL on every dialect), `drop_column` (`ALTER TABLE … DROP COLUMN`, which
+ * SQLite and libSQL support since 3.35), and `relax_not_null` (libSQL's own
+ * `ALTER TABLE … ALTER COLUMN … TO …`, #33724). A column's indexes go with it, in the
  * same transaction, as they do on PostgreSQL and in the local face's SQLite
- * table rebuild. Every other column entry (nullability, width, a dropped
- * DEFAULT) needs that rebuild, which this transport has no copy of, so it is
+ * table rebuild. Every other column entry (a tightened NOT NULL, a width, a
+ * dropped DEFAULT) needs that rebuild, which this transport has no copy of, so it is
  * reported `skipped` and logged, as the in-place arm reports an op its dialect
  * cannot perform. Each entry is reported `applied` only once a read-back shows
- * the physical schema in its target state: the column gone, the index name
+ * the physical schema in its target state: the column gone, the column
+ * nullable with the type and the default it had, the index name
  * gone, or the index present with the uniqueness and the key columns, in
  * order, the entry asked for.
  *
@@ -684,7 +688,12 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   create_index: 'applied',
   recreate_index: 'applied',
   replace_unique_index: 'applied',
-  relax_not_null: 'needs-table-rebuild',
+  // [#33724] Ruling 6915086281 (letter A): relaxed in place with libSQL's
+  // `ALTER TABLE … ALTER COLUMN … TO …`, never by a table rebuild. Relax ONLY:
+  // that statement does not revalidate existing rows, so a tightening through
+  // it would leave violating rows in place; the tightening, the widths and the
+  // dropped DEFAULT keep the rebuild answer below.
+  relax_not_null: 'applied',
   tighten_not_null: 'needs-table-rebuild',
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
@@ -1140,9 +1149,10 @@ export const REMOTE_FACE_ANSWERS = {
   // `false` here (arming is refused), so nothing short-circuits it.
   applyPublishedColumnChanges: 'inherited',
   // [#33724] The install's NOT NULL relax: the same inherited reading of this
-  // face's own `detectManagedDrift` and `applyMigrationEntries`. A relax needs
-  // the SQLite table rebuild, which this transport does not run, so it comes
-  // back `skipped` with this face's reason, which the install logs.
+  // face's own `detectManagedDrift` and `applyMigrationEntries`, which relaxes
+  // the column in place (`ALTER TABLE … ALTER COLUMN … TO …`, ruling
+  // 6915086281) and reports it applied only on a read-back; a refused statement
+  // or a read-back that differs comes back `skipped` with its reason, logged.
   relaxDeclaredNotNull: 'inherited',
   planMediaColumnMove: 'refused',
   // [cloud#3652 D3] Declared renames: this face renames no column (the
@@ -2495,6 +2505,20 @@ export class TursoDriver extends SqlDriver {
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'find');
     if (this.isRemote) {
+      // [latest per group] The remote transport compiles its own reads and no
+      // window: a read handed the directive is refused before anything is
+      // read, never answered as an ordinary read. The engine refuses it first;
+      // this is the driver's own word for a caller that reaches it directly.
+      if (latestPerDirectiveOf(query) !== undefined) {
+        const err = new Error(
+          `find('${object}'): one row per group cannot run on the remote face of this driver, whose transport `
+          + 'compiles no window. The query was NOT run and nothing was read. A local or replica database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'find');
       const remoteQuery = this.toRemoteReadQuery(object, query, undefined, options);
       // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
@@ -3249,6 +3273,23 @@ export class TursoDriver extends SqlDriver {
   ): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
     if (this.isRemote) {
+      // [aggregate order and cut] The remote transport compiles its own
+      // aggregates and no ordered cut: a statement handed the engine's
+      // directive (`Symbol.for` key, as `driver-sql` reads it) is refused
+      // before anything is read, never answered uncut. The engine refuses it
+      // first; this is the driver's own word for a caller that reaches it
+      // directly.
+      if ((query as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.driver.aggregate.orderCut')] !== undefined) {
+        const err = new Error(
+          `aggregate('${object}'): ordered and cut groups cannot run on the remote face of this driver, whose `
+          + 'transport compiles no ordered cut. The query was NOT run and nothing was read. A local or replica '
+          + 'database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'aggregate');
       // [#20424] The caller's own query is what the fault is attributed
       // against, as `SqlDriver.aggregate` does locally: its groupBy and
@@ -4770,7 +4811,7 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Apply drift entries. [#23816] On the REMOTE face, through the libSQL
-   * client: the index entries and `drop_column`, each in one `write` batch so
+   * client: the index entries, `drop_column` and `relax_not_null` (#33724), each in one `write` batch so
    * it lands whole or not at all, and each reported `applied` only once a
    * read-back shows its target state (see "Remote schema drift" at the top of
    * this file for which entries, and why only those). The contract is the
@@ -4831,8 +4872,10 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * [#23816] One column drift entry on the REMOTE face. `drop_column` only:
-   * `ALTER TABLE … DROP COLUMN`, preceded in the same transaction by a
+   * [#23816] One column drift entry on the REMOTE face: `drop_column`, and
+   * [#33724] `relax_not_null` ({@link applyRemoteRelaxNotNull}).
+   *
+   * `drop_column` is `ALTER TABLE … DROP COLUMN`, preceded in the same transaction by a
    * `DROP INDEX` of every index keyed on the column, since SQLite refuses to
    * drop a column an index still uses. That is the outcome the other dialects
    * reach by themselves (PostgreSQL drops the column's indexes, the local
@@ -4845,6 +4888,7 @@ export class TursoDriver extends SqlDriver {
    * {@link REMOTE_DRIFT_OP_ANSWERS} [#23925]. The guard below narrows the type.
    */
   private async applyRemoteColumnDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
+    if (op.type === 'relax_not_null') return this.applyRemoteRelaxNotNull(op.table, op.column);
     const column = (op as { column?: string }).column;
     if (op.type !== 'drop_column' || !column) return false;
     const hasColumn = async () => (await this.remoteLiveColumns(op.table)).some((c) => c.name === column);
@@ -4860,6 +4904,116 @@ export class TursoDriver extends SqlDriver {
       'write',
     );
     return !(await hasColumn());
+  }
+
+  /**
+   * [#33724] Relax one NOT NULL column in place on the REMOTE face, as the
+   * maintainer ruled (record 6915086281, letter A): libSQL's own
+   * `ALTER TABLE t ALTER COLUMN c TO <definition>`, which rewrites the column's
+   * definition in the stored `CREATE TABLE` and neither copies nor revalidates
+   * a row. No table rebuild, and no fall-back to one: a refusal is reported,
+   * never worked around (ruling parameter 4).
+   *
+   * - The definition sent is the column's own, cut out of the table's stored
+   *   `CREATE TABLE` with only its NOT NULL clause removed
+   *   ({@link planRelaxedColumnDefinition}), so the type, the DEFAULT and
+   *   every other clause the database holds are restated byte for byte and
+   *   nothing else is aligned on the way (parameter 5). A stored SQL that does
+   *   not say what that needs is a refusal before any statement.
+   * - The statement goes in one `write` batch with a check that the table's
+   *   stored SQL now reads exactly as planned; a mismatch fails the check's
+   *   statement, so the batch, the statement included, rolls back. libSQL
+   *   locates the old definition by its own reading of the stored text
+   *   (measured: a comma inside the definition, in a DEFAULT, a CHECK, a type's
+   *   width or a comment, makes it splice at that comma, and the result is
+   *   refused as unparseable); the check holds any splice the plan did not
+   *   predict out of the database.
+   * - Applied only on a read-back (parameter 3): the column, read again, is
+   *   nullable, with the type, the DEFAULT and the primary-key position it had
+   *   before. A refused batch or a read-back that differs is `false`, which
+   *   {@link applyMigrationEntries} reports `skipped`; the reason is logged.
+   *   A failed batch is called refused only when the stored table SQL, read
+   *   again, is still what it was: a transport error can arrive after the
+   *   server committed, and then the log says the outcome is unknown.
+   *
+   * A column that is gone, or already nullable, has nothing to relax here and
+   * is `false`, as `drop_column` answers a column that is already gone; the
+   * log says which, since the apply tells the operator its log says why.
+   */
+  private async applyRemoteRelaxNotNull(table: string, column: string): Promise<boolean> {
+    const columnState = async () => {
+      const [row] = await this.remoteCatalogRead(
+        'SELECT type, "notnull" AS nn, dflt_value, pk FROM pragma_table_info(?) WHERE name = ?',
+        [table, column],
+      );
+      return row ? { type: row.type, notNull: Number(row.nn) === 1, dflt: row.dflt_value ?? null, pk: Number(row.pk ?? 0) } : null;
+    };
+    const skip = (reason: string): false => {
+      this.logger.warn(`[schema-drift] relax_not_null on ${table}.${column} not applied on the Turso REMOTE transport: ${reason}`);
+      return false;
+    };
+    const before = await columnState();
+    if (!before) return skip('the table has no such column; nothing was sent');
+    if (!before.notNull) return skip('the column is already nullable; nothing was sent');
+    const storedSql = async () =>
+      (await this.remoteCatalogRead(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, [table]))[0]?.sql;
+    const stored = await storedSql();
+    if (typeof stored !== 'string') return skip('the database holds no CREATE TABLE text for the table');
+    const plan = planRelaxedColumnDefinition(stored, column);
+    if ('refusal' in plan) return skip(`${plan.refusal}; nothing was sent`);
+    const statement = `ALTER TABLE ${quoteRemoteIdentifier(table)} ALTER COLUMN ${quoteRemoteIdentifier(column)} TO ${plan.relaxed}`;
+    try {
+      await this.remoteTransport!.batch(
+        [
+          statement,
+          // The check: `json()` over a malformed argument is the error SQLite
+          // raises from a plain SELECT, and CASE evaluates it only on a mismatch.
+          {
+            sql: `SELECT CASE WHEN (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?) = ? THEN 1 ELSE json('relax check: stored table SQL differs') END`,
+            args: [table, plan.expectedTableSql],
+          },
+        ],
+        'write',
+      );
+    } catch (e: any) {
+      // A refusal rolls the batch back; a transport error may arrive after the
+      // server committed it. Only a fresh read tells the two apart, and when
+      // it cannot, the outcome is unknown and the next drift read decides.
+      const failure = e?.message ?? String(e);
+      let now: unknown;
+      try {
+        now = await storedSql();
+      } catch (readError: any) {
+        return skip(
+          `the batch carrying \`${statement}\` failed (${failure}), and its outcome is unknown: the stored table SQL ` +
+            `could not be read back (${readError?.message ?? readError}); the next drift read decides`,
+        );
+      }
+      // The comma class (ruling 6922037129, the limit accepted): libSQL ends
+      // the old definition at the first comma after the column's name, so a
+      // definition holding one is refused. The log names the class, and no
+      // rebuild follows; the column keeps its NOT NULL.
+      const commaClass = plan.definition.includes(',')
+        ? '. The column\'s stored definition holds a comma, and libSQL\'s ALTER COLUMN ends the old definition at the ' +
+          'first comma after the column\'s name, so this transport cannot relax it: the column keeps its NOT NULL'
+        : '';
+      return skip(
+        now === stored
+          ? `the batch carrying \`${statement}\` and its check that the stored table SQL reads as planned failed, ` +
+              `and the stored table SQL reads as before, so nothing landed: ${failure}${commaClass}`
+          : `the batch carrying \`${statement}\` failed (${failure}), and its outcome is unknown: the stored table SQL ` +
+              'no longer reads as before; the next drift read decides',
+      );
+    }
+    const after = await columnState();
+    const differs = !after
+      ? 'the column is gone'
+      : after.notNull
+        ? 'the column is still NOT NULL'
+        : after.type !== before.type || after.dflt !== before.dflt || after.pk !== before.pk
+          ? `the column reads back as ${JSON.stringify(after)}, not as ${JSON.stringify({ ...before, notNull: false })}`
+          : null;
+    return differs === null ? true : skip(`the statement ran, and the read-back differs: ${differs}`);
   }
 
   /**

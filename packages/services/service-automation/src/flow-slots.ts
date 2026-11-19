@@ -15,6 +15,17 @@
  * when a name gains or loses its second slot; {@link FlowSlotTable.add} and
  * {@link FlowSlotTable.remove} answer which keys moved.
  *
+ * [#33893; seat ruling 6884403301, amendment 7] A disable is reversible and
+ * moves no key. While the registry holds a name under two or more packages
+ * and the others are disabled (`coHeldByDisabled`), a package's lone slot of
+ * the name is filed, and stays, under its qualified key: the first holder
+ * the boot pull registers beside a disabled one, and the holder a disabled
+ * one's withdrawal leaves behind. Once the registry no longer holds the name
+ * twice (the disabled holder uninstalled), it folds back to the bare name
+ * ({@link FlowSlotTable.settle}) the first time the engine places it, fires it
+ * or reads its name: one keying rule, so a name one package holds is never
+ * read as shared.
+ *
  * Invariant (D4): a package-less slot never sits beside a package slot. A
  * package arriving for a name a package-less slot holds takes it over
  * ({@link FlowSlotTable.adopt}), and a package-less registration of a name one
@@ -65,8 +76,14 @@ export interface FlowKeyMove {
 
 /** The slots one engine holds, and the key each is filed under. */
 export class FlowSlotTable {
-    /** [M1] `heldByMany(name)`: the registry holds `name` under two or more packages (the resolver refuses it with no package). */
-    constructor(private readonly heldByMany?: (name: string) => boolean) {}
+    /**
+     * @param heldByMany [M1] the registry holds `name` under two or more packages (the resolver refuses it with no package).
+     * @param coHeldByDisabled [#33893] it does, and at most one of them is served: a lone package slot keeps its qualified key.
+     */
+    constructor(
+        private readonly heldByMany?: (name: string) => boolean,
+        private readonly coHeldByDisabled?: (name: string) => boolean,
+    ) {}
 
     private readonly byKey = new Map<string, FlowSlot>();
     /** name → (package id, `''` for none) → key */
@@ -98,12 +115,27 @@ export class FlowSlotTable {
         return size > 1 || (size === 1 && this.heldByMany?.(name) === true);
     }
 
+    /**
+     * [#33893] The name's lone slot, filed under its qualified key beside a
+     * disabled co-holder, goes back to the bare name once the registry no
+     * longer holds the name twice: the move answered, or none.
+     */
+    settle(name: string): FlowKeyMove[] {
+        const packages = this.byName.get(name);
+        if (packages?.size !== 1) return [];
+        const [[onlyPackage, onlyKey]] = [...packages];
+        if (onlyKey === name || this.heldByMany?.(name) === true) return [];
+        this.rekey(onlyKey, name);
+        packages.set(onlyPackage, name);
+        return [{ from: onlyKey, to: name }];
+    }
+
     /** Every key, in arrival order. */
     keys(): string[] {
         return [...this.byKey.keys()];
     }
 
-    /** File the slot `(packageId, name)`: its key, and the name's lone slot's move to its qualified key, if any. */
+    /** File the slot `(packageId, name)`: its key (qualified for the first one too when `coHeldByDisabled`), and the name's lone slot's move to its qualified key, if any. */
     add(slot: FlowSlot): { key: string; moved: FlowKeyMove[] } {
         const packages = this.byName.get(slot.name) ?? new Map<string, string>();
         const moved: FlowKeyMove[] = [];
@@ -116,14 +148,15 @@ export class FlowSlotTable {
                 moved.push({ from: onlyKey, to });
             }
         }
-        const key = packages.size === 0 || slot.packageId === null ? slot.name : qualifiedFlowKey(slot.packageId, slot.name);
+        const lone = packages.size === 0 && this.coHeldByDisabled?.(slot.name) !== true;
+        const key = lone || slot.packageId === null ? slot.name : qualifiedFlowKey(slot.packageId, slot.name);
         packages.set(slot.packageId ?? '', key);
         this.byName.set(slot.name, packages);
         this.byKey.set(key, slot);
         return { key, moved };
     }
 
-    /** Drop the slot `key` files: a name left with one slot files it under the bare name again (the move answered). */
+    /** Drop the slot `key` files: a name left with one slot files it under the bare name again (the move answered), [#33893] unless `coHeldByDisabled`. */
     remove(key: string): FlowKeyMove[] {
         const slot = this.byKey.get(key);
         if (!slot) return [];
@@ -137,6 +170,8 @@ export class FlowSlotTable {
         if (packages.size !== 1) return [];
         const [[onlyPackage, onlyKey]] = [...packages];
         if (onlyKey === slot.name) return [];
+        // [#33893] A disabled holder's slot leaving moves no key of the others.
+        if (this.coHeldByDisabled?.(slot.name) === true) return [];
         this.rekey(onlyKey, slot.name);
         packages.set(onlyPackage, slot.name);
         return [{ from: onlyKey, to: slot.name }];

@@ -117,7 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -171,6 +171,7 @@ import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, re
 import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
+import { requiredVisibleWhenFormulaIssue } from './required-visible-when-formula-issue.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -513,18 +514,6 @@ function isNullableField(def: AnyRec): boolean {
 }
 
 /**
- * object name → set of field names that may hold `null` (#4763).
- *
- * DECLARED fields only, like {@link buildFieldTypeIndex} and for a sharper
- * reason: this index feeds a BUILD-BREAKING verdict, so adding the injected
- * columns {@link buildFieldIndex} now resolves would turn `record.created_at`
- * comparisons into errors on stacks that ship today. Nullability there is also
- * genuinely per-column and not derivable from the existence plan — the driver
- * always populates `created_at`, while `owner_id` really can be NULL — so it
- * needs the registry's column definitions, not this module's guesses. Leaving
- * them out costs coverage, never a false error.
- */
-/**
  * [#29026] A `count` / `sum` roll-up summary is always valued: zero children is
  * zero. `@objectstack/objectql`'s `summaryEmptySetValue` is the authority — the
  * engine seeds a new parent row with it at create time
@@ -583,11 +572,32 @@ interface FlowBareNames {
  * and `updated_at` unconditionally, and driver-sql creates both on every
  * table it provisions (`PLATFORM_PROVISIONED_COLUMNS`, which adds the
  * primary key `id`; the registry never injects `id` into the field map, so
- * it has no entry here). The other injected columns are stamped only when
- * there is something to stamp: a system-context insert stores `NULL` in
- * `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and
- * `queue` (measured on the real engine), so they stay nullable. This package
- * may not import a runtime, so the two names are spelled here.
+ * it has no entry here). This package may not import a runtime, so the two
+ * names are spelled here.
+ *
+ * [#33435] Every other injected column can hold `null` where a flow or hook
+ * condition reads it, measured on the showcase over the real REST door and
+ * engine (sqlite, `single` posture), on all three ownership tiers:
+ *
+ * - `owner_id`, `created_by`, `updated_by`: a signed-in user's REST create
+ *   stamps all three, but a system-context insert stores `NULL` in each, a
+ *   system-context update leaves them so, and a seeded row keeps `created_by`
+ *   / `updated_by` `NULL` (seeds run before any user exists; the boot claims
+ *   only `owner_id`). Such rows fire record-triggered flows and every hook: a
+ *   `record.owner_id > 'a'` start condition failed the run on each system
+ *   insert ("no such overload: dyn<null> > string") and passed on the REST
+ *   create. A guest write and a queue park or release leave `owner_id` empty
+ *   by design (ADR-0138 D1, ADR-0142 D3).
+ * - `owning_business_unit_id`: nothing stamps it yet (ADR-0117 D1), so it is
+ *   `NULL` on every row, both tiers that carry it, every writer.
+ * - `queue`: `NULL` until a queue write names one (ADR-0142 D3); a REST create
+ *   naming none stores `NULL`.
+ * - `organization_id`: every stored row on driver-sql carried it, a
+ *   system-context insert included (stamped with the Default Organization;
+ *   the `isolated` posture refuses such a write with no organization, ADR-0131
+ *   D9), but a `beforeInsert` hook reads it `null` whoever writes (the driver
+ *   fills it after the hook chain), and the memory driver never stamps a
+ *   tenant column at all. Not every reachable row, so it stays nullable.
  */
 const PLATFORM_STAMPED_COLUMNS: ReadonlySet<string> = new Set(['created_at', 'updated_at']);
 
@@ -669,6 +679,17 @@ function hookReadsStampedRow(hookEvents: unknown): boolean {
     && hookEvents.every((e) => typeof e === 'string' && STAMPED_ROW_HOOK_EVENTS.has(e));
 }
 
+/**
+ * object name → set of field names that may hold `null` (#4763).
+ *
+ * The fields the objects AS READ carry, judged by their own keys
+ * ({@link isNullableField}): at `os build` the declared fields, at a runtime
+ * door the served ones, the injected system columns among them. [#33435] The
+ * flow and hook condition sites add the injected columns the objects as read
+ * do not carry ({@link buildInjectedNullableIndex}, {@link buildPreStampIndex}),
+ * so the build gives the door's verdict there; every other site judges this
+ * index alone.
+ */
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {
@@ -681,6 +702,81 @@ function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
     idx.set(name, nullable);
   }
   return idx;
+}
+
+/**
+ * [#33435] The injected system columns the platform injects on this object
+ * that the object AS READ does not carry as a field. `os build` reads the
+ * objects as authored, so there every injected column the author did not
+ * declare is here; a runtime door reads them as the registry SERVES them,
+ * where each one is already a declared field and nothing is here. A column the
+ * author declared keeps the author's keys and the author's verdict, at both.
+ */
+function injectedColumnsNotCarried(obj: AnyRec): string[] {
+  const carriedFieldNames = new Set(fieldEntries(obj).map(([fname]) => fname));
+  return Object.keys(injectedSystemColumnDefs(obj)).filter((fname) => !carriedFieldNames.has(fname));
+}
+
+/**
+ * [#33435] object name → the injected columns a stored row can hold `null` in
+ * ({@link PLATFORM_STAMPED_COLUMNS} says which ones it cannot), for the
+ * objects as read that do not carry them ({@link injectedColumnsNotCarried}).
+ * Read by the flow and hook condition sites only, beside
+ * {@link buildNullableFieldIndex}: a runtime door judges those two sites over
+ * the served objects, whose injected columns are `required: false` fields
+ * with no default, so this is what makes `os build` give the door's verdict
+ * there. Every other null-guard site (a validation rule, `requiredWhen`) is
+ * judged over the authored object at the door too, and keeps its declared
+ * fields only.
+ */
+function buildInjectedNullableIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const nullable = injectedColumnsNotCarried(obj).filter((fname) => !PLATFORM_STAMPED_COLUMNS.has(fname));
+    if (nullable.length > 0) idx.set(name, new Set(nullable));
+  }
+  return idx;
+}
+
+/**
+ * [#33435] object name → the platform-stamped columns
+ * ({@link PLATFORM_STAMPED_COLUMNS}) the object as read does not carry. Read
+ * only for a hook that can run before the stamp ({@link hookRunsBeforeStamp}):
+ * there `created_at` / `updated_at` are `null`, and the door judges them so
+ * over the served objects.
+ */
+function buildPreStampIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const stamped = injectedColumnsNotCarried(obj).filter((fname) => PLATFORM_STAMPED_COLUMNS.has(fname));
+    if (stamped.length > 0) idx.set(name, new Set(stamped));
+  }
+  return idx;
+}
+
+/**
+ * [#33435] Can this hook run before `sys_stamp_audit_insert` writes
+ * `created_at` / `updated_at`? A `beforeInsert` hook can, at any priority
+ * below the stamp's, and its condition then reads both as `null`.
+ */
+function hookRunsBeforeStamp(hookEvents: unknown): boolean {
+  return Array.isArray(hookEvents) && hookEvents.includes('beforeInsert');
+}
+
+/** Each object's set from both indexes, joined. */
+function joinNullableIndexes(a: Map<string, Set<string>>, b: Map<string, Set<string>>): Map<string, Set<string>> {
+  const joinedNullable = new Map<string, Set<string>>();
+  for (const [name, fields] of a) joinedNullable.set(name, new Set(fields));
+  for (const [name, fields] of b) {
+    const joinedFields = joinedNullable.get(name) ?? new Set<string>();
+    for (const fname of fields) joinedFields.add(fname);
+    joinedNullable.set(name, joinedFields);
+  }
+  return joinedNullable;
 }
 
 /**
@@ -1199,9 +1295,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
     '`resolveFieldRuleState` evaluates it with the host scope bound, the `current_user` binding ' +
     'ADR-0089 D1 gives every runtime record surface) — so the ' +
-    'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
-    '`visibleWhen` at all: the record still carries the value and every other reader still ' +
-    'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
+    'control is hidden in that one form while NO server-side gate hides anything by a field-level ' +
+    '`visibleWhen` (the write path reads one only to decide whether a `required` field must be ' +
+    'filled): the record still carries the value and every other reader still returns it, a SILENT ' +
+    'enforcement gap. Where no host publishes a scope (the console public ' +
     '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
     'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
     '`fallback: true`), leaving the field the test was meant to hide showing for everyone. ' +
@@ -1537,7 +1634,7 @@ function faultOutcomeOf(site: FaultSite): (ExprFaultOutcome & NullGuardOutcome) 
  * select option's own `visibleWhen`.
  */
 
-type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
+type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen' | 'visibleWhen';
 
 /** [#20078] A root a field-level predicate binds, with the record shape it binds. */
 interface FieldTraversalHolder {
@@ -1564,6 +1661,15 @@ const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
   'option visibleWhen':
     'The server REFUSES every write by an acting user that picks this option — an option gate it ' +
     'cannot evaluate refuses the write, naming the option, the field and the fault (ADR-0137 D2)',
+  // [ADR-0113 D1, as amended] Judged only on a `required` field: the server
+  // reads that field's own `visibleWhen` to decide whether the requirement
+  // applies, and a predicate it cannot evaluate counts as SHOWN. A warning,
+  // not a refusal: the field keeps exactly the unconditional `required` it had
+  // before the amendment, so nothing gets worse; only the waiver never happens.
+  visibleWhen:
+    'This field is `required`, and the server judges that requirement by this predicate on every ' +
+    'write; a predicate it cannot evaluate counts as SHOWN (ADR-0113 D1), so the field stays required ' +
+    'on every record, the ones the form hides it on included, and a user who cannot see it cannot save',
 };
 
 /**
@@ -2516,6 +2622,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
+  // [#33435] The flow and hook condition sites also judge the injected
+  // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
+  // stamped timestamps, wherever the objects as read do not carry them as
+  // fields: at `os build`, so it gives the verdict a runtime door gives over
+  // the served objects. Two runtime readers hand authored objects too and
+  // judge the same way: the MCP `validate_expression` tool at a flow condition
+  // (`judgeAuthoredSiteExpression` strips the injected columns), and a
+  // `publish-drafts` batch carrying a draft of the flow's or hook's own object
+  // (the pending-draft door: the draft body replaces the served object). Read off the objects as served, a tied field included: a column
+  // two packages tie on is carried, so it gets no verdict, as above.
+  const flowHookNullableIndex = joinNullableIndexes(nullableIndex, buildInjectedNullableIndex(servedObjects));
+  const preStampIndex = buildPreStampIndex(servedObjects);
   // [#33246] Read at a runtime publish door only: the build passes no write
   // type, so its null-guard verdicts are what they were.
   const platformStampedIndex = options.runtimeWriteType !== undefined
@@ -2734,11 +2852,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // [#33246] At a runtime door, leave out an ordering comparison over a
     // platform-stamped column ({@link isStampedComparisonFinding}). A caller
     // whose predicate can run before the stamp passes `false`.
-    { stampedComparisons = true }: { stampedComparisons?: boolean } = {},
+    // [#33435] `nullable`: the index the site judges against; a flow or hook
+    // condition passes `flowHookNullableIndex`. `beforeStamp`: a hook that can
+    // run before the stamp also judges the stamped columns the objects as read
+    // do not carry ({@link buildPreStampIndex}).
+    {
+      stampedComparisons = true,
+      nullable = nullableIndex,
+      beforeStamp = false,
+    }: { stampedComparisons?: boolean; nullable?: Map<string, Set<string>>; beforeStamp?: boolean } = {},
   ): void => {
     if (!objectName) return;
-    const nullableFields = nullableIndex.get(objectName);
-    if (!nullableFields || nullableFields.size === 0) return;
+    const nullableFields = new Set([
+      ...(nullable.get(objectName) ?? []),
+      ...(beforeStamp ? preStampIndex.get(objectName) ?? [] : []),
+    ]);
+    if (nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
     const stamped = stampedComparisons ? platformStampedIndex.get(objectName) : undefined;
@@ -2897,6 +3026,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     slot: FieldTraversalSlot,
     raw: unknown,
     holders: readonly FieldTraversalHolder[],
+    // [ADR-0113 D1, as amended] `warning` for the one slot whose fault the
+    // server answers with the pre-amendment `required` instead of a refusal.
+    severity: 'error' | 'warning' = 'error',
   ): void => {
     const source = celSourceOf(raw);
     if (!source) return;
@@ -2912,7 +3044,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           where,
           message: fieldTraversalMessage(slot, root, field, fieldType, [...related].sort(), owner),
           source,
-          severity: 'error',
+          severity,
         });
       }
     }
@@ -2985,11 +3117,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * registers, and a malformed envelope used to be stored verbatim and rendered
    * by `notify` as JSON with nothing said at any layer.
    *
+   * [#34451] `fieldTypes`: the field types of the object the flow's run binds
+   * as `record` — the object its conditions are typed against (the start
+   * node's `objectName`, else a time-relative flow's swept object) — passed
+   * only where that binding holds: a record-triggered flow or a sweep of the
+   * typed object, rebinding neither `record` nor `previous` (the caller's
+   * `valueEnvelopeFieldTypes`). Handed on
+   * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
+   * family alone reach the envelope, over its `record.<field>` /
+   * `previous.<field>` reads: `timestamp(record.<date field>)` faults on the
+   * `YYYY-MM-DD` text on every run. The engine's `registerFlow` passes the
+   * same hint (`valueEnvelopeRefusals`), so the two doors refuse one set.
+   * Absent (no typed object), the call is byte for byte what it was.
+   *
    * @returns whether the slot was refused on SHAPE, so the caller can skip the
    *   root judgment (#22565) — a value that is not an envelope has no source to
    *   read roots from.
    */
-  const checkDeclaredValue = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredValue = (
+    where: string,
+    raw: unknown,
+    fieldTypes?: Readonly<Record<string, string>>,
+  ): { refused: boolean } => {
     if (raw == null) return { refused: false };
     // `celSourceOf` — not a second read of `.source`: the same helper every
     // other slot in this file locates its finding with.
@@ -3000,7 +3149,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
       return { refused: true };
     }
-    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    const res = validateExpression(
+      'value',
+      raw as { dialect?: string; source?: string },
+      fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
+    );
     for (const e of res.errors) {
       issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
     }
@@ -3176,6 +3329,24 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       triggerKind,
       sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
     });
+    // [#34451] The value envelopes' typing holds on the same flows: where the
+    // run's `record` IS a row of the typed object — the flows a condition has
+    // a proven outcome on — and only while the flow rebinds neither root the
+    // typing reads (`celScope` spreads the run's variables over the context,
+    // so an assigned or output `record` / `previous` is what an envelope
+    // reads): `record` by any row of `collectFlowVariableNames` (a declared
+    // one too), `previous` by a NODE row only — the collector asked without
+    // `flow.variables` — since `seedRunVariables` sets `previous` over a
+    // declared variable of that name. Elsewhere (an inbound hook, a schedule,
+    // a flow a parent's `subflow` / `map` starts) `record` holds whatever the
+    // entrance handed the run, and the envelope is judged untyped. The
+    // engine's `registerFlow` stands down on the same set
+    // (`flow-registration-checks.ts` `flowRebindsRunRowRoots`).
+    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName
+      && !declaredVariables.has('record')
+      && !collectFlowVariableNames({}, graphs).has('previous')
+      ? fieldTypeIndex.get(objectName)
+      : undefined;
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
     // instead of the field: the type check never types them as the field.
@@ -3201,7 +3372,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
-      for (const name of nullableIndex.get(nullGuardObject) ?? []) {
+      for (const name of flowHookNullableIndex.get(nullGuardObject) ?? []) {
         if (!declaredVariables.has(name) && !screenFields.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) {
           nullGuardBare.add(name);
         }
@@ -3216,7 +3387,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       checkNullGuards(where, where, raw, nullGuardObject, flowFaultOutcome, {
         bareFields: nullGuardBare,
         ...(afterStart ? { presumed: nullGuardPresumed } : {}),
-      });
+      }, { nullable: flowHookNullableIndex });
     };
 
     /**
@@ -3403,7 +3574,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
             const from = issues.length;
-            if (!checkDeclaredValue(slotWhere, found.value).refused) {
+            if (!checkDeclaredValue(slotWhere, found.value, valueEnvelopeFieldTypes).refused) {
               refuseUnboundRoots(slotWhere, found.value, from, 'value');
             }
             continue;
@@ -4172,6 +4343,46 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ] as const) {
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
+      // [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` is a
+      // server concept now: the write path judges the requirement by it
+      // (`rule-validator.ts`, `evaluateRequiredWhenShown`) with the field-rule
+      // slots' binding, and a fault there counts as SHOWN. Two shapes the author
+      // can see at build time keep the field required where the form hides it,
+      // so both are WARNINGS, never refusals — the field keeps the requirement
+      // it had before the amendment, nothing gets worse:
+      //
+      //  - a read THROUGH a reference field: never hydrated at the field level,
+      //    so it faults on every row (the roots the server cannot bind —
+      //    `features`, `app`, `page`, the acting user — are already refused for
+      //    every field `visibleWhen` above, `FIELD_RULE_BOUND_ROOTS`);
+      //  - `storage.notNull`: the column refuses the null the waiver admits, so
+      //    a record outside the condition still cannot be created. A parse
+      //    refusal like the `requiredWhen` rider's would break every pre-17
+      //    source the `field-required-notnull-explicit` conversion stamped.
+      // Literal member reads, like the gates above, for the #5017 scan.
+      if (f.required === true && f.visibleWhen != null) {
+        const visibleWhere = `object '${objectName}' · field '${fname}' visibleWhen`;
+        refuseFieldTraversal(visibleWhere, 'visibleWhen', f.visibleWhen, fieldRuleHolders, 'warning');
+        if ((f.storage as AnyRec | undefined)?.notNull === true) {
+          issues.push({
+            where: visibleWhere,
+            message:
+              `Field '${fname}' is \`required\` with a \`visibleWhen\`, so a write the predicate hides it on ` +
+              `does not need it (ADR-0113 D1) — but it also declares \`storage.notNull: true\`, and the column ` +
+              `refuses that null: a record outside the condition still cannot be created. Drop ` +
+              `\`storage.notNull\` (the write contract alone keeps shown rows filled), or drop \`visibleWhen\` ` +
+              `if the field applies to every record.`,
+            source: celSourceOf(f.visibleWhen) ?? '',
+            severity: 'warning',
+          });
+        }
+        // A `formula` the predicate reads: a reminder that the server judges it
+        // on the formula value it computes at write time, and one the write
+        // path cannot compute keeps the field required on every write, shown
+        // by the form (`required-visible-when-formula-issue.ts`).
+        const formulaRead = objectName ? requiredVisibleWhenFormulaIssue(objectName, fname, f, fieldDefs) : undefined;
+        if (formulaRead) issues.push(formulaRead);
+      }
       judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });
     }
     // [#33100] A formula that reads its own value, itself or through the
@@ -4472,6 +4683,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // ({@link hookReadsStampedRow}): not on `beforeInsert`, `beforeFind` or
     // `afterFind`.
     const stampedComparisons = hookReadsStampedRow(hook.events);
+    // [#33435] …and every hook judges the injected columns a stored row can
+    // hold `null` in, and a `beforeInsert` one the stamped timestamps too.
+    const hookNullGuards = {
+      stampedComparisons,
+      nullable: flowHookNullableIndex,
+      beforeStamp: hookRunsBeforeStamp(hook.events),
+    };
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
@@ -4482,7 +4700,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         hook.object,
         undefined,
         undefined,
-        { stampedComparisons },
+        hookNullGuards,
       );
       continue;
     }
@@ -4517,7 +4735,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         target,
         undefined,
         undefined,
-        { stampedComparisons },
+        hookNullGuards,
       );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
@@ -4550,6 +4768,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // pages' action rows off an object write. Errors since #25680, a holeless
   // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
+  // [#34273] An action refusal sentence over declared `params` — the hook
+  // refusal's compile half, on the same collections the copy pass reads.
+  issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
 
   return issues;
 }

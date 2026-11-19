@@ -66,6 +66,7 @@ import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
+import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -91,6 +92,12 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const dataSource = useAdapter();
+  // objectstack#34807 — under draft preview the form reads its object
+  // definition through the draft overlay: a field only the draft declares is
+  // drawn disabled, and the proxy leaves it out of every create and update.
+  // Outside preview this is `dataSource` itself. The answer-warning claim below
+  // keeps the raw adapter.
+  const formDataSource = usePreviewFormDataSource(dataSource);
   const { objects, loading: metadataLoading } = useMetadata();
   const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
@@ -357,14 +364,14 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   if (!objectDef) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
+      <div className="flex h-full items-center justify-center p-4" data-testid="object-not-found">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Database className="h-6 w-6 text-muted-foreground" />
           </div>
           <EmptyTitle>{t('empty.objectNotFound')}</EmptyTitle>
           <EmptyDescription>
-            {t('empty.objectNotFoundDescription', { name: objectName })}
+            {t('console.objectView.objectNotFoundDescription', { objectName })}
           </EmptyDescription>
           <div className="mt-4">
             <Button variant="outline" onClick={() => navigate(baseUrl)}>
@@ -511,7 +518,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                     onCancel: handleCancel,
                     ...formChrome,
                   }}
-                  dataSource={dataSource ?? undefined}
+                  dataSource={formDataSource ?? undefined}
                 />
               </SuggestedFieldsContext.Provider>
             </SuggestedFieldChangesContext.Provider>

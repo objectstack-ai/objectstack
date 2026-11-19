@@ -97,12 +97,15 @@
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
+ *   objects.<name>._actions.<action>.resultDialog.columns.<path>.<column_path>
  *   objects.<name>._actions.<action>.preflight.fields.<path>
+ *   objects.<name>._actions.<action>.preflight.columns.<path>.<column_path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *                          / .cancelText (beside `confirmText` or a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* / .preflight.fields.<path>
+ *                          / .preflight.columns.<path>.<column_path>
  *                          (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -133,16 +136,23 @@
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
+ *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
+ *   hooks.<hook>.texts.<key>.message                           (#34374)
+ *   objects.<object>._actions.<action>.refusals.<CODE>.message  (#34273; and
+ *   globalActions.<action>.refusals.<CODE>.message, with `.reasons.<REASON>.message` under each)
+ *   objects.<object>._actions.<action>.texts.<key>.message     (#34374 PR2; and
+ *   globalActions.<action>.texts.<key>.message)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
  *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
+ *   mappings.<mapping>.label                (a named import mapping's label)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -172,7 +182,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
@@ -253,6 +263,7 @@ export interface ExpectedEntry {
     | 'position'
     | 'permission'
     | 'book'
+    | 'mapping'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -765,8 +776,9 @@ function pushActionParams(
 }
 
 /**
- * Emit `resultDialog.{title,description,acknowledge}` and
- * `resultDialog.fields.<path>` entries under an action's translation root.
+ * Emit `resultDialog.{title,description,acknowledge}`,
+ * `resultDialog.fields.<path>` and `resultDialog.columns.<path>.<column_path>`
+ * entries under an action's translation root.
  * Mirrors `ActionResultDialogTranslationSchema` in @objectstack/spec and the
  * client-side `actionResultDialog` resolver. Field entries are keyed by the
  * LITERAL result-field path (`"user.email"`) — the dot stays inside a single
@@ -794,6 +806,63 @@ function pushActionOutcomeMessages(
   }
 }
 
+/**
+ * [#34273] Emit `<action root>.refusals.<CODE>.message` for every entry an
+ * action's refusal catalogue declares (`ActionSchema.refusals`), and
+ * `….reasons.<REASON>.message` for each reason under it — seeded with the
+ * declared sentence, as {@link walkHookRefusals} seeds a hook's. The action
+ * body runner reads exactly that key (`actionRefusalMessageKey`) in the
+ * caller's locale, so each entry is one demand, under the action's own root:
+ * `objects.<object>._actions.<action>` or `globalActions.<action>`.
+ */
+function pushActionRefusals(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const refusals = action?.refusals;
+  if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) return;
+  for (const [code, entry] of Object.entries<any>(refusals)) {
+    pushOptional(out, [...actionRoot, 'refusals', code, 'message'], inlineText(entry?.message), kind, { objectName });
+    const reasons = entry?.reasons;
+    if (!reasons || typeof reasons !== 'object' || Array.isArray(reasons)) continue;
+    for (const [reason, sentence] of Object.entries<any>(reasons)) {
+      pushOptional(
+        out,
+        [...actionRoot, 'refusals', code, 'reasons', reason, 'message'],
+        inlineText(sentence?.message),
+        kind,
+        { objectName },
+      );
+    }
+  }
+}
+
+/**
+ * [#34374 PR2] Emit `<action root>.texts.<key>.message` for every text an
+ * action declares (`ActionSchema.texts`), seeded with the declared message, as
+ * {@link walkHookTexts} seeds a hook's. The action body runner reads exactly
+ * that key (`actionTextMessageKey`) in the organization's language when the
+ * body asks for the text (`ctx.text`), so each declared text is one demand,
+ * under the action's own root: `objects.<object>._actions.<action>` or
+ * `globalActions.<action>`.
+ */
+function pushActionTexts(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const texts = action?.texts;
+  if (!texts || typeof texts !== 'object' || Array.isArray(texts)) return;
+  for (const [key, entry] of Object.entries<any>(texts)) {
+    pushOptional(out, [...actionRoot, 'texts', key, 'message'], inlineText(entry?.message), kind, { objectName });
+  }
+}
+
 function pushActionResultDialog(
   out: ExpectedEntry[],
   actionRoot: string[],
@@ -812,7 +881,34 @@ function pushActionResultDialog(
       if (!field || typeof field !== 'object') continue;
       if (typeof field.path !== 'string' || field.path.length === 0) continue;
       pushEntry(out, [...base, 'fields', field.path], field.label, kind, { objectName });
+      pushAnswerTableColumns(out, base, field, kind, objectName);
     }
+  }
+}
+
+/**
+ * [#34652] Emit `columns.<path>.<column_path>` entries beside `fields` under an
+ * answer block's root (`…resultDialog` or `…preflight`) — one per labelled
+ * column of a `format: 'table'` field. Both levels are keyed by the LITERAL
+ * path (`"error.message"` is one segment), the address
+ * `ActionResultDialogTranslationSchema.columns` declares and
+ * `resolveActionResultDialog` / `resolveActionPreflight` read. A column with
+ * no `label` draws its `path` as the header and gets no key, as a field row
+ * with no `label` gets none; the format is not re-judged here — a `columns`
+ * list beside any other format is refused at parse.
+ */
+function pushAnswerTableColumns(
+  out: ExpectedEntry[],
+  blockRoot: string[],
+  field: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  if (!Array.isArray(field.columns)) return;
+  for (const column of field.columns) {
+    if (!column || typeof column !== 'object') continue;
+    if (typeof column.path !== 'string' || column.path.length === 0) continue;
+    pushEntry(out, [...blockRoot, 'columns', field.path, column.path], column.label, kind, { objectName });
   }
 }
 
@@ -838,6 +934,7 @@ function pushActionPreflight(
     if (!field || typeof field !== 'object') continue;
     if (typeof field.path !== 'string' || field.path.length === 0) continue;
     pushEntry(out, [...actionRoot, 'preflight', 'fields', field.path], field.label, kind, { objectName });
+    pushAnswerTableColumns(out, [...actionRoot, 'preflight'], field, kind, objectName);
   }
 }
 
@@ -1521,6 +1618,8 @@ export function collectExpectedEntries(
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionRefusals(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionTexts(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
 
@@ -1621,6 +1720,8 @@ export function collectExpectedEntries(
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
     pushActionPreflight(out, root, action, kind, objectName);
+    pushActionRefusals(out, root, action, kind, objectName);
+    pushActionTexts(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────
@@ -1707,6 +1808,9 @@ export function collectExpectedEntries(
   // ── Doc books (`books.<name>.…`) ──────────────────────────────────
   walkBooks(config, out);
 
+  // ── Import mappings (`mappings.<name>.label`) ─────────────────────
+  walkMappings(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1754,6 +1858,9 @@ export function collectExpectedEntries(
 
   // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
   walkHookRefusals(config, out);
+
+  // ── Hook texts (`hooks.<hook>.texts.<key>.message`, #34374) ─────
+  walkHookTexts(config, out);
 
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
@@ -2056,6 +2163,25 @@ function walkBooks(config: any, out: ExpectedEntry[]): void {
   }
 }
 
+// ─── Import mappings (`mappings.<name>.label`) ──────────────────────────
+
+/**
+ * Emit a named import mapping's label: `mappings.<mapping>.label`, the key
+ * `translateMapping` reads. The import wizard offers a mapping by this label.
+ * The label is optional on the schema, so it is recorded with
+ * {@link pushOptional}; a mapping's `fieldMapping` is column and field names,
+ * not copy, and has no key.
+ */
+function walkMappings(config: any, out: ExpectedEntry[]): void {
+  const mappings: any[] = Array.isArray(config?.mappings) ? config.mappings : [];
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object') continue;
+    const name = mapping.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
+  }
+}
+
 // ─── Screen flows (`flows.<flow>.screens.<node_id>.…`) ─────────────────
 
 /**
@@ -2077,6 +2203,14 @@ const REFUSED_OUTCOME = 'refused';
  * addresses: a `save_notice` node (`SaveNoticeConfigSchema`).
  */
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
+ * [ruling 6913660232] The nodes whose `fields` values
+ * `flows.<flow>.records.<node_id>.fields.<field>` addresses: a record write
+ * whose field value is MARKED as text — a `{ dialect: 'template', source }`
+ * envelope (`FlowRecordFieldValueSchema`).
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
 
 /**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
@@ -2362,6 +2496,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
 
+    // [ruling 6913660232] `flows.<flow>.records.<node_id>.fields.<field>` — a
+    // `create_record` / `update_record` field value MARKED as text (a
+    // `{ dialect: 'template', source }` envelope), at any depth of the same
+    // node universe. The engine reads that key (`flowRecordFieldTextKey`) in
+    // the ORGANIZATION's language before it fills the holes, so the seed is
+    // the authored template, holes and all. A bare string in `fields` is a
+    // literal value, never translated, and has no key.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || !RECORD_WRITE_NODE_TYPES.has(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const fields = cfg.fields && typeof cfg.fields === 'object' && !Array.isArray(cfg.fields) ? cfg.fields : {};
+      for (const [fieldName, value] of Object.entries(fields as Record<string, unknown>)) {
+        if (!isFlowTextEnvelopeShaped(value)) continue;
+        const source = inlineText((value as { source?: unknown }).source);
+        pushOptional(out, ['flows', flowName, 'records', nodeId, 'fields', fieldName], source, 'flow', scope);
+      }
+    }
+
     // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
     // step label, the name its request shows the submitter and the approvers.
     // The approvals door reads that key in the reader's locale for the
@@ -2415,6 +2569,29 @@ function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
           'hook',
         );
       }
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.texts.<key>.message` for every text a hook declares
+ * (#34374, ruling 6913660232 parameter 7), seeded with the declared message.
+ *
+ * The hook runtime reads exactly that key (`hookTextMessageKey`) in the
+ * organization's language when the hook asks for the text (`ctx.text`), so
+ * each declared text is one demand, counted under the `hook` bucket like a
+ * refusal, and `os i18n extract` scaffolds it (parameter 5: the existing
+ * coverage check demands it, no new gate). Keyed by hook name.
+ */
+function walkHookTexts(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const texts = hook.texts;
+    if (!texts || typeof texts !== 'object' || Array.isArray(texts)) continue;
+    for (const [key, entry] of Object.entries<any>(texts)) {
+      pushOptional(out, ['hooks', hookName, 'texts', key, 'message'], inlineText(entry?.message), 'hook');
     }
   }
 }

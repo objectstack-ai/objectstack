@@ -85,6 +85,7 @@ function mePermissions(systemPermissions: string[] | undefined): MePermissionsAu
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},

@@ -198,9 +198,9 @@ describe('the visible predicate: offered on every row, the SCIM-held refusal is 
   });
 
   it('⛔ is NOT gated on features.admin, and that is deliberate', () => {
-    // The `admin` flag hides buttons whose endpoint is "only wired when
-    // `auth.plugins.admin` is enabled" — the 404-avoidance the block header on
-    // the admin actions states. This route is not one of those: it is an
+    // The `admin` flag hides buttons whose endpoint needs the better-auth
+    // admin plugin, so that the UI does not render buttons that 404 (the block
+    // header on the admin actions). This route is not one of those: it is an
     // ObjectStack mount registered unconditionally beside `unlock-user` and
     // authorized by the ADR-0068 platform-admin gate, so gating it would hide
     // a WORKING affordance on every host that never opted into that plugin —

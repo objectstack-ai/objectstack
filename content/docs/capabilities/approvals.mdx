@@ -17,8 +17,9 @@ A specific person · everyone holding a position (e.g. sales managers) · the su
 admin sets it one user at a time from **Setup → Users → ⋯ → Set Manager**, which calls
 `POST /api/v1/auth/admin/set-user-manager` — for anyone, people who sign in through SSO included,
 except a person a SCIM directory holds, whose manager is changed in that directory. For many users at once, provisioning fills it: the
-admin bulk-import endpoint reads a `manager_id` column, and a seed, or a SCIM / directory-sync
-path your deployment supplies, can write it too. Until it is set, a manager-only approval step
+admin bulk-import endpoint reads a `manager_id` column, SCIM provisioning writes it from the
+Enterprise User `manager` attribute, and a seed, or a directory-sync path your deployment
+supplies, can write it too. Until it is set, a manager-only approval step
 resolves to nobody and the node's `onEmptyApprovers` policy decides what happens — by default the
 request opens and waits for an administrator. The details, and the fallback that needs no manager
 data at all, are in [Automation → Approvals](/docs/automation/approvals).

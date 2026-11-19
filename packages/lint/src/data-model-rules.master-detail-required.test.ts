@@ -26,7 +26,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { Field, ObjectSchema } from '@objectstack/spec/data';
+import { defineStack } from '@objectstack/spec';
+import { Field, ObjectSchema, masterDetailRequiredOmitted } from '@objectstack/spec/data';
 import {
   lintDataModel as lintDataModelUnrecorded,
   RELATIONSHIP_DELETE_BEHAVIOR,
@@ -226,6 +227,67 @@ describe('R2 over objects built by ObjectSchema.create()', () => {
     const detail = build(Field.masterDetail('work_order', { label: 'Work Order', required: false }));
     expect((detail.fields as Record<string, { required?: boolean }>).order!.required).toBe(false);
     expect(r2([{ name: 'work_order', sharingModel: 'private', fields: {} }, detail])).toEqual([]);
+  });
+});
+
+// [#33940 · ruling A, record 6687830530] What reaches the rule from the
+// DEFAULT door: a config module that calls `defineStack` itself, strict. The
+// parse writes `false` into an omitted `required` (the optional master, as
+// ruled) and records the omission on the field it returns; the rule reads that
+// record, so the omitted spelling is reported here exactly as on the raw
+// literal and on `{ strict: false }`. The stack still loads in every case.
+describe('R2 over a stack a strict defineStack built — the omitted spelling is still reported (#33940)', () => {
+  const built = (shape: Record<string, unknown>, options?: { strict: boolean }) =>
+    (
+      defineStack(
+        {
+          manifest: { id: 'com.example.r2-door', namespace: 'wo', version: '0.0.1', type: 'app', name: 'R2' },
+          objects: [
+            { name: 'wo_order', label: 'Order', fields: { name: { type: 'text', label: 'Name' } } },
+            {
+              name: 'wo_item',
+              label: 'Item',
+              sharingModel: 'controlled_by_parent',
+              fields: { order: { type: 'master_detail', label: 'Order', reference: 'wo_order', deleteBehavior: 'cascade', ...shape } },
+            },
+          ],
+        } as never,
+        options,
+      ) as unknown as { objects: any[] }
+    ).objects;
+
+  it('the sole master_detail without `required`: one error at `.required`, naming both spellings', () => {
+    const objects = built({});
+    // The parsed value is the ruled one: `false`, the optional master — recorded as omitted.
+    expect(objects[1].fields.order.required).toBe(false);
+    expect(masterDetailRequiredOmitted(objects[1].fields.order)).toBe(true);
+    const issues = r2(objects);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      severity: 'error',
+      rule: R2,
+      path: 'objects[1].fields.order.required',
+      fix: 'required: true',
+    });
+    expect(issues[0]!.message).toContain('declares no required: write true (every detail names its master) or false (an optional master)');
+  });
+
+  it('CONTROL: an explicit `required: false` (the optional master) and `required: true` lint clean', () => {
+    expect(r2(built({ required: false }))).toEqual([]);
+    expect(r2(built({ required: true }))).toEqual([]);
+  });
+
+  it('CONTROL: `{ strict: false }` reports the same finding, on the same path, as before', () => {
+    const issues = r2(built({}, { strict: false }));
+    expect(issues.map((issue) => [issue.severity, issue.path, issue.fix])).toEqual([
+      ['error', 'objects[1].fields.order.required', 'required: true'],
+    ]);
+  });
+
+  it('a copy of the built field drops the record and reads as the explicit `false` — the pre-record reading', () => {
+    const objects = built({});
+    const copied = [objects[0], { ...objects[1], fields: { order: { ...objects[1].fields.order } } }];
+    expect(r2(copied)).toEqual([]);
   });
 });
 

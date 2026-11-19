@@ -4,12 +4,13 @@
  * objectui#12698 — the header names the organization the SERVER reports as
  * active, never `orgList[0]`.
  *
- * Real `AuthProvider` over a mocked auth server, real `WorkspaceSwitcher`. When
- * the server holds no active organization (a refused `set-active` nulls it),
- * the provider holds `activeOrganization = null`; the component used to fill
- * that with the first membership and name an organization the session did not
- * hold. The control case uses the identical harness, which is what proves the
- * query can see the component when an organization is active.
+ * Real `AuthProvider` over a mocked auth server, real `WorkspaceSwitcherMenu`
+ * (the avatar menu's switcher; its submenu primitives pass through so the rows
+ * render inline). When the server holds no active organization (a refused
+ * `set-active` nulls it), the provider holds `activeOrganization = null`, and
+ * the switcher names no organization. The control case uses the identical
+ * harness, which is what proves the query can see the component when an
+ * organization is active.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -18,7 +19,20 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider, useAuth, type AuthClient, type AuthOrganization } from '@object-ui/auth';
-import { WorkspaceSwitcher } from '../WorkspaceSwitcher';
+
+vi.mock('@object-ui/components', async (importOriginal) => {
+  const Pass = ({ children, ...p }: any) => <div {...p}>{children}</div>;
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    DropdownMenuSub: Pass,
+    DropdownMenuSubTrigger: Pass,
+    DropdownMenuSubContent: Pass,
+    DropdownMenuItem: Pass,
+    DropdownMenuLabel: Pass,
+  };
+});
+
+import { WorkspaceSwitcherMenu } from '../WorkspaceSwitcher';
 
 const PREV = { id: 'org_prev', name: 'Previous Org', slug: 'prev' } as AuthOrganization;
 const OTHER = { id: 'org_other', name: 'Other Org', slug: 'other' } as AuthOrganization;
@@ -52,7 +66,7 @@ async function boot(active: AuthOrganization | null) {
     <MemoryRouter>
       <AuthProvider authUrl="/api/auth" client={createServer(active)}>
         <Probe />
-        <WorkspaceSwitcher />
+        <WorkspaceSwitcherMenu isGroupPosture={false} />
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -64,20 +78,20 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('WorkspaceSwitcher names only the server-active organization (objectui#12698)', () => {
+describe('WorkspaceSwitcherMenu names only the server-active organization (objectui#12698)', () => {
   it('(a) two memberships, server reports no active organization: no organization is named', async () => {
     await boot(null);
     // Let the tenancy-posture config fetch land too, so "nothing rendered" is not "not yet rendered".
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(screen.queryByTestId('workspace-switcher')).toBeNull();
+    expect(screen.queryByTestId('header-switch-organization')).toBeNull();
     for (const org of MEMBERSHIPS) expect(screen.queryByText(org.name)).toBeNull();
   });
 
   it('(b) control: the server-active organization is named as before', async () => {
     await boot(PREV);
 
-    const el = await screen.findByTestId('workspace-switcher');
-    expect(el).toHaveTextContent(PREV.name);
+    expect(await screen.findByTestId('header-switch-organization')).toBeInTheDocument();
+    expect(screen.getByTestId(`workspace-switcher-org-${PREV.id}`)).toHaveTextContent(PREV.name);
   });
 });

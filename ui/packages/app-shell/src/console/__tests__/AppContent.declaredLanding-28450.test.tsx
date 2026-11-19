@@ -25,6 +25,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -136,6 +139,7 @@ function permissionsDenying(...unreadable: string[]): MePermissionsAuthenticated
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {
       '*': { allowRead: true },

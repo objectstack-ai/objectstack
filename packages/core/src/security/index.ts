@@ -620,6 +620,7 @@ export {
   markAppAutomationElevation,
   appAutomationElevationOf,
   carryAppAutomationElevation,
+  withoutAppAutomationElevation,
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
 
@@ -717,3 +718,16 @@ export {
   type CallerMailSenderSource,
   type CallerMailBoundsResult,
 } from './caller-mail-bounds.js';
+
+// The flow start rules a by-name start of a published flow
+// (`flowStartRefusal`, runtime) and a dry run of an unpublished definition
+// (`IAutomationService.dryRun`, service-automation) both ask — one spelling.
+export {
+  missingCapabilities,
+  requiredPermissionsRefusal,
+  AI_ACCOUNT_ELEVATED_START_REFUSAL,
+  isAiServiceAccount,
+  aiAccountElevatedStartRefusal,
+  requiredPermissionsStartRefusal,
+  type FlowStartPermissionRefusal,
+} from './flow-start-rules.js';

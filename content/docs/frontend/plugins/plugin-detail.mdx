@@ -289,8 +289,8 @@ on the record writes the record it logged first (an event, a `sys_email` row)
 and points at it from the activity row through `source_object` / `source_id`
 (ADR-0052). A `task` item that carries that pointer shows whatever
 `showCompleted` says, and it is the same item the timeline gives a **View
-source** link. It stays a `task` item, so `types: ['task']` and
-`filterMode: 'tasks_only'` still list it. A `completed` row with neither the
+source** link. It stays a `task` item, so a `types` list that names `task`
+and `filterMode: 'tasks_only'` still list it. A `completed` row with neither the
 marker nor a pointer is hidden by default. That includes a finished task, every
 row a runtime from before the marker serves, a row an app inserts itself
 without a pointer, and a milestone row served to a reader who may not read a
@@ -371,10 +371,21 @@ edited (`is_edited` on the row).
 
 The other eight — `email`, `call`, `note`, `file`, `record_create`,
 `record_delete`, `approval`, `sharing` — have no producer on any ObjectUI
-surface. Authoring `types: ['approval']` is legal, typechecks, builds, and
-renders a **permanently empty** timeline. Since objectui#5877 it also emits one
-`console.warn` per distinct kind, so the emptiness is diagnosable instead of
-looking like "a working feature with no data yet".
+surface. A `types` list of only such kinds renders a **permanently empty**
+timeline. Since objectui#5877 it also emits one `console.warn` per distinct
+kind, so the emptiness is diagnosable instead of looking like "a working
+feature with no data yet".
+
+Beside the default composer such a list is refused before it ever renders.
+`types: ['approval']` leaves out `'comment'` while `showCommentInput` defaults
+to `true`, so `os lint`, `os validate`, `os build`, the page save door and the
+console's schema mirror report it at error as `component-props-invalid` at
+`properties.showCommentInput` (`properties.feed.showCommentInput` on
+`record:chatter` / `record:discussion`). Add `'comment'` to `types` when the
+block should take comments, or set `showCommentInput: false` when it should
+stay comment-free; `types: ['approval']` with `showCommentInput: false` parses
+and renders the empty timeline above. A page already stored with the shape
+still loads; its next save is refused.
 
 The diagnostic separates two reasons a kind has no producer, because reporting a
 decision as a defect is how a warning channel gets ignored:

@@ -13,6 +13,7 @@ import {
   type ActionDef,
   type ActionContext,
 } from '../ActionRunner';
+import { createServerActionHandler } from '../serverActionHandler';
 
 describe('ActionRunner', () => {
   let runner: ActionRunner;
@@ -1133,5 +1134,72 @@ describe('ActionRunner', () => {
       expect(result.success).toBe(true);
       expect(result.data).toBe(3);
     });
+  });
+});
+
+/**
+ * The failure toast speaks the handler's words (objectstack#34215): a refusal's
+ * producer-marked `userMessage` (`ActionResult.userMessage`) is shown in place
+ * of the platform's `error` text. An authored `errorMessage` stays first — the
+ * spec declares it the override of the raw error.
+ */
+describe('the failure toast shows the refusal\'s userMessage (objectstack#34215)', () => {
+  const USER_TEXT = 'Plan B is Closed Won and was not moved.';
+  const PLATFORM_TEXT = 'mass_update_stage: plan_b stage is closed_won';
+  let runner: ActionRunner;
+  let toast: Mock;
+
+  beforeEach(() => {
+    runner = new ActionRunner();
+    toast = vi.fn();
+    runner.setToastHandler(toast);
+  });
+
+  const refuseWith = (extra: Record<string, unknown>) =>
+    runner.registerHandler('script', async () => ({ success: false, error: PLATFORM_TEXT, ...extra }));
+
+  const errorToast = () => {
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][1]).toMatchObject({ type: 'error' });
+    return toast.mock.calls[0][0];
+  };
+
+  it('shows the userMessage of a refusal that carries one', async () => {
+    refuseWith({ userMessage: USER_TEXT });
+    await runner.execute({ type: 'script', name: 'mass_update_stage' });
+    expect(errorToast()).toBe(USER_TEXT);
+  });
+
+  it('carries it from the /actions door: the server action handler\'s refusal reaches the toast', async () => {
+    const fetchRefusal = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        success: false,
+        error: { code: 'HOOK_ABORTED', httpStatus: 400, message: PLATFORM_TEXT, userMessage: USER_TEXT },
+      }),
+    }));
+    runner.registerHandler('script', createServerActionHandler({ fetch: fetchRefusal as any, baseUrl: '' }));
+    await runner.execute({ type: 'script', name: 'mass_update_stage', objectName: 'opportunity' } as ActionDef);
+    expect(fetchRefusal).toHaveBeenCalledTimes(1);
+    expect(errorToast()).toBe(USER_TEXT);
+  });
+
+  it('CONTROL: a refusal without a userMessage keeps the error', async () => {
+    refuseWith({});
+    await runner.execute({ type: 'script', name: 'mass_update_stage' });
+    expect(errorToast()).toBe(PLATFORM_TEXT);
+  });
+
+  it('a blank userMessage is no marking: the error is shown', async () => {
+    refuseWith({ userMessage: '   ' });
+    await runner.execute({ type: 'script', name: 'mass_update_stage' });
+    expect(errorToast()).toBe(PLATFORM_TEXT);
+  });
+
+  it('an authored errorMessage keeps its text even when the refusal carries a userMessage', async () => {
+    refuseWith({ userMessage: USER_TEXT });
+    await runner.execute({ type: 'script', name: 'mass_update_stage', errorMessage: 'Stage update failed' });
+    expect(errorToast()).toBe('Stage update failed');
   });
 });

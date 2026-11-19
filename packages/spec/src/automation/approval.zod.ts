@@ -70,6 +70,18 @@ export const ApproverType = z.enum([
   // where it sits.
   'role',
   'user',           // A specific user id — least portable; see the note above
+  // The deployment's platform administrators: the people
+  // `hasPlatformAdminStanding` (`@objectstack/core`) answers yes for, asked
+  // per caller at the inbox and at each decision, never enumerated. Takes no
+  // `value` and no `organization`. Opens ONE address slot that names no
+  // person, so it reads no record, tells no one, and a revocation takes effect
+  // at the next decision, on requests already open too. Accepted only in the
+  // running body of a flow shipped by a package the deployment registers in
+  // code (registry `source: 'code'`): the approval node refuses to open
+  // anywhere else, and the tenant save door refuses it as early feedback.
+  // Never offered by a designer (NON_AUTHORABLE_APPROVER_TYPES), since every
+  // flow saved through one is authored in the deployment and refused.
+  'platform_admin',
 ])
   // The generated reference page renders THIS string under `## ApproverType`;
   // the JSDoc above the enum renders nowhere (`renderSchemaSection` prints
@@ -112,7 +124,9 @@ export const ApproverType = z.enum([
     "user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` " +
     'policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and ' +
     '`os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and ' +
-    'the full remedy; the Approvals guide states the same remedy in prose.',
+    'the full remedy; the Approvals guide states the same remedy in prose. ' +
+    "The platform administrators type is for a deployment's own packaged flows only: a flow saved here " +
+    'cannot use it, and an approval step that names it anywhere else does not open.',
   );
 export type ApproverType = z.input<typeof ApproverType>;
 
@@ -134,8 +148,16 @@ export function canonicalApproverType(type: string): string {
  * Approver types that still PARSE but must not be offered for new authoring.
  * Published to designers as `xEnumDeprecated` on the approver `type` (see
  * {@link ApprovalNodeApproverSchema}): a stored value keeps rendering, the
- * dropdown just stops handing authors the entry. One source: the deprecated
- * spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3).
+ * dropdown just stops handing authors the entry. Two sources: the deprecated
+ * spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3), and
+ * `platform_admin`, which is NOT deprecated: it is accepted only in a code
+ * package's flow body, which no designer saves.
+ *
+ * The published label is `xEnumDeprecated` because that is the one key every
+ * designer reads to keep an entry out of its picker. For `platform_admin` it
+ * means "not offered for authoring", never "deprecated": no replacement exists
+ * and no removal is planned. A `value` on a `platform_admin` approver is
+ * ignored, not refused.
  *
  * `queue` was the second source while the runtime had no queue branch
  * (offering it would have advertised a capability the engine did not deliver,
@@ -144,6 +166,10 @@ export function canonicalApproverType(type: string): string {
  */
 export const NON_AUTHORABLE_APPROVER_TYPES: readonly string[] = [
   ...Object.keys(DEPRECATED_APPROVER_TYPES),
+  // Not deprecated: accepted only in the running body of a flow a `code`
+  // package ships (see the enum). Every flow a designer saves is authored in
+  // the deployment and is refused for naming it, so no picker offers it.
+  'platform_admin',
 ];
 
 /**
@@ -202,9 +228,11 @@ export type ApproverValueBinding =
   /** Closed value set — render a strict select, never free text. */
   | { source: 'enum'; values: readonly string[] }
   /**
-   * Resolved by the engine at runtime (submitter's manager via
-   * `sys_user.manager_id`); `value` is optional (an advanced override naming
-   * the record field that holds the subject user) and normally stays empty.
+   * Resolved by the engine at runtime, with nothing to pick. `manager`: the
+   * submitter's manager via `sys_user.manager_id`; `value` is optional (an
+   * advanced override naming the record field that holds the subject user)
+   * and normally stays empty. `platform_admin`: the platform administrators,
+   * asked per caller; it takes no `value` at all.
    */
   | { source: 'auto' }
   /** `value` names a field on the flow's trigger object. */
@@ -260,6 +288,8 @@ export const APPROVER_VALUE_BINDINGS = {
   // `registry-and-record` member of ApproverValueBinding.
   queue: { source: 'registry-and-record', type: 'queue', object: 'sys_queue', valueField: 'name' },
   expression: { source: 'expression', roots: APPROVER_EXPRESSION_ROOTS },
+  // Nothing to pick: the engine asks each caller's standing.
+  platform_admin: { source: 'auto' },
 } as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
 
 /**
@@ -385,6 +415,8 @@ export const APPROVER_ORG_SCOPED = {
   // expand, in the request's organization or the one `organization` targets.
   queue: true,
   expression: true,
+  // No directory and no organization: platform standing is deployment-wide.
+  platform_admin: false,
 } as const satisfies Record<z.infer<typeof ApproverType>, boolean>;
 
 /** Does `organization` (ADR-0105 D9) apply to this approver type? */
@@ -515,6 +547,8 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // approver-type dropdown straight from this enum and keeps offering `role`
   // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
   // (`queue` was listed too until the runtime resolved it, ADR-0142 D6.)
+  // `platform_admin` is listed without being deprecated: it is not offered
+  // for authoring (see NON_AUTHORABLE_APPROVER_TYPES).
   // Renderers omit these from pickers while still rendering a stored value.
   type: ApproverType.meta({
     xEnumDeprecated: [...NON_AUTHORABLE_APPROVER_TYPES],
@@ -524,7 +558,8 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
    * membership tier — owner/admin/member (`org_membership_level`), a position
    * machine name (`position`), team/department id (`team`/`department`), field
    * name holding a user id (`field`), or queue machine name (`queue`). Omitted for
-   * `manager` (resolved from the submitter's `manager_id`).
+   * `manager` (resolved from the submitter's `manager_id`) and for
+   * `platform_admin`, which takes none.
    */
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
   // §configSchema): the concrete picker follows the sibling `type` column.

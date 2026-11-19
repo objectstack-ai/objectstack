@@ -115,6 +115,19 @@ export interface PermissionContextValue {
    * toggle stays hidden on it, objectstack#28428).
    */
   hasAnyQueue?: boolean;
+  /**
+   * [objectstack#34602] The objects, by name, on which a queue filter can find
+   * something in the caller's organization: a record sits in a queue now, or an
+   * active assignment rule routes the object into a queue. The server resolves
+   * it and `/auth/me/permissions` serves it as `objectsUsingQueues`, handed on
+   * here verbatim. It names no queue.
+   *
+   * `undefined` means no answer, exactly as for {@link hasAnyQueue}. A consumer
+   * reads only membership in a present list as "this object uses queues": an
+   * unknown answer cannot show one does (the list's "In a queue" toggle stays
+   * hidden on it).
+   */
+  objectsUsingQueues?: readonly string[];
   /** Whether permissions are loaded */
   isLoaded: boolean;
 }

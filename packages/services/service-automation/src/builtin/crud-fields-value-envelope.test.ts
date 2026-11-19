@@ -142,7 +142,10 @@ const MALFORMED: ReadonlyArray<{ label: string; envelope: Record<string, unknown
   { label: 'an empty `source`', envelope: { dialect: 'cel', source: '' } },
   { label: 'a whitespace-only `source`', envelope: { dialect: 'cel', source: '   ' } },
   { label: 'an `ast`-only envelope', envelope: { dialect: 'cel', ast: { op: 'value' } } },
-  { label: 'a non-`cel` dialect', envelope: { dialect: 'template', source: 'Hi {name}' } },
+  // A `template` envelope is a record field's TEXT form (ruling 6913660232 on
+  // #34062), judged as a text slot — `record-field-text.test.ts` pins its
+  // refusals; a dialect that is neither is still a malformed value envelope.
+  { label: 'a dialect neither `cel` nor `template`', envelope: { dialect: 'cron', source: '0 * * * *' } },
   { label: 'CEL that does not parse', envelope: { dialect: 'cel', source: 'price *' } },
   { label: 'an unknown function', envelope: { dialect: 'cel', source: 'nosuchfn(price)' } },
 ];

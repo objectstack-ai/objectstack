@@ -91,6 +91,15 @@ lookup `bench_product` (200)). The member owns every tenth account, so it reads
   pair with no summary field is the control: its statement count is what the
   write costs without any recompute.
 
+### The paged-list total (R12)
+
+Every paged-list scenario (a `GET` with `top=`) runs again as
+`<name>_nocount`, the same request with `count=false`. The list door then skips
+the `count(*)` it otherwise runs over the full predicate beside the page, so a
+pair's difference in time and in statements is what the total costs. The
+twin's rows/total cell shows no total: that is the proof the opt-out was
+honoured. `--only list_filter_sort,list_filter_sort_nocount` runs one pair.
+
 The machine is shared and the numbers are wall-clock: compare runs on the same
 box, read the statement counts as exact and the milliseconds as indicative.
 

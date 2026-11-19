@@ -179,3 +179,26 @@ describe('objectui#11658 item 5 — the host resolves the scope chip\'s app labe
     expect(resolve('no_such_app')).toBeUndefined();
   });
 });
+
+// objectstack#34608 — acceptance 3: a builder's empty state inside an app
+// shows data suggestions (the ruling:「问数据，或者让我改这个应用」), ahead of
+// the change starters; the empty-state description names both halves.
+describe('the build agent inside an app offers data questions too (objectstack#34608)', () => {
+  it('en: the starters lead with data questions, then the change starters', () => {
+    const props = renderPane('en', { agent: 'build', editPackageId: 'app.crm' });
+    const suggestions = props.suggestions as string[];
+    expect(suggestions.slice(0, 2)).toEqual([
+      'List the 5 most recently created records.',
+      'Count records for each object.',
+    ]);
+    expect(suggestions.join(' ')).toMatch(/Add a field/);
+    const labels = props.labels as { emptyDescription: string };
+    expect(labels.emptyDescription).toMatch(/Ask about this app’s data/);
+  });
+
+  it('control: the from-scratch build surface (no app) offers no data questions', () => {
+    const props = renderPane('en', { agent: 'build' });
+    const suggestions = (props.suggestions as string[] | undefined) ?? [];
+    expect(suggestions).not.toContain('Count records for each object.');
+  });
+});

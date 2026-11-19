@@ -96,6 +96,25 @@ describe('saving "sign out of the company sign-in too" on is refused for a provi
     expect(verdict).toEqual({ ok: true, endSessionEndpoint: `${IDP}/oauth2/logout` });
   });
 
+  it('isTrustedLogoutOrigin, when given, is the predicate the logout-endpoint verdict reads; the discovery read keeps isTrustedOrigin', async () => {
+    const LOGOUT = 'https://logout.idp-other.example/oauth2/logout';
+    const fetchDiscovery = vi.fn(async () => ({ issuer: IDP, end_session_endpoint: LOGOUT }));
+    const isTrustedLogoutOrigin = (url: string) => trusted(url) || url.startsWith('https://logout.idp-other.example/');
+    const input = {
+      providerId: 'acme-okta',
+      issuer: IDP,
+      stored: { oidcConfig: JSON.stringify({ issuer: IDP, clientId: 'c', discoveryEndpoint: `${IDP}/.well-known/openid-configuration` }) },
+      isTrustedOrigin: trusted,
+      fetchDiscovery,
+    };
+    expect(await judgeSignOutOfIdpCapability({ ...input, isTrustedLogoutOrigin })).toEqual({ ok: true, endSessionEndpoint: LOGOUT });
+    expect(fetchDiscovery).toHaveBeenCalledWith(`${IDP}/.well-known/openid-configuration`, trusted);
+    // Absent, the verdict reads isTrustedOrigin: the same endpoint is refused.
+    const absent = await judgeSignOutOfIdpCapability(input);
+    expect(absent.ok).toBe(false);
+    if (!absent.ok) expect(absent.refusal).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+  });
+
   it('a provider with neither configuration: refused', async () => {
     const verdict = await judgeSignOutOfIdpCapability({ providerId: 'bare', isTrustedOrigin: trusted });
     expect(verdict.ok).toBe(false);

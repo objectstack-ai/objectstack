@@ -131,7 +131,9 @@
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import { resolveDisplayField } from '@objectstack/spec/data';
+import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { redactSnapshot, resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
+import { negotiatedReaderLocale, readerLabelsFor, type ReaderLabelI18n } from './reader-locale-labels.js';
 
 export const APPROVALS_HOOK_PACKAGE = 'plugin-approvals:lock';
 
@@ -211,10 +213,18 @@ const PENDING_LOCK_LIMIT = 1_000;
  */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-function lockedError(message: string): never {
+/**
+ * `userMessage` [#34699] is passed only by the per-row lock, whose sentence is
+ * the end user's (`recordLockRefusal`): a client that shows `userMessage` then
+ * shows it without the `RECORD_LOCKED: ` prefix `message` keeps. The bound and
+ * unanswerable-intersection refusals name the object's API name for the
+ * developer who scoped the write, so they mark none.
+ */
+function lockedError(message: string, userMessage?: string): never {
   const err: any = new Error(`RECORD_LOCKED: ${message}`);
   err.code = 'RECORD_LOCKED';
   err.statusCode = 409;
+  if (userMessage !== undefined) err.userMessage = userMessage;
   throw err;
 }
 
@@ -273,7 +283,8 @@ function writerEnvelope(ctx: any): unknown {
 }
 
 /**
- * The END-USER sentence for a record held by a live approval (#18153).
+ * The END-USER sentence for a record held by a live approval (#18153), in the
+ * WRITER's locale.
  *
  * Three degradations, in the order the material runs out, and none of them
  * reaches for the id or the object's API name:
@@ -286,12 +297,72 @@ function writerEnvelope(ctx: any): unknown {
  * locked while an approval is in progress"), so a reader who has seen the old
  * text recognises the new one; what is added is the one thing the old sentence
  * never said — what has to happen before the record can be edited again.
+ *
+ * Rendered through the SHARED Operation Message Catalog
+ * (`@objectstack/spec/system`, the `record_locked*` keys), not a second
+ * mechanism: user-facing refusal text is in the request locale, and the record
+ * door's other refusals (`record_write_denied`, `record_access_denied`, this
+ * plugin's own `approval_recall_not_submitter`) already reach the user that
+ * way. Same `errors.<key>` override address, same resolution ladder
+ * (deployment override → locale catalog → `en`), so a locale the catalog does
+ * not carry reads the English sentence. Which degradation applies picks the
+ * KEY; the label and the title are its parameters, never spliced into prose
+ * here, so each language orders and quotes them its own way.
  */
-function recordLockRefusal(objectLabel: string | undefined, recordTitle: string | undefined): string {
-  const subject = recordTitle
-    ? (objectLabel ? `${objectLabel} '${recordTitle}'` : `'${recordTitle}'`)
-    : (objectLabel ? `This ${objectLabel}` : 'This record');
-  return `${subject} is locked while an approval is in progress, and cannot be edited until that approval is complete`;
+function recordLockRefusal(
+  objectLabel: string | undefined,
+  recordTitle: string | undefined,
+  locale: string | undefined,
+  translate: ValidationMessageTranslator | undefined,
+): string {
+  const messageKey = recordTitle
+    ? (objectLabel ? 'record_locked' : 'record_locked_unlabeled')
+    : (objectLabel ? 'record_locked_untitled' : 'record_locked_opaque');
+  const params: Record<string, string> = {};
+  if (objectLabel) params.object = objectLabel;
+  if (recordTitle) params.title = recordTitle;
+  return renderOperationMessage({ messageKey, params }, { locale, translate });
+}
+
+/**
+ * The writer's locale and the deployment lookups the refusal is worded with.
+ *
+ * The locale is `HookContext.session.locale`, the caller's language the engine
+ * copies onto every hook session so a hook refusal can answer in it (the
+ * request's `Accept-Language`, else the `localization` settings). The `i18n`
+ * service, resolved lazily per refusal because it is contributed by another
+ * plugin that may start after this one (ADR-0029 D8), supplies two things:
+ * the object's label in that locale (`objects.<object>.label`, negotiated by
+ * {@link readerLabelsFor}, the approvals door's one reader-locale label pick)
+ * and the deployment's `errors.<key>` override. Absent, the built-in catalog
+ * still renders the writer's locale and the object keeps its declared label.
+ *
+ * [#34454] The locale returned is the NEGOTIATED one
+ * ({@link negotiatedReaderLocale}), so the label and the override are asked
+ * with the same tag: a bare `zh` writer reads a deployment's zh-CN
+ * `errors.record_locked*` override, not the built-in sentence around a zh-CN
+ * label. The built-in catalog matches the negotiated tag as it matched the raw
+ * one.
+ */
+function refusalLocalization(
+  ctx: any,
+  i18nService: (() => ReaderLabelI18n | undefined) | undefined,
+): { locale: string | undefined; service: ReaderLabelI18n | undefined; translate: ValidationMessageTranslator | undefined } {
+  const raw = ctx?.session?.locale;
+  const requested = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+  let service: ReaderLabelI18n | undefined;
+  try {
+    service = i18nService?.();
+  } catch {
+    // i18n is optional and late-bound; a missing service degrades the wording, never the lock.
+    service = undefined;
+  }
+  const locale = negotiatedReaderLocale(service, requested);
+  const svc = service;
+  const translate: ValidationMessageTranslator | undefined = svc && typeof svc.t === 'function'
+    ? (key, loc, params) => svc.t(key, loc, params)
+    : undefined;
+  return { locale, service, translate };
 }
 
 /**
@@ -529,11 +600,17 @@ async function gatingRequests(
  * is narrowed by (#23618) — lazily, per refusal, because the security plugin may
  * start after this one. Absent, or resolving nothing, the title is served as
  * before, exactly as the payload snapshot is (`resolveReadableSnapshotFields`).
+ *
+ * `i18nService` resolves the deployment's `i18n` service the refusal is worded
+ * with in the writer's locale — the object's translated label and the
+ * `errors.record_locked*` override (see {@link refusalLocalization}). Absent,
+ * the sentence is still the catalog's, in the writer's locale.
  */
 export function bindApprovalLockHook(
   engine: MinimalEngine,
   logger?: MinimalLogger,
   fieldVisibility?: () => FieldVisibilitySource | undefined,
+  i18nService?: () => ReaderLabelI18n | undefined,
 ): void {
   engine.registerHook('beforeUpdate', async (ctx: any) => {
     const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
@@ -602,9 +679,14 @@ export function bindApprovalLockHook(
       const recordId = String(pending?.record_id ?? '');
       let schema: unknown;
       try { schema = engine.getSchema?.(object); } catch { /* registry unavailable — label degrades */ }
-      const objectLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
+      const declaredLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
         ? String((schema as any).label)
         : undefined;
+      // The sentence is in the writer's locale, and so is the label it names:
+      // the translated `objects.<object>.label` when the pack carries one, else
+      // the declared label. ⛔ Never the API name.
+      const { locale, service, translate } = refusalLocalization(ctx, i18nService);
+      const objectLabel = readerLabelsFor(service, locale)?.objectLabel(object) ?? declaredLabel;
       // `previous` is the pre-image the engine already read for THIS row; it is
       // used only when it really is the row this pending request names, so a
       // dispatch that ever carried a different row cannot title the wrong
@@ -630,7 +712,8 @@ export function bindApprovalLockHook(
         `[approvals] update refused RECORD_LOCKED: record '${recordId}' of '${object}' ` +
         `is held by pending approval request '${String(pending?.id ?? '')}'`,
       );
-      lockedError(recordLockRefusal(objectLabel, recordTitleOf(schema, asServed, recordId)));
+      const sentence = recordLockRefusal(objectLabel, recordTitleOf(schema, asServed, recordId), locale, translate);
+      lockedError(sentence, sentence);
     }
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 

@@ -87,6 +87,7 @@ import {
 // Files proven eligible for the worker-shared plain showcase stack.
 const SHARED_SHOWCASE = [
   'test/create-caller-id-collision.dogfood.test.ts',
+  'test/direct-share-grant-is-manual.dogfood.test.ts',
   'test/form-self-auth.dogfood.test.ts',
   'test/showcase-agent-intersection.dogfood.test.ts',
   'test/showcase-agent-scope-ceiling.dogfood.test.ts',
@@ -247,6 +248,15 @@ export default defineConfig({
             {
               find: /^@objectstack\/metadata-core$/,
               replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+            },
+            // [#33795] `rollup-grouped-recompute-33795.test.ts` drives the bulk
+            // update doors (`updateManyData`, `batchData`) of
+            // `ObjectStackProtocolImplementation` over a real engine and SQL
+            // driver; the doors' roll-up batch wiring is the pin's subject, so
+            // it resolves to SOURCE, like the entries above.
+            {
+              find: /^@objectstack\/metadata-protocol$/,
+              replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
             },
             // [#13513] `date-bucket-parity-turso.test.ts` drives
             // `TursoDriver` itself — it asserts the driver's SQL date

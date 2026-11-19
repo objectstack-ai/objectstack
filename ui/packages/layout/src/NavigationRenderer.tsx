@@ -74,7 +74,7 @@ import {
   useIsMobile,
   useOptionalSidebar,
 } from '@object-ui/components';
-import type { NavigationItem, KeyedI18nLabel } from '@object-ui/types';
+import type { NavigationItem, NavigationEntryItem, KeyedI18nLabel } from '@object-ui/types';
 import { isElementApiDataSourceShape } from '@object-ui/react';
 // Aliased on import, following PR #4169's convention (as `AppSchemaRenderer`
 // does): this file has its OWN `resolveLabel` over the KEYED vocabulary, and
@@ -792,6 +792,36 @@ export function hasVisibleNavigationItems(
   options: NavigationVisibilityOptions = {},
 ): boolean {
   return !visibleNavigationEntries(items, options).next().done;
+}
+
+/**
+ * The entries a navigation tree draws, in the sidebar's reading order: each
+ * level sorted by the sidebar's one comparator (`byNavOrder`), a group
+ * replaced by its surviving children, separators left out. Each node asks
+ * {@link hasVisibleNavigationItems} about itself alone, which is the sidebar's
+ * own per-node answer, so a gated group takes its children with it and an
+ * `action` entry counts only with a dispatcher (`hasActionHandler`).
+ *
+ * The walk behind every tab bar that lists "the first entries the sidebar
+ * draws": `AppSchemaRenderer`'s bottom nav and the console's phone menu bar
+ * (objectstack#34594). Sharing it keeps their first entries the sidebar's
+ * first drawn rows; ⛔ do not write the sort or the walk out at a call site.
+ */
+export function drawnNavigationEntries(
+  items: readonly NavigationItem[],
+  options: NavigationVisibilityOptions = {},
+): NavigationEntryItem[] {
+  const out: NavigationEntryItem[] = [];
+  for (const item of items.slice().sort(byNavOrder)) {
+    if (!hasVisibleNavigationItems([item], options)) continue;
+    if (item.type === 'separator') continue;
+    if (item.type === 'group') {
+      out.push(...drawnNavigationEntries(item.children ?? [], options));
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
 }
 
 /**

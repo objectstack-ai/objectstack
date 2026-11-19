@@ -967,7 +967,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       refusals: {
         label: "Recusas",
-        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o corpo lança (por exemplo CLEAN_VERSION_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Somente corpos JavaScript (L2)"
+        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o hook lança (por exemplo CLEAN_VERSION_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Para um corpo JavaScript (L2) ou um handler; recusado em um corpo de expressão"
       },
       "refusals.message": {
         label: "Mensagem",

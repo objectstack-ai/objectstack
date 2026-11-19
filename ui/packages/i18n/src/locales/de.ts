@@ -189,6 +189,8 @@ const de = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Füllen Sie die Formularfelder aus und senden Sie ab oder brechen Sie ab.",
+    sectionNav: "Formularabschnitte",
+    sectionNavErrors: "Zu korrigierende Felder: {{number}}",
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
@@ -543,6 +545,7 @@ const de = {
       succeeded: "Erfolgreich {{count}} / {{total}}",
       resultFailed: " · Fehlgeschlagen {{count}}",
       succeededRecords: "Erfolgreiche Datensätze",
+      aggregateNotCompleted: "Die Aktion wurde für die ausgewählten Datensätze nicht abgeschlossen. Einige Datensätze wurden möglicherweise bereits geändert; nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",
@@ -580,6 +583,7 @@ const de = {
         "Diese Ansicht ist gruppiert, aber ihre Datenquelle implementiert queryGroupHeaders nicht, daher können die Gruppen nicht gezählt werden. Entfernen Sie die Gruppierung, um die Datensätze anzuzeigen.",
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
+      draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -931,6 +935,8 @@ const de = {
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
     groupingUnstoredRemove: "Aus Gruppierung entfernen",
+    draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
+    withheldFieldsLeftOut: "Nicht angezeigt, gefiltert, sortiert oder gruppiert nach {{fields}}: Das Paket, das das Feld hinzufügt, ist deaktiviert. Es kehrt zurück, sobald das Paket aktiviert wird.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },
@@ -1376,6 +1382,8 @@ const de = {
     writeStrippedUnknownReason: "Vom Server nicht übernommen: {{fields}}",
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
+    approvalPending: "In Genehmigung",
+    approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
     approvalProgressLabel: "Genehmigungsfortschritt",
@@ -1555,7 +1563,6 @@ const de = {
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
     allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
     details: "Details",
-    exportCsv: "CSV exportieren",
     openInList: "In Liste öffnen",
     filters: {
       label: "Dashboard-Filter",
@@ -1585,6 +1592,9 @@ const de = {
     },
     total: "Gesamt",
     noDataSourceFor: "Keine Datenquelle verfügbar für",
+    drillTooMany: 'Mit diesem Wert sind zu viele Datensätze verknüpft, um sie hier aufzulisten. Schränken Sie die Dashboard-Filter ein und versuchen Sie es erneut.',
+    drillUnavailable: 'Die Datensätze hinter diesem Wert können hier nicht aufgelistet werden.',
+    drillFailed: 'Die Datensätze hinter diesem Wert konnten nicht geladen werden. Versuchen Sie es später erneut.',
     config: {
       breadcrumb: {
         dashboard: "Dashboard",
@@ -1916,10 +1926,22 @@ const de = {
       },
       passwordsNote: "Temporäre Passwörter — einmalig angezeigt, nie gespeichert. Speichern Sie sie jetzt; jeder Benutzer muss seines bei der ersten Anmeldung ändern.",
       passwordsMore: "Weitere Einträge ausgelassen — bitte den Download verwenden.",
+      positionsHint: "Positionen: Ordnen Sie eine Spalte mit Maschinennamen von Positionen zu, mehrere durch Semikolon (;) getrennt. Jede wird wie in Setup zugewiesen; ein Name, den es nicht gibt oder den Sie nicht zuweisen dürfen, wird in seiner Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
+      managerHint: "Vorgesetzte: Ordnen Sie eine Spalte mit der vorgesetzten Person jedes Benutzers zu, per E-Mail-Adresse (oder Telefonnummer, wenn die Telefon-Anmeldung aktiv ist). Vorgesetzte werden verknüpft, wenn alle Zeilen angelegt sind, daher zählt auch eine Person weiter unten in der Datei; eine Person, die nicht gefunden oder nicht verknüpft werden kann, wird in ihrer Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
       passwordsDownload: "CSV herunterladen",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_one: '{{count}} unveröffentlichte Änderung. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_other: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        showDraftToPublish: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_one: '{{count}} unveröffentlichte Änderung. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_other: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraft: 'Entwurf anzeigen',
+        receipt: 'Veröffentlicht. Ihre Änderungen sind live.',
+        dismissReceipt: 'Schließen',
         count: "{{count}} Änderung(en) sind noch nicht veröffentlicht — Benutzer können sie nicht sehen.",
         publish: "Veröffentlichen",
         published: "Alle ausstehenden Änderungen sind live.",
@@ -2015,6 +2037,9 @@ const de = {
           title: "„{{app}}“ wird bearbeitet",
           titleGeneric: "Diese App bearbeiten",
           description: "Was möchten Sie ändern? Ich passe diese App direkt an — ein Feld, Objekt, eine Ansicht oder ein Dashboard hinzufügen oder Vorhandenes anpassen.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Fragen Sie nach den Daten dieser App – Anzahlen, Listen und Zusammenfassungen – oder sagen Sie mir, was ich ändern soll, und ich passe die App direkt an: ein Feld, ein Objekt, eine Ansicht oder ein Dashboard.",
         },
       },
       clearConversation: "Leeren",
@@ -2154,7 +2179,7 @@ const de = {
       changesApplied: "Angewendet",
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
-      discussing: "Thema: {{target}}",
+      discussing: "Angezeigt: {{target}}",
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2202,11 +2227,16 @@ const de = {
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
-        title: "Assistent",
+        title: "KI-Assistent",
         description: "KI-Assistent-Chat",
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
         maximize: "Als ganze Seite öffnen",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Verlauf",
+        backToChat: "Zurück zum Chat",
+        expand: "Erweitern",
+        restore: "Seitenleiste wiederherstellen",
         open: "Assistent öffnen",
         planAwaitingApproval: "Ein vorgeschlagener Plan wartet auf Ihre Freigabe",
       },
@@ -2253,6 +2283,9 @@ const de = {
       fieldErrorsToast_one: "{{count}} Einstellung muss überprüft werden: {{settings}}",
       fieldErrorsToast_other: "{{count}} Einstellungen müssen überprüft werden: {{settings}}",
       cryptoRefusalTitle: "Diese Installation kann keine Geheimnisse verschlüsseln",
+      platformManagedTitle: "Von der Plattform verwaltet",
+      platformManagedBody: "Die Hosting-Plattform stellt dies für diese Umgebung bereit und konfiguriert es, daher wird es hier nicht eingestellt.",
+      aiProviderManaged: "Der KI-Anbieter, sein Modell und seine Zugangsdaten werden von der Plattform verwaltet.",
       cryptoRefusalSubjectSuffix: "ist als verschlüsselt deklariert, daher wurde nichts geschrieben.",
       cryptoRefusalNoSubject: "Der als verschlüsselt deklarierte Wert wurde abgelehnt, daher wurde nichts geschrieben.",
       cryptoRefusalToast: "Geheimnisse können nicht verschlüsselt werden: {{subject}}",
@@ -2305,6 +2338,7 @@ const de = {
       view: "Anzeigen",
       confirm: "Bestätigen",
       cancel: "Abbrechen",
+      continue: "Fortsetzen",
       prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
       organizationName: {
         title: "Organisation benennen",
@@ -2351,6 +2385,8 @@ const de = {
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
+      firstApp: { title: 'Erste App hinzufügen', todo: 'Noch keine eigene App. Installieren Sie eine aus dem Marktplatz oder erstellen Sie eine; sie erscheint auf der Startseite.', done: 'Eine eigene App ist auf der Startseite.' },
+      firstRecord: { title: 'Ersten Datensatz anlegen', todo: 'In Ihren Apps hat noch niemand einen Datensatz angelegt.', done: 'In Ihren Apps wurde ein Datensatz angelegt.', action: 'App öffnen' },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",
@@ -2489,8 +2525,16 @@ const de = {
       },
       viewTypeTree: "Baum",
       viewTypeTreeDesc: "Selbstreferenzierende Datensätze über ein übergeordnetes Feld zu einer Hierarchie verschachteln.",
+      viewTypeTimesheet: "Zeiterfassung",
+      viewTypeTimesheetDesc: "Eine Zahl pro Zeile und Wochentag eingeben; jede ausgefüllte Zelle ist ein Datensatz.",
       parentField: "Übergeordnetes Feld",
       parentFieldHelp: "Das Feld, das auf den übergeordneten Datensatz (dasselbe Objekt) verweist und die Hierarchie definiert. Nur selbstreferenzierende Felder kommen infrage.",
+      timesheetRowField: "Zeilenfeld",
+      timesheetRowFieldHelp: "Jede Zeile des Rasters ist ein Wert dieses Felds, etwa ein Projekt.",
+      timesheetDateField: "Datumsfeld",
+      timesheetDateFieldHelp: "Datensätze werden dem Wochentag dieses Datums zugeordnet.",
+      timesheetValueField: "Wertfeld",
+      timesheetValueFieldHelp: "Die Zahl, die jede Zelle anzeigt und bearbeitet, etwa Stunden.",
       viewName: "Name",
       viewNameHelp: "Technischer Schlüssel (snake_case). Wird aus dem Titel automatisch gefüllt — bei Bedarf anpassen.",
       viewNameRequired: "Geben Sie einen Schlüssel ein (Kleinbuchstaben, Ziffern, Unterstrich). Bei nicht-lateinischen Titeln wird er nicht automatisch gefüllt.",
@@ -2519,7 +2563,7 @@ const de = {
       expandToPage: "Als ganze Seite öffnen",
       openAsPage: "Als ganze Seite öffnen",
       objectNotFound: "Objekt nicht gefunden",
-      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert in der aktuellen Konfiguration nicht.",
+      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert nicht, oder Sie haben keinen Zugriff darauf.",
       objectNotFoundHint: "Überprüfen Sie Ihre App-Navigationseinstellungen oder wählen Sie ein anderes Objekt aus der Seitenleiste.",
       objectPackageDisabled: "Das Objekt „{{objectName}}“ gehört zu einem deaktivierten Paket und wird daher nicht bereitgestellt.",
       filterOrGroupNotEditable: "Dieser Filter enthält neben anderen Bedingungen eine ODER-Gruppe, die der Filter-Editor nicht darstellen kann, daher ist er hier schreibgeschützt. Die Ansicht wendet ihn weiterhin an.",
@@ -2674,6 +2718,10 @@ const de = {
       launcherLabel: "App-Launcher",
       menuLabel: "App-Navigation",
       menuEmpty: "Diese App hat keine Navigationseinträge, die Sie öffnen können.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "App-Menüleiste",
+      searchMenu: "Menü durchsuchen",
+      phoneBarHint: "Markieren Sie einen Eintrag mit dem Stern, um ihn in die untere Leiste zu legen. Die Leiste zeigt die ersten vier.",
       itemMenu: "Weitere Aktionen für {{name}}",
       openInNewTab: "In neuem Tab öffnen",
       copyLink: "Link kopieren",
@@ -2704,6 +2752,7 @@ const de = {
         retry: "Mit Single Sign-on fortfahren",
       },
       ssoHandoff: "Weiter zu {{target}}",
+      ssoHandoffClient: "Melden Sie sich an, um mit {{clientName}} fortzufahren",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
         signIn: "Als Entwickler-Admin anmelden",
@@ -2733,6 +2782,8 @@ const de = {
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
+        ssoAccessDeniedNotMember: "Das Konto, mit dem Sie sich angemeldet haben, ist kein Mitglied der Organisation dieser Umgebung. Melden Sie sich mit einem Konto an, das Mitglied ist, oder bitten Sie einen Administrator der Organisation, Sie einzuladen.",
+        ssoAccessDeniedInvitationPending: "Sie wurden in die Organisation dieser Umgebung eingeladen, haben die Einladung aber noch nicht angenommen. Nehmen Sie die Einladung aus Ihrer E-Mail an und melden Sie sich dann erneut an.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
@@ -2911,6 +2962,10 @@ const de = {
       missingToken: "Im Bestätigungslink fehlt ein Token.",
       emailMissing: "E-Mail-Adresse fehlt",
       resendButton: "Bestätigungs-E-Mail erneut senden",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ihre E-Mail-Adresse ist noch nicht bestätigt. Senden Sie einen Bestätigungslink an {{email}} und klicken Sie dann auf den Link, um Ihr Konto zu bestätigen.",
+      sendButton: "Bestätigungs-E-Mail senden",
       resending: "Sende…",
       resent: "E-Mail gesendet! Überprüfen Sie Ihren Posteingang",
       resentSuccess: "Bestätigungs-E-Mail gesendet!",
@@ -3045,6 +3100,10 @@ const de = {
       granted: "Zugriff gewährt",
       denied: "Zugriff verweigert",
       noRedirect: "Der Server hat keine Weiterleitungs-URL zurückgegeben.",
+      returnToApp: "Kehren Sie zu {{appName}} zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      returnToUnnamedApp: "Kehren Sie zur Anwendung zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      openApp: "{{appName}} öffnen",
+      openUnnamedApp: "Anwendung öffnen",
       failed: "Zustimmung fehlgeschlagen",
       footer: "Sie können den Zugriff jederzeit in Ihren Kontoeinstellungen widerrufen.",
     },
@@ -3181,7 +3240,7 @@ const de = {
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "App im Studio ansehen",
+    openAppInStudio: "{{app}} im Studio ansehen",
   },
   home: {
     build: {
@@ -3372,7 +3431,6 @@ const de = {
   },
   empty: {
     objectNotFound: "Objekt nicht gefunden",
-    objectNotFoundDescription: "Definition des Objekts „{{name}}“ fehlt. Überprüfen Sie Ihre Konfiguration oder navigieren Sie zurück.",
     interfacePageSourceMissing: "Diese Interface-Seite verweist auf „{{name}}“, das nicht verfügbar ist.",
     pageNotFound: "Seite nicht gefunden",
     pageNotFoundDescription: "Die Seite „{{name}}“ wurde nicht gefunden. Sie wurde möglicherweise entfernt oder umbenannt.",
@@ -3708,6 +3766,17 @@ const de = {
       accept: "Einladung annehmen",
       accepted: "Einladung angenommen",
       joinedDescription: "Willkommen bei {{orgName}}. Sie sind als {{role}} beigetreten.",
+      joinedWelcome: "Willkommen bei {{orgName}}.",
+      verifyEmailTitle: "Bestätigen Sie Ihre E-Mail-Adresse",
+      verifyEmailDescription: "Die E-Mail-Adresse dieses Kontos muss die eingeladene und bestätigt sein. Bestätigen Sie sie und öffnen Sie dann den Einladungslink aus Ihrem Postfach erneut.",
+      proofInvalid: "Dieser Einladungslink kann nicht mehr verwendet werden. Fordern Sie eine neue Einladung an oder melden Sie sich bei einem bestehenden Konto an.",
+      signInInstead: "Bei einem bestehenden Konto anmelden",
+      proofTitle: "{{orgName}} beitreten",
+      proofDescription: "Richten Sie Ihr Konto für {{email}} ein, um die Einladung anzunehmen.",
+      proofDivider: "oder ein Passwort festlegen",
+      proofNameLabel: "Name",
+      proofPasswordLabel: "Passwort",
+      proofSubmit: "Konto erstellen und beitreten",
       continue: "Weiter",
       acceptFailed: "Einladung konnte nicht angenommen werden",
       decline: "Ablehnen",
@@ -3741,6 +3810,8 @@ const de = {
     viewApprovals: "Genehmigungen anzeigen",
     noPendingApprovals: "Keine ausstehenden Genehmigungen",
     openApprovalsInbox: "Genehmigungs-Posteingang öffnen",
+    needsYou: "Wartet auf Ihre Aktion",
+    viewApprovalDetails: "Details anzeigen",
     badgeTotal: "{{total}} insgesamt",
     badgeNotifications: "{{count}} ungelesene Themen",
     badgeNotifications_one: "{{count}} ungelesenes Thema",
@@ -3971,13 +4042,11 @@ const de = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
@@ -4042,6 +4111,7 @@ const de = {
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
       get_record_history: "Den Verlauf des Datensatzes lesen",
+      list_flow_runs: "Die Flow-Ausführungen prüfen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",
@@ -4138,6 +4208,22 @@ const de = {
       needsAttention: "{{count}} erfordern Prüfung",
       needsAttention_one: "{{count}} erfordert Prüfung",
       needsAttention_other: "{{count}} erfordern Prüfung",
+      health: {
+        sampleRowsLive: "{{count}} Beispieldatensätze live",
+        sampleRowsLive_one: "{{count}} Beispieldatensatz live",
+        sampleRowsLive_other: "{{count}} Beispieldatensätze live",
+        views: "{{count}} Ansichten",
+        views_one: "{{count}} Ansicht",
+        views_other: "{{count}} Ansichten",
+        widgets: "{{count}} Widgets",
+        widgets_one: "{{count}} Widget",
+        widgets_other: "{{count}} Widgets",
+        seeds: "{{count}} Beispieldatenpakete",
+        seeds_one: "{{count}} Beispieldatenpaket",
+        seeds_other: "{{count}} Beispieldatenpakete",
+        verified: "{{checks}} geprüft",
+        seedFailed: "Die Beispieldaten konnten nicht geladen werden.",
+      },
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
@@ -4322,13 +4408,26 @@ const de = {
     progressBar: 'Entscheidungsfortschritt',
     declaredActions: 'Aktionen',
     decisionPanelOffRequestPage: 'Der Entscheidungsbereich für Genehmigungen funktioniert nur auf Seiten von Genehmigungsanfragen.',
+    openNextAfterDecision: 'Nach der Entscheidung die nächste öffnen',
+    queueDone: 'In dieser Liste sind keine offenen Anfragen mehr.',
     snapshotAsSubmitted: 'Wie eingereicht',
+    snapshotChanged: 'Geändert',
+    snapshotCurrentValue: 'Aktueller Wert',
+    snapshotOpenRecord: 'Datensatz öffnen',
+    snapshotCurrentUnreadable: 'Der aktuelle Datensatz kann nicht gelesen werden, daher sind Änderungen nach der Einreichung nicht markiert.',
+    snapshotChildCurrent: 'Aktuelle Zeilen: Die Einreichung speichert keine untergeordneten Zeilen.',
+    progressTitle: 'Genehmigungsfortschritt',
+    attachmentsTitle: 'Anhänge',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',
     approveOneTitle: '„{{title}}“ genehmigen?',
     approveOneBody: 'Die Anfrage wird mit Ihrer Identität genehmigt. Um einen Kommentar oder Anhang hinzuzufügen, öffnen Sie die Anfrage.',
     flowOrigin: 'Vom Flow gestartet',
     submittedByYou: 'Von Ihnen eingereicht',
+    awaitingYourDecision: 'Wartet auf Ihre Genehmigung',
+    stepNumber: 'Schritt {{n}}',
+    submittedByName: 'Eingereicht von {{name}}',
+    moreDecisionActions: 'Weitere Genehmigungsaktionen',
     sortBy: 'Sortieren',
     sortRecent: 'Neueste zuerst',
     sortOldest: 'Älteste zuerst',
@@ -4504,6 +4603,10 @@ const de = {
       pendingHere: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
       pendingHere_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung auf dieser Seite',
       pendingHere_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
     },
     changes: {
       title: 'Ausstehende Änderungen',
@@ -4520,7 +4623,7 @@ const de = {
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       fieldOrderChanged: 'Feldreihenfolge geändert',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Assistent entworfen hat',
       draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
@@ -4628,7 +4731,8 @@ const de = {
       securityBlockTitle: 'Veröffentlichen wird abgelehnt — {{count}} Element(e) benötigen zuerst eine Entscheidung',
       securityBlockTitle_one: 'Veröffentlichen wird abgelehnt — {{count}} Element benötigt zuerst eine Entscheidung',
       securityBlockTitle_other: 'Veröffentlichen wird abgelehnt — {{count}} Elemente benötigen zuerst eine Entscheidung',
-      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Datensatzfreigabe und veröffentlichen Sie erneut.',
+      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Wer welche Datensätze sehen kann und veröffentlichen Sie erneut.',
+      flowChecksTitle: 'Vor dem Veröffentlichen: Die Veröffentlichungsprüfung meldet Folgendes',
       securityRule: {
         owdUnset: 'Es ist keine Basis für die Datensatzfreigabe (sharingModel) deklariert. Die Laufzeit greift auf private zurück, aber die Basis muss eine bewusste Entscheidung sein.',
         owdAlias: 'Die Basis für die Datensatzfreigabe (sharingModel) ist kein kanonischer Wert, daher behandelt die Laufzeit das Objekt als private.',
@@ -4639,6 +4743,8 @@ const de = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Diese App ist noch nicht veröffentlicht. Sie funktioniert, aber nur Builder können sie sehen. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       message: 'Unveröffentlichte App — voll funktionsfähig, aber nur für Builder sichtbar. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       publish: 'Veröffentlichen',
       publishing: 'Wird veröffentlicht…',
@@ -5090,6 +5196,52 @@ const de = {
     sourceRequired: "Eine Seite vom Typ {{kind}} benötigt einen nicht leeren Wert für {{source}}.",
     loading: "React-Laufzeit wird geladen…",
     error: "Fehler auf der React-Seite",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile-App",
+    subtitle: "Die ObjectOS-Mobile-App mit diesem Server verbinden",
+    scanHint: "Öffnen Sie die ObjectOS-Mobile-App und scannen Sie diesen Code, um sie mit diesem Server zu verbinden.",
+    qrAlt: "QR-Code, der die ObjectOS-Mobile-App mit diesem Server verbindet",
+    linkLabel: "Verbindungslink",
+    copy: "Link kopieren",
+    copied: "Link kopiert",
+    privacy: "Der Code enthält nur die Adresse dieses Servers, niemals Ihr Konto.",
+    loadFailed: "Die öffentliche Adresse dieses Servers konnte nicht gelesen werden. Laden Sie die Seite neu, um es erneut zu versuchen.",
+    unreachableTitle: "Ein Telefon kann die Adresse dieses Servers nicht erreichen",
+    unreachableBody: "Die Adresse dieses Servers ist {{address}}, eine lokale oder private Adresse, die ein Telefon nicht öffnen kann, daher wird kein Code angezeigt. Setzen Sie {{setting}} auf dem Server auf seine öffentliche Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+    insecureTitle: "Die Adresse dieses Servers verwendet kein HTTPS",
+    insecureBody: "Die Adresse dieses Servers ist {{address}}. Die mobile App meldet sich darüber an, daher muss sie HTTPS verwenden, und es wird kein Code angezeigt. Stellen Sie den Server über HTTPS bereit, setzen Sie {{setting}} auf seine https://-Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+    unpublishedTitle: "Dieser Server veröffentlicht keine öffentliche Adresse",
+    unpublishedBody: "Es wird kein Code angezeigt: Dieser Server stellt der mobilen App seine öffentliche Adresse noch nicht bereit. Aktualisieren Sie den Server auf eine Version, die das unterstützt.",
+  },
+  notificationSettings: {
+    title: "Benachrichtigungseinstellungen",
+    subtitle: "Legen Sie fest, welche Benachrichtigungen Sie über welche Kanäle erhalten",
+    loading: "Ihre Benachrichtigungseinstellungen werden geladen…",
+    loadFailed: "Ihre Benachrichtigungseinstellungen konnten nicht gelesen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
+    saveFailed: "Die Änderung wurde nicht gespeichert: {{reason}}",
+    general: "Allgemein",
+    generalWarning: "Wenn Sie Zusammenfassung oder Ruhezeiten ändern, wird Ihre eigene allgemeine Einstellung gespeichert. Sie gilt dann für jedes Thema und jeden Kanal, die Sie nicht selbst festgelegt haben, anstelle der Standardwerte Ihrer Organisation.",
+    digest: "Zusammenfassung",
+    digestNone: "Keine Zusammenfassung",
+    digestDaily: "Täglich",
+    digestWeekly: "Wöchentlich",
+    digestNoOff: "Die Zusammenfassung lässt sich hier nicht abschalten: Das Speichern ohne Zusammenfassung schaltet eine von Ihrer Organisation festgelegte Zusammenfassung nicht ab und wirkt daher möglicherweise nicht.",
+    quietHours: "Ruhezeiten",
+    quietHoursNoClear: "Ein leeres Zeitfenster kann nicht gespeichert werden: Es schaltet von Ihrer Organisation festgelegte Ruhezeiten nicht ab und wirkt daher möglicherweise nicht. Legen Sie stattdessen eine Start- und eine Endzeit fest.",
+    save: "Speichern",
+    matrix: "Themen und Kanäle",
+    topic: "Thema",
+    allTopics: "Alle Themen",
+    alwaysDelivered: "Immer zugestellt",
+    notConfigured: "Nicht eingerichtet",
+    toggleLabel: "{{topic}} über {{channel}}",
+    sourceOwn: "Ihre Einstellung",
+    sourceDefault: "Standard der Organisation",
+    sourceBuiltin: "Standard",
+    sourceMandatory: "Erforderlich",
   },
 };
 

@@ -32,7 +32,13 @@
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
-import { DELETE_RECORDS_MAX_PER_CALL, grantsAuthoringTools } from './mcp-http-tools.js';
+import { ASK_SKILL_DATA_LOOP } from './ask-skill.generated.js';
+import {
+  DELETE_AMBIGUOUS_ASKS_FIRST,
+  DELETE_NAMED_RECORD_IS_APPROVAL,
+  DELETE_RECORDS_MAX_PER_CALL,
+  grantsAuthoringTools,
+} from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
@@ -120,7 +126,8 @@ export interface RenderSkillOptions {
   /**
    * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
    * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
-   * and the D3 selection rule that teaches a client when to use them, render
+   * and the ask-data skill's data loop that teaches a client when to use them
+   * (#34686: generated from the published skill), render
    * only when this is true AND {@link grantedScopes} admit `data:read`, so the
    * skill names them exactly where `tools/list` lists them. Default false: the
    * renderer cannot see the bridge, so the host says so.
@@ -248,43 +255,55 @@ const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a
 `;
 
 /**
- * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
- * tells a client when a governed metric answers instead of an object query.
- * The rule is ADR-0149 D3's, in the client's terms: an exact word match
- * (after normalization) is the only hit, one hit wins, several hits are a
- * question for the user, no hit falls back to the object tools with the
- * answer labelled as not a governed metric, and a dimension alone is not an
- * answer.
+ * [ADR-0149 D2] The dataset pair's entries in the tool list: each tool's
+ * signature and what its answer carries, in a sentence. When to call them and
+ * how to read their answers (ADR-0149 D3's selection rule, the fallback, and a
+ * question the data cannot answer) is {@link ASK_SECTION_HEADING}'s section,
+ * which the published skill writes.
  */
 const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed datasets (business metrics)
   you may query: each dataset's measures and dimensions with their business
-  labels, descriptions and synonyms. Pass the business words of the question
-  as \`terms\`; the answer's \`matches\` says which member each word names
-  exactly. \`membersWithheld: true\` means some measures exist that you may not
-  read: say so rather than saying the metric does not exist.
-- **query_dataset({ datasetName, selection })** — compute a governed metric:
-  \`selection\` takes \`measures\`, \`dimensions\` and a \`runtimeFilter\`, by
-  the names \`list_datasets\` gives. The answer carries \`provenance\` (the
-  dataset and measures used); cite the source from it, not from memory, and
-  use a measure's \`description\` to explain what the number includes.
-- **Choosing between a metric and an object query.** Call \`list_datasets\`
-  with the question's business words first. A word matches only when it
-  equals a member's name, label or synonym (case, spacing, \`_\` and \`-\`
-  aside), never by similarity. One measure match: answer with
-  \`query_dataset\`. Several matches (two datasets or two members): ask the
-  user which one they mean, listing each candidate's label, dataset and
-  description; do not pick. No match: fall back to \`query_records\` /
-  \`aggregate_records\` and say the answer is not from a governed metric. A
-  dimension match alone (a grouping such as "by stage") is not an answer: you
-  still need a measure match, or ask.
+  labels, descriptions and synonyms, and, for the \`terms\` you pass, the
+  \`matches\` each word made.
+- **query_dataset({ datasetName, selection })** — compute a governed metric
+  by the names \`list_datasets\` gives; the answer carries \`provenance\`.
+  When to call these two, and how to read their answers: the section
+  **Answering a business question** below.
 `;
 
-/** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */
-function renderDatasetToolLines(options: RenderSkillOptions): string {
-  if (options.datasetTools !== true) return '';
+/**
+ * [#34686] The heading the served page gives the ask-data skill's data loop.
+ * The text under it is {@link ASK_SKILL_DATA_LOOP}, generated from
+ * `skills/objectstack-ask/SKILL.md` (`scripts/gen-mcp-ask-skill.mjs`) and pinned
+ * equal to it by `skill-single-source-34686.test.ts`: the published skill is
+ * the one source, and nothing here restates it.
+ */
+export const ASK_SECTION_HEADING = '## Answering a business question';
+
+/**
+ * Whether this render teaches the dataset pair: a host whose bridge carries
+ * them, under a grant that registers them.
+ */
+function datasetToolsTaught(options: RenderSkillOptions): boolean {
+  if (options.datasetTools !== true) return false;
   // Mirrors the gate in `registerDatasetTools` (`!scopes || scopes.includes(data:read)`).
   const scopes = options.grantedScopes;
-  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) ? DATASET_TOOL_LINES : '';
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+}
+
+/** The dataset pair's entries in the tool list, where {@link datasetToolsTaught}. */
+function renderDatasetToolLines(options: RenderSkillOptions): string {
+  return datasetToolsTaught(options) ? DATASET_TOOL_LINES : '';
+}
+
+/**
+ * [#34686] The ask-data skill's data loop under its own heading, where
+ * {@link datasetToolsTaught}. It renders after every other block of the tool
+ * list and before the conventions, so a render that does not teach the pair is
+ * byte-identical to one from before this section existed.
+ */
+function renderAskSection(options: RenderSkillOptions): string {
+  return datasetToolsTaught(options) ? `\n${ASK_SECTION_HEADING}\n\n${ASK_SKILL_DATA_LOOP}\n` : '';
 }
 
 /** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */
@@ -447,9 +466,10 @@ create/update payload.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
 - **delete_record({ objectName, recordId, confirm })** — delete a record.
   The server REFUSES a call without \`confirm: true\`
-  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
-  first; the flag asserts an approval, it does not obtain one. A deleted
-  business record goes to the recycle bin and can be restored there until the
+  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted.
+  ${DELETE_NAMED_RECORD_IS_APPROVAL}
+  ${DELETE_AMBIGUOUS_ASKS_FIRST}
+  A deleted business record goes to the recycle bin and can be restored there until the
   deployment's retention ends (30 days by default); the answer names the entry
   as \`recycleBinEntryId\`. An answer without one was a permanent delete: a
   platform object's record (\`sys_\`, \`cloud_\`, \`ai_\`), or any record on a
@@ -477,29 +497,39 @@ create/update payload.
   but \`run_action\` would refuse it for you (your credential, or your role in
   this organization): \`unavailable.reason\` says why and what would let it
   run, so tell your human instead of calling it.
-- **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
+- **run_action({ actionName, objectName?, recordId?, params? })** —
   invoke a business action by name. Invocation is permission-gated, but the
   action body executes the app's registered logic as trusted code (it can
   mutate data or trigger flows with the app's own authority). Pass
   \`recordId\` for record-scoped actions and \`params\` for declared inputs;
-  \`objectName\` only disambiguates a name shared by multiple objects. Pass
-  \`confirm: true\` on an action \`list_actions\` reports as
-  \`requiresConfirmation\` — the server REFUSES such a call without it
-  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
-  the flag asserts an approval, it does not obtain one. Under an AI service
+  \`objectName\` only disambiguates a name shared by multiple objects. An
+  action \`list_actions\` reports as \`requiresConfirmation\` may need a
+  person's approval, which you cannot give: when its author declared it and
+  your client supports elicitation on a connection that can carry it, the
+  person is asked in your client — accept runs the call once, and any other
+  answer refuses it (\`ACTION_CONFIRMATION_REQUIRED\`); do not retry unless
+  they ask. Otherwise the call does not run, and you are answered
+  \`status: "pending_confirmation"\` with a \`pendingId\` — the person
+  approves or rejects it in the app, so relay the message and do not retry.
+  A server that cannot hand it off
+  refuses it (\`ACTION_CONFIRMATION_REQUIRED\`, \`details.reason\`
+  \`no_confirmation_service\`) and nothing runs: the person performs it in the
+  app. Never send \`confirm\`: the tool refuses a call that carries it, on
+  every action. Under an AI service
   account's own key (an agent acting for itself, for no person) the call is
   refused whatever it sends and nothing runs: hand the action to a person, or
   its author declares \`ai.requiresConfirmation: false\` when it is safe
   unattended.
-- **resume_run({ runId, values?, confirm? })** — continue a flow run that
+- **resume_run({ runId, values? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`,
+  (the person's confirmation, in your client or in the app, for an action its
+  author declared \`requiresConfirmation\`, the refusal of a call that sends \`confirm\`,
   and its refusal under an AI service account's own key whatever the call sends).
-${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}${renderAskSection(options)}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
@@ -508,7 +538,9 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 - **Discover, don't assume.** Object and field names vary per app; always
   \`list_objects\` / \`describe_object\` first.
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
-  destructive actions (\`delete_record\`, bulk updates) with the user.
+  destructive actions (\`delete_record\`, bulk updates) with the user; a
+  \`delete_record\` the user named, with exactly one record matching, is
+  already confirmed.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
 - **People are \`sys_user\` records.** A person field (owner, approver,
   employee) holds a user id. Find it with \`query_records\` on \`sys_user\`:
@@ -531,6 +563,7 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 3. \`query_records\` to read / verify current state.
 4. \`run_action\` when a matching business action exists; otherwise
    \`create_record\` / \`update_record\` / \`delete_record\` — confirming
-   destructive steps with the user.
+   destructive steps with the user (a delete the user named, with exactly one
+   record matching, is already confirmed).
 `;
 }

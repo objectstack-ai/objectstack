@@ -1047,6 +1047,32 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       });
     });
 
+    it('#33634: with sourceLocale en declared over a zh-CN default, an English page names the inline labels and a Chinese one the pack', async () => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      // An app authored in English that defaults its users to zh-CN, no
+      // `fallbackLocale` (both boot paths collapse it to zh-CN).
+      const i18nOf = (sourceLocale: string | undefined) => ({
+        getLocales: () => ['zh-CN', 'en'],
+        getTranslations: (locale: string) =>
+          locale === 'zh-CN' ? { objects: { claim: { label: '报销单', fields: { policy: { label: '保单' } } } } } : {},
+        getDefaultLocale: () => 'zh-CN',
+        getFallbackLocale: () => 'zh-CN',
+        getSourceLocale: () => sourceLocale,
+      });
+      await withServices({ i18n: i18nOf('en') }, async () => {
+        const enHtml = String((await openIn(tokenOf(grant.path), EN))._sent);
+        expect(enHtml).toContain(`${row(en.recordRow, en.recordTitled('Claim', TITLE))}${row(en.goesIntoRow, en.intoField('Policy'))}`);
+        const zhHtml = String((await openIn(tokenOf(grant.path), ZH))._sent);
+        expect(zhHtml).toContain(`${row(zh.recordRow, zh.recordTitled('报销单', TITLE))}${row(zh.goesIntoRow, zh.intoField('保单'))}`);
+      });
+      // CONTROL — no sourceLocale declared: the English page walks the chain to zh-CN, as before.
+      await withServices({ i18n: i18nOf(undefined) }, async () => {
+        const enHtml = String((await openIn(tokenOf(grant.path), EN))._sent);
+        expect(enHtml).toContain(`${row(en.recordRow, en.recordTitled('报销单', TITLE))}${row(en.goesIntoRow, en.intoField('保单'))}`);
+      });
+    });
+
     it('an attachments link, a multi-file field and a record not yet created each name what they can', async () => {
       const id = await titledClaim();
       const attach = await files.createUploadLinkAs('claim', id, { attachments: true }, OWNER as never);

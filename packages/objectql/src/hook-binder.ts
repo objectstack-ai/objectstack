@@ -205,15 +205,21 @@ export function bindHooksToEngine(
   // named 'x' is registered", naming the one thing the author had actually
   // done.
   if (opts.functions && typeof (engine as any).registerFunction === 'function') {
-    // [#30803] One name, one package holder for a function
-    // (`bare-name-one-holder.ts`, phase 1 of ADR-0150): once the cold boot
-    // has sealed the registry a bind bringing a function another package
-    // holds is refused here, ahead of every registration below, naming both
-    // holders. Before the seal the claims are only recorded, for the cold
-    // boot to read. The engine keeps every holder of a name
+    // [#30803] The bare-name one-holder rule for a function
+    // (`bare-name-one-holder.ts`), narrowed to the namespace (ADR-0150 D2/D9:
+    // `function` is in `NAMESPACE_SCOPED_BARE_NAME_TYPES`). Before the seal
+    // the claims are only recorded, for the cold boot to read. Once the cold
+    // boot has sealed the registry, `claimBareNameFunctions` throws a
+    // `BareNameConflictError` naming both holders when this bind brings a
+    // function a package of its own namespace, a package with no namespace,
+    // or the platform already holds; a package of another namespace may hold
+    // the same name. The throw comes ahead of every registration below and is
+    // not caught here: the runtime's `bindAppArtifactHandlers` catches it per
+    // owner group and logs "Failed to bind declarative hooks" at `error`, so
+    // the package still installs and every function and hook of that owner
+    // group stays unbound. The engine keeps every holder of a name
     // (`functionHoldersOf`) and a flow `script` node resolves it in the
-    // calling flow's package (#32073); this refusal stays until the trailing
-    // backstop child (ADR-0150 D9) narrows it.
+    // calling flow's package (#32073).
     const claimable = Object.entries(opts.functions)
       .filter(([, entry]) => normalizeFlowFunctionEntry(entry) !== undefined)
       .map(([name]) => name);

@@ -54,6 +54,14 @@ import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { dateRangeWindowBounds } from '../dataset-executor.js';
+import {
+  ANALYTICS_GROUP_COUNT_COLUMN,
+  GROUP_COUNT_DIALECTS,
+  answerWholeGrid,
+  groupCountRequestOf,
+  hasWindow,
+  takeGroupCount,
+} from '../dataset-group-count.js';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
@@ -390,6 +398,23 @@ function measureColumnOf(
 }
 
 /**
+ * The leaf operators whose compiled clause a NULL column can satisfy, so a
+ * joined column's NULL from a row the `LEFT JOIN` reached no parent for would
+ * select that row ({@link NativeSQLStrategy}'s `compileFilterNode` leaf arm):
+ *
+ * - `notSet` — `col IS NULL`, the escape arm of the negative operators' NULL
+ *   guard, `$null: true` and `$eq: null`;
+ * - `empty` — `col IS NULL OR …` (`empty-operator-sql.ts`);
+ * - `notContains` — the constant TRUE on a column that stores no text
+ *   (`non-text-column.ts`), and `NOT EXISTS (… json_each(col) …)` on a
+ *   JSON-stored one (`contains-membership-sql.ts`), both TRUE on a NULL.
+ *
+ * Every other operator of the normalized vocabulary compiles to a comparison
+ * that is UNKNOWN on a NULL, or to `IS NOT NULL`, and selects no such row.
+ */
+const NULL_SATISFIED_LEAF_OPERATORS: ReadonlySet<string> = new Set(['notSet', 'empty', 'notContains']);
+
+/**
  * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
  * and the object it reads — the object {@link resolvePathHops} named for that
  * hop, which `generateSql` then scopes the alias as. One value for both, so
@@ -653,6 +678,23 @@ function judgedComparands(source: unknown, typeOf: MemberDeclaredType | null): u
   if (!condition) return source;
   const judged = narrowComparands(condition, typeOf, 'where');
   return judged === condition ? source : { where: judged };
+}
+
+/** The window the group count is answered by: `COUNT(*) OVER ()` over the grouped statement. */
+const GROUP_COUNT_WINDOW_SQL = `COUNT(*) OVER () AS "${ANALYTICS_GROUP_COUNT_COLUMN}"`;
+
+/**
+ * [query_dataset totalGroups] The statement's projection, with the group-count
+ * window appended when `query` carries a count request
+ * (`dataset-group-count.ts`) AND a window to count past, `dialect` parses the
+ * window, and no selected member already answers under its column. Otherwise
+ * the projection as compiled. A statement with no window needs none: every
+ * group it forms comes back, and the request is answered from the rows.
+ */
+function countedGroupsSql(query: AnalyticsQuery, dialect: AnalyticsSqlDialect, selectClauses: string[]): string[] {
+  if (!groupCountRequestOf(query) || !hasWindow(query) || !GROUP_COUNT_DIALECTS.has(dialect)) return selectClauses;
+  if (selectClauses.some((clause) => clause.endsWith(` AS "${ANALYTICS_GROUP_COUNT_COLUMN}"`))) return selectClauses;
+  return [...selectClauses, GROUP_COUNT_WINDOW_SQL];
 }
 
 /**
@@ -1329,6 +1371,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
     }
 
+    // [query_dataset totalGroups] The count the statement answered on every
+    // row is taken off the rows before anyone reads them, and written to the
+    // caller's request (`dataset-group-count.ts`). A statement with no
+    // `LIMIT` or `OFFSET` handed back every group it formed: the rows ARE the
+    // count, and the request is answered from them — the executor's proof
+    // that a grid it windows in memory is whole.
+    const groupCount = groupCountRequestOf(query);
+    if (groupCount && sql.includes(GROUP_COUNT_WINDOW_SQL)) {
+      takeGroupCount(rows, groupCount, { limit: query.limit, offset: query.offset });
+    } else if (groupCount && !hasWindow(query)) {
+      answerWholeGrid(rows, groupCount);
+    }
+
     // Build field metadata
     const fields = this.buildFieldMeta(query, cube);
 
@@ -1632,7 +1687,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // order states its NULL placement in it. [#31626] SQL Server's lone limit
     // is a `TOP (n)` after `SELECT` (`windowTopSql`).
     const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
-    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectClauses.join(', ')} FROM "${tableName}"`;
+    // [query_dataset totalGroups] A caller that asked for the group count
+    // (`dataset-group-count.ts`) gets it from THIS statement: a window over
+    // its groups runs after the `GROUP BY` and ahead of the `ORDER BY` and the
+    // window, so every row answers how many groups formed before the cut. Only
+    // on a dialect it parses on, and never under a member's own name.
+    const projected = countedGroupsSql(query, dialect, selectClauses);
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${projected.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
       sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
@@ -2035,6 +2096,29 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * The key column of the row a filter member's relationship path reaches, as
+   * {@link qualifyAndRegisterJoin} joined it (`"order"."id"`, or
+   * `"account__owner"."id"` for two hops), or `null` for a base-table column or
+   * an SQL expression. The hops are {@link resolvePathHops}'s, the one resolver
+   * the join itself reads; every hop joins `ON … = "<alias>"."id"`, so the last
+   * hop's key is NULL exactly when the chain reached no row. Read after the
+   * leaf resolved, so the join is registered.
+   */
+  private joinedParentKey(
+    cube: Cube,
+    member: string,
+    parentTable: string,
+    joins: StatementJoins,
+  ): string | null {
+    const rawSql = this.lookupFilterMember(cube, member)?.sql ?? member;
+    if (!rawSql.includes('.') || !IDENTIFIER_PATH.test(rawSql)) return null;
+    const hops = rawSql.split('.').slice(0, -1);
+    const resolved = resolvePathHops(cube, parentTable, hops, joins.referenceOf);
+    const last = resolved[resolved.length - 1];
+    return last && joins.has(last.alias) ? `"${last.alias}"."id"` : null;
+  }
+
+  /**
    * Resolve the (object, column) a filter member binds against, so its
    * comparand can be coerced to that column's on-disk storage form.
    *
@@ -2174,6 +2258,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (!node) return null;
 
     if (node.kind === 'const') {
+      // [#34384] The empty `$nin`'s TRUE names the member it was written on. On
+      // a joined member it is a leaf a NULL satisfies like the others the leaf
+      // arm below guards, so it is evaluated on an existing parent the same
+      // way: the last hop's `key = key`, TRUE for an existing parent and
+      // UNKNOWN for none. As the bare `1 = 1` it selected the orphans the
+      // engine path and `/data` leave out (`cross-object-where.ts`: no parent
+      // never matches, whatever the operator). On a base column, or an
+      // expression, the constant is the answer. It binds nothing.
+      if (node.value && node.member !== undefined) {
+        this.resolveFieldSql(cube, node.member, parentTable, joins);
+        const parentKey = this.joinedParentKey(cube, node.member, parentTable, joins);
+        if (parentKey) return `${parentKey} = ${parentKey}`;
+      }
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
     }
 
@@ -2201,7 +2298,34 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // Resolve the (object, column) this member binds against so the value
       // can be coerced to the column's storage form (see buildFilterClause).
       const target = this.resolveStorageTarget(cube, node.member, parentTable, joins.referenceOf);
-      return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      const clause = this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      // A leaf on a joined column is evaluated on an EXISTING parent. The
+      // `LEFT JOIN` gives a detail row with no parent a NULL in every joined
+      // column, and a leaf a NULL satisfies read that NULL as "the parent's
+      // value is missing", selecting the orphan: the escape the shared lowering
+      // lays around `$ne` / `$nin` / `$notContains` (`col IS NULL OR …`),
+      // `$null: true`, `$eq: null`, `$empty: true`. The engine path and the
+      // `/data` nested-relation filter read the parent first, so no parent
+      // never matches, whatever the operator (`cross-object-where.ts`); this
+      // conjunct is that rule here. Only the operators of
+      // {@link NULL_SATISFIED_LEAF_OPERATORS} take it: every other clause is
+      // UNKNOWN on a NULL and already leaves the orphan out. A parent that
+      // exists with a NULL value still answers its own polarity (#5298). Added
+      // only around a clause that bound, so `params` stays aligned.
+      //
+      // The conjunct is `key = key`, never `key IS NOT NULL`: it is TRUE for an
+      // existing parent and UNKNOWN (not FALSE) for an orphan, so the leaf is
+      // UNKNOWN there. A `$not` operand reaches this arm with the same leaves
+      // (the lowering leaves `$null` / `$empty` / a null `$eq` alone under
+      // `$not`, and escapes `$ne` / `$nin` / `$notContains`), and a FALSE leaf
+      // would let the `NOT` select the orphan. Under Kleene logic, turning TRUE
+      // into UNKNOWN can never turn a FALSE row TRUE, at any depth of `NOT`,
+      // `AND` or `OR`, so no row this compile left out before is selected now.
+      // Outside a `NOT`, UNKNOWN selects exactly what FALSE selects.
+      const parentKey = clause !== null && NULL_SATISFIED_LEAF_OPERATORS.has(node.operator)
+        ? this.joinedParentKey(cube, node.member, parentTable, joins)
+        : null;
+      return parentKey ? `(${clause} AND ${parentKey} = ${parentKey})` : clause;
     }
 
     if (node.kind === 'not') {

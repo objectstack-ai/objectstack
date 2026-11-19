@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   AUDIT_PROOF_BUNDLE_FORMAT,
@@ -28,7 +28,9 @@ import {
 } from './index.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
 import { AuditSealer } from './sealer.js';
-import { LocalCheckpointSigner, readAuditSealSecret, writeAuditSealSecret } from './signer.js';
+import type { IAuditCheckpointSigner } from '@objectstack/spec/contracts';
+import { signingKeyContext } from './seed.js';
+import { LocalCheckpointSigner, readAuditSealSecret, trustedSigningKey, writeAuditSealSecret } from './signer.js';
 
 /**
  * ADR-0154 D9 — the live check over an in-memory engine double: per-row
@@ -635,6 +637,210 @@ describe('the anchor tells a store that did not answer from a key that does not 
     blob[blob.length - 1] ^= 0xff;
     secret.ciphertext = blob.toString('base64');
     const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.keys).toEqual({ trusted: [], untrusted: [s.keyId] });
+    expect(new Set(report.faults.map((f) => f.kind))).toEqual(new Set(['untrusted_key']));
+    expect(report.ok).toBe(false);
+  });
+});
+
+/**
+ * A host signer that signs ES256 (ECDSA P-256, SHA-256) the way a KMS-held key
+ * does (Azure Key Vault's encoding, `r || s`), under the key id the amended
+ * D4 gives an ES256 key: the SHA-256 of its SPKI DER. Its `trustedPublicKey`
+ * answers for its own key and for every key it pins (ADR-0154 D6, amended):
+ * the `{ fingerprint, public_key }` pairs of a proof bundle's `keys`.
+ */
+function es256HostSigner(pins: ReadonlyArray<{ fingerprint: string; public_key: string }> = []) {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const spki = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+  const keyId = createHash('sha256').update(spki).digest('hex');
+  const pinned = new Map(pins.map((k) => [k.fingerprint, k.public_key]));
+  const p1363 = (bytes: Uint8Array) => sign('sha256', bytes, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  const signer: IAuditCheckpointSigner = {
+    sign: async (bytes) => ({ keyId, signature: p1363(bytes).toString('base64') }),
+    trustedPublicKey: async (id) => (id === keyId ? spki.toString('base64') : pinned.get(id) ?? null),
+  };
+  return { keyId, publicKey: spki.toString('base64'), signer, p1363, der: (bytes: Uint8Array) => sign('sha256', bytes, privateKey) };
+}
+
+/** The ledger of `sealedLedger`, sealed by `host` instead of the local key. */
+async function hostSealedLedger(host: ReturnType<typeof es256HostSigner>) {
+  const store = memoryEngine([LEDGER, AMENDMENTS] as never);
+  const crypto = bindingCrypto();
+  const now = DAY0 + 12 * H + 30 * 60_000;
+  const sealer = new AuditSealer({ engine: store.engine, crypto, signer: () => host.signer, logger: recordingLogger(), now: () => now });
+  store.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30), null), row('r4', at(10, 5)), row('r5', at(11, 10), 'org_b'));
+  await sealer.runPass();
+  const checkpoint = (chain: string, sequence: number) => store.hot.table('sys_audit_checkpoint').find((r) => r.chain_key === chain && r.sequence === sequence)!;
+  /** Re-sign a checkpoint row: `signing_key_id` set to `keyId`, the signature `signWith` makes over the new body. */
+  const resign = (cp: Record<string, unknown>, keyId: string, signWith: (bytes: Uint8Array) => Buffer) => {
+    const body = { ...checkpointBodyFromRow(cp), signing_key_id: keyId };
+    cp.signing_key_id = keyId;
+    cp.signature = signWith(signedBodyBytes(body)).toString('base64');
+  };
+  /** The live check under `trust` (default: the host's anchor), and its bundle re-judged offline under the trusted fingerprints. */
+  const verifyNow = async (trust: Pick<IAuditCheckpointSigner, 'trustedPublicKey'> = host.signer) => {
+    let bundle: AuditProofBundle | undefined;
+    const report = await verifyAuditLedger({ engine: store.engine, crypto, trust, now: () => now, onProofBundle: (b) => { bundle = b; } });
+    const copy = JSON.parse(JSON.stringify(bundle)) as AuditProofBundle;
+    if (report.keys.trusted.length > 0) {
+      expect(comparable(await verifyAuditProofBundle(copy, { trustedKeys: report.keys.trusted, now: () => now }))).toEqual(comparable(report));
+    }
+    return { report, bundle: copy };
+  };
+  return { ...store, crypto, checkpoint, resign, verifyNow };
+}
+
+/** A public key of a type the amended D4 does not admit, in the encoding a host might answer it in, under its own fingerprint. */
+function foreignKey(kind: 'P-384' | 'RSA' | 'P-256 compressed' | 'Ed25519 SPKI'): { keyId: string; publicKey: string; signWith: (bytes: Uint8Array) => Buffer } {
+  const pair = (): { privateKey: KeyObject; publicKey: KeyObject } =>
+    kind === 'P-384' ? generateKeyPairSync('ec', { namedCurve: 'P-384' })
+      : kind === 'RSA' ? generateKeyPairSync('rsa', { modulusLength: 2048 })
+        : kind === 'Ed25519 SPKI' ? generateKeyPairSync('ed25519')
+          : generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const { privateKey, publicKey } = pair();
+  let der = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+  if (kind === 'P-256 compressed') {
+    // The same P-256 key, its point compressed: X9.62 0x02/0x03 || x, in the compressed-point SPKI prefix.
+    const point = der.subarray(der.length - 65);
+    const compressed = Buffer.concat([Buffer.from([0x02 + (point[64] & 1)]), point.subarray(1, 33)]);
+    der = Buffer.concat([Buffer.from('3039301306072a8648ce3d020106082a8648ce3d030107032200', 'hex'), compressed]);
+  }
+  const signWith = (bytes: Uint8Array) =>
+    kind === 'Ed25519 SPKI' ? sign(null, bytes, privateKey)
+      : kind === 'RSA' ? sign('sha256', bytes, privateKey)
+        : sign('sha256', bytes, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  return { keyId: createHash('sha256').update(der).digest('hex'), publicKey: der.toString('base64'), signWith };
+}
+
+describe('an ES256 host signer: the trusted key\'s type decides the algorithm (ADR-0154 D4, D6, amended)', () => {
+  it('verifies a ledger an ES256 host signer sealed, live under its anchor and offline under its fingerprint', async () => {
+    const host = es256HostSigner();
+    const s = await hostSealedLedger(host);
+    expect(s.checkpoint('org:org_a', 0).signing_key_id).toBe(host.keyId);
+    const { report, bundle } = await s.verifyNow();
+    expect(report.faults).toEqual([]);
+    expect(report.totals.unmodified).toBe(5);
+    expect(report.keys).toEqual({ trusted: [host.keyId], untrusted: [] });
+    expect(report.ok).toBe(true);
+    // The bundle carries the ES256 key as its SPKI DER, under the fingerprint of exactly those bytes.
+    expect(bundle.keys).toEqual([{ fingerprint: host.keyId, public_key: host.publicKey }]);
+  });
+
+  it('refuses a forged ES256 signature: the checkpoint holds nothing', async () => {
+    const host = es256HostSigner();
+    const s = await hostSealedLedger(host);
+    const cp = s.checkpoint('org:org_a', 0);
+    const forged = Buffer.from(String(cp.signature), 'base64');
+    forged[10] ^= 0x01;
+    cp.signature = forged.toString('base64');
+    const { report } = await s.verifyNow();
+    expect(faultKinds(report)).toContain('org:org_a#0:signature');
+    expect(verdicts(report)).toMatchObject({ r1: 'late!', r2: 'late!' });
+    expect(report.ok).toBe(false);
+  });
+
+  it('refuses a valid ES256 signature in DER encoding: one encoding, r || s', async () => {
+    const host = es256HostSigner();
+    const s = await hostSealedLedger(host);
+    s.resign(s.checkpoint('org:org_a', 0), host.keyId, host.der);
+    const { report } = await s.verifyNow();
+    expect(faultKinds(report)).toContain('org:org_a#0:signature');
+    expect(report.ok).toBe(false);
+  });
+
+  it.each(['P-384', 'RSA', 'P-256 compressed', 'Ed25519 SPKI'] as const)(
+    'trusts no %s key the anchor answers, though the record it signed is otherwise valid: it fails closed',
+    async (kind) => {
+      const host = es256HostSigner();
+      const s = await hostSealedLedger(host);
+      const foreign = foreignKey(kind);
+      s.resign(s.checkpoint('org:org_a', 0), foreign.keyId, foreign.signWith);
+      const anchor = { trustedPublicKey: async (id: string) => (id === foreign.keyId ? foreign.publicKey : host.signer.trustedPublicKey(id)) };
+      const { report } = await s.verifyNow(anchor);
+      expect(report.keys.untrusted).toEqual([foreign.keyId]);
+      expect(faultKinds(report)).toContain('org:org_a#0:untrusted_key');
+      expect(report.ok).toBe(false);
+    },
+  );
+
+  it('never verifies an Ed25519 signature under an EC key: the record cannot choose the algorithm', async () => {
+    const host = es256HostSigner();
+    const s = await hostSealedLedger(host);
+    const ed = generateKeyPairSync('ed25519');
+    // 64 bytes, the length of an r || s signature, made by Ed25519 over the right body.
+    s.resign(s.checkpoint('org:org_a', 0), host.keyId, (bytes) => sign(null, bytes, ed.privateKey));
+    const { report } = await s.verifyNow();
+    expect(faultKinds(report)).toContain('org:org_a#0:signature');
+    expect(report.ok).toBe(false);
+  });
+
+  it('trusts no key the anchor answers under an id its bytes do not hash to: the id binds the key and its type', async () => {
+    const host = es256HostSigner();
+    const s = await hostSealedLedger(host);
+    const alias = 'a'.repeat(64);
+    s.resign(s.checkpoint('org:org_a', 0), alias, host.p1363);
+    const anchor = { trustedPublicKey: async (id: string) => (id === alias ? host.publicKey : host.signer.trustedPublicKey(id)) };
+    const { report } = await s.verifyNow(anchor);
+    expect(report.keys.untrusted).toEqual([alias]);
+    expect(faultKinds(report)).toContain('org:org_a#0:untrusted_key');
+  });
+});
+
+describe('a host signer that takes over pins the local keys (ADR-0154 D6, amended)', () => {
+  /** A key D6's own derivation trusts: its private half wrapped under its fingerprint, as a master-key holder could plant it. */
+  async function plantOpeningKey(s: Awaited<ReturnType<typeof sealedLedger>>) {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const raw = Buffer.from((publicKey.export({ format: 'jwk' }) as { x: string }).x, 'base64url');
+    const fingerprint = createHash('sha256').update(raw).digest('hex');
+    const context = signingKeyContext(fingerprint);
+    const handle = await s.crypto.encrypt((privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer).toString('base64'), context);
+    await writeAuditSealSecret(s.engine, handle, context);
+    s.hot.table('sys_audit_signing_key').push({ id: 'planted', fingerprint, public_key: raw.toString('base64'), private_handle: handle.id, status: 'retired', created_at: at(0, 0), retired_at: at(0, 1) });
+    return { fingerprint, signWith: (bytes: Uint8Array) => sign(null, bytes, privateKey) };
+  }
+
+  it('keeps the checkpoints the local key signed trusted after the switch, and a key planted after it untrusted', async () => {
+    const s = await sealedLedger();
+    // Before the switch: the operator's `os audit verify --out` lists each trusted fingerprint with its public key.
+    const pins = (await s.bundleNow()).keys;
+    expect(pins.map((k) => k.fingerprint)).toEqual([s.keyId]);
+    const host = es256HostSigner(pins);
+    // The switch: the host signer seals the next window, continuing the same chains.
+    s.clock.now = DAY0 + 14 * H + 30 * 60_000;
+    s.ledger.push(row('r6', at(13, 10)));
+    const hostSealer = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => host.signer, logger: recordingLogger(), now: () => s.clock.now });
+    await hostSealer.runPass();
+    expect(s.checkpoint('org:org_a', 2).signing_key_id).toBe(host.keyId);
+    expect(s.checkpoint('org:org_a', 0).signing_key_id).toBe(s.keyId);
+
+    const live = (trust: Pick<IAuditCheckpointSigner, 'trustedPublicKey'>) => verifyAuditLedger({ engine: s.engine, crypto: s.crypto, trust, now: () => s.clock.now });
+    let bundle: AuditProofBundle | undefined;
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, trust: host.signer, now: () => s.clock.now, onProofBundle: (b) => { bundle = b; } });
+    expect(report.faults).toEqual([]);
+    expect(report.totals.unmodified).toBe(6);
+    expect(report.keys).toEqual({ trusted: [s.keyId, host.keyId].sort(), untrusted: [] });
+    expect(report.ok).toBe(true);
+    const offline = await verifyAuditProofBundle(JSON.parse(JSON.stringify(bundle)), { trustedKeys: [s.keyId, host.keyId], now: () => s.clock.now });
+    expect(comparable(offline)).toEqual(comparable(report));
+
+    // A key planted after the switch — one D6's own derivation would trust — signs nothing the host anchor vouches for.
+    const planted = await plantOpeningKey(s);
+    expect(await trustedSigningKey(s.engine, s.crypto, planted.fingerprint)).not.toBeNull();
+    const cp = s.checkpoint('deployment', 0);
+    const body = { ...checkpointBodyFromRow(cp), signing_key_id: planted.fingerprint };
+    cp.signing_key_id = planted.fingerprint;
+    cp.signature = planted.signWith(signedBodyBytes(body)).toString('base64');
+    const tampered = await live(host.signer);
+    expect(tampered.keys.untrusted).toEqual([planted.fingerprint]);
+    expect(faultKinds(tampered)).toEqual(['deployment#0:untrusted_key']);
+    expect(tampered.ok).toBe(false);
+  });
+
+  it('reads the local key\'s checkpoints untrusted under a host signer that pins nothing: the pin is the host\'s duty', async () => {
+    const s = await sealedLedger();
+    const host = es256HostSigner();
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, trust: host.signer, now: () => s.clock.now });
     expect(report.keys).toEqual({ trusted: [], untrusted: [s.keyId] });
     expect(new Set(report.faults.map((f) => f.kind))).toEqual(new Set(['untrusted_key']));
     expect(report.ok).toBe(false);

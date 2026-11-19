@@ -139,6 +139,14 @@ describe('[#28337] packagelessLayeredReadRefusal', () => {
         );
         // The holder list is the save's, sorted.
         expect(saveRefusal.message).toContain(`('${PKG_A}', '${PKG_B}')`);
+        // [#32622, ADR-0150 D5] …and carried as the package-scoped refusal's
+        // candidates, which each door answers as `details.candidates`.
+        expect((refusal as any).refusal?.status).toBe('refused');
+        expect((refusal as any).refusal?.candidates).toEqual([
+            { kind: 'package', packageId: PKG_A },
+            { kind: 'package', packageId: PKG_B },
+        ]);
+        expect(saveRefusal.refusal, 'the save\'s answer does not move').toBeUndefined();
         // The plural URL spelling is the same item.
         expect((await protocol.packagelessLayeredReadRefusal({ type: 'dashboards', name: 'twin_dash' }))?.message)
             .toBe(refusal!.message);

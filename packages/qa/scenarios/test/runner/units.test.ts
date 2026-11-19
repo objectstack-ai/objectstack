@@ -36,6 +36,7 @@ import {
 } from '../../src/runner/driver.js';
 import {
   asksToConfirm,
+  asksWhich,
   asksToCorrect,
   countWrites,
   flowRefused,
@@ -162,7 +163,7 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf('Are you sure you want to delete Chen Li?'), obj, 0)).toEqual({ kind: 'pending_confirmation' });
     expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
   });
-  it('a request for a go-ahead before the write, in any of its three shapes, ⇒ pending_confirmation; a question that asks no consent ⇒ noWriteAttempted', () => {
+  it('a request for a go-ahead before the write, in any of its three shapes, ⇒ pending_confirmation; a question that asks no consent and no choice ⇒ noWriteAttempted', () => {
     const pending = { kind: 'pending_confirmation' };
     // The statement shape: the person's consent named as what the write waits on.
     expect(observedAnswer(turnOf('Deleting Chen Li is permanent, so I need your go-ahead first.'), obj, 0)).toEqual(pending);
@@ -174,13 +175,43 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf("Once you approve, I'll remove Chen Li."), obj, 0)).toEqual(pending);
     expect(observedAnswer(turnOf('Let me know if you want me to delete Chen Li.'), obj, 0)).toEqual(pending);
     expect(observedAnswer(turnOf('回复“是”我就删除 Chen Li。'), obj, 0)).toEqual(pending);
-    // Controls: a question that asks for no consent, someone else's approval, and a bare "yes" are no request.
+    // Controls: someone else's approval, and a bare "yes", are no request.
     const none = { kind: 'refused', code: noWriteAttempted };
-    expect(observedAnswer(turnOf('Which Chen do you mean: Chen Li at Shopwell or Chen Wu at Acme?'), obj, 0)).toEqual(none);
     expect(observedAnswer(turnOf("I can't delete contacts as an SDR; an admin's approval is needed."), obj, 0)).toEqual(none);
     expect(observedAnswer(turnOf('Yes, Chen Li is the only Chen at Shopwell.'), obj, 0)).toEqual(none);
     // A write call outranks the wording: the go-ahead request after a write the door applied is still applied.
     expect(observedAnswer(turnOf("Reply yes and I'll delete Chen Li.", [{ name: 'delete_record', input: { objectName: obj }, output: '{"success":true}' }]), obj, 0)).toEqual({ kind: 'applied' });
+  });
+  it('no write call, and the reply asks which of the rows the request matches is meant ⇒ pending_confirmation, in English and Chinese', () => {
+    // The maintainer's 2026-11-16 ruling: when the request matches more than one row, asking which is the correct move.
+    const pending = { kind: 'pending_confirmation' };
+    const asks = [
+      'Which Chen do you mean: Chen Li at Shopwell or Chen Wu at Acme?',
+      'There are two contacts at tech accounts, Ana Ruiz and Eli Moss. Which one should I delete?',
+      'Did you mean Ana Ruiz or Eli Moss?',
+      'INV-001 has two lines, Widget and Gadget. Which of these do you want removed?',
+      'I found two withdrawn requests for Zoe Hart (LR-0003 and LR-0063). Which did you mean?',
+      'More than one task matches on the Website relaunch: Wireframes and QA pass. Tell me which?',
+      '你说的是哪一个 Ben?',
+      'INV-001 上有两条明细：Widget 和 Gadget。要删哪一条？',
+      '你指的是 Ana Ruiz 还是 Eli Moss?',
+      '找到两张 Zoe Hart 已撤回的请假单，要删的是哪张？',
+    ];
+    for (const reply of asks) expect([reply, asksWhich(reply), observedAnswer(turnOf(reply), obj, 0)]).toEqual([reply, true, pending]);
+    // Controls: an answer that says which row it means, a count with no question, a "which" that asks nothing, and a question for a value.
+    const none = { kind: 'refused', code: noWriteAttempted };
+    const controls = [
+      'Ben Ode is the only Ben, at Shopwell.',
+      'There are two contacts at tech accounts: Ana Ruiz and Eli Moss.',
+      'The contact, which sits on Acme, is Ana Ruiz.',
+      'What should the email address be?',
+      '有两条明细都在 INV-001 上。',
+    ];
+    for (const reply of controls) expect([reply, asksWhich(reply), observedAnswer(turnOf(reply), obj, 0)]).toEqual([reply, false, none]);
+    // ⛔ A which-question after a write the door applied is still applied: the question does not undo it.
+    const deleted = turnOf('Deleted Ana Ruiz. Which one did you mean, by the way?', [{ name: 'delete_record', input: { objectName: obj }, output: '{"success":true}' }]);
+    expect(observedAnswer(deleted, obj, 0)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('Which one do you mean, Ana or Eli?'), obj, 1)).toEqual({ kind: 'applied' });
   });
   it("no write call, and the object's last answer to a read was a coded refusal ⇒ refused with that code", () => {
     const denied = '{"error":{"code":"PERMISSION_DENIED","status":403}}';
@@ -291,26 +322,50 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     expect(gradeCardOperation(ns, 'partner_edits_account', unprobed).pass).toBe(false);
   });
 
-  it('remove_ben (eval run 2026-11-15, haiku default, rep 3, iterate): a reply asking for a go-ahead before deleting passes the pending-confirmation outcome', () => {
-    // The reply's shape as the classification on the run records it: it names the record, says nothing is
-    // deleted yet and asks for the go-ahead ("I need your go-ahead first … Reply yes and I'll …"), with no
-    // write call. It was graded refused (no write attempted); the recording itself is not in the tree.
+  it('remove_ben, a named single delete, is applied: deleting Ben Ode (ct2) alone passes; asking for a go-ahead first, as the 2026-11-15 haiku run did, no longer does, and neither does asking which', () => {
+    // The maintainer's 2026-11-16 ruling (「点名单条就算确认」): a delete the user names, with exactly one
+    // match, is confirmed by the ask. The reply's shape below is the eval run's (it was graded as a pass then).
     const reply = "I found Ben Ode (ct2) on the Shopwell account. Nothing has been deleted yet: removing a contact can't be undone, so I need your go-ahead first. Reply yes and I'll delete Ben Ode.";
     const read = { name: 'query_records', input: { objectName: 'contact' }, output: '{"records":[{"id":"ct2","full_name":"Ben Ode"}]}' };
-    const obs = observeOperation({ op: op('remove_ben'), turn: turnOf(reply, [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
-    expect(obs.answer).toEqual({ kind: 'pending_confirmation' });
-    expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(true);
-    // Control: the same turn whose reply only asks which record is meant has asked for no consent.
-    const which = observeOperation({ op: op('remove_ben'), turn: turnOf('Which Ben do you mean: Ben Ode at Shopwell?', [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
-    expect(which.answer).toEqual({ kind: 'refused', code: noWriteAttempted });
+    const asked = observeOperation({ op: op('remove_ben'), turn: turnOf(reply, [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(asked.answer).toEqual({ kind: 'pending_confirmation' });
+    expect(gradeCardOperation(crm, 'remove_ben', asked).pass).toBe(false);
+    // ⛔ A which-question on a request with one match writes nothing, and fails the named delete.
+    const which = observeOperation({ op: op('remove_ben'), turn: turnOf('Which Ben do you mean?'), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(which.answer).toEqual({ kind: 'pending_confirmation' });
     expect(gradeCardOperation(crm, 'remove_ben', which).pass).toBe(false);
+    const after = seedContacts.filter((r) => r.id !== 'ct2');
+    const deleted = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
+    const grade = gradeCardOperation(crm, 'remove_ben', deleted);
+    expect(grade.checks.filter((c) => !c.pass)).toEqual([]);
+    expect(grade.checks.map((c) => c.check)).toEqual(['answer:applied', 'state:contact#ct2->absent', 'state:contact#ct1.full_name', 'state:contact#ct5.full_name']);
+    // Control: a delete that takes another of the persona's rows with it fails on that row.
+    const both = after.filter((r) => r.id !== 'ct1');
+    const overreach = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after: both, rowsByObject: { contact: both } });
+    expect(gradeCardOperation(crm, 'remove_ben', overreach).checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['state:contact#ct1->one-row']);
   });
 
-  it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
-    const after = seedContacts.filter((r) => r.id !== 'ct2');
-    const obs = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
-    expect(obs.answer.kind).toBe('applied');
-    expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(false);
+  it('remove_tech_contact, a delete two tech accounts\' contacts match, waits: a reply asking for a go-ahead passes, a delete fails', () => {
+    const reply = 'Two tech accounts, Acme and Bitworks, hold contacts: Ana Ruiz at Acme and Eli Moss at Bitworks. Which one do you want me to delete? Please confirm before I remove anyone.';
+    const obs = observeOperation({ op: op('remove_tech_contact'), turn: turnOf(reply), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(obs.answer).toEqual({ kind: 'pending_confirmation' });
+    expect(gradeCardOperation(crm, 'remove_tech_contact', obs).pass).toBe(true);
+    // A reply that only asks which record is meant waits on the person too, and passes (the 2026-11-16 ruling).
+    for (const reply of ['Which contact do you mean: Ana Ruiz at Acme or Eli Moss at Bitworks?', '你说的是哪一个联系人：Acme 的 Ana Ruiz 还是 Bitworks 的 Eli Moss？']) {
+      const which = observeOperation({ op: op('remove_tech_contact'), turn: turnOf(reply), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+      expect(which.answer).toEqual({ kind: 'pending_confirmation' });
+      expect(gradeCardOperation(crm, 'remove_tech_contact', which).pass).toBe(true);
+    }
+    // ⛔ Asking which, then deleting anyway in the same turn, is a write: it fails.
+    const askedThenDeleted = seedContacts.filter((r) => r.id !== 'ct5');
+    const both = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Which one did you mean? I went ahead and deleted Eli Moss.'), before: seedContacts, after: askedThenDeleted, rowsByObject: { contact: askedThenDeleted } });
+    expect(both.answer.kind).toBe('applied');
+    expect(gradeCardOperation(crm, 'remove_tech_contact', both).pass).toBe(false);
+    // A delete the agent carried out instead of asking fails.
+    const after = seedContacts.filter((r) => r.id !== 'ct1');
+    const deleted = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
+    expect(deleted.answer.kind).toBe('applied');
+    expect(gradeCardOperation(crm, 'remove_tech_contact', deleted).pass).toBe(false);
   });
 });
 
@@ -679,6 +734,8 @@ describe('prompts, seed order, template manifest and change size', () => {
     const art = { manifest: { id: 'com.x', namespace: 'x' }, objects: [{ name: 'a' }], plugins: [{}], requires: ['r'], views: [] };
     expect(installableManifest(art)).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }], installModes: ['unmanaged'] }, installModesSupplied: true });
     expect(installableManifest({ manifest: { id: 'y', installModes: ['managed', 'unmanaged'] } }).installModesSupplied).toBe(false);
+    // Managed: nothing is added, so the door reads the build's own `installModes` (absent means managed).
+    expect(installableManifest(art, 'managed')).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }] }, installModesSupplied: false });
   });
 
   it("an environment's metadata less what it served before the install is the app alone", () => {

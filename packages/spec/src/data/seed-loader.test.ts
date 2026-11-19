@@ -261,7 +261,7 @@ describe('SeedLoaderConfigSchema', () => {
   });
 
   it('should accept all valid dataset modes as default', () => {
-    const modes = ['insert', 'update', 'upsert', 'replace', 'ignore'] as const;
+    const modes = ['update', 'upsert', 'ignore'] as const;
     modes.forEach(mode => {
       const config = SeedLoaderConfigSchema.parse({ defaultMode: mode });
       expect(config.defaultMode).toBe(mode);
@@ -326,7 +326,7 @@ describe('SeedLoadResultSchema', () => {
   it('should accept a result with deferred references', () => {
     const result = SeedLoadResultSchema.parse({
       object: 'task',
-      mode: 'insert',
+      mode: 'ignore',
       inserted: 10,
       updated: 0,
       skipped: 0,
@@ -341,7 +341,7 @@ describe('SeedLoadResultSchema', () => {
   it('should default errors to empty array', () => {
     const result = SeedLoadResultSchema.parse({
       object: 'product',
-      mode: 'insert',
+      mode: 'ignore',
       inserted: 1,
       updated: 0,
       skipped: 0,

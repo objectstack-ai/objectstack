@@ -28,7 +28,8 @@ import {
   useIsMobile,
 } from '@object-ui/components';
 import { Search, Loader2, AlertCircle } from 'lucide-react';
-import type { DataSource, LookupFilterDef } from '@object-ui/types';
+import type { DataSource } from '@object-ui/types';
+import type { LookupFilterEntry } from './lookupRecordReference.js';
 import { useRecordQuery } from './useRecordQuery.js';
 // The repo's single filter sink — conjoins filter sources under one `and`
 // instead of spreading them, so an id restriction can never overwrite a
@@ -97,7 +98,7 @@ export interface PeoplePickerProps {
   searchFields?: string[];
   pageSize?: number;
   /** Base candidate filters (e.g. exclude banned users). */
-  lookupFilters?: LookupFilterDef[];
+  lookupFilters?: readonly LookupFilterEntry[];
   /**
    * Hard filter constraints in QueryParams.$filter record form — the
    * dependent (cascading) lookup chain (#2215). Always ANDed into the

@@ -378,6 +378,22 @@ export interface ExplainEngineDeps {
     delegatorSets: PermissionSet[] | null,
   ) => Promise<Record<string, FieldMaskingRule>>;
   /**
+   * The computed fields the read mask deletes for what they are computed
+   * from — a field `mask` withholds or `partialRules` serves masked, read on
+   * this record, through another computed field or through a reference —
+   * for the principal `context` names: the enforcement composition
+   * (`foldComputedFieldReads` over the posture, with
+   * `resolveHopWithheldFields`), never a re-derivation. Absent → none are
+   * reported, which under-reports and never widens; the plugin's own wiring
+   * passes it.
+   */
+  getComputedFieldsWithheld?: (
+    object: string,
+    mask: Record<string, { readable?: boolean; editable?: boolean }>,
+    partialRules: Record<string, FieldMaskingRule>,
+    context: any,
+  ) => Promise<Set<string>>;
+  /**
    * Configured additive baseline set NAMES (default `['member_default']`), for
    * attribution.
    *
@@ -3254,10 +3270,19 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // — including the capability-gated case, where the mask says `readable:
   // false` precisely because the unmask gate is what the rule softens.
   const partialRules = await deps.getPartialMaskRules(sets, object, delegatorSets);
-  const partial = Object.keys(partialRules);
-  const hidden = Object.entries(mask)
-    .filter(([f, p]) => p?.readable === false && !(f in partialRules))
-    .map(([f]) => f);
+  // Field-level security covers what a value is computed from: a computed
+  // field the read mask deletes for what it reads is reported hidden, whole,
+  // whatever masking rule of its own it carries — as step 4 deletes it.
+  const computedWithheld = deps.getComputedFieldsWithheld
+    ? await deps.getComputedFieldsWithheld(object, mask, partialRules, context)
+    : new Set<string>();
+  const partial = Object.keys(partialRules).filter((f) => !computedWithheld.has(f));
+  const hidden = [
+    ...Object.entries(mask)
+      .filter(([f, p]) => p?.readable === false && !(f in partialRules) && !computedWithheld.has(f))
+      .map(([f]) => f),
+    ...computedWithheld,
+  ];
   const listFields = (fields: string[], label: (f: string) => string): string =>
     `[${fields.slice(0, 25).map(label).join(', ')}${fields.length > 25 ? ', …' : ''}]`;
   const maskNarrows = hidden.length > 0 || partial.length > 0;

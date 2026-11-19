@@ -59,6 +59,7 @@ function row(name: string, defaultValue?: unknown): Row {
   return {
     name,
     label: name,
+    labelSource: 'object',
     type: 'text',
     required: false,
     readonly: false,

@@ -375,9 +375,26 @@ describe('[ruling E] list_actions marks an organization action the caller\'s mem
         }
     });
 
-    // Green before the mark existed too: the mark changes no run.
+    // Green before the mark existed too: the mark changes no run. [#33690] An
+    // action declaring `ai.requiresConfirmation: true` never runs on the MCP
+    // caller's own `confirm: true`: with no pending-confirmation service it is
+    // refused before anything is forwarded, for the admin as for the member.
     it('CONTROL: run_action is unchanged: the member\'s call is forwarded and refused by the endpoint (the marked code); the admin\'s is forwarded and served', async () => {
-        for (const key of [...SET_A, ...SET_B]) {
+        const gated = [...SET_A, ...SET_B].filter((key) => declarationOf(key).ai?.requiresConfirmation === true);
+        for (const key of gated) {
+            const [objectName, name] = key.split('.');
+            for (const [who, ctx] of [['member', MEMBER_P()], ['admin', ADMIN_P()]] as const) {
+                const boot = bootIdentity(who === 'member');
+                const thrown = await refusalOf(boot.dispatcher.buildMcpBridge(ctx).runAction(name!, {
+                    objectName, recordId: 'rec_1', params: paramsFor(key), confirm: true,
+                }));
+                expect(thrown, `${who}: ${key}`).toMatchObject({
+                    code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' },
+                });
+                expect(boot.request, `${who}: ${key}`).not.toHaveBeenCalled();
+            }
+        }
+        for (const key of [...SET_A, ...SET_B].filter((k) => !gated.includes(k))) {
             const [objectName, name] = key.split('.');
             const member = bootIdentity(true);
             const thrown = await refusalOf(member.dispatcher.buildMcpBridge(MEMBER_P()).runAction(name!, {

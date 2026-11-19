@@ -2,8 +2,8 @@
 
 /**
  * [#29520 codemod] The "SQLite serialisation" section of `SqlDriver`: the
- * bodies of `formatInput`, `formatOutput` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * bodies of `formatInput`, `formatOutput` moved out of `sql-driver.ts` whole (split
+ * by #29598).
  *
  * A MOVE, not a redesign. {@link SqliteSerialisationFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -42,6 +42,24 @@ import { isDateOnInstantColumn, utcMidnightOfDay } from './date-on-instant-colum
  * here too. `readonly` members are the getters; the others are fields a body
  * assigns.
  */
+/**
+ * [#34916] The boolean a declared `Field.boolean` column's stored value reads
+ * as, on the dialects whose storage form is not a boolean (see the
+ * `booleanFields` pass in `formatOutput`).
+ *
+ * A number or a boolean reads as `Boolean(value)`, as it always has. The TEXT
+ * `'false'` / `'0'` reads as `false` and `'true'` / `'1'` as `true`: before the
+ * engine wrote the boolean its arm judged, the readings `'true'` / `'false'`
+ * that arm admits reached a SQLite column as text (the console's inline grid
+ * sent them), and `Boolean('false')` presented an un-ticked row as `true`.
+ * Any other string keeps the `Boolean(value)` reading it had.
+ */
+function presentStoredBoolean(value: unknown): boolean {
+  if (value === 'false' || value === '0') return false;
+  if (value === 'true' || value === '1') return true;
+  return Boolean(value);
+}
+
 export interface SqliteSerialisationHost {
   readonly booleanFields: SqlDriver['booleanFields'];
   readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
@@ -537,7 +555,7 @@ export class SqliteSerialisationFacet {
       if (booleanFields && booleanFields.length > 0) {
         for (const field of booleanFields) {
           if (data[field] !== undefined && data[field] !== null) {
-            data[field] = Boolean(data[field]);
+            data[field] = presentStoredBoolean(data[field]);
           }
         }
       }

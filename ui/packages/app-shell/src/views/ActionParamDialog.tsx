@@ -136,7 +136,7 @@ import {
   type ApiFetch,
 } from '@object-ui/react';
 import { getLazyFieldWidget, fileIdOf, buildValidationRules, resolveParamWidgetType } from '@object-ui/fields';
-import { useInitialFieldFocus } from '@object-ui/plugin-form';
+import { useInitialFieldFocus } from '@object-ui/plugin-form/core';
 import { paramToField, paramDegradesWithoutTarget } from '../utils/paramToField.js';
 import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
 import type { DeclaredPreflight, ParamDialogCompanion } from './actionDialogCompanion.js';

@@ -45,7 +45,8 @@
  * the wiring below reads them off that context instead of inventing a private
  * one (this package has no access to the current user, so it cannot author a
  * `sys_comment` row on its own):
- *   `showCommentInput` (needs `onAddComment`) · `enableThreading` (replies
+ *   `showCommentInput` (needs `onAddComment`, and a `types` that admits
+ *   `comment`: objectstack#34371) · `enableThreading` (replies
  *   need `onAddReply`) · `enableReactions` (needs `onToggleReaction`) ·
  *   `enableMentions` (withholds the @-autocomplete suggestions when off)
  *
@@ -75,6 +76,8 @@ import {
   normalizeLimit,
   describeRefusedFeedLimit,
   isRefusedFeedRead,
+  feedTypesAdmitComments,
+  warnWithheldCommentComposer,
   IMPERSONATED_ACTOR_FALLBACK,
   type SysActivityRow,
 } from './recordActivityFeed';
@@ -91,6 +94,15 @@ import {
   timelineStreamFilters,
   type TimelineStreamFilter,
 } from '../recordTimelineStream';
+
+/**
+ * Dev mode, in this package's established spelling for it — the build's
+ * `NODE_ENV`, read per call — the guard `record-related-list.tsx` and
+ * `record-path.tsx` put on their authoring diagnostics.
+ */
+const isDevBuild = (): boolean =>
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NODE_ENV !== 'production';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -175,6 +187,18 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     enableThreading: read('enableThreading'),
     showSubscriptionToggle: read('showSubscriptionToggle'),
   };
+
+  // objectstack#34371 — a `types` allow-list that leaves out `comment` filters
+  // every comment out of this block, the ones posted here included. Such a
+  // block offers no composer and no Comments-only filter, and, where the
+  // composer would have been offered, tells the author why once, in development.
+  const commentsShown = feedTypesAdmitComments(types, BLOCK_NAME);
+  const composerWithheld = !commentsShown && config.showCommentInput !== false;
+  const nodeId: string | undefined = typeof schema.id === 'string' ? schema.id : undefined;
+  const typesKey = JSON.stringify(types ?? null);
+  React.useEffect(() => {
+    if (composerWithheld && isDevBuild()) warnWithheldCommentComposer(BLOCK_NAME, nodeId, JSON.parse(typesKey));
+  }, [composerWithheld, nodeId, typesKey]);
 
   const hostItems: FeedItem[] | undefined = Array.isArray(schema.items)
     ? (schema.items as FeedItem[])
@@ -381,6 +405,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         hasMore={hasMore}
         onLoadMore={handleLoadMore}
         onAddComment={discussion?.onAddComment as any}
+        commentsShown={commentsShown}
         onAddReply={discussion?.onAddReply as any}
         onToggleReaction={discussion?.onToggleReaction as any}
         // objectui#12268: the author's Edit and Delete on their own comment.

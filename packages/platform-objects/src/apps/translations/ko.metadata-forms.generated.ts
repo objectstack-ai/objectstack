@@ -967,7 +967,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "거부",
-        helpText: "본문이 던지는 SCREAMING_SNAKE 코드(예: CLEAN_VERSION_REQUIRED)를 키로 하는 거부 카탈로그입니다. 호출자는 선언된 메시지를 자신의 언어로 번역해 선언된 상태와 함께 읽습니다. JavaScript(L2) 본문 전용"
+        helpText: "훅이 던지는 SCREAMING_SNAKE 코드(예: CLEAN_VERSION_REQUIRED)를 키로 하는 거부 카탈로그입니다. 호출자는 선언된 메시지를 자신의 언어로 번역해 선언된 상태와 함께 읽습니다. JavaScript(L2) 본문 또는 핸들러용이며, expression 본문에서는 거부됩니다"
       },
       "refusals.message": {
         label: "메시지",

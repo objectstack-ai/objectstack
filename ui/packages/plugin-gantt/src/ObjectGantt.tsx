@@ -300,6 +300,23 @@ export function normalizeDependencies(raw: unknown): GanttDependency[] {
 }
 
 /**
+ * A task's parent id, read from the value under the configured `parentField`.
+ *
+ * The record query auto-`$expand`s lookup fields, so for a lookup (or
+ * self-lookup) `parentField` the value is the related ROW, not its id. The task
+ * tree keys parents by id, so the row is read down to its `id` (`_id` as the
+ * fallback) — the same read {@link normalizeDependencies} makes of an expanded
+ * predecessor. A scalar id passes through as it is; no value is `null`.
+ */
+function taskParentId(raw: unknown): string | number | null {
+  if (raw != null && typeof raw === 'object') {
+    const row = raw as { id?: string | number | null; _id?: string | number | null };
+    return row.id ?? row._id ?? null;
+  }
+  return (raw as string | number | null | undefined) ?? null;
+}
+
+/**
  * The two keys the fetch path reads off the node that the published
  * {@link ObjectGanttSchema} does not declare: the package-local hand-off
  * (objectstack#25923, ui/AGENTS.md Commandment #0.1).
@@ -1545,7 +1562,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         hasOwnDates: !!(startDate && endDate),
         progress: Math.min(100, Math.max(0, progress || 0)), // Clamp between 0-100
         dependencies: normalizeDependencies(dependencies),
-        parent: parentField ? record[parentField] ?? null : undefined,
+        parent: parentField ? taskParentId(record[parentField]) : undefined,
         type: typeField ? normalizeTaskType(record[typeField]) : undefined,
         locked: lockField ? !!record[lockField] : undefined,
         color,

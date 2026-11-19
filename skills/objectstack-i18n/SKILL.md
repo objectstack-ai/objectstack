@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---
@@ -164,10 +164,11 @@ All translatable content for a single object is aggregated under
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (the title of the related list a `lookup` or `master_detail` field draws on its parent's record page — the key is the child's too; untranslated it keeps its authored text, never the child's label) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `submitBehavior.title` / `submitBehavior.message` (the thank-you panel of a form whose `submitBehavior` is `kind: 'thank-you'`; only the copy the form authors is translated, and the other kinds carry none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
-| `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
+| `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
+| `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (actions with no `objectName` — a key naming a bound action is
@@ -183,24 +184,25 @@ book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, 
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
-Two keys sit deeper than their group's `label`: a `page:tabs` item at
+Three keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
-one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.
+one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, and the text a
+`create_record` / `update_record` writes into a field marked `{ dialect: 'template', source }` at
+`flows.{flow}.records.{node_id}.fields.{field}`, picked in the organization's language (the
+Localization setting if set, else `i18n.defaultLocale`; never the run starter's).
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, both keys included. The `inlineTitle` and report-block keys, as the
-shipped `app-crm` and `app-showcase` bundles spell them for `zh-CN`:
+`settingsCommon`, all three keys included. The `inlineTitle`, report-block and table-column
+keys, as the shipped `app-crm`, `app-showcase` and platform bundles spell them for `zh-CN`
+(`rows` is the table field's `path`, `error.message` one column's):
 
 ```typescript
 objects: { crm_opportunity_line_item: { fields: { opportunity: { inlineTitle: '产品明细' } } } },
 reports: { showcase_task_overview: { blocks: { open_block: { label: '未完成任务' } } } },
+objects: { sys_user: { _actions: { import_sso_users: { resultDialog: { columns: { rows: { email: '邮箱', 'error.message': '未添加的原因' } } } } } } },
 ```
 
 `settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
 the platform declares one, so an app bundle carrying it is refused by name.
-
-For the exact Zod shape (and any field that may have been added since), read
-`node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`TranslationDataSchema`, `ObjectTranslationDataSchema`, and `FieldTranslationSchema`.
 
 ---
 
@@ -223,9 +225,10 @@ parse, ship, and resolve to nothing.
 is an **error** and fails the run; `translation-option-key-unknown` is a warning.
 A key naming an object, field, view, tab, action, param, section, validation rule, app,
 nav item, dashboard, widget or flow screen that does not exist is listed alongside the names
-that do. Five more shapes under an action entry are the error: an outcome the action does
+that do. Six more shapes under an action entry are the error: an outcome the action does
 not declare in `outcomeMessages`; a `resultDialog.fields` or `preflight.fields` path it does
-not declare (an action with no `preflight` declares none);
+not declare; a `columns` key whose field path is no declared `format: 'table'` field, or
+whose column path that field's `columns[]` does not list;
 `resultDialog` `title` / `description` / `acknowledge` under an action that declares no
 `resultDialog`; `submitText` under an action with no non-empty `params`; and `cancelText`
 under an action that declares neither `confirmText` nor a non-empty `params` — a bundle
@@ -284,9 +287,8 @@ what the runtime implements.)
 
 ### No ICU MessageFormat
 
-There is no ICU MessageFormat engine — interpolation is always simple
-`{{variable}}` substitution (the aspirational `messageFormat` config knob was
-removed). To pluralize, select the form in application code before calling `t()`.
+There is no ICU MessageFormat engine (the aspirational `messageFormat` config knob
+was removed). To pluralize, select the form in application code before calling `t()`.
 
 ---
 
@@ -339,9 +341,8 @@ The spec models coverage results for tooling — the return shapes of the option
 (totals, `coveragePercent`, per-group `breakdown`) and `TranslationDiffItem` —
 `key` (dot path), `status` (`missing | redundant | stale`), `locale`, optional
 `objectName`, optional `sourceHash` for stale detection, and AI-enrichment
-fields (`aiSuggested`, `aiConfidence`). Full Zod shape:
-`node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`TranslationCoverageResultSchema`, `TranslationDiffItemSchema`.
+fields (`aiSuggested`, `aiConfidence`). Full Zod shape: `TranslationCoverageResultSchema`,
+`TranslationDiffItemSchema` (`translation.zod.ts`).
 
 ---
 
@@ -357,8 +358,7 @@ import type { II18nService } from '@objectstack/spec/contracts';
 ```
 
 (The contract's source `.ts` is not part of the published package — only
-`src/**/*.zod.ts` ships — so import the type from `@objectstack/spec/contracts`
-rather than reading `node_modules` source.)
+`src/**/*.zod.ts` ships — so there is no `node_modules` source to read.)
 
 Methods implemented by both shipped adapters (`FileI18nAdapter` from
 `@objectstack/service-i18n`, and the in-memory fallback `@objectstack/core`
@@ -403,7 +403,8 @@ produced; a client renders it as received.
   code is never handed Simplified text.
 - **App-authored** refusal text is not on this ladder: a hook's catalogued refusal is served
   through `hooks.<hook>.refusals.<CODE>.message` (a declared reason's through
-  `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`) in the caller's locale, negotiated over
+  `….<CODE>.reasons.<REASON>.message`), an action's through its `_actions.{action_name}.refusals`
+  keys (table above), each in the caller's locale, negotiated over
   whatever locales the app's translations hold, and otherwise as declared, in the app's own
   source language. No `en` floor is supplied for it. Under an entry declaring `params`, a
   translation keeps its `{{ name }}` holes; the runtime fills them after picking it.
@@ -437,11 +438,7 @@ groups, or author them by hand.
 
 Fill in the values manually.
 
-### 3. Verify Coverage
-
-Run `os i18n check` (**Translation Coverage** above).
-
-### 4. Register
+### 3. Register
 
 A stack registers its bundles with `defineStack({ translations: [...] })`. A **package or
 plugin shipping its own generated bundle** — the most common shape in this repo — has one
@@ -478,8 +475,8 @@ every plugin contributes its own `objects.*` slice.
 
 ## Shipped examples
 
-`examples/app-crm` — the bundled layout (one `crm.translation.ts`, `en` + `zh-CN`).
-`examples/app-todo` — the per-locale layout (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
+`examples/app-crm` — the bundled layout (`en` + `zh-CN`).
+`examples/app-todo` — the per-locale layout.
 
 ---
 

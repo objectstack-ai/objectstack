@@ -28,6 +28,7 @@ import {
   credentialUseClientFor,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
+import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/objectql';
 import type {
   AuthSessionApi,
   IAuthService,
@@ -1542,7 +1543,7 @@ export function buildSharingMiddleware(
       const verb: 'update' | 'delete' = writeClass;
       const data: any = ctx.data;
       const options: any = ctx.options;
-      const id = inferTargetId(data, options);
+      const id = engineByIdTarget(verb, data, options);
       // [#30237] The recycle bin's own doors — `restore(entryId)`,
       // `purge(entryId)`, `empty(object)` — dispatch their verb with no id and
       // no AST: they address no live row, so there is no row to gate and no
@@ -1773,16 +1774,29 @@ function composeAnd(existing: unknown, addition: unknown): unknown {
   return { $and: [existing, addition] };
 }
 
-function inferTargetId(data: any, options: any): string | number | undefined {
-  if (data && typeof data === 'object' && data.id != null) return data.id;
-  if (options && typeof options === 'object') {
-    if (options.id != null) return options.id;
-    if (options.where && typeof options.where === 'object' && options.where.id != null) {
-      return options.where.id;
-    }
-    if (options.filter && typeof options.filter === 'object' && options.filter.id != null) {
-      return options.filter.id;
-    }
-  }
-  return undefined;
+/**
+ * The row the ENGINE writes by id, or `undefined` when the engine runs the
+ * write as a predicate over the AST it seeded from `where`.
+ *
+ * The rule: this gate judges by id exactly the writes the engine runs by id,
+ * and every other write meets the bulk scope (`buildWriteFilter`). So the
+ * branch is the engine's own dispatch decision, made by the helpers its
+ * `delete()` / `update()` call on the same options bag
+ * (`resolveEngineDeleteDispatch` / `resolveEngineUpdateDispatch`), never a
+ * reading of option slots of this gate's own: an option the engine does not
+ * route on names no row here either.
+ */
+function engineByIdTarget(
+  verb: 'update' | 'delete',
+  data: unknown,
+  options: unknown,
+): string | number | bigint | undefined {
+  const bag = (options && typeof options === 'object' ? options : undefined) as Record<string, unknown> | undefined;
+  const dispatch = verb === 'delete'
+    ? resolveEngineDeleteDispatch(bag)
+    : resolveEngineUpdateDispatch((data && typeof data === 'object' ? data : {}) as Record<string, unknown>, bag);
+  if (dispatch.kind !== 'by-id') return undefined;
+  const id: unknown = dispatch.id;
+  // The engine binds a by-id write to a scalar key; anything else is no row to judge by id.
+  return typeof id === 'string' || typeof id === 'number' || typeof id === 'bigint' ? id : undefined;
 }

@@ -339,3 +339,65 @@ describe("the `manifest` service's planUpgrade reads the protocol's served overr
     }
   });
 });
+
+describe('objectExtensions: an extension field is planned and its column read like an owned one (#34095)', () => {
+  // HotCRM 6.2.0 → 6.4.0's shape: the core package owns `crm_account`, the
+  // o2c package of the same artifact adds its receivables figures through
+  // `objectExtensions`.
+  const SUMMARY = { type: 'summary', summaryOperations: { object: 'crm_invoice', field: 'amount', function: 'sum' } };
+  const artifact = (extensionFields?: Record<string, unknown>) => ({
+    packages: [
+      { manifest: { id: 'com.acme.crm', name: 'crm', version: '1.0.0', type: 'app', objects: [{ name: 'crm_account', fields: { name: { type: 'text' } } }] } },
+      {
+        manifest: {
+          id: 'com.acme.o2c', name: 'o2c', version: '1.0.0', type: 'app',
+          ...(extensionFields ? { objectExtensions: [{ extend: 'crm_account', fields: extensionFields }] } : {}),
+        },
+      },
+    ],
+  });
+
+  async function withPlanUpgrade(rows: Row[], served: Record<string, unknown>, run: (planUpgrade: (a: unknown, b: unknown) => ReturnType<typeof planPackageUpgrade>) => Promise<void>) {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    try {
+      const ql = kernel.getService<ObjectQL>('objectql');
+      ql.registerDriver(makeDriver({ crm_account: rows }) as any, true);
+      (ql.registry as any).registerObject({ name: 'crm_account', fields: served });
+      const manifest = kernel.getService<{ planUpgrade(a: unknown, b: unknown): ReturnType<typeof planPackageUpgrade> }>('manifest');
+      await run((a, b) => manifest.planUpgrade(a, b));
+    } finally {
+      await kernel.shutdown();
+    }
+  }
+
+  it('the upgrade that adds extension fields lists them in fields.added', async () => {
+    await withPlanUpgrade([{ id: 'a1', name: 'Acme' }], { name: { type: 'text' } }, async (planUpgrade) => {
+      const { plan, environment } = await planUpgrade(artifact(), artifact({ invoiced_amount: SUMMARY, received_amount: SUMMARY }));
+      expect(plan.fields.added.map((f) => `${f.object}.${f.field}`)).toEqual(['crm_account.invoiced_amount', 'crm_account.received_amount']);
+      expect(plan.objects).toEqual({ added: [], removed: [] });
+      expect(environment.columns).toEqual([]);
+    });
+  });
+
+  it('the rollback lists them in fields.removed and counts the rows holding a value', async () => {
+    const served = { name: { type: 'text' }, invoiced_amount: { type: 'number' } };
+    const rows = [{ id: 'a1', name: 'Acme', invoiced_amount: 120 }, { id: 'a2', name: 'Globex', invoiced_amount: null }];
+    await withPlanUpgrade(rows, served, async (planUpgrade) => {
+      const { plan, environment } = await planUpgrade(artifact({ invoiced_amount: SUMMARY }), artifact());
+      expect(plan.fields.removed.map((f) => `${f.object}.${f.field}`)).toEqual(['crm_account.invoiced_amount']);
+      expect(environment.columns).toEqual([{ object: 'crm_account', field: 'invoiced_amount', reasons: ['removed'], rows: 1 }]);
+    });
+  });
+
+  it('a retyped extension field is a type change whose column is read', async () => {
+    const served = { name: { type: 'text' }, tier: { type: 'text' } };
+    const rows = [{ id: 'a1', name: 'Acme', tier: 'gold' }, { id: 'a2', name: 'Globex', tier: 'silver' }];
+    await withPlanUpgrade(rows, served, async (planUpgrade) => {
+      const { plan, environment } = await planUpgrade(artifact({ tier: { type: 'text' } }), artifact({ tier: { type: 'number' } }));
+      expect(plan.typeChanges).toEqual([{ object: 'crm_account', field: 'tier', from: 'text', to: 'number', category: 'needs_confirm' }]);
+      expect(environment.columns).toEqual([{ object: 'crm_account', field: 'tier', reasons: ['type_change'], rows: 2 }]);
+    });
+  });
+});

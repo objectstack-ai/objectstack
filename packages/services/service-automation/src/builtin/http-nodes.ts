@@ -2,6 +2,7 @@
 
 import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
+import { defaultEgressGuard, findEgressRefusal, type EgressGuard } from '@objectstack/core/egress';
 import { defineActionDescriptor, HttpConfigSchema } from '@objectstack/spec/automation';
 import type { HttpConfigParsed } from '@objectstack/spec/automation';
 import { randomUUID } from 'node:crypto';
@@ -64,9 +65,9 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
  * durable outbox and the inline call start from the same url, headers and
  * body value, and nothing renders at delivery. The bytes sent can still
  * differ: the outbox serializes the body itself (a string verbatim, no body
- * as `{}`) and adds `Content-Type: application/json`, while the inline call
- * JSON-encodes a body it has and sends none otherwise (see the no-outbox
- * fallback below). Until #19939 the whole config went through the
+ * as `{}`, and nothing at all for a GET or HEAD) and adds `Content-Type:
+ * application/json` when it sends a body, while the inline call JSON-encodes
+ * a body it has and sends none otherwise (see the no-outbox fallback below). Until #19939 the whole config went through the
  * single-brace `interpolate()` first; a `{…}` token is refused now, by the
  * contract parse below and, before a run starts, by `registerFlow` and
  * `objectstack validate`.
@@ -115,7 +116,21 @@ interface MessagingHttpSurface {
 
 const HTTP_TYPE = 'http' as const;
 
-export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext): void {
+/** Options for {@link registerHttpNodes}. */
+export interface HttpNodeOptions {
+    /**
+     * The outbound-request guard the inline arm sends through (the automation
+     * plugin passes the one it installed). Omitted, the process's default
+     * guard for `OS_EGRESS_ALLOWED_TARGETS`, which throws on a malformed
+     * allowlist. There is no unguarded arm.
+     */
+    egress?: EgressGuard;
+}
+
+export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext, options: HttpNodeOptions = {}): void {
+    // Resolved here, at registration, so a malformed allowlist fails the boot
+    // rather than the first run.
+    const egress = options.egress ?? defaultEgressGuard();
     const getMessaging = (): MessagingHttpSurface | undefined => {
         try {
             return ctx.getService<MessagingHttpSurface>('messaging');
@@ -290,8 +305,15 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // template resolves here, so what was authored is what signs.
             const signingSecret = cfg.signingSecret;
 
+            // The organization the request is made for — the same value the
+            // durable arm stamps on its outbox row; the egress guard is asked
+            // with it.
+            const organizationId =
+                typeof context.tenantId === 'string' && context.tenantId !== '' ? context.tenantId : undefined;
+
             // One inline send: the default mode, and the durable arm's no-outbox
-            // fallback (awaited, or in the background on the save path).
+            // fallback (awaited, or in the background on the save path). It
+            // connects through the egress guard, never a bare fetch.
             const sendInline = async () => {
                 // #4354 — unlike a connector action, an HTTP call's effect IS
                 // knowable: the method says it. A GET reads and can never write, so
@@ -308,12 +330,11 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
                     : headers;
                 try {
-                    const response = await fetch(url, {
-                        method,
-                        headers: requestHeaders,
-                        body: requestBody,
-                        signal: controller.signal,
-                    });
+                    const response = await egress.fetch(
+                        url,
+                        { method, headers: requestHeaders, body: requestBody, signal: controller.signal },
+                        { source: 'flow-http', organizationId },
+                    );
                     const data = await readBody(response);
                     return {
                         success: response.ok,
@@ -330,6 +351,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                                 : { unmeasuredEffect: true },
                     };
                 } catch (err) {
+                    // A connect the egress guard refused sent nothing: the run
+                    // reads the named refusal, and no effect happened.
+                    const refused = findEgressRefusal(err);
+                    if (refused) return { success: false, error: `http: ${refused.message}`, metrics: { acted: 0 } };
                     const e = err as { name?: string; message?: string };
                     const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : describeFetchFailure(err, url);
                     // A timed-out or aborted mutating request may well have landed —
@@ -359,10 +384,6 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     // lands `organization_id = NULL` — a row of no
                     // organization, which no tenant-scoped read or redeliver()
                     // reaches (ADR-0131 D8 retired the driver's NULL arm).
-                    const organizationId =
-                        typeof context.tenantId === 'string' && context.tenantId !== ''
-                            ? context.tenantId
-                            : undefined;
                     if (!organizationId) {
                         // Fail-LOUD, not fail-guess, not fail-closed (#11303's
                         // triage): a `single`-posture install and a stack before
@@ -434,9 +455,11 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 // which sends the verb the outbox would have. It sends and signs
                 // its own serialization (see `sendInline`), which is the
                 // outbox's bytes for a non-string body only: with no body it sends
-                // none and signs '' (the outbox sends and signs '{}'), a string
+                // none and signs '' (the outbox sends and signs '{}', except for a
+                // GET or HEAD, where it too sends none and signs ''), a string
                 // body goes out JSON-encoded (the outbox sends it verbatim), and
-                // it adds no `Content-Type: application/json` (the outbox does).
+                // it adds no `Content-Type: application/json` (the outbox does
+                // when it sends a body).
                 if (onSavePath(context)) {
                     // Ruling 6810500711, letter D: the record save never waits on
                     // an external system. A run after a record change holds the

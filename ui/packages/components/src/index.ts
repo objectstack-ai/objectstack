@@ -127,6 +127,11 @@ export type { PageHeaderActionsProps } from './renderers/layout/containers';
 // until edited; its edit page hands the changes an AI chat update proposed, and
 // the form applies them as unsaved edits, marked, before → after, revertible.
 export { SuggestedFieldsContext, SuggestedFieldChangesContext } from './renderers/form/suggested-fields-context';
+// The form's section-list slot (objectstack#34605): a sectioned form reports
+// the headings it draws, with each section's error count, and the host draws
+// the section navigation from them (`@object-ui/plugin-form`).
+export { FormSectionNavContext } from './renderers/form/section-nav-context';
+export type { FormSectionNavItem, FormSectionNavSink } from './renderers/form/section-nav-context';
 
 // The field-face seam (objectui#13216): the slot `@object-ui/fields` fills
 // with its read-face registry when it loads, so `page:header` can draw a

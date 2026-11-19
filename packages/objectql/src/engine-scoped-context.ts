@@ -5,14 +5,14 @@
  * transactions" section: the bodies of `ScopedContext`'s methods `object`,
  * `sudo`, `withRunAs`, `[SEED_USER_GRANTS]`, `transaction`,
  * `releaseJoinedHandle`, `txDriver`, `beginTransaction`, `commitTransaction`,
- * `rollbackTransaction`, `serveFormulaField` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs` (its second pass).
+ * `rollbackTransaction`, `serveFormulaField` moved out of `engine.ts` whole (split
+ * by #30264 and #31665, the codemod's second pass).
  * The bodies of `derive` and `[APP_AUTHORED_HOOK_API]` moved by hand
  * (#30975): each writes the private `appAuthored` of the instance it builds,
  * which the codemod refuses to move (`foreign-private`), so each writes it
  * through that instance's own host setter.
  * The body of `[DETACHED_HOOK_RUN]` (#33651) was written here, in the same
- * stub-and-facet shape.
+ * stub-and-facet shape, and so was the body of `[PLATFORM_SYSTEM_API]`.
  *
  * A MOVE, not a redesign. {@link ScopedContextFacet} is a stateless facet of
  * `ScopedContext`: each static method of it is the body of the `ScopedContext`
@@ -40,13 +40,14 @@
 import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { IScopedContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzGrants } from '@objectstack/core';
+import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzGrants, withoutAppAutomationElevation } from '@objectstack/core';
 import type { EngineTransactionInfo, EngineTransactionOptions } from '@objectstack/core';
 import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
+import { forgetTrioTransactionScope, recordTrioTransactionScope } from './engine-execute-transactions.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
-import { runOutsideOpenUnits } from './unit-detach.js';
+import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnits, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
@@ -120,6 +121,18 @@ export class ScopedContextFacet {
     );
   }
 
+  /**
+   * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; its contract, and
+   * where its guard stops, is `platform-system-api.ts`'s module header.
+   * An app-authored hook's api is never the platform's: there it is that
+   * api's own {@link ScopedContextFacet.sudo}, provenance kept.
+   */
+  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext'>): ScopedContext {
+    if (this.appAuthored) return ScopedContextFacet.sudo.call(this);
+    const { flowRunId: _run, ...context } = withoutAppAutomationElevation({ ...this.executionContext, isSystem: true });
+    return this.derive(context as ExecutionContext);
+  }
+
   /** The body of `ScopedContext#withRunAs`; the method's docblock there is its contract. */
   static withRunAs(this: Pick<ScopedContextHost, 'derive' | 'executionContext'>, runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
     if (runAs === 'system') {
@@ -168,10 +181,14 @@ export class ScopedContextFacet {
   }
 
   /** The body of `ScopedContext#[DETACHED_HOOK_RUN]`; the method's docblock there is its contract. */
-  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => T): T {
-    // The engine's ambient store, reached the `as any` way `transaction` below reaches it.
-    const txStore = (this.engine as any)?.txStore;
-    return runOutsideOpenUnits(txStore, this.executionContext?.transaction, body);
+  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
+    // The engine's ambient store and its published units, reached the `as any`
+    // way `transaction` below reaches them.
+    const engine = this.engine as any;
+    const threaded = this.executionContext?.transaction;
+    return waitForCommit
+      ? runOutsideOpenUnitsOnCommit(engine?.txStore, engine?.openedUnits, threaded, body)
+      : runOutsideOpenUnits(engine?.txStore, threaded, body);
   }
 
   /** The body of `ScopedContext#transaction`; the method's docblock there is its contract. */
@@ -239,23 +256,30 @@ export class ScopedContextFacet {
     // when the callback settles, so work the callback started and did not await
     // (an `async: true` hook) no longer keeps the finished handle, neither the
     // ambient one nor the `trxCtx` one threaded above.
+    // [#33760] With the engine's `ObjectQL.transaction` twin, the queue the
+    // `async` after-hooks dispatched in this unit wait on for its outcome.
+    const commitQueue = newUnitCommitQueue();
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
+      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn, commitQueue) : fn();
 
+    let result: any;
     try {
       // Reached only with no ambient transaction to join, so this call really
       // did open one and the callback owns the outcome (#5696 / #6168).
-      const result = await runIn(() => callback(trxCtx, { owned: true }));
+      result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);
-      return result;
     } catch (error) {
+      settleUnitCommitQueue(commitQueue, false);
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
       // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
       // stale-roll-up conversion included.
       throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
+    // Committed: start the waiting runs, outside the `try`, never awaited.
+    settleUnitCommitQueue(commitQueue, true);
+    return result;
   }
 
   /**
@@ -320,6 +344,20 @@ export class ScopedContextFacet {
     const driver = this.txDriver();
     if (!driver) return null;
     const trx = await driver.beginTransaction();
+    // [#33760] The `async` after-hooks dispatched in this unit wait for the
+    // trio's own commit, or are dropped by its rollback (`unit-detach.ts`).
+    openTrioCommitQueue(trx);
+    // [#35028] The trio never publishes into `txStore`, so record here which
+    // driver owns the handle — the same scope `runOpenedUnit` publishes — for
+    // the same-origin gate to read when the handle comes back explicitly. A
+    // ledger row routed to another datasource then runs outside this
+    // transaction on its own connection, and a business write routed there is
+    // refused, exactly as inside `transaction(cb)`. Reached the same `as any`
+    // way as `runOpenedUnit`.
+    const engine = this.engine as any;
+    if (typeof engine?.newTransactionScope === 'function') {
+      recordTrioTransactionScope(trx, engine.newTransactionScope(driver));
+    }
     const ctx = this.derive({ ...this.executionContext, transaction: trx });
     return { ctx, handle: trx, owned: true };
   }
@@ -327,19 +365,31 @@ export class ScopedContextFacet {
   /** The body of `ScopedContext#commitTransaction`; the method's docblock there is its contract. */
   static async commitTransaction(this: Pick<ScopedContextHost, 'releaseJoinedHandle' | 'txDriver'>, handle: unknown): Promise<void> {
     if (this.releaseJoinedHandle(handle)) return;
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.commit) await driver.commit(handle);
-    else if (driver.commitTransaction) await driver.commitTransaction(handle);
+    // [#35028] Closed either way: a handle whose commit threw is no open unit.
+    try {
+      const driver = this.txDriver();
+      if (!driver) return;
+      if (driver.commit) await driver.commit(handle);
+      else if (driver.commitTransaction) await driver.commitTransaction(handle);
+    } finally {
+      forgetTrioTransactionScope(handle);
+    }
+    settleTrioCommitQueue(handle, true);
   }
 
   /** The body of `ScopedContext#rollbackTransaction`; the method's docblock there is its contract. */
   static async rollbackTransaction(this: Pick<ScopedContextHost, 'releaseJoinedHandle' | 'txDriver'>, handle: unknown): Promise<void> {
     if (this.releaseJoinedHandle(handle)) return;
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.rollback) await driver.rollback(handle);
-    else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
+    settleTrioCommitQueue(handle, false);
+    // [#35028] Closed either way, as on the commit face.
+    try {
+      const driver = this.txDriver();
+      if (!driver) return;
+      if (driver.rollback) await driver.rollback(handle);
+      else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
+    } finally {
+      forgetTrioTransactionScope(handle);
+    }
   }
 
   /** The body of `ScopedContext#serveFormulaField`; the method's docblock there is its contract. */

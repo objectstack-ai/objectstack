@@ -41,11 +41,12 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "플랫폼 관리자 권한 변경",
           action_invocation: "작업 호출",
           package_uninstall: "패키지 제거",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "비관리 패키지 가져오기",
+          credential_use: "자격 증명 사용",
+          scim_refused: "SCIM 요청 거부",
+          audit_signing_key_change: "감사 서명 키 변경",
+          dataset_query: "데이터 세트 쿼리",
+          scim_manager_unresolved: "SCIM 관리자 확인 불가"
         }
       },
       user_id: {

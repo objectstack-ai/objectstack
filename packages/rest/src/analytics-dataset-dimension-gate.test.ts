@@ -61,6 +61,10 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
 // asserts against instead of inheriting the suite's quiet one. 'info' is the
@@ -100,6 +104,23 @@ const dataset = {
   object: 'crm_account',
   dimensions: [{ name: 'industry', field: 'industry', type: 'string' }],
   measures: [{ name: 'account_count', aggregate: 'count' }],
+};
+
+/**
+ * [ADR-0021, ADR-0149 D1] The same dataset with a STALE declaration: a declared
+ * dimension (and a declared time dimension) reading a field the object does not
+ * have — e.g. one dropped after the dataset was saved. A dataset query answers
+ * only declared members, so this is how the source-field gate is reached on the
+ * dataset door now: an undeclared `bogus_dim` is refused earlier, as an
+ * undeclared member (pinned below), and never reaches this gate.
+ */
+const staleDataset = {
+  ...dataset,
+  dimensions: [
+    ...dataset.dimensions,
+    { name: 'bogus_dim', field: 'bogus_dim', type: 'string' },
+    { name: 'bogus_at', field: 'bogus_dim', type: 'date' },
+  ],
 };
 
 const ACCOUNT_FIELDS = ['id', 'name', 'phone', 'industry', 'annual_revenue'];
@@ -168,7 +189,7 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
   it('names the field and the object — and is not a 500 (repro ③)', async () => {
     const route = buildRoute(async () => realAnalytics());
     const res = await post(route, {
-      dataset,
+      dataset: staleDataset,
       selection: { measures: ['account_count'], dimensions: ['bogus_dim'] },
     });
 
@@ -179,6 +200,10 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
     expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
     expect(String(res.body.message)).toMatch(/groups by field 'bogus_dim'/);
     expect(String(res.body.message)).toMatch(/object 'crm_account' does not have/);
+    // [ADR-0021, ADR-0149 D1] The dataset door's remedy is the declared field,
+    // never the cube door's "own fields need no declaration" hint.
+    expect(String(res.body.message)).toContain("The dataset declares this dimension over 'bogus_dim': point its `field` at one of the object's fields, or remove the dimension");
+    expect(String(res.body.message)).not.toMatch(/without the cube declaring it/);
   });
 
   it('carries no generated SQL — because the statement was never built', async () => {
@@ -190,7 +215,7 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
     // is the field-naming 400, and that answer carries no statement.
     const route = buildRoute(async () => realAnalytics());
     const res = await post(route, {
-      dataset,
+      dataset: staleDataset,
       selection: { measures: ['account_count'], dimensions: ['bogus_dim'] },
     });
 
@@ -205,8 +230,8 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
   it('a POSITIVE control: the same wiring with a real field → 200 with rows', async () => {
     // Without this the cases above could pass for any reason that makes the
     // route 400, including a pipeline that never reaches the gate. It also pins
-    // the contract the gate must not kill: `phone` is a REAL column that this
-    // dataset never declared as a dimension, and it still groups.
+    // the contract the gate must not kill: a dimension DECLARED over a real
+    // column that is not the dataset's first one (`phone`) still groups.
     const route = buildRoute(async () => realAnalytics());
 
     const declared = await post(route, {
@@ -216,26 +241,44 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
     expect(declared.statusCode).toBe(200);
     expect(declared.body.rows).toEqual([{ industry: 'tech', account_count: 3 }]);
 
-    const undeclaredButReal = await post(route, {
-      dataset,
-      selection: { measures: ['account_count'], dimensions: ['phone'] },
+    const declaredOverReal = await post(route, {
+      dataset: { ...dataset, dimensions: [...dataset.dimensions, { name: 'phone_dim', field: 'phone', type: 'string' }] },
+      selection: { measures: ['account_count'], dimensions: ['phone_dim'] },
     });
-    expect(undeclaredButReal.statusCode).toBe(200);
+    expect(declaredOverReal.statusCode).toBe(200);
+  });
+
+  it('[ADR-0021, ADR-0149 D1] a real field the dataset does not DECLARE is refused as an undeclared member, before this gate', async () => {
+    // Until the closed-member rule, `dimensions: ['phone']` grouped by the raw
+    // column (the dimension twin of measure auto-inference). A dataset query now
+    // answers only the members its dataset declares, so the raw field — real
+    // or bogus — is refused 400 INVALID_FIELD by that rule, naming the member
+    // and the declared ones, and never reaches the source-field gate above.
+    const route = buildRoute(async () => realAnalytics());
+    for (const member of ['phone', 'bogus_dim']) {
+      const res = await post(route, { dataset, selection: { measures: ['account_count'], dimensions: [member] } });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.code).toBe('INVALID_FIELD');
+      expect(String(res.body.message)).toContain(`The dataset "account_metrics" does not declare the dimension "${member}".`);
+      expect(String(res.body.message)).toContain('Dimensions you may use: industry.');
+      expect(String(res.body.message)).not.toMatch(/groups by field/);
+    }
   });
 
   it('a bogus TIME dimension answers the same way, naming that request key', async () => {
     const route = buildRoute(async () => realAnalytics());
     const res = await post(route, {
-      dataset,
+      dataset: staleDataset,
       selection: {
         measures: ['account_count'],
         dimensions: [],
-        timeDimensions: [{ dimension: 'bogus_dim', granularity: 'month' }],
+        timeDimensions: [{ dimension: 'bogus_at', granularity: 'month' }],
       },
     });
 
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('INVALID_FIELD');
+    expect(String(res.body.message)).toMatch(/buckets field 'bogus_dim'/);
   });
 });
 

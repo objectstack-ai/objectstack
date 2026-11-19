@@ -98,13 +98,19 @@ file exists, through the same refusals as the endpoint above, and reports each o
 row's `manager` result: a link it cannot make never fails the user it imported.
 
 The column is also written by a seed, or by any other system-context write, which bypasses the
-managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
-through a provisioning path your own deployment supplies: this platform declares the SCIM
-`manager` attribute without projecting it onto the column. Where a SCIM directory holds an
-identity (it carries `source: 'idp_provisioned'` and the directory has provisioned or linked it)
-the admin operation **refuses**, the import's `manager_id` column included, so that directory
-stays the one surface that authors its manager; for such a user the column is written only by that
-deployment-supplied path, and a value the column already holds stays as it is. A person who only
+managed-update whitelist. SCIM provisioning populates it too: the Enterprise User `manager`
+attribute, whose `value` is the manager's SCIM resource `id`, is written onto the column on a SCIM
+create, replace or patch that names the attribute, through the same refusals (each answered as a
+SCIM `400 invalidValue`). It is written only for an active user the directory holds, and only from
+the connection that provisioned that user's profile. A write that does not name the attribute
+leaves the column as it is; removing the attribute, or a replace without it, clears the column. An
+id that names no existing user the connection provisioned does not fail the write: the user is saved, the
+column stays as it was, and the server logs a warning for the operator and records a
+`scim_manager_unresolved` row in the audit log, naming the connection, the user and the reference, once per
+connection per ten minutes. Where a SCIM directory holds an identity (it carries `source: 'idp_provisioned'` and
+the directory has provisioned or linked it) the admin operation **refuses**, the import's
+`manager_id` column included, so that directory stays the one surface that authors its manager.
+Any other directory sync writes it only through a path your own deployment supplies. A person who only
 signs in through SSO also carries `source: 'idp_provisioned'`, but no directory holds them: their
 manager is set with **Set Manager** or the import like anyone else's.
 
@@ -427,9 +433,10 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `org_membership_level`, `queue`, and `expression`
-(described in the [callout above](#3-the-approval-node) and in
-[Dynamic approvers](#dynamic-approvers-3447)); `org_membership_level` is the
+`team`, `department`, `org_membership_level`, `queue`, `expression` and
+`platform_admin` (described in the [callout above](#3-the-approval-node) and in
+[Dynamic approvers](#dynamic-approvers-3447), and `platform_admin` in
+[Routing to the platform administrators](#platform-admin-approvers)); `org_membership_level` is the
 one that silently resolves to nobody when it's mistaken for a business
 hierarchy. A `queue` entry names an ownership queue by its machine name — one
 an installed app declares, or one of the organization's own — and resolves to
@@ -447,6 +454,51 @@ organization's directory resolves them — see
 A `position` or `queue` name is not checked when the flow is saved: positions and
 queues are runtime data an administrator adds and removes, so a name nobody holds
 yet saves, and it is resolved when the run reaches the node.
+
+#### Routing to the platform administrators [#platform-admin-approvers]
+
+`{ type: 'platform_admin' }` routes the step to the deployment's **platform
+administrators**: the people with platform-administrator standing, which is a
+cross-tenant `admin_full_access` grant or a verified account whose email the
+deployment declares in `OS_PLATFORM_OWNER_EMAIL`. It takes no `value` and no
+`organization`.
+
+- **One slot, nobody listed.** The request opens on one slot,
+  `platform_admin:*`, that names no person. At every inbox read and every
+  decision, the server asks whether the caller has platform-administrator
+  standing at that moment. A caller who has it sees the request under
+  "My Pending" and decides it as an ordinary approver, and the decision records
+  that person. A caller whose standing was revoked cannot decide it, even if
+  the request opened before the revocation. An organization administrator
+  neither takes the slot nor overrides the request: the tenant admin override
+  below is withheld from any request whose slate holds `platform_admin:*`,
+  including a mixed slate that also names ordinary approvers. An override
+  decides the whole request, so a mixed slate is withheld whole, and its
+  ordinary approvers still decide it as usual. The platform admin override is
+  unchanged.
+- **Only this type opens the slot.** The rule holds on the slate as the
+  decision, override and inbox doors read it: however else a slate is resolved
+  or later rewritten, the slot is not opened through it. A request records,
+  when it opens, that a `platform_admin` step opened its slot, and the doors
+  honour the slot only on a request that carries that record. Moving the slot
+  to someone else takes a platform administrator, the platform admin override,
+  or the system.
+- **Nobody is told.** The slot names no person, so opening the request sends
+  no notification, and the slot grants no read of the record. The request does
+  not count as an empty slate, so `onEmptyApprovers` never replaces it with
+  the organization's administrators.
+- **Only the deployment's own packaged flows may use it.** The approval node
+  opens on this type only when the flow body it runs ships in a package the
+  deployment registers in code (registry `source: 'code'`). The origin is
+  answered for the body whose step is being opened, in every run state. Anywhere else, the
+  node fails with a `FORBIDDEN:` error that says why, and writes no request.
+  That covers a flow authored in the deployment, an environment override of a
+  packaged flow, and a flow from a package installed from the marketplace or
+  created in the deployment. Saving an active flow that names the type, in
+  Studio or through `/meta`, is refused with
+  `approval-approver-platform-admin-authored`. `os lint` accepts the type. It
+  cannot know which door will register the package it reads. No designer
+  offers the type.
 
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
@@ -542,9 +594,9 @@ surface that carries the **decision actions**: approve, reject, return, reassign
 request info, delegate, remind, override.
 
 <Callout type="info">
-**Why the raw `sys_approval_request` table is not that surface.** Every decision
-action on the object is gated on `record.viewer.can_act ||
-record.viewer.can_override`, and the `viewer` block is computed and attached only
+**Why the raw `sys_approval_request` table is not that surface.** Every
+action on the object is gated on the `record.viewer` flags (`can_act`,
+`is_submitter`, or an override flag), and the `viewer` block is computed and attached only
 by the approvals REST path (`/api/v1/approvals/*`) — never by the generic data
 API a plain object view reads. Browse the table directly and you get a correct,
 completely inert list: the rows are there, the buttons are not. That inertness
@@ -726,7 +778,10 @@ no admin override covers, returns 404 (`REQUEST_NOT_FOUND`), exactly as an id
 that names no request does — on every door that acts on a request, before any
 other check of it.
 For a caller who can read it, no such slot and no admin override returns 403
-(`FORBIDDEN: actor '…' is not a pending approver`); a request that isn't
+(`FORBIDDEN: actor '…' is not a pending approver`). An administrator who
+submitted the request and holds no slot on it also gets 403 (`FORBIDDEN`) on
+`approve`: the admin override never approves its actor's own request (see the
+admin-override callout below). A request that isn't
 pending returns 409 (`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
 row: `actor_id` is the user who decided, and `acted_as` is the slot the decision
 took, in that slot's stored spelling — the multi-approver tally counts approvals
@@ -779,6 +834,20 @@ for you.
   segment](/docs/automation/flows#retry-pause-boundary). It is also the shape you
   want regardless: a flow-level retry re-runs the flow **from the start**, which
   would open a second approval request.
+</Callout>
+
+<Callout type="warn">
+  **A refusal on the step after the decision.** Say the `approve` branch
+  updates the record and that record's `beforeUpdate` hook refuses the write
+  (a declared refusal, a validation rule, a permission). With no `fault` edge
+  on that step, `POST …/approve` answers **500 `RESUME_FAILED`**. The decision
+  still stands (`finalized: true`), the run is stranded (`runId`, and
+  `repairable` says whether an operator can re-arm it), and the body also
+  carries the refusal: `innerRefusal` (`{ code, message }`) and the hook's
+  `userMessage`, the sentence to show the approver. Draw a `fault` edge from
+  that step to a handler, for example one that sends the record back to its
+  owner, and the engine routes the refusal there instead: the decision answers
+  normally and the run finishes without an administrator.
 </Callout>
 
 </Steps>
@@ -873,7 +942,7 @@ service attaches to every request it returns:
 
 ```jsonc
 // getRequest / listRequests responses carry, per the calling user:
-"viewer": { "can_act": true, "is_submitter": false, "can_override": false }
+"viewer": { "can_act": true, "is_submitter": false, "can_override": false, "can_override_approve": false }
 ```
 
 - `can_act` — the caller is a **current pending approver**: while the request is
@@ -886,14 +955,21 @@ service attaches to every request it returns:
 - `can_override` — the caller is a **platform or tenant admin** who may act on a
   `pending` request despite holding no slot (see the admin-override callout
   below).
+- `can_override_approve` — `can_override`, except on a request the caller
+  submitted: the override never approves its actor's own request. It is added
+  beside `can_override`, which keeps its meaning for Reject, Reassign and
+  Recall; a client that gates its own Approve control on the override reads
+  this flag. A server that predates it does not send it.
 
 Approver actions gate on `record.viewer.can_act`, submitter levers
-(remind/recall/resubmit) on `record.viewer.is_submitter`, and Approve/Reject/
-Reassign additionally OR in `record.viewer.can_override`. So a submitter viewing
-their own pending request never sees Approve/Reject/Reassign (buttons the server
-would 403 anyway), a position-addressed approver is never wrongly hidden, and an
-admin can rescue a stuck request. The service stays the sole authority — the
-predicate only trims the UI.
+(remind/recall/resubmit) on `record.viewer.is_submitter`, Reject/Reassign/Recall
+additionally OR in `record.viewer.can_override`, and Approve ORs in
+`record.viewer.can_override_approve`. So a submitter who holds no slot and is
+not an administrator never sees Approve, Reject or Reassign on their own pending
+request (buttons the server would 403 anyway); one who is an administrator sees
+Reject, Reassign and Recall on it, and never Approve. A position-addressed
+approver is never wrongly hidden, and an admin can rescue a stuck request. The
+service stays the sole authority — the predicate only trims the UI.
 
 <Callout type="info">
 **Admin override — recovering a stuck request.** A slate that names no one
@@ -907,10 +983,40 @@ then — and for a `team` or `department` literal, always — no concrete user c
 act, and (with `lockRecord`) the record stays locked. A **platform admin**
 (`admin_full_access`) or **tenant admin** (`organization_admin`, org-scoped) may
 act on any `pending` request — **approve, reject, reassign** it to a real
-approver, or **recall** it — releasing the lock. An admin decision is
+approver, or **recall** it — releasing the lock. The one exception is a
+request whose slate holds the platform administrators' slot: a tenant admin
+cannot override it ([Routing to the platform administrators](#platform-admin-approvers)). An admin decision is
 authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
+
+The override never **approves** a request its actor submitted, and is never
+the means by which they take a slot on it. Whatever the step's
+`excludeSubmitter` says:
+
+- an administrator who submitted a request and holds no slot on it gets
+  `403 FORBIDDEN` from `approve`;
+- an override `reassign` never hands a request to its submitter, whoever makes
+  it: a target naming them (their user id, or their email in any letter case)
+  or a position only they hold answers `400 VALIDATION_FAILED`;
+- when the submitter makes the override `reassign` themselves, every target
+  they could act under is refused the same way, a position they share with
+  others included.
+
+Rejecting or recalling their own request stays open to them. A different
+administrator may still reassign the request to a position the submitter shares
+with others: the submitter is then one of its holders, and whether a holder may
+approve their own request is `excludeSubmitter`'s question, as it is for any
+submitter who holds a real slot on the step.
+
+If your own request is stuck, reassign it to someone who can decide it, or
+recall it — which unlocks the record — and send the record for approval again.
+The new request resolves its approvers afresh: when they still name no one, it
+opens on the organization's administrators under `admin_rescue`, as ordinary
+approvers. Without `excludeSubmitter: true` on the step, a submitter who is one
+of those administrators is on that slate and may approve the request as an
+ordinary approver; a step that sets it keeps the submitter off the slate, so
+another administrator decides.
 
 The same override is the only way to decide a slot no position holder addresses
 since ADR-0090 D3 retired the pre-rename word: a request a 15.x-era release stored
@@ -929,9 +1035,15 @@ is also a designated approver is approving normally and records `false` — the
 flag is about the branch that authorized the call, not about who holds admin
 rights. A row written before the column existed carries no value at all, which
 reads as *not recorded* rather than as *not an override*. Without it, an
-override and an ordinary approval were byte-for-byte identical, and the only
-trace that a slate had been bypassed was the designated approver's later
-`409 INVALID_STATE` — if they happened to try.
+override and an ordinary approval were byte-for-byte identical. The slate's
+approvers are not told either: once the override decides the request it is no
+longer pending on them, so it leaves their queue. An approver with no other read
+on it loses sight of it, and reading or deciding it answers
+`404 REQUEST_NOT_FOUND`, as for any request they may not read. One who keeps a
+read — they already acted on it (under their own id or a position slot they
+hold), they submitted it, or the object's `approvalsVisibleToReaders` lets record
+readers read its approvals and they read the record — still sees it decided, and
+a decision answers `409 INVALID_STATE`.
 </Callout>
 
 <Callout type="info">

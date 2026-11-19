@@ -572,7 +572,7 @@ export const de: PlatformTranslationData = {
           label: 'DashScope-API-Schlüssel',
           help: 'sk-... — ausgestellt auf dashscope.console.aliyun.com.',
         },
-        dashscope_model: { label: 'Modell' },
+        dashscope_model: { label: 'Modell', help: 'Beispiele: qwen-plus, qwen-max, qwen3-max, qwen-turbo.' },
         cloudflare_account_id: {
           label: 'Cloudflare-Konto-ID',
           help: 'Die 32-stellige Hex-ID aus der URL Ihres Cloudflare-Dashboards.',
@@ -585,7 +585,10 @@ export const de: PlatformTranslationData = {
           label: 'Cloudflare-AI-Gateway-Token',
           help: 'Ausgestellt in AI Gateway → Registerkarte „API tokens“ (cfut_… oder sk_…).',
         },
-        cloudflare_model: { label: 'Modell' },
+        cloudflare_model: {
+          label: 'Modell',
+          help: 'Format: provider/model. Zulässige Anbieter (laut Cloudflare /compat): anthropic, openai, groq, mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
+        },
         siliconflow_api_key: { label: 'SiliconFlow-API-Schlüssel' },
         siliconflow_model: {
           label: 'Modell',
@@ -596,7 +599,10 @@ export const de: PlatformTranslationData = {
           label: 'Modell',
           help: 'Format: provider/model (z. B. anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'Gesprächstitel automatisch zusammenfassen' },
+        title_generation_enabled: {
+          label: 'Gesprächstitel automatisch zusammenfassen',
+          help: 'Wenn aktiv, erzeugt das LLM nach der ersten Antwort des Assistenten einen kurzen Titel. Deaktivieren, um Tokens zu sparen, oder den Titel leer lassen, damit Benutzer Gespräche selbst benennen.',
+        },
         title_max_length: {
           label: 'Max. Titellänge (Zeichen)',
           help: 'Harte Obergrenze für den erzeugten Titel. Längeres wird serverseitig abgeschnitten.',

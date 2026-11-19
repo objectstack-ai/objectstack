@@ -18,9 +18,11 @@
  *     `encodeURIComponent`, and degrades missing keys to empty string.
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import type { Action as SpecAction } from '@objectstack/spec/ui';
 import {
   ActionRunner,
   type ActionDef,
+  type ResultDialogFieldSpec,
   type ResultDialogHandler,
   type ToastHandler,
 } from '../ActionRunner';
@@ -280,5 +282,33 @@ describe('ActionRunner - target interpolation', () => {
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
     expect(calledUrl).toBe('/api/echo/abc-1');
     fetchSpy.mockRestore();
+  });
+});
+
+/**
+ * objectstack#33187 — `ResultDialogFieldSpec.columns` is DERIVED from the
+ * contract's answer-field row, like `label` and `format` beside it, so the
+ * console's `table` renderer reads `columns` off the runner's own type and no
+ * caller re-declares it. These are TYPES: `tsconfig.test.json` (chained off
+ * this package's `type-check`) compiles this file, so dropping the member, or
+ * restating it as a hand-written shape that drifts from the spec, is a compile
+ * error. The runtime `expect` only makes the case visible to vitest.
+ */
+type Assert<T extends true> = T;
+type IsAny<T> = 0 extends 1 & T ? true : false;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type SpecAnswerField = NonNullable<NonNullable<SpecAction['resultDialog']>['fields']>[number];
+
+describe('ResultDialogFieldSpec carries the contract\'s `columns`', () => {
+  it('is pinned at compile time', () => {
+    type _SpecNotAny = Assert<Equal<IsAny<SpecAnswerField['columns']>, false>>;
+    type _IsTheSpecColumns = Assert<Equal<ResultDialogFieldSpec['columns'], SpecAnswerField['columns']>>;
+    type _Optional = Assert<Equal<undefined extends ResultDialogFieldSpec['columns'] ? true : false, true>>;
+    const field: ResultDialogFieldSpec = {
+      path: 'rows',
+      format: 'table',
+      columns: [{ path: 'email', label: 'Email' }, { path: 'notApplied', format: 'code-list' }],
+    };
+    expect(field.columns?.map((column) => column.path)).toEqual(['email', 'notApplied']);
   });
 });

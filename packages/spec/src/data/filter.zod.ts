@@ -2831,6 +2831,28 @@ export function canonicalAstOperator(op: string): string {
 }
 
 /**
+ * The `$`-spelled field operator one operator spelling names, or `undefined`
+ * for a spelling outside the vocabulary.
+ *
+ * An infix or view spelling ({@link VALID_AST_OPERATORS}, case-insensitive:
+ * `contains`, `not_contains`, `notContains`, `>`, `before`, …) is lowered
+ * through {@link AST_OPERATOR_MAP}, the table {@link canonicalAstOperator}
+ * folds through. A `$` spelling is handed back as written: which `$` names a
+ * consumer accepts is that consumer's vocabulary, not this lowering's.
+ *
+ * The lowering erases a direction on two pairs, as every lowering here does:
+ * `is_null` and `is_not_null` both name `$null`, `is_empty` and `is_not_empty`
+ * both name `$empty`. A consumer that judges by operator CLASS (which operator
+ * a declared field type admits) reads this; one that needs the direction reads
+ * {@link canonicalAstOperator}.
+ */
+export function dollarFilterOperatorOf(op: string): string | undefined {
+  const spelled = String(op);
+  if (spelled.startsWith('$')) return spelled;
+  return astOperatorLowering(spelled.toLowerCase());
+}
+
+/**
  * Detect whether a value is a valid Filter AST array structure.
  *
  * A valid AST is one of:

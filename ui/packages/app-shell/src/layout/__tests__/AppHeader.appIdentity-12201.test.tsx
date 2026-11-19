@@ -182,6 +182,7 @@ function mePermissions(systemPermissions: string[]): MePermissionsAuthenticatedR
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     systemPermissions,
     objects: {},

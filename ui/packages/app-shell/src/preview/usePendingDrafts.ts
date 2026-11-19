@@ -53,6 +53,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { I18nLabel } from '@objectstack/spec/ui';
+import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../assistant/assistantBus.js';
 import { isPollingSuspended } from '../hooks/hiddenTabPollStop.js';
 
@@ -327,9 +328,45 @@ export async function fetchPendingDrafts(
     });
 }
 
+/**
+ * objectstack#34610 — the packages ONE APP's drafts are saved to: the app's
+ * package and, when that package can be a read-only base, its paired
+ * customization package (ADR-0146 D1/D3, `<base>.custom`). An edit to a
+ * code-shipped app is drafted into the pair, and `_drafts?package=<base>` does
+ * not list it, so a count scoped to the base alone reads 0 while the app has
+ * pending changes. The base comes first; either id in gives the same answer.
+ */
+export function appDraftPackages(packageId: string): readonly string[] {
+  const base = customizationBasePackageId(packageId) ?? packageId;
+  const pair = customizationPackageId(base);
+  return pair.ok ? [base, pair.value] : [base];
+}
+
+/** The app a package's drafts belong to: the base of a customization pair, else the package itself. */
+export function appPackageOf(packageId: string): string {
+  return appDraftPackages(packageId)[0];
+}
+
+/**
+ * objectstack#34610 — one app's pending drafts ({@link appDraftPackages}),
+ * read off the environment-wide feed: the pair may not be installed yet, and
+ * `_drafts?package=` refuses a package that is not.
+ */
+export async function fetchAppPendingDrafts(appPackageId: string): Promise<PendingDraftEntry[]> {
+  const scope = appDraftPackages(appPackageId);
+  return (await fetchPendingDrafts(null)).filter((d) => d.packageId !== null && scope.includes(d.packageId));
+}
+
 export interface UsePendingDraftsOptions {
   /** Scope: a packageId for per-app surfaces, undefined/null for env-wide. */
   packageId?: string | null;
+  /**
+   * objectstack#34610 — scope to ONE APP's drafts instead: those in its
+   * package or its paired customization package ({@link appDraftPackages}).
+   * Takes precedence over `packageId`. The console's draft bar and the chat's
+   * drafts line read this, so their counts agree for a code-shipped app too.
+   */
+  appPackageId?: string | null;
   /** False = hold fetching (e.g. no bound package yet). Default true. */
   enabled?: boolean;
 }
@@ -360,7 +397,9 @@ export interface UsePendingDraftsResult {
 }
 
 export function usePendingDrafts(opts: UsePendingDraftsOptions = {}): UsePendingDraftsResult {
-  const { packageId, enabled = true } = opts;
+  const { packageId: packageScope, appPackageId, enabled = true } = opts;
+  // The URL this scope reads: one app's drafts come off the env-wide feed.
+  const packageId = appPackageId ? null : packageScope;
   const [entries, setEntries] = useState<PendingDraftEntry[]>([]);
   const [count, setCount] = useState<number | null>(null);
   // A single in-flight guard + generation counter: a refresh started before a
@@ -383,7 +422,7 @@ export function usePendingDrafts(opts: UsePendingDraftsOptions = {}): UsePending
     const sentAfter = savesRef.current;
     const gen = ++genRef.current;
     try {
-      const list = await fetchPendingDrafts(packageId);
+      const list = appPackageId ? await fetchAppPendingDrafts(appPackageId) : await fetchPendingDrafts(packageId);
       if (genRef.current !== gen) return;
       setEntries(list);
       setCount(list.length);
@@ -397,7 +436,7 @@ export function usePendingDrafts(opts: UsePendingDraftsOptions = {}): UsePending
       setEntries([]);
       setCount(null);
     }
-  }, [packageId, enabled]);
+  }, [packageId, appPackageId, enabled]);
 
   useEffect(() => {
     if (!enabled) {

@@ -39,8 +39,13 @@ const OperationResultSchema = z.looseObject({
 
 const RunHalfSchema = z.looseObject({ questions: z.array(QuestionResultSchema), operations: z.array(OperationResultSchema) });
 
+/**
+ * Every mode the runner writes, `ask` included: an ask mode is read and passed
+ * over by the exporter (`judgeRecord`, `buildTranscript` say why), never a
+ * reason to refuse the record.
+ */
 const ModeRunSchema = z.looseObject({
-  mode: z.enum(['scratch', 'template']),
+  mode: z.enum(['scratch', 'template', 'ask']),
   run: RunHalfSchema.optional(),
   iterate: z.looseObject({ run: RunHalfSchema.optional() }).optional(),
   skipped: z.string().optional(),

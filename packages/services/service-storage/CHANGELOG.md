@@ -1,5 +1,165 @@
 # @objectstack/service-storage
 
+## 18.6.0
+
+### Minor Changes
+
+- 2068e03: feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+  
+  An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
+  
+  - Before: an `en` request was not treated as the authored language, walked the fallback chain (`zh-CN`) ahead of the inline text and was served the Chinese bundle row, unless the stack also declared `fallbackLocale: 'en'`.
+  - Now: an `en` request answers the English inline label; a `zh-CN` request answers the `zh-CN` row; any other locale walks the declared fallback chain exactly as before.
+  
+  `AppPlugin` threads the declared `i18n.sourceLocale` into the i18n service, and every metadata-document translation (the REST metadata reads, a formula's `label()`, an email template's `option` hole, analytics select-option labels and the upload-link page) passes `getSourceLocale()`, else `getDefaultLocale()`, as `ResolveOptions.defaultLocale`. A stack that declares no `sourceLocale` is served exactly as before. A `fallbackLocale: 'en'` added only to work around this can stay; it is no longer needed for the `en` request.
+  
+  Writing your own i18n provider: implement `setSourceLocale` to receive the declaration and `getSourceLocale` to report it, answering `undefined` when nothing was declared — never `defaultLocale`; the serving layer does that collapse itself.
+
+### Patch Changes
+
+- a8261ce: fix(service-storage)!: every upload bound resolves by one precedence, and unset never means unlimited
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes: `max_upload_mb` keeps its manifest key, type and declared default, and what moves is the bound a storage door enforces when no layer sets one, plus one optional constructor option (`maxUploadMb`) on the plugin, `mountStorageRoutes` and `registerStorageRoutes`. There is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a host whose storage doors had no upload bound because nothing set one. Each such host now enforces 100 MB per upload.
+  
+  **The rule.** The three storage Limits keys (`presigned_ttl`, `session_ttl`, `max_upload_mb`) resolve by one precedence, highest first: a saved setting (an admin save or an env override), the host's option, the settings manifest's default, the built-in default. Unset never means unlimited.
+  
+  - **Built-in default.** `max_upload_mb`'s built-in default is 100 MB (counted as MiB), the number the settings manifest declares. A drift pin holds the two equal.
+  - **Host option.** `maxUploadMb` on the `StorageServicePlugin` constructor, on `mountStorageRoutes` and on `registerStorageRoutes` is the host layer, exactly like `presignedTtl` and `sessionTtl`. It takes a positive number of MB, or `'unlimited'` for no bound. Any other value (`0`, a negative or non-finite number, a numeric string, any other string) refuses construction or the mount.
+  - **Failure paths.** A settings read that fails, and a saved value that is present but not a positive number, take the host option or else the built-in default, never no bound.
+  - **Coverage.** The bound applies wherever an upload is judged: the byte doors (the chunk `PUT`, the presigned local raw `PUT`, the upload-link `PUT` and its several-file form), the declared-size doors (presign, chunked start), and the server-side file verbs (`field-files`, `file-attachments` and the upload link's several-file spend).
+  - **Boot line.** Each host door says, once at boot or mount, the bound in force and the layer it came from: the plugin through its logger, `mountStorageRoutes` and `registerStorageRoutes` through the `logger` they are given. With an explicit `'unlimited'` the line is a `warn`, and it is said even when no logger was passed, on `console.warn`.
+  
+  **Who moves.** Each of these moves from no upload bound to 100 MB:
+  
+  - a DevPlugin-composed server;
+  - `--preset minimal` with storage;
+  - a `mountStorageRoutes` host over a bare adapter or over a plugin bound to no settings;
+  - an embedder that passes `bindToSettings: false`;
+  - a settings-bound host while its settings read fails;
+  - a host whose saved or env-sourced `max_upload_mb` is present but not a positive number (it was dropped, and nothing stood in its place).
+  
+  Remedies:
+  
+  - **A host that constructs the plugin** (`bindToSettings: false` embedders, `--preset minimal`, settings-fault hosts): one option, `new StorageServicePlugin({ maxUploadMb: 500 })` for another bound, or `maxUploadMb: 'unlimited'` to keep accepting uploads of any size (boot then says so at `warn`). A `mountStorageRoutes` or `registerStorageRoutes` host passes the same option for that mount's doors.
+  - **A DevPlugin-composed server**: DevPlugin constructs the storage plugin with no options, so turn its storage toggle off and mount the plugin yourself: `new DevPlugin({ services: { storage: false }, extraPlugins: [new StorageServicePlugin({ maxUploadMb: 500 })] })`, or list the `StorageServicePlugin` instance in the stack's own `plugins`, where an explicit instance wins.
+  - **A host with an invalid saved value**: correct the saved `max_upload_mb` (Setup's File Storage settings, or the env override) to a positive number. The saved layer cannot spell "no bound"; to accept any size, remove the saved value and pass the host option `maxUploadMb: 'unlimited'`.
+  
+  **Unchanged.** A settings-bound host with nothing saved, which is the default `os serve`, already enforced the manifest's 100 MB and still does. A saved `max_upload_mb` still wins over every host option. The 18.5.0 note "with `max_upload_mb` unset a byte door states no bound and reads the whole body" no longer holds: with `max_upload_mb` unset a byte door states the host's bound or else the built-in 100 MB, and it states no bound only under an explicit host `'unlimited'`.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/observability@18.6.0
+  - @objectstack/service-cluster@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

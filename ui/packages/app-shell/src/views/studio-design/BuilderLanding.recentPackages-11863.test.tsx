@@ -58,9 +58,17 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
+
+// The package-less flow count the landing draws (objectstack#34715) is not under
+// test here: no flow belongs to no package, and no request leaves the file.
+vi.mock('./packageSurfaces', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./packageSurfaces')>();
+  return { ...mod, loadPackageLessSurfaces: vi.fn(async () => []) };
+});
 
 import { BuilderLanding } from './BuilderLanding';
 import { RecentItemsProvider } from '../../context/RecentItemsProvider';
@@ -110,6 +118,23 @@ const recentSection = () => screen.getByTestId('studio-landing-recent');
 const recentLinks = () => within(recentSection()).getAllByRole('link');
 
 describe('Studio landing → recent packages (objectui#11863)', () => {
+  it('with a recent visit, the installed apps still lead the page: the list follows the author’s own apps (objectstack#34715)', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' },
+    ];
+    renderLanding([visit('com.example.showcase')]);
+
+    await screen.findByText('Recently viewed');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Installed apps',
+      'Customizations in this environment',
+      'Your own apps',
+      'Recently viewed',
+      'Outside any app',
+    ]);
+  });
+
   it('lists the most recent packages first, each by its current name, each opening its /studio/PKG route', async () => {
     packages.list = [
       { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
@@ -131,7 +156,11 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
   it('a package renamed since the visit shows its new name: the label is read on the render, never stored', async () => {
     // The visit happened while the package was called something else; the
     // stored entry carries no text from that moment to go stale.
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme Sales', writable: true, namespace: 'acme' }];
+    // A second app the row does not repeat keeps it drawn (objectstack#35018).
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme Sales', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
     renderLanding([visit('com.acme.crm')]);
 
     await screen.findByText('Recently viewed');
@@ -168,7 +197,10 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     packages.gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
     renderLanding([visit('com.acme.crm')]);
 
     expect(screen.getByText('Loading…')).toBeInTheDocument();
@@ -189,24 +221,30 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Acme CRM');
     expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
     expect(screen.queryByText('Recently viewed')).not.toBeInTheDocument();
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
-    expect(screen.getByTestId('studio-landing-org-scope')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-landing-env-catalog')).toBeInTheDocument();
   });
 
   it('the package cards stay beside the recent row', async () => {
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
     renderLanding([visit('com.acme.crm')]);
 
     await screen.findByText('Recently viewed');
     // Once in the recent row, once as its writable card.
     expect(screen.getAllByText('Acme CRM')).toHaveLength(2);
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
   });
 });
 
 describe('Studio landing → a deleted package leaves "Recently viewed" (objectstack#32615)', () => {
   it('a package the list no longer has is not listed; CONTROL — a live one beside it is', async () => {
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
     renderLanding([visit('com.acme.gone'), visit('com.acme.crm')]);
 
     await screen.findByText('Recently viewed');
@@ -215,7 +253,8 @@ describe('Studio landing → a deleted package leaves "Recently viewed" (objects
   });
 
   it('the gone entry does not take a slot of the row: the next live packages fill it', async () => {
-    packages.list = ['a', 'b', 'c'].map((x) => ({
+    // A fourth app, never visited, keeps the row from repeating the cards (objectstack#35018).
+    packages.list = ['a', 'b', 'c', 'd'].map((x) => ({
       id: `com.acme.${x}`,
       name: `Pkg ${x.toUpperCase()}`,
       writable: true,
@@ -252,11 +291,109 @@ describe('Studio landing → a deleted package leaves "Recently viewed" (objects
   });
 
   it('the stored entry is kept: filtered on the render, never dropped from the store here', async () => {
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
     renderLanding([visit('com.acme.gone'), visit('com.acme.crm')]);
 
     await screen.findByText('Recently viewed');
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Array<{ id: string }>;
     expect(stored.map((e) => e.id)).toEqual(['package:com.acme.gone', 'package:com.acme.crm']);
+  });
+});
+
+/** The own-app section's card for `id`. */
+const ownCard = (id: string) => {
+  const card = screen.getByTestId('studio-landing-own').querySelector(`[data-package-id="${id}"]`);
+  if (!(card instanceof HTMLElement)) throw new Error(`no own-app card for ${id}`);
+  return card;
+};
+
+describe('Studio landing → an own-app card shows the app, not its package (objectstack#35018)', () => {
+  it('names no package id and carries no Writable badge on its face', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' },
+    ];
+    renderLanding([]);
+
+    await screen.findByText('Acme CRM');
+    const card = ownCard('com.acme.crm');
+    expect(within(card).getByText('Acme CRM')).toBeInTheDocument();
+    expect(card.textContent).not.toContain('com.acme.crm');
+    expect(within(card).queryByText('Writable')).not.toBeInTheDocument();
+    // Nowhere on the page: an installed app's card carries no such badge either.
+    expect(screen.queryByText('Writable')).not.toBeInTheDocument();
+  });
+
+  it('keeps the package id reachable, as the card’s hover title', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    renderLanding([]);
+
+    await screen.findByText('Acme CRM');
+    expect(within(ownCard('com.acme.crm')).getByTitle('com.acme.crm')).toBeInTheDocument();
+  });
+});
+
+describe('Studio landing → a "Recently viewed" entry shows the app, not its package (objectstack#35018)', () => {
+  it('shows the name and not the id; the id is the entry’s hover title', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
+    renderLanding([visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    const [link] = recentLinks();
+    expect(within(link).getByText('Acme CRM')).toBeInTheDocument();
+    expect(link.textContent).not.toContain('com.acme.crm');
+    expect(within(recentSection()).getByTitle('com.acme.crm')).toBe(link);
+  });
+});
+
+describe('Studio landing → "Recently viewed" is left out when it only repeats the cards (objectstack#35018)', () => {
+  it('one recent visit to the only app: no row', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    renderLanding([visit('com.acme.crm')]);
+
+    await screen.findByText('Acme CRM');
+    expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recently viewed')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Acme CRM')).toHaveLength(1);
+  });
+
+  it('every card visited, in any order, installed apps included: no row', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' },
+    ];
+    renderLanding([visit('com.example.showcase'), visit('com.acme.crm')]);
+
+    await screen.findByText('Acme CRM');
+    expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — a recent app no card shows keeps the row', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.hidden = ['com.objectstack.platform'];
+    renderLanding([visit('com.acme.crm'), visit('com.objectstack.platform')]);
+
+    await screen.findByText('Recently viewed');
+    expect(recentLinks().map((a) => a.getAttribute('href'))).toEqual([
+      '/studio/com.acme.crm',
+      '/studio/com.objectstack.platform',
+    ]);
+  });
+
+  it('CONTROL — a card the row does not repeat keeps the row', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
+    renderLanding([visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    expect(recentLinks().map((a) => a.getAttribute('href'))).toEqual(['/studio/com.acme.crm']);
   });
 });

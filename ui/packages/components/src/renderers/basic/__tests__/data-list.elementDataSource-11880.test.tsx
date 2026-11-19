@@ -46,6 +46,9 @@ import type { SchemaElement } from '@objectstack/sdui-parser';
 // Registers every `element:*` renderer at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../../../renderers';
+// The page renderer loads `@object-ui/react-runtime` lazily; loading it here
+// pays that transform during collection, not inside a case's clocked window.
+import '@object-ui/react-runtime';
 
 afterEach(cleanup);
 
@@ -95,7 +98,7 @@ describe('element:repeater reads the node-level `dataSource` (objectui#11880)', 
     await waitFor(() => expect(screen.getByTestId('repeater')).toHaveTextContent('Ada'));
     expect(firstRead(adapter)).toEqual({
       object: 'contact',
-      query: { $filter: ACTIVE, $orderby: BY_NAME, $top: 5 },
+      query: { $filter: ACTIVE, $orderby: BY_NAME, $top: 5, $count: false },
     });
   });
 
@@ -180,7 +183,7 @@ describe('element:repeater does not read the retired flat query keys (objectui#1
       properties: { ...FLAT, titleField: 'name' },
     });
     await waitFor(() => expect(adapter.find).toHaveBeenCalled());
-    expect(firstRead(adapter)).toEqual({ object: 'lead', query: { $filter: ACTIVE, $orderby: BY_NAME, $top: 5 } });
+    expect(firstRead(adapter)).toEqual({ object: 'lead', query: { $filter: ACTIVE, $orderby: BY_NAME, $top: 5, $count: false } });
   });
 
   it('a binding with no query keys of its own does not borrow the flat ones', async () => {

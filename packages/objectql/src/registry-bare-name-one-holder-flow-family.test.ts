@@ -697,6 +697,11 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
       const err = await register(ofBeta({ emailTemplates: [member('beta', RESET, 'zh-CN')] }));
       expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${RESET}`);
       expect(err!.message).not.toContain(EMAIL_SERVICE_PKG);
+      // The reason states the exception that refused it: another namespace may NOT ship this name.
+      expect(err!.message).toContain('may ship the same name, save the exceptions below');
+      expect(err!.message).toMatch(
+        /For an email template, whatever the namespaces: a name the platform requests by its bare spelling \([^)]*"auth\.password_reset"[^)]*\) keeps one holder per deployment/,
+      );
       expect(await register(pkg('com.acme.beta'))).toBeUndefined();
       expectRefusal(
         await caught(() => registry.registerItem(type, member('beta', RESET, 'zh-CN'), 'name', 'com.acme.beta')),
@@ -725,7 +730,14 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
     it('at the package door, naming the base', async () => {
       const { register } = await boot();
       expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
-      expectRefusal(await register(dependent()), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${name}`);
+      const err = await register(dependent());
+      expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${name}`);
+      // The reason states the exception that refused it: another namespace may NOT ship this addition.
+      expect(err!.message).toContain('may ship the same name, save the exceptions below');
+      expect(err!.message).toContain(
+        "a package that depends on the name's holder (which does not depend on it back) and ships the name only in "
+        + "locales the holder does not ship is refused as an addition to the holder's email template",
+      );
     });
 
     it('at the item seam, naming the base', async () => {
@@ -773,7 +785,7 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
 
 });
 
-describe('the refusal\'s reason names the consumers of the types it lists', () => {
+describe('the refusal\'s reason states the rule of the types it lists', () => {
   it('one sentence per refusal, naming only the types it carries', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { flow: ['f1'], webhook: ['w1'], connector: ['c1'], email_template: ['e1'] }))).toBeUndefined();
@@ -782,9 +794,20 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['flow/f1', 'webhook/w1', 'connector/c1', 'email_template/e1']);
     expect(err!.message).toContain(bareNameReason(['flow', 'webhook', 'connector', 'email_template']));
     expect(bareNameReason(['flow', 'webhook', 'connector', 'email_template'])).toMatch(
-      /^A flow, a webhook, a connector and an email template each hold one name per deployment: the automation engine arms one flow per name, the webhook dispatcher subscribes one declared webhook per name, /,
+      /^A flow, a webhook, a connector and an email template each hold one name per namespace: /,
     );
-    expect(bareNameReason(['email_template'])).toMatch(/^An email template holds one name per deployment: a send names its email template, /);
+    expect(bareNameReason(['email_template'])).toMatch(/^An email template holds one name per namespace: /);
+  });
+
+  it('a narrowed type is told the namespace rule, never one name per deployment', () => {
+    expect(bareNameReason(['flow'])).toBe(
+      'A flow holds one name per namespace: a package of another namespace may ship the same name, but within '
+      + 'one namespace, or beside a package that declares no namespace, a name has one holder, and a bare name '
+      + 'two holders share is refused naming both.',
+    );
+    // Every covered type has narrowed, so no reason says the old rule.
+    expect(bareNameReason()).not.toContain('one name per deployment');
+    expect(bareNameReason()).not.toContain('chosen by registration order');
   });
 
   it('a built-in name is refused to a package at the package door, naming the platform', async () => {

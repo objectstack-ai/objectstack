@@ -536,7 +536,7 @@ export const ar: PlatformTranslationData = {
         deepseek_api_key: { label: 'مفتاح API لـ DeepSeek', help: 'sk-... — يصدر من platform.deepseek.com.' },
         deepseek_model: { label: 'النموذج', help: 'أمثلة: deepseek-chat (V3)، وdeepseek-reasoner (التفكير R1).' },
         dashscope_api_key: { label: 'مفتاح API لـ DashScope', help: 'sk-... — يصدر من dashscope.console.aliyun.com.' },
-        dashscope_model: { label: 'النموذج' },
+        dashscope_model: { label: 'النموذج', help: 'أمثلة: qwen-plus، qwen-max، qwen3-max، qwen-turbo.' },
         cloudflare_account_id: {
           label: 'معرّف حساب Cloudflare',
           help: 'المعرّف السداسي العشري المكوَّن من 32 حرفًا في عنوان URL للوحة تحكم Cloudflare.',
@@ -549,7 +549,10 @@ export const ar: PlatformTranslationData = {
           label: 'رمز Cloudflare AI Gateway',
           help: 'يصدر في AI Gateway ← تبويب "API tokens" (cfut_… أو sk_…).',
         },
-        cloudflare_model: { label: 'النموذج' },
+        cloudflare_model: {
+          label: 'النموذج',
+          help: 'الصيغة: provider/model. المزوّدون المسموح بهم (وفق Cloudflare /compat): anthropic، openai، groq، mistral، cohere، perplexity، workers-ai، google-ai-studio، vertex، grok، deepseek، cerebras، baseten، parallel.',
+        },
         siliconflow_api_key: { label: 'مفتاح API لـ SiliconFlow' },
         siliconflow_model: {
           label: 'النموذج',
@@ -560,7 +563,10 @@ export const ar: PlatformTranslationData = {
           label: 'النموذج',
           help: 'الصيغة: provider/model (مثل anthropic/claude-3.5-sonnet وdeepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'تلخيص عناوين المحادثات تلقائيًا' },
+        title_generation_enabled: {
+          label: 'تلخيص عناوين المحادثات تلقائيًا',
+          help: 'عند التفعيل، يُطلب من نموذج LLM إنشاء عنوان قصير بعد أول رد من المساعد. عطّله لتوفير الرموز المميزة، أو اترك العنوان فارغًا ليُسمّي المستخدمون المحادثات يدويًا.',
+        },
         title_max_length: {
           label: 'الحد الأقصى لطول العنوان (أحرف)',
           help: 'حد صارم لطول العنوان المُنشأ. أي زيادة تُقتطع على الخادم.',

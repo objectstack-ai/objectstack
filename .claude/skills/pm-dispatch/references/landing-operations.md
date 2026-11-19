@@ -1,21 +1,18 @@
 # 入队与落地细则
 
-执行席在落地窗口(ACCEPT 之后至 MERGED)读本文;入队与落地条款与 A–D 操作细则都在此。
-
 ## 入队与落地
 
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
-- `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
+- `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档 L2(条款②)PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
-- PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免复核不放行。
-- 落地后见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现照立卡门入卡,⛔ 不修已关 PR。
+- 子代理起不来 ⇒ L2 缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
+- PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免 L2 不放行。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
-- diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
-- 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
+- diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head L2。
+- 其余(含改代码)照全套:同 head 达档 L2 PASS 记录即确认,记录逐句判改写句。
 - 两类缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
-- 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定;外部评审链只作事后审计。
+- 真正设计分叉照旧进决策箱,席内 L2 ⛔ 不替代维护者裁定;外部评审链只作事后审计。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
 - 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
@@ -38,11 +35,14 @@
 - 逾 3,000 行须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
 - 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
   (c) PR 正文签名尾行之席以签名评论自请。审计评论在先,回读离队且仍开未合才落地。
+- 该 op 实测离队见 `platform-readings.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
 - 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
-- K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
+- K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
+- 或共享预算 PR 遇 `git diff --name-only PRBASE..origin/main` 碰同本输入或账本;封闭两本,输入:账本:
+- `skills/**`:`scripts/check-skills-token-ratchet.mjs`;`ui/**/locales/en.ts`:`ui/scripts/check-eager-closure-budget.mjs`
 - 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
@@ -55,9 +55,10 @@
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
-- 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
+- 车道 PM 的权责三件:验收(L1 清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即落地评论与 `pr_ready`+`automerge_enable` 一笔中继:`label-write --land`;未绿按阶梯重挂定点。
+  `--land` 拒 `!`/`(narrowing)` PR,除非卡上最新受信 os-dev-report 的 dogfood 钉 head(`os-dev.md`)。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 429 ⇒ 卡记 `resets at`,到点一次重试裸 op(`rest-channel.md`),⛔ 不重发评论、不报阻塞。
@@ -81,7 +82,7 @@
 - `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
   这一移 head 的撤挂与重挂照 `contract-review.md` head 后移例外条。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。
-- 触发条件是卡终局且报告已收复核;⛔ 合并前不归档,误归档可 unarchive 但容器现场已失。
+- 触发条件是卡终局且报告已过 L1;⛔ 合并前不归档,误归档可 unarchive 但容器现场已失。
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 - main-red 约定①:见主干/队列全量红的席位先找锚卡,无则立 p0 锚卡(门类 ①),域随失败面。
 - 认领并派止血,⛔ 不等分诊首触、不等维护者;首触事后补,可改域、⛔ 不改动作。
@@ -91,7 +92,7 @@
 - main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立。
 - 约定③:锚卡一轮分诊(~60 分钟)无人认领 ⇒ 分诊与总监当轮轮报点名卡与归属车道。
 - 再一轮无人认领 ⇒ 分诊贴标准认领行、派一个 os-dev 只做止血;每轮一张,分诊不成车道。
-- 止血 PR 复核归车道席或总监,⛔ 非分诊;Tier H 仍等审批人;车道席到场经认领行交回。
+- 止血 PR 的 L1/L2 归车道席或总监,⛔ 非分诊;Tier H 仍等审批人;车道席到场经认领行交回。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 
@@ -104,9 +105,8 @@
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 
 - 每一棒都是一整圈:merge main + A 的四步 + AGENTS.md §10 所划受影响门禁 + 兄弟单断言复核。
-- 然后 PM 复核回报 → 转 ready → 挂 auto-merge 或入队;每棒都重走。
+- 然后 PM L1 审核回报 → 转 ready → 挂 auto-merge 或入队;每棒都重走。
 - 相邻两棒同碰一个文件时,交接的是语义不是文本。
 - 前棒在回报里写明它对共享文件改动的性质:改名、提取变量、增补断言,还是纯追加。
 - PM 原样转告下一棒,并要求两个 PR 的意图叠加,⛔ 禁止机械取一边。
-- 两棒散文互锁时分工由 PM 指派,允许前棒留占位交接。
-- PM 必须在两侧接力指令里写明谁动、谁不动。
+- 两棒散文互锁时分工由 PM 指派,允许前棒留占位交接;PM 在两侧指令写明谁动、谁不动。

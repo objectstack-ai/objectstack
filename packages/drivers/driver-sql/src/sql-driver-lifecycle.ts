@@ -6,7 +6,7 @@
  * `autoVacuumOf`, `resolveSqliteJournalMode`, `supportsWalJournal`,
  * `applySqliteJournalMode`, `verifyWalReadable`, `isSqliteBusyError`,
  * `journalModeOf`, `checkHealth`, `disconnect` moved out of `sql-driver.ts`
- * whole by `scripts/codemod-split-sql-driver.mjs`.
+ * whole (split by #29598 and #30249).
  *
  * A MOVE, not a redesign. {@link LifecycleFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

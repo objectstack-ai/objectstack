@@ -382,7 +382,7 @@ describe('[#28040] connector pull — the input is checked against the action\'s
         expect(res.pulled).toBe(0);
     });
 
-    it('[#33553] an undeclared key is not refused here: the pull door does not opt in to that judgment', async () => {
+    it('[#33894] an undeclared key is VALIDATION_ERROR 400 naming it, as at the connector_action node, and the action is never called', async () => {
         const h = harness({
             inputSchema: SINCE_REQUIRED,
             mapping: baseMapping({
@@ -392,11 +392,12 @@ describe('[#28040] connector pull — the input is checked against the action\'s
                 },
             }),
         });
-        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
-        expect(h.handler).toHaveBeenCalledTimes(1);
-        expect(h.handler.mock.calls[0][0]).toEqual({
-            path: '/contacts', query: { since: '2026-01-01', stale: 'x' }, extra: 'kept',
-        });
+        const err = await refusal(h);
+        expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'input_schema_mismatch' });
+        expect(err.message).toContain("'query.stale' is not an input the action declares");
+        expect(err.message).toContain("'extra' is not an input the action declares");
+        expect(h.handler).toHaveBeenCalledTimes(0);
+        expect(h.writes).toEqual([]);
     });
 
     it('a valid input still pulls and writes', async () => {

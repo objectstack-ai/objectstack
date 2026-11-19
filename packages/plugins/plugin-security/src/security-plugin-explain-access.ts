@@ -76,6 +76,7 @@ import { ExplainUserNotFoundError, PermissionDeniedError } from './errors.js';
 import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
 import { delegatedUnitReadAdmission } from './delegated-admin-gate.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
+import { foldComputedFieldReads } from './field-masker.js';
 import {
   buildContextForUser,
   delegatedOrganizationRefusal,
@@ -109,6 +110,7 @@ export interface ExplainAccessHost {
   foldFieldRequiredPermissions: SecurityPlugin['foldFieldRequiredPermissions'];
   getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
   readRowById: SecurityPlugin['readRowById'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
   resolveSharingReadFilter: SecurityPlugin['resolveSharingReadFilter'];
@@ -165,7 +167,7 @@ export async function mayDescribeAnotherUser(
 
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
-  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
+  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
   request: { object: string; operation: string; userId?: string; recordId?: string; recordIds?: readonly string[] },
   callerContext?: any,
 ): Promise<ExplainDecision> {
@@ -435,6 +437,13 @@ export async function explainAccessForCaller(
           ? this.permissionEvaluator.getFieldPermissions(o, delSets as any)
           : null;
         return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
+      },
+      // The computed fields step 4 deletes for what they are computed from,
+      // from the enforcement composition itself.
+      getComputedFieldsWithheld: async (o, mask, partial, c) => {
+        const meta = await this.getObjectSecurityMeta(o);
+        const hop = await this.resolveHopWithheldFields(meta, c, { fallbackOnEmptySets: false });
+        return foldComputedFieldReads(mask as Record<string, { readable: boolean; editable: boolean }>, meta.computedFieldInputs, Object.keys(partial), hop).withheld;
       },
       baselinePermissionSets: this.baselinePermissionSets,
       // [Ruling of record 6355206139] The EXTERNAL OWD seam's question, asked

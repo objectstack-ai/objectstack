@@ -50,6 +50,8 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { formulaValuesFor } from './engine-top-level.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
@@ -513,6 +515,11 @@ export async function validate(
   const batchSummaries = mode === 'insert' && rows.length > 1
     ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
     : undefined;
+  // [#34466] And the master-detail header a field-level `parent.` predicate
+  // reads, overlaid the way the write's `insertParentOf` overlays it.
+  const previewParentMaster = batchSummaries && previewParents
+    ? resolveMasterDetailRelation(schemaForValidation as any)?.master
+    : undefined;
 
   // [#26684] Judged one row after another, as the write's validation loop
   // judges them: a row's admission (the reference check below) is awaited
@@ -559,7 +566,7 @@ export async function validate(
         // [#22183] The option values an import kept for this write — the
         // preview admits exactly what the write would.
         keptOptionValues: options?.context?.keptOptionValues,
-      });
+      }, 'deferred'); // [ADR-0113 D1, as amended] as the write: `evaluateValidationRules` below judges it
       // [ADR-0144 D8 rule 4] The write's blank-code refusal, at the write's
       // step and on the write's image: the insert row as stored, or the stored
       // row with the patch over it (`judgedViews`, the by-id update's
@@ -628,10 +635,11 @@ export async function validate(
         // [#22474] The header the write binds: the insert's
         // `insertParentForRow`, the update's landing header and, for a
         // repoint, `roWhenPreviousParent`.
-        parent: previewParents?.parents[i],
+        parent: previewParentMaster ? batchSummaries!.overlayRow(previewParentMaster, previewParents?.parents[i]) : previewParents?.parents[i],
         previousParent: previewParents?.previousParents[i],
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
+        formulaValues: formulaValuesFor(schemaForValidation, options?.context, previewPermissionsFor(row)),
       }));
       if (previewReferences && !referencesFirst) {
         await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);

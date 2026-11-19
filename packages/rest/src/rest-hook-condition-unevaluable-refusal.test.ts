@@ -102,7 +102,7 @@ function makeRes() {
     return res;
 }
 
-async function boot(hooks: any[]) {
+async function boot(hooks: any[], objects: any[] = [INQUIRY]) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -111,7 +111,7 @@ async function boot(hooks: any[]) {
         useNullAsDefault: true,
     }), true);
     await engine.init();
-    engine.registry.registerObject(INQUIRY as any, PACKAGE_ID);
+    for (const object of objects) engine.registry.registerObject(object, PACKAGE_ID);
     await engine.syncSchemas();
     const bound = bindHooksToEngine(engine, hooks as any, { packageId: PACKAGE_ID });
     expect(bound.registered).toBe(hooks.length);
@@ -128,10 +128,10 @@ async function boot(hooks: any[]) {
         return found;
     };
     const unhandled = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const drive = async (path: string, body: unknown) => {
+    const drive = async (path: string, body: unknown, object = 'inquiry') => {
         const res = makeRes();
         await route(path).handler({
-            method: 'POST', path: `/api/v1/data/inquiry${path}`, params: { object: 'inquiry' },
+            method: 'POST', path: `/api/v1/data/${object}${path}`, params: { object },
             headers: { 'content-type': 'application/json' }, query: {}, body,
         }, res);
         return { status: res.statusCode as number, body: res.body as Record<string, unknown> };
@@ -139,7 +139,8 @@ async function boot(hooks: any[]) {
     return {
         create: (body: unknown) => drive('', body),
         createMany: (body: unknown) => drive('/createMany', body),
-        rows: async () => ((await engine.find('inquiry', {})) as unknown[]).length,
+        createOn: (object: string, body: unknown) => drive('', body, object),
+        rows: async (object = 'inquiry') => ((await engine.find(object, {})) as unknown[]).length,
         /** Every `[REST] Unhandled error` line this boot printed. */
         unhandledLines: () => unhandled.mock.calls.filter((c) => c[0] === '[REST] Unhandled error:'),
     };
@@ -211,5 +212,50 @@ describe('[#24662] an unevaluable hook condition is a coded refusal on the REST 
         expect(lines).toHaveLength(1);
         expect((lines[0][1] as Error).name).toBe('HookConditionError');
         expect((lines[0][1] as { reason?: unknown }).reason).toBe('uncompilable');
+    });
+});
+
+/**
+ * [#34412] The REST data door over a transactional driver (sqlite): a
+ * `beforeInsert` hook creates a row on another object through `ctx.api`, then
+ * the object's declared validation refuses the outer row. The refusal used to
+ * leave the hook's row stored, because a single write opened no unit unless an
+ * aborting `after*` hook existed; the hook now opens the door's unit, so the
+ * refusal rolls it back. The control: an accepted create keeps both rows.
+ */
+describe('[#34412] a refused REST create rolls back the ctx.api write its beforeInsert hook made', () => {
+    const TIMED = {
+        name: 'timed', label: 'Timed', systemFields: false,
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true, label: 'ID' },
+            name: { name: 'name', type: 'text' as const, label: 'Name' },
+            hours: { name: 'hours', type: 'number' as const, label: 'Hours' },
+        },
+        validations: [{ name: 'max_hours', type: 'script', condition: 'record.hours > 24', message: 'Hours must be 24 or less.', severity: 'error' }],
+    };
+    const MASTER = { ...INQUIRY, name: 'timed_master', label: 'Timed master' };
+    const MASTER_WRITER = {
+        name: 'qa_master_writer', object: 'timed', events: ['beforeInsert'],
+        handler: async (ctx: any) => { await ctx.api.object('timed_master').insert({ id: `m-${ctx.input.data.id}`, name: 'draft' }); },
+    };
+
+    it('the declared validation refuses the row: 400 VALIDATION_FAILED, and the hook\'s row is absent', async () => {
+        const stack = await boot([MASTER_WRITER], [TIMED, MASTER]);
+
+        const res = await stack.createOn('timed', { id: 't1', name: 'line', hours: 30 });
+
+        expect({ status: res.status, code: res.body.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(await stack.rows('timed')).toBe(0);
+        expect(await stack.rows('timed_master')).toBe(0);
+    });
+
+    it('CONTROL: an accepted create stores the row and the hook\'s row', async () => {
+        const stack = await boot([MASTER_WRITER], [TIMED, MASTER]);
+
+        const res = await stack.createOn('timed', { id: 't2', name: 'line', hours: 3 });
+
+        expect(res.status).toBeLessThan(300);
+        expect(await stack.rows('timed')).toBe(1);
+        expect(await stack.rows('timed_master')).toBe(1);
     });
 });

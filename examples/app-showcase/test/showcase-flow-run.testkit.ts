@@ -4,7 +4,10 @@
  * One harness for running a real showcase flow in a test: a real kernel with
  * ObjectQL over sqlite, the automation plugin, the app's real objects and real
  * flows. Messaging is a recorder of the audience each `notify` hands over, and
- * `fetch` is stubbed so an `http` node answers without leaving the process.
+ * an `http` node answers without leaving the process: its url is pointed at a
+ * receiver on loopback, which the suite allowlists through the environment the
+ * way an operator lists an internal target. The outbound-request guard judges
+ * every connection itself, so a stubbed global fetch would not stand in for it.
  *
  * The record-change trigger package is not a dependency of this app, so a
  * `data.update` here fires no flow. A test runs the flow itself with
@@ -17,6 +20,8 @@
  */
 
 import { vi } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -39,22 +44,53 @@ export interface ShowcaseFlowKernel {
 
 const openKernels: Array<{ shutdown?: () => Promise<void> }> = [];
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
+const openReceivers: Server[] = [];
 
 export async function closeShowcaseFlowKernels(): Promise<void> {
-  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   while (openKernels.length) {
     try { await openKernels.pop()?.shutdown?.(); } catch { /* noop */ }
   }
   while (openDrivers.length) {
     try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
   }
+  while (openReceivers.length) {
+    const receiver = openReceivers.pop()!;
+    receiver.closeAllConnections?.();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  }
+}
+
+/** A loopback receiver answering every request `201 {}`; its base url. */
+async function startReceiver(): Promise<string> {
+  const receiver = createServer((_req, res) => {
+    res.writeHead(201, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve));
+  openReceivers.push(receiver);
+  return `http://127.0.0.1:${(receiver.address() as AddressInfo).port}`;
+}
+
+/** A copy of `value` with every `http` node's literal url moved onto `base`, path kept. */
+function pointHttpNodesAt<T>(value: T, base: string): T {
+  if (Array.isArray(value)) return value.map((v) => pointHttpNodesAt(v, base)) as T;
+  if (!value || typeof value !== 'object') return value;
+  const copy: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) copy[key] = pointHttpNodesAt(v, base);
+  const config = copy.config as Record<string, unknown> | undefined;
+  if (copy.type === 'http' && config && typeof config.url === 'string') {
+    copy.config = { ...config, url: config.url.replace(/^https?:\/\/[^/]+/, base) };
+  }
+  return copy as T;
 }
 
 export async function bootShowcaseFlowKernel(
   objects: readonly unknown[],
   flows: readonly unknown[],
 ): Promise<ShowcaseFlowKernel> {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } })));
+  const receiver = await startReceiver();
+  vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
 
   const emitted: Emitted[] = [];
   const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
@@ -93,7 +129,7 @@ export async function bootShowcaseFlowKernel(
   await installDefaultOrganization(objectql);
   await objectql.getDriverForObject('sys_user')!.create('sys_user', { id: 'usr_admin', email: OWNER_EMAIL, name: 'Admin' });
 
-  for (const flow of flows) automation.registerFlow((flow as any).name, flow as any);
+  for (const flow of flows) automation.registerFlow((flow as any).name, pointHttpNodesAt(flow, receiver) as any);
 
   return { automation, data, objectql, emitted };
 }

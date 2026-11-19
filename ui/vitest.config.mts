@@ -141,7 +141,6 @@ const domTsTests = [
 // and fails loudly in CI (it can never be skipped), so coverage cannot be lost
 // — only a red build that points at the fix.
 const heavyDomTests = [
-  'packages/app-shell/src/console/ai/LiveCanvas.test.tsx',
   'packages/app-shell/src/console/ai/__tests__/ConversationsSidebar.test.tsx',
   'packages/app-shell/src/console/organizations/__tests__/CreateWorkspaceDialog.test.tsx',
   'packages/app-shell/src/hooks/__tests__/useConsoleActionRuntime.test.tsx',
@@ -542,11 +541,14 @@ export default defineConfig({
       '@object-ui/plugin-chatbot': path.resolve(__dirname, './packages/plugin-chatbot/src'),
       '@object-ui/plugin-detail': path.resolve(__dirname, './packages/plugin-detail/src'),
       '@object-ui/plugin-editor': path.resolve(__dirname, './packages/plugin-editor/src'),
+      '@object-ui/plugin-form/core': path.resolve(__dirname, './packages/plugin-form/src/core.ts'),
       '@object-ui/plugin-form': path.resolve(__dirname, './packages/plugin-form/src'),
       '@object-ui/plugin-gantt': path.resolve(__dirname, './packages/plugin-gantt/src'),
       '@object-ui/plugin-map': path.resolve(__dirname, './packages/plugin-map/src'),
       '@object-ui/plugin-markdown': path.resolve(__dirname, './packages/plugin-markdown/src'),
       '@object-ui/plugin-timeline': path.resolve(__dirname, './packages/plugin-timeline/src'),
+      '@object-ui/plugin-timesheet': path.resolve(__dirname, './packages/plugin-timesheet/src'),
+      '@object-ui/plugin-view/core': path.resolve(__dirname, './packages/plugin-view/src/core.ts'),
       '@object-ui/plugin-view': path.resolve(__dirname, './packages/plugin-view/src'),
       '@object-ui/plugin-report': path.resolve(__dirname, './packages/plugin-report/src'),
       '@object-ui/plugin-designer': path.resolve(__dirname, './packages/plugin-designer/src'),

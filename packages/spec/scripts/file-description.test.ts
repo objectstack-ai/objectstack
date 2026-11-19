@@ -1796,13 +1796,17 @@ describe('corpus — no reference source donates a symbol comment to its page', 
     expect(openingOf('shared/mapping.zod.ts')).toBe('@module shared/mapping');
   });
 
-  it('publishes no description for the eight modules whose opening was one schema\'s doc (#13334)', () => {
+  it('publishes no description for seven of the eight modules whose opening was one schema\'s doc (#13334)', () => {
     // The corpus half of route ② — each of the eight had a symbol's comment
     // wedged into its import list by the lazify codemod, published as the
     // page's opening and as the module's skill-index pointer row. The comments
     // moved back to the declarations they document (or to the family they
     // head), so no block sits in the header zone documenting nothing: the page
     // honestly prints no description. 宁可缺,不要错.
+    //
+    // The eighth, `ui/action.zod.ts`, has since been given a module header
+    // written on purpose (#34824 N4) — the case below pins it, so it leaves
+    // this list rather than being exempted from it.
     const openingOf = (rel: string) =>
       opening(findModuleDocBlock(fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8')));
     for (const rel of [
@@ -1810,13 +1814,40 @@ describe('corpus — no reference source donates a symbol comment to its page', 
       'data/datasource.zod.ts',
       'data/hook.zod.ts',
       'security/permission.zod.ts',
-      'ui/action.zod.ts',
       'ui/app.zod.ts',
       'ui/component.zod.ts',
       'ui/page.zod.ts',
     ]) {
       expect(openingOf(rel), rel).toBeNull();
     }
+  });
+
+  it('opens `ui/action` with the module header written above its imports (#34824 N4)', () => {
+    // The one #13334 module that regained a description, and how: not a
+    // symbol's comment back in the import list, but a block in the header zone
+    // — after the licence line, before the first import — that describes the
+    // module. Pinned on three facts so neither a re-wedged symbol comment nor a
+    // header glued to a declaration can pass for it.
+    const rel = 'ui/action.zod.ts';
+    const source = fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8');
+    const block = findModuleDocBlock(source);
+
+    // ① the opening, exactly — the page's first line and the skill-index row.
+    expect(opening(block)).toBe(
+      'Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.',
+    );
+
+    // ② the selected block is the header zone's: nothing but the licence line
+    // and blanks precede it, and no import does.
+    const at = source.indexOf(`/**${block}*/`);
+    expect(at).toBeGreaterThan(-1);
+    const before = source.slice(0, at).split('\n').filter(l => l.trim() !== '');
+    expect(before).toEqual(['// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.']);
+
+    // ③ what follows it is the import list, not a declaration it could be
+    // documenting.
+    const after = source.slice(at + `/**${block}*/`.length).split('\n').find(l => l.trim() !== '');
+    expect(after).toMatch(/^import\b/);
   });
 });
 

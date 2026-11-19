@@ -831,6 +831,15 @@ export interface PendingApprovalRequest {
   /** The flow's machine name, as served. */
   processName?: string;
   createdAt?: string;
+  /**
+   * The request row as the approvals list served it, carrying the
+   * server-computed `viewer` block (`can_act`, `can_override`). It is the
+   * dispatch record the inbox panel hands `DeclaredActionsBar`, so an inline
+   * Approve / Reject runs the request's own declared action, gated by its own
+   * `visible` predicate, and resolves `{id}` from this row (objectstack#34589).
+   * Optional so a surface that only lists titles builds the shape without it.
+   */
+  row?: Record<string, unknown>;
 }
 
 /**
@@ -1019,6 +1028,7 @@ export function useSharedPendingApprovalRequests(): SharedFeedSnapshot<{
         recordTitle: str(row.record_title),
         processName: str(row.process_name),
         createdAt: str(row.created_at),
+        row,
       });
     }
     return { requests, total };
@@ -1613,6 +1623,16 @@ export function setUserFeedPushChannelOpen(open: boolean): void {
  */
 export function notifyUserFeedPushed(feed: 'inbox' | 'approvals'): void {
   (feed === 'inbox' ? inboxFeed : approvalsFeed).pushedChange();
+}
+
+/**
+ * Read the pending approvals once, now: a decision taken in this tab changed
+ * them, so the bell badge and every list cut from the feed must not wait for
+ * the next poll to drop the decided request (objectstack#34589). Same refresh
+ * {@link notifyUserFeedPushed} runs for a pushed change. Package-internal.
+ */
+export function refreshSharedPendingApprovals(): void {
+  approvalsFeed.pushedChange();
 }
 
 /**

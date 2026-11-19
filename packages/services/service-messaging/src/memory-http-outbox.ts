@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { hashPartition } from './backoff.js';
-import { deliveryBody, signBody } from './http-sender.js';
+import { assertBodylessPayloadAdmitted, deliveryBody, signBody } from './http-sender.js';
 import {
     HttpAckError,
     HttpRedeliverError,
@@ -43,9 +43,10 @@ export class MemoryHttpOutbox implements IHttpOutbox {
 
     async enqueue(input: EnqueueHttpInput): Promise<string> {
         assertEnqueueDeliverable(input);
+        assertBodylessPayloadAdmitted(input);
         return this.insert(input, {
             signature: input.signingSecret
-                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                ? signBody(deliveryBody(input.payload, input.method), input.signingSecret)
                 : undefined,
             status: 'pending',
             error: undefined,

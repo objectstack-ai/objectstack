@@ -1203,6 +1203,15 @@ export interface ActionResult {
    */
   fieldErrors?: ActionFieldError[];
 
+  /**
+   * The refusal's producer-marked user-facing text, as the server answered it
+   * (`error.userMessage`, `ApiErrorSchema.userMessage`): verbatim, already in
+   * the request's locale. Set only on a failed result whose refusal carried
+   * it, beside `error`, which stays the whole text. A host that reports the
+   * failure to the end user shows this when present (objectstack#34173).
+   */
+  userMessage?: string;
+
   /** Whether the caller should reload its data after the action */
   reload?: boolean;
 

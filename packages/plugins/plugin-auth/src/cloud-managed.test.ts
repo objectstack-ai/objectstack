@@ -31,7 +31,7 @@ import { assertAudienceConfig, decideAudienceAdmission, resolveAudience } from '
 import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { SSO_ONLY_REFUSAL_MESSAGES } from './sso-only-local-password';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
-import { inviteForAudienceGate } from './audience-gate-test-support';
+import { inviteForAudienceGate, operatorProvisioningField } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-25083';
@@ -154,9 +154,13 @@ async function produceStagedRows() {
     member: 'member.25083@example.com',
     idp: 'idp.25083@example.com',
   } as const;
+  // Members bound at creation: the operator door (`operatorProvisioningField`),
+  // since a sign-up admitted by the invitation it presents joins no
+  // organization until it accepts.
   for (const email of Object.values(emails)) {
-    const invitationId = await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
+    const res = await direct('/sign-up/email', {
+      email, password: PASSWORD, name: email, ...operatorProvisioningField(manager, email),
+    });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 
@@ -223,10 +227,10 @@ beforeAll(async () => {
  * staging gave, so no case sees another's writes. The tests switch the mode
  * on afterwards: every door under test reads the accessor per request.
  */
-async function stage() {
+async function stage(extra: Record<string, unknown> = {}) {
   const engine = createMemoryEngine();
   for (const [name, rows] of structuredClone(staged.tables)) engine.tables.set(name, rows);
-  const manager = makeManager(engine);
+  const manager = makeManager(engine, extra);
   const { ids, bearers } = staged;
 
   const users = () => (engine.tables.get('sys_user') ?? []) as any[];
@@ -797,6 +801,272 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the s
       expect(changed.status, changed.text).toBe(200);
     }, 120_000);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Membership and roles
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * On a cloud-managed environment the organisation that hosts it manages who
+ * is a member and at which tier. Every organization door that writes or
+ * deletes a membership row refuses with the invite-member envelope and writes
+ * nothing: `remove-member`, `update-member-role` (Make Owner sends the owner
+ * tier to it), `leave`, `accept-invitation`, `create` (the caller would own
+ * the new organization) and `delete` (every membership would end). The arms
+ * behind the refusal (the remove-member permission judge, the role-change
+ * grant read, the organization-delete records judge) do not run.
+ * `add-member` stays open and admits exactly a platform administrator: it
+ * restores a membership the environment lost. Self-hosted, every door answers
+ * as before, and a door that writes no membership row (`reject-invitation`)
+ * answers as before on a managed environment too.
+ */
+describe('on a cloud-managed environment, membership and its tiers are managed by the hosting organisation', () => {
+  type Staged = Awaited<ReturnType<typeof stage>>;
+  const memberships = (s: Staged) =>
+    ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.organization_id === DEFAULT_ORG);
+  const membershipOf = (s: Staged, userId: string) => memberships(s).find((m) => String(m.user_id) === userId);
+
+  /** The ordinary user's membership row, read before the case changes anything. */
+  const memberRow = (s: Staged) => {
+    const row = membershipOf(s, s.ids.member);
+    expect(row, 'fixture invariant: the ordinary user holds a default-org membership').toBeDefined();
+    expect(row.role, 'fixture invariant: as a plain member').toBe('member');
+    return row;
+  };
+
+  type DoorPath = '/organization/remove-member' | '/organization/update-member-role';
+  const DOORS: ReadonlyArray<
+    [string, DoorPath, 'removeMember' | 'updateMemberRole', (memberId: string) => Record<string, unknown>]
+  > = [
+    ['remove-member', '/organization/remove-member', 'removeMember',
+      (memberId) => ({ memberIdOrEmail: memberId, organizationId: DEFAULT_ORG })],
+    ['update-member-role', '/organization/update-member-role', 'updateMemberRole',
+      (memberId) => ({ memberId, role: 'admin', organizationId: DEFAULT_ORG })],
+    ['update-member-role to owner (Make Owner)', '/organization/update-member-role', 'updateMemberRole',
+      (memberId) => ({ memberId, role: 'owner', organizationId: DEFAULT_ORG })],
+  ];
+
+  it.each(DOORS)('%s answers 409 RESOURCE_CONFLICT to the owner, and the membership row is unchanged', async (_door, path, door, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire(path, body(String(row.id)), s.bearers.admin));
+    expectManagedRefusal(v, door);
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  it.each(DOORS)('%s refuses ahead of the arms behind it: no permission judge runs and no grant read is taken', async (_door, path, _key, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const permissionJudge = vi.spyOn(s.manager as any, 'assertRemoveMemberPermitted');
+    const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
+    setManaged(true);
+    const v = await verdict(await s.fire(path, body(String(row.id)), s.bearers.admin));
+    expect(v.status, v.text).toBe(409);
+    expect(permissionJudge).not.toHaveBeenCalled();
+    expect(grantRead).not.toHaveBeenCalled();
+  }, 120_000);
+
+  it.each(DOORS)('CONTROL: self-hosted, %s answers 200 and changes the membership as before', async (_door, path, _key, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const permissionJudge = vi.spyOn(s.manager as any, 'assertRemoveMemberPermitted');
+    const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
+    const sent = body(String(row.id));
+    const v = await verdict(await s.fire(path, sent, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    if (path === '/organization/remove-member') {
+      expect(membershipOf(s, s.ids.member)).toBeUndefined();
+      // The spy legs above are measured against arms that do run here.
+      expect(permissionJudge).toHaveBeenCalled();
+    } else {
+      expect(membershipOf(s, s.ids.member)?.role).toBe(sent.role);
+      expect(grantRead).toHaveBeenCalled();
+    }
+  }, 120_000);
+
+  it('CONTROL: add-member still answers a platform administrator, and restores a membership the environment lost', async () => {
+    const s = await stage();
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/add-member', { userId: s.ids.member, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin),
+    );
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)?.role).toBe('member');
+  }, 120_000);
+
+  it('CONTROL: invite-member keeps its own refusal, not a membership one', async () => {
+    const s = await stage();
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/invite-member', {
+        email: 'newcomer.membership@example.com',
+        role: 'member',
+        organizationId: DEFAULT_ORG,
+      }, s.bearers.admin),
+    );
+    expectManagedRefusal(v, 'invitation');
+    expect(s.invitationsOf('newcomer.membership@example.com')).toHaveLength(0);
+  }, 120_000);
+
+  it('add-member admits exactly a platform administrator there: an ordinary member hears 403 PERMISSION_DENIED and nothing is written', async () => {
+    const s = await stage();
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/add-member', { userId: s.ids.member, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.member),
+    );
+    expect(v.status, v.text).toBe(403);
+    expect(v.code, v.text).toBe('PERMISSION_DENIED');
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  // ── leave: a member ends their own membership ─────────────────────────────
+
+  it('leave answers 409 RESOURCE_CONFLICT to a member, and their membership row is unchanged', async () => {
+    const s = await stage();
+    memberRow(s);
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/leave', { organizationId: DEFAULT_ORG }, s.bearers.member));
+    expectManagedRefusal(v, 'leaveOrganization');
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, leave answers 200 and ends the membership as before', async () => {
+    const s = await stage();
+    memberRow(s);
+    const v = await verdict(await s.fire('/organization/leave', { organizationId: DEFAULT_ORG }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+  }, 120_000);
+
+  // ── accept-invitation: an invitation still pending from before ────────────
+
+  /** The ordinary user, with no membership, holding a pending invitation issued while unmanaged. */
+  const pendingInvitationFor = async (s: Staged): Promise<string> => {
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    const email = String(s.users().find((u) => String(u.id) === s.ids.member)!.email);
+    const issued = await verdict(
+      await s.fire('/organization/invite-member', { email, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin),
+    );
+    expect(issued.status, `fixture: the invitation is issued while unmanaged — ${issued.text}`).toBe(200);
+    const [invitation] = s.invitationsOf(email);
+    expect(invitation?.status, 'fixture: the invitation is pending').toBe('pending');
+    // The invitee's address is verified, so only the posture decides: accepting
+    // or declining an invitation needs a verified address
+    // (`invitation-acceptance-verified-address.test.ts`).
+    s.users().find((u) => String(u.id) === s.ids.member)!.email_verified = true;
+    return String(invitation.id);
+  };
+
+  it('accept-invitation answers 409 RESOURCE_CONFLICT to the invitee: no membership is created and the invitation stays pending', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/accept-invitation', { invitationId }, s.bearers.member));
+    expectManagedRefusal(v, 'acceptInvitation');
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+    const invitation = ((s.engine.tables.get('sys_invitation') ?? []) as any[]).find((r) => String(r.id) === invitationId);
+    expect(invitation?.status).toBe('pending');
+  }, 120_000);
+
+  it('CONTROL: self-hosted, accept-invitation answers 200 and creates the membership as before', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    const v = await verdict(await s.fire('/organization/accept-invitation', { invitationId }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)?.role).toBe('member');
+  }, 120_000);
+
+  // ── create and delete: an organization's owner membership, and every one ──
+
+  const organizations = (s: Staged) => (s.engine.tables.get('sys_organization') ?? []) as any[];
+  const allMemberships = (s: Staged) => (s.engine.tables.get('sys_member') ?? []) as any[];
+  const SECOND_ORG = { name: 'Second Org', slug: 'second-org-membership' };
+  /** A walled posture, where a second organization may be created at all. */
+  const multiOrg = () => stage({
+    getTenancy: () => ({ ...singleOrgTenancy(), posture: 'isolated', requestedPosture: 'isolated', isolationActive: true }),
+  });
+
+  it('create answers 409 RESOURCE_CONFLICT to the owner: no organization and no owner membership are written', async () => {
+    const s = await multiOrg();
+    const orgsBefore = structuredClone(organizations(s));
+    const membersBefore = structuredClone(allMemberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expectManagedRefusal(v, 'createOrganization');
+    expect(organizations(s)).toEqual(orgsBefore);
+    expect(allMemberships(s)).toEqual(membersBefore);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, create answers 200 and makes the caller the new organization\'s owner as before', async () => {
+    const s = await multiOrg();
+    const v = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    expect(org, v.text).toBeDefined();
+    const owner = allMemberships(s).find((m) => m.organization_id === org.id && String(m.user_id) === s.ids.admin);
+    expect(owner?.role).toBe('owner');
+  }, 120_000);
+
+  it('delete answers 409 RESOURCE_CONFLICT to the owner, ahead of the records arm: the organization and its memberships remain', async () => {
+    const s = await multiOrg();
+    const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(created.status, `fixture: the organization is created while unmanaged — ${created.text}`).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    const orgsBefore = structuredClone(organizations(s));
+    const membersBefore = structuredClone(allMemberships(s));
+    const recordsArm = vi.spyOn(s.manager as any, 'assertOrganizationDeletable');
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/delete', { organizationId: org.id }, s.bearers.admin));
+    expectManagedRefusal(v, 'deleteOrganization');
+    expect(recordsArm).not.toHaveBeenCalled();
+    expect(organizations(s)).toEqual(orgsBefore);
+    expect(allMemberships(s)).toEqual(membersBefore);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, delete answers 200 and ends the organization\'s memberships as before', async () => {
+    const s = await multiOrg();
+    const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(created.status, `fixture: the organization is created — ${created.text}`).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    expect(allMemberships(s).some((m) => m.organization_id === org.id), 'fixture: the owner membership exists').toBe(true);
+    const recordsArm = vi.spyOn(s.manager as any, 'assertOrganizationDeletable');
+    const v = await verdict(await s.fire('/organization/delete', { organizationId: org.id }, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    expect(recordsArm).toHaveBeenCalled();
+    expect(organizations(s).some((o) => o.id === org.id)).toBe(false);
+    expect(allMemberships(s).some((m) => m.organization_id === org.id)).toBe(false);
+  }, 120_000);
+
+  // ── the rest of the family writes no membership row ───────────────────────
+
+  it('CONTROL: reject-invitation, which writes no membership, answers the invitee as before', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/reject-invitation', { invitationId }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+  }, 120_000);
 });
 
 describe('[#25083] what a host that mounts its own twin of a door imports', () => {

@@ -43,7 +43,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Mapping unique name (lowercase snake_case) |
-| **label** | `string` | optional |  |
+| **label** | `string` | optional | Display label, shown where the mapping is offered by name (the import wizard); translated per locale at `mappings.<name>.label` in the translation bundle |
 | **sourceFormat** | `Enum<'csv' \| 'json' \| 'xml' \| 'sql'>` | optional (default: `"csv"`) |  |
 | **targetObject** | `string` | ✅ | Target Object Name |
 | **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform?: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
@@ -75,7 +75,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **connector** | `string` | ✅ | Name of the connector instance the rows are pulled from — a `connectors[]` entry whose `provider` is `rest` or `openapi` (version 1) |
 | **action** | `string` | ✅ | Key of the connector action that reads the records: `request` on a `rest` connector, an operation key on an `openapi` connector |
-| **input** | `Record<string, any>` | optional | Fixed input passed to the action on every pull (e.g. `{ method: 'GET', path: '/contacts' }` for `rest`) |
+| **input** | `Record<string, any>` | optional | Fixed input passed to the action on every pull (e.g. `{ method: 'GET', path: '/contacts' }` for `rest`). Judged against the action's `inputSchema` before the call, as a `connector_action` node's input is: a key the action does not declare is refused, never sent — the watermark parameter the pull adds to `query` included, so an `openapi` operation that declares any parameter or a body must declare it in its OpenAPI document. An operation that declares neither has no `inputSchema` and is not judged, until the day it gains its first parameter or a body |
 | **recordsPath** | `string` | optional | Dot path, within the action's result, to the array of records (e.g. `body.results`); omitted ⇒ the result's `body` is the array |
 | **watermark** | `{ field: string; param: string }` | optional | Timestamp-incremental pull; omitted ⇒ every pull reads the full set. Either way a pull makes ONE action call and reads ONE response: the connector's paging is not followed, so a paged endpoint yields its first page only — and an incremental pull over a newest-first paged endpoint moves its starting point past the pages it never read |
 | **paging** | `{ style: Enum<'page' \| 'cursor' \| 'offset' \| 'none'>; param?: string; nextPath?: string }` | optional | The connector's paging convention: page, cursor or offset, or `none` for a source whose one response is the whole set. Omitted ⇒ a pull reads one response and does not treat it as complete |

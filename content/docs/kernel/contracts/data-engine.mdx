@@ -189,19 +189,53 @@ where: {
 
 A nested relation filter is a condition on a related record's own fields, written
 beneath a relation field (`lookup`, `master_detail`, `user` or `tree`, single or
-multiple). The engine serves it in `where`, the same on every driver: it reads the
+multiple). The engine serves it in `where`, the same on every driver that serves it (below): it reads the
 related object with the condition **as the caller** — that object's row scope and field
 permissions apply, so a condition on a field the caller cannot read is refused
 (`PERMISSION_DENIED` / 403), never answered with an empty list — and then matches the
-relation field against the ids that read returns: `$in` on a single-valued relation, any
-member on a multi-valued one (`multiple: true`). No related record matching selects no
+relation field against what that read selects: on a read verb, a single-valued relation is
+one subquery inside the read's own statement where that is provably the same read (the
+related read is planned, not run: its read scope and the condition become the subquery's
+`WHERE`, so no id list is read and none is capped — the related object's read restrictions
+the planned read observes are carried into the subquery, or the hop falls back to the id
+read); otherwise `$in` on the
+ids that read returns, any member on a multi-valued one (`multiple: true`). No related record matching selects no
 rows; under `$not`, a record whose relation is empty satisfies the negation.
 
-It reaches **one level**: every key must be a field the related object declares
-(`{ account: { owner: { region: 'NA' } } }` and the dotted `{ account: { 'owner.region': 'NA' } }`
-are refused), and a condition matching more than 1,000 related records is refused with
-`INVALID_FILTER` / 400 rather than run over a cut-off list. For either, run the two steps
-yourself — filter the related object, then match its ids:
+It reaches **up to three relationships** (ADR-0071's hop limit): every key must be a field
+the related object declares, and a relation key may carry a condition of its own
+(`{ account: { owner: { region: 'NA' } } }`), each hop read as the caller with its own read
+scope; a fourth relationship and the dotted `{ account: { 'owner.region': 'NA' } }` are
+refused. Where ids are read (a multi-valued relation, `update`, `delete`) a
+condition matching more than 1,000 related records is refused with `INVALID_FILTER` / 400
+rather than run over a cut-off list. The id read, with that cap, is also what serves a
+single-valued relation on a read verb in each of these cases:
+
+- a related object on another datasource;
+- a federated related object;
+- a related object whose reads an object-scoped middleware or an `afterFind` hook shapes;
+- a related object read under different driver options than the outer object (its tenant
+  scope, most commonly) — decided before the related read is planned where the registry
+  answers it (the two objects' tenancy class under a walled posture), at the executor
+  boundary otherwise;
+- a related read that a middleware answers itself (or adds rows to after the driver call).
+
+A driver that compiles no subquery is not one of those cases. The SQL drivers compile it
+and the in-memory driver evaluates it in process; each declares the
+`DriverCapabilities.readableIdsLeaf` bit. On a driver without it (MongoDB, OData), a
+single-valued relation condition on a read verb is refused before anything is planned or
+read, `INVALID_FILTER` / 400, naming the driver and the two-step route below. A
+multi-valued relation and `update` / `delete` keep the capped id read there. An analytics
+dimension through a lookup is refused on such a driver the same way, `INVALID_QUERY` / 400.
+
+A read rule that narrows a related object's rows after its driver call bounds a relation
+condition on that object only when it is registered for that object — as an object-keyed
+middleware or an `afterFind` hook; registered that way, the hop keeps the id read.
+
+A hop that falls back after planning (a middleware answering the related read, or driver
+options only the request decides) dispatches the related read twice: its middleware chain and `beforeFind` hooks run for the
+planned read and again for the id read. Past the cap, run the two steps yourself — filter
+the related object, then match its ids:
 
 ```typescript
 const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });

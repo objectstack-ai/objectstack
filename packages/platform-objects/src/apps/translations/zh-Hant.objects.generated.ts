@@ -240,6 +240,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "電子郵件",
+            pendingAgain: "已在待啟用中",
             notApplied: "此人仍待啟用，以下內容未套用（請在其記錄上設定）",
             managerError: "主管",
             "host.reason": "邀請未送出"
@@ -263,6 +264,19 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "已在待啟用中，已再次通知",
             "summary.failed": "未新增",
             rows: "逐列結果"
+          },
+          columns: {
+            rows: {
+              row: "列",
+              email: "電子郵件",
+              ok: "成功",
+              alreadyPending: "已在待啟用中，已再次通知",
+              "host.notified": "已通知託管組織",
+              "host.reason": "未通知的原因",
+              "error.message": "未新增的原因",
+              notApplied: "未套用（請在記錄上設定）",
+              managerError: "上級"
+            }
           }
         }
       },

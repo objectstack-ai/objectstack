@@ -60,6 +60,10 @@
 import { describe, it, expect } from 'vitest';
 import { ImportJobProgressSchema, ImportJobSummarySchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
+// The source under test reaches `import('@objectstack/objectql')` inside a
+// handler; paying that load at collection keeps it out of a clocked case
+// (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 /** Canonical ISO-8601 UTC with milliseconds — what the DTO contract promises. */
 const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -198,7 +202,8 @@ describe('[#14078] §B formatCsvCell — the export writer emits the cell an ope
 
         // `formatDate` -> `toDate` rejects an Invalid `Date` and returns the
         // value UNCHANGED, so this path reaches the same arm.
-        const lines = csv.split('\r\n').filter((l) => l.length > 0);
+        // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+        const lines = csv.replace(/^\uFEFF/, '').split('\r\n').filter((l) => l.length > 0);
         expect(lines[0]).toBe('ID,截止');
         expect(lines[1]).toBe(`1,${INVALID_TEXT}`);
     });

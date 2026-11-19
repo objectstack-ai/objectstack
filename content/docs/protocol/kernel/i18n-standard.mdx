@@ -234,10 +234,10 @@ Fallback to: en (system default) ✓
 
 The "system default" step is the stack's **declared** fallback
 (`i18n.fallbackLocale`, else `defaultLocale`), never a literal `en`. For
-metadata labels one more rule applies (#15711): the inline `label:` authored
-on the metadata **is** the default locale's text, so a request for
-`defaultLocale` stops at the authored label without consulting any other
-locale's bundle — a `zh-CN` workspace with a courtesy `en` bundle serves
+metadata labels one more rule applies (#15711, #33634): the inline `label:`
+authored on the metadata **is** the source locale's text (`sourceLocale`, else
+`defaultLocale`), so a request for that locale stops at the authored label
+without consulting any other locale's bundle — a `zh-CN` workspace with a courtesy `en` bundle serves
 Chinese to `zh-CN` and English to `en`. See
 [Translations](/docs/ui/translations#how-a-locale-is-chosen).
 
@@ -493,7 +493,7 @@ Three rules the shape enforces, all of them closed since #4001:
 - **The top level is the declared group set and nothing else** — `objects`,
   `picklists`, `apps`, `messages`, `globalActions`, `dashboards`, `datasets`,
   `reports`, `pages`, `flows`, `hooks`, `positions`, `permissions`, `books`,
-  `metadataForms`, `settingsCommon`. A group invented beside them
+  `mappings`, `metadataForms`, `settingsCommon`. A group invented beside them
   (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
   at both authoring doors, with the group to use instead named in the
   rejection.
@@ -582,7 +582,7 @@ what the overlay writes back as the node's `title`.
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
 is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
-so it starts at one of the sixteen declared groups.
+so it starts at one of the seventeen declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');
@@ -1155,6 +1155,7 @@ beneath an action entry are judged the same way under either.
 | `{action}.params.{param}.options.{value}` | an option's stored **`value`** in that param's inline `options` — a warning, as on a field. A param that references a `field` and declares no inline `options` takes the field's list when the dialog renders, so its option keys are not judged |
 | `{action}.outcomeMessages.{outcome}` | an outcome the action's own `outcomeMessages` declares |
 | `{action}.resultDialog.fields.{path}` | the literal `path` of a field the action's `resultDialog.fields[]` declares — dots included, so `client.secret` is one key |
+| `{action}.resultDialog.columns.{path}.{column}` / `{action}.preflight.columns.{path}.{column}` | a column header of a table: `{path}` the literal `path` of a `format: 'table'` field in that block's `fields[]`, `{column}` the literal `path` of one of its `columns[]` — dots included at both levels, so `columns.rows["error.message"]` is two keys deep, not three |
 | `{action}.resultDialog.title` / `.description` / `.acknowledge` | an action that declares a `resultDialog`, whether or not the dialog sets that text itself — for an action that declares none, nothing reads the dialog's copy |
 | `apps.{app}` | an app declared, or one a `navigationContributions` entry anywhere in the artifact contributes into — including an app owned outside the artifact; under an app that is only contributed into, `apps.{app}.label` may be left out (the owning package's label survives the merge) |
 | `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |

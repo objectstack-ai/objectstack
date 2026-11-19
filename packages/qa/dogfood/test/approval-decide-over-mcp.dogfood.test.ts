@@ -28,21 +28,19 @@
 //   ⭐ an AI service account acting for itself (ADR-0151, its own API key, on
 //      no slate) is refused, and the request stays pending: the account
 //      confirmation rule (ADR-0151 D3 rule 3) answers first, `428`
-//      `ACTION_CONFIRMATION_REQUIRED` whatever the call sends, `confirm: true`
-//      included — an account does not confirm an action for itself, so the
-//      action is handed to a person;
-//   ⭐ the approver is refused `428` until the call carries `confirm: true`;
-//   ⭐ confirmed, the approver's call decides: the request is approved and
-//      the decision is recorded once, as the approver's;
-//   ⭐ [#32993] the submitter's recall is refused `428` until confirmed, then
-//      withdraws the pending request, recorded once as the submitter's;
-//   ⭐ [#32993] a caller who is not the submitter (the approver) is refused
-//      recall in `approval_recall_not_submitter`'s words, and the request
-//      stays pending;
-//   ⭐ [#32993] on a request sent back for revision, the submitter edits the
-//      record and resubmits over MCP (confirmed): round 2 opens a pending
-//      request; unconfirmed, or from the approver, nothing moves.
-//
+//      `ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'service_account'`
+//      whatever the call sends;
+//   ⭐ [#33690] every other caller's decision, recall, send-back and resubmit
+//      runs nothing over MCP, confirmed or not: the actions declare
+//      `ai.requiresConfirmation: true`, so the caller's own `confirm: true`
+//      never counts, and this stack registers no pending-confirmation service,
+//      so each call is refused `428`, `details.reason:
+//      'no_confirmation_service'`, and the request stays pending. Before the
+//      amended contract a confirmed call decided here; a person now decides in
+//      the app (a host's pending-confirmation service hands the call to them).
+//      [#34209] A call that carries `confirm` at all is refused earlier, at
+//      `run_action`'s closed input, and the request stays pending as well.
+
 // The read half of the card (an approver listing their pending requests over
 // MCP) is not here: the MCP object tools refuse every `sys_*` object, so this
 // file finds each request id as the system.
@@ -57,7 +55,6 @@ import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
-import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
@@ -73,7 +70,6 @@ const STRANGER = 'apmcp-stranger@verify.test';
 const DECISIONS = ['approval_approve', 'approval_reassign', 'approval_reject', 'approval_send_back'];
 // [#32993] The submitter's recall and resubmit, exposed beside the decisions.
 const EXPOSED = [...DECISIONS, 'approval_recall', 'approval_resubmit'].sort();
-const RECALL_REFUSAL = BUILTIN_OPERATION_MESSAGES.en!.approval_recall_not_submitter!;
 
 const leave = ObjectSchema.create({
   name: OBJECT,
@@ -138,8 +134,6 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
   let submitter: string;
   let approver: string;
   let stranger: string;
-  let approverId: string;
-  let submitterId: string;
   let accountKey: string;
 
   const idOf = async (email: string): Promise<string> =>
@@ -217,10 +211,6 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
       expect(await catalogPermissionSet(ql, baselineSet.name), `${baselineSet.name} is served by the catalog`).toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: await idOf(email), permission_set: baselineSet.name }, SYS);
     }
-    approverId = await idOf(APPROVER);
-    expect(approverId).not.toBe('');
-    submitterId = await idOf(SUBMITTER);
-    expect(submitterId).not.toBe('');
 
     // An AI service account acting for itself (ADR-0151): registered by the
     // administrator, its key minted for it, on no slate.
@@ -253,104 +243,78 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
     }
   });
 
+  /**
+   * [#33690] What every decision call over MCP answers now: the decide,
+   * recall, resubmit and send-back actions declare `ai.requiresConfirmation:
+   * true`, so the caller's own `confirm: true` never runs them; this stack
+   * registers no pending-confirmation service, so the call is refused at
+   * confirmation, after the request row is read and before it is forwarded.
+   * [#34209] A call that carries the retired `confirm` member is refused
+   * earlier still, at the tool's closed input, and never reaches the action:
+   * with `confirm` set, that refusal is what is asserted.
+   */
+  const expectRefusedAtConfirmation = (
+    answer: { isError: boolean; payload: any; text: string }, reason: string, confirm = false,
+  ) => {
+    expect(answer.isError, answer.text).toBe(true);
+    if (confirm) {
+      expect(answer.text).toContain(`\`${AI_ACTION_CONFIRMATION_MEMBER}\``);
+      expect(answer.payload?.error?.code, answer.text).toBeUndefined();
+      return;
+    }
+    expect(answer.payload?.error?.code, answer.text).toBe('ACTION_CONFIRMATION_REQUIRED');
+    expect(answer.payload?.error?.status, answer.text).toBe(428);
+    expect(answer.payload?.error?.details?.reason, answer.text).toBe(reason);
+  };
+
   it('⭐ a member on no slate is refused, confirmed or not, and the request stays pending', async () => {
     const requestId = await openRequest('stranger');
-    const answer = await approve({ bearer: stranger }, requestId, true);
-    expect(answer.isError, answer.text).toBe(true);
-    // The service's own answer: a request the caller takes no part in is
-    // answered as missing (existence non-disclosure), never decided.
-    expect(answer.payload?.error?.code, answer.text).toBe('REQUEST_NOT_FOUND');
+    for (const confirm of [true, false]) {
+      // [#33690] Refused at confirmation now, never forwarded: the service's
+      // own `REQUEST_NOT_FOUND` is no longer reached over MCP.
+      expectRefusedAtConfirmation(await approve({ bearer: stranger }, requestId, confirm), 'no_confirmation_service', confirm);
+    }
     await expectUndecided(requestId, 'a member on no slate');
   });
 
   it('⭐ the submitter is refused, and the request stays pending', async () => {
     const requestId = await openRequest('submitter');
-    const answer = await approve({ bearer: submitter }, requestId, true);
-    expect(answer.isError, answer.text).toBe(true);
-    expect(answer.payload?.error?.code, answer.text).toBe('FORBIDDEN');
-    expect(answer.text).toContain('is not a pending approver');
+    expectRefusedAtConfirmation(await approve({ bearer: submitter }, requestId, false), 'no_confirmation_service');
     await expectUndecided(requestId, 'the submitter');
   });
 
   it('⭐ an AI service account acting for itself is refused, and the request stays pending', async () => {
     const requestId = await openRequest('account');
-    const answer = await approve({ key: accountKey }, requestId, true);
-    expect(answer.isError, answer.text).toBe(true);
     // The account confirmation rule answers first (ADR-0151 D3 rule 3): an AI
     // service account does not confirm an action for itself, so the decision
     // action, which declares `ai.requiresConfirmation`, is refused at admission
-    // whatever the call carries, before the request is looked up.
-    expect(answer.payload?.error?.code, answer.text).toBe('ACTION_CONFIRMATION_REQUIRED');
-    expect(answer.payload?.error?.status, answer.text).toBe(428);
+    // whatever the call carries, before the request is looked up; [#33690]
+    // the refusal names `reason: 'service_account'`.
+    expectRefusedAtConfirmation(await approve({ key: accountKey }, requestId, false), 'service_account');
     await expectUndecided(requestId, 'an AI service account');
   });
 
-  it('⭐ the approver is refused until the call is confirmed, then decides, recorded once as the approver\'s', async () => {
+  it('⭐ [#33690] the approver\'s call decides nothing, confirmed or not: refused at confirmation, the request stays pending', async () => {
     const requestId = await openRequest('approver');
-    const unconfirmed = await approve({ bearer: approver }, requestId, false);
-    expect(unconfirmed.isError, unconfirmed.text).toBe(true);
-    expect(unconfirmed.text).toContain('ACTION_CONFIRMATION_REQUIRED');
-    await expectUndecided(requestId, 'an unconfirmed call');
-
-    const confirmed = await approve({ bearer: approver }, requestId, true);
-    expect(confirmed.isError, confirmed.text).toBe(false);
-    expect((await requestRow(requestId)).status).toBe('approved');
-    expect((await decisionsOn(requestId)).map((r) => [r.action, r.actor_id])).toEqual([['approve', approverId]]);
+    for (const confirm of [false, true]) {
+      expectRefusedAtConfirmation(await approve({ bearer: approver }, requestId, confirm), 'no_confirmation_service', confirm);
+      await expectUndecided(requestId, `an approver's call (confirm: ${confirm})`);
+    }
   });
 
-  it('⭐ [#32993] the submitter\'s recall is refused until confirmed, then withdraws the pending request, recorded once as the submitter\'s', async () => {
+  it('⭐ [#33690] the submitter\'s recall, resubmit and the approver\'s send-back run nothing over MCP, confirmed or not', async () => {
     const requestId = await openRequest('recall');
-    const unconfirmed = await act({ bearer: submitter }, 'approval_recall', requestId, false, 'fixing the lines');
-    expect(unconfirmed.isError, unconfirmed.text).toBe(true);
-    expect(unconfirmed.text).toContain('ACTION_CONFIRMATION_REQUIRED');
-    await expectUndecided(requestId, 'an unconfirmed recall');
-
-    const confirmed = await act({ bearer: submitter }, 'approval_recall', requestId, true, 'fixing the lines');
-    expect(confirmed.isError, confirmed.text).toBe(false);
-    expect((await requestRow(requestId)).status).toBe('recalled');
-    expect((await decisionsOn(requestId)).map((r) => [r.action, r.actor_id])).toEqual([['recall', submitterId]]);
-  });
-
-  it('⭐ [#32993] a caller who is not the submitter is refused recall in the service\'s own words, and the request stays pending', async () => {
-    const requestId = await openRequest('recall-not-submitter');
-    const answer = await act({ bearer: approver }, 'approval_recall', requestId, true, 'not mine to recall');
-    expect(answer.isError, answer.text).toBe(true);
-    expect(answer.payload?.error?.code, answer.text).toBe('FORBIDDEN');
-    expect(answer.text).toContain(RECALL_REFUSAL);
-    await expectUndecided(requestId, 'a recall by the approver');
-  });
-
-  it('⭐ [#32993] on a request sent back for revision, the submitter edits the record and resubmits over MCP: round 2 opens a pending request', async () => {
-    const requestId = await openRequest('resubmit');
-    const recordId = String((await requestRow(requestId)).record_id);
-    const sentBack = await act({ bearer: approver }, 'approval_send_back', requestId, true, 'fix the dates');
-    expect(sentBack.isError, sentBack.text).toBe(false);
-    expect((await requestRow(requestId)).status).toBe('returned');
-
-    const edited = await stack.apiAs(submitter, 'PATCH', `/data/${OBJECT}/${recordId}`, { name: 'resubmit (dates fixed)' });
-    expect(edited.status, await edited.clone().text()).toBe(200);
-
-    const pendingOn = async () =>
-      rowsOf(await ql.find(REQUEST, { where: { object_name: OBJECT, record_id: recordId, status: 'pending' }, context: SYS.context }));
-
-    // Unconfirmed, or from anyone but the submitter, nothing moves.
-    const unconfirmed = await act({ bearer: submitter }, 'approval_resubmit', requestId, false, 'dates fixed');
-    expect(unconfirmed.isError, unconfirmed.text).toBe(true);
-    expect(unconfirmed.text).toContain('ACTION_CONFIRMATION_REQUIRED');
-    const byApprover = await act({ bearer: approver }, 'approval_resubmit', requestId, true, 'not mine');
-    expect(byApprover.isError, byApprover.text).toBe(true);
-    expect(byApprover.payload?.error?.code, byApprover.text).toBe('FORBIDDEN');
-    expect((await requestRow(requestId)).status).toBe('returned');
-    expect(await pendingOn(), 'no round 2 before the submitter\'s confirmed resubmit').toEqual([]);
-
-    const confirmed = await act({ bearer: submitter }, 'approval_resubmit', requestId, true, 'dates fixed');
-    expect(confirmed.isError, confirmed.text).toBe(false);
-    const round2 = await pendingOn();
-    expect(round2, 'the resubmit opened round 2').toHaveLength(1);
-    expect(round2[0].id).not.toBe(requestId);
-    // One row each, in no stored order (the read is unsorted).
-    expect((await decisionsOn(requestId)).map((r) => `${r.action}:${r.actor_id}`).sort()).toEqual(
-      [`resubmit:${submitterId}`, `revise:${approverId}`].sort(),
-    );
+    for (const confirm of [false, true]) {
+      expectRefusedAtConfirmation(
+        await act({ bearer: submitter }, 'approval_recall', requestId, confirm, 'fixing the lines'), 'no_confirmation_service', confirm,
+      );
+      expectRefusedAtConfirmation(
+        await act({ bearer: approver }, 'approval_send_back', requestId, confirm, 'fix the dates'), 'no_confirmation_service', confirm,
+      );
+      expectRefusedAtConfirmation(
+        await act({ bearer: submitter }, 'approval_resubmit', requestId, confirm, 'dates fixed'), 'no_confirmation_service', confirm,
+      );
+    }
+    await expectUndecided(requestId, 'recall, send-back and resubmit over MCP');
   });
 });

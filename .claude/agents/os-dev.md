@@ -60,10 +60,10 @@ model: opus
    - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
-   - 写预算三笔:`git push`、`pr_create`(draft,含 labels 与 assignees)、`os-dev-report` 评论。
+   - 写预算三笔:`git push`、`pr_create`(draft,含 labels/assignees)、`os-dev-report`;卡线程另改正文。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
-   - PR 正文 dev 只在 `pr_create` 写,⛔ 不 `PATCH`;改法报告点名,席位经 `seat-post-protocol.md` 代写。
+   - PR 正文子代理只在 `pr_create` 写、⛔ 不 PATCH 由席代写;卡线程照 `dispatch-runbook.md` 自改。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
    - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
    - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。
@@ -317,11 +317,11 @@ model: opus
 ## 干净收尾 —— 报告是你的终局动作
 
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
-- 例外:harness 自写的 PR 正文首行归属注释原样留、只报;`Fixes #<n>` 紧随其后;dev 自写仍禁。
+- 例外二:harness 自写 PR 正文首行归属注释原样留、只报,`Fixes #<n>` 紧随;派发令要求才独占
+  末个非空行写 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`(`PR_BODY_TRAILER_SHAPE`);其余 dev 自写仍禁。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
 - 各派发模式(`mode:subagent`、`mode:cloud`、`mode:thread`)下 GitHub 都是报告的权威源。
-- 写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
-- PR 正文同欠一次全文回读,评审读的正是它。
+- 评论、PR 正文都读回到尾:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
 
 1. **后台子进程不得比本轮运行活得久,monitor 不得比它看的东西活得久。**
    - monitor 按自己的死线触发,不按对象生命周期:杀掉被看的进程 ⇒ 同一步杀它的 monitor。
@@ -337,7 +337,7 @@ model: opus
    - ② `blocked`,点名那件只有 PM 能解的事;锁没排到、测试在跑、CI 未出结论都不是第三种。
    - 两条合法出路:在轮内同步等它(资源纪律的排队条款:限时获取 ⇒ 无锁工作 ⇒ 再取)。
    - 或者收窄这次检查的范围并在报告里申报:已申报的收窄是被接受的偏差,CI 跑满农场。
-   - PM 复核的是 CI 收敛,不是你本地的覆盖面;未申报的收窄不在此列,那是漏跑。
+   - PM L1 审核的是 CI 收敛,不是你本地的覆盖面;未申报的收窄不在此列,那是漏跑。
    - 唯一同时反轮询又不停轮的形状是一次前台阻塞等待:前台跑完,或 `tail --pid` 等它退出。
    - 比回合长的门禁在写报告那一刻读日志(重定向目标);未完成的记 NOT MEASURED 并写原因。
    - 自检是机械的,不看你怎么形容这次等待:终消息只能是报告 JSON 或 `blocked` 报告。
@@ -349,7 +349,7 @@ model: opus
 - issue 对塑造公开契约的决定欠规格(spec/Zod schema、API 形状、命名、元数据语义)时:不猜。
 - 契约形状(Zod 形状、错误码台账、可编写键增删/墓碑、已发布导出)改即报 `needs_decision`。
 - spec 散文(jsdoc、`.describe`、`content/docs/**`、再生镜像)只复述裁决区所载裁决 ⇒ 非 fork。
-- 同 PR 改,正文点名裁决 id,落地欠契约复审档记录;⛔ 永不自行翻转裁决,与之相左仍停手。
+- 同 PR 改,正文点名裁决 id,落地欠达档 L2 记录;⛔ 永不自行翻转裁决,与之相左仍停手。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
 - 派发词标只读读数 ⇒ 不 commit、不开 PR,`status: "reading"` 贴决策卡;要实测才建闭包跑测。

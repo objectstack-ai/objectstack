@@ -507,7 +507,7 @@ function scenarios(ctx) {
     fieldAccess: true,
   };
   const list = (filter, extra = '') => `/data/bench_line_item?filter=${enc(filter)}&sort=-created_at&top=50${extra}`;
-  return [
+  const base = [
     // 1. list reads with filters and sorts
     { name: 'list_filter_sort', who: 'admin', method: 'GET', path: list({ status: 'open', quantity: { $gte: 10 } }) },
     { name: 'list_filter_sort', who: 'member', method: 'GET', path: list({ status: 'open', quantity: { $gte: 10 } }) },
@@ -537,7 +537,15 @@ function scenarios(ctx) {
     { name: 'public_list_tiny', who: 'member', method: 'GET', path: '/data/bench_region?top=1' },
     // 7. child writes under roll-up summaries (R10), as the admin.
     ...rollupScenarios(),
-  ].filter((s) => !args.only || args.only.includes(s.name));
+  ];
+  // 8. the paged list without its total (R12): every paged-list scenario above
+  // again with `count=false`, which skips the `count(*)` the list door runs
+  // beside each page. A pair's difference is what that total costs; the twin's
+  // rows/total cell shows no total, which is the proof the opt-out was honoured.
+  const twins = base
+    .filter((s) => s.method === 'GET' && /[?&]top=\d+/.test(s.path))
+    .map((s) => ({ ...s, name: `${s.name}_nocount`, path: `${s.path}&count=false` }));
+  return [...base, ...twins].filter((s) => !args.only || args.only.includes(s.name));
 }
 
 /**

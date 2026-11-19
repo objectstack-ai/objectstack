@@ -199,6 +199,17 @@ const MIXED_SCOPED_SALES: Dataset = DatasetSchema.parse({
   measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
 }) as Dataset;
 
+/** [#33626] A dataset scope this path cannot serve exactly: a cross-object leaf under `$not`. */
+const NEGATED_SCOPED_SALES: Dataset = DatasetSchema.parse({
+  name: 'negated_scoped_sales',
+  label: 'Negated scoped sales',
+  object: 'opportunity',
+  include: ['account'],
+  filter: { $not: { 'account.region': 'West' } },
+  dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+  measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+}) as Dataset;
+
 /**
  * [commit 399ecad58] ONE dataset carrying all three of ⑦/⑧'s directions, so the
  * distinctions are structural rather than three fixtures that happen to differ.
@@ -514,54 +525,45 @@ describe('[#10759] the #10413-phase-1 dataset filter conjunct is not misread', (
  * CARRYING its predicate — dropping the scope silently widens the answer just
  * as badly as refusing it wrongly narrows the product.
  */
-describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doors', () => {
-  it('execute() refuses with the ADR-0112 envelope, before the engine is asked', async () => {
+describe('[#10861, #33626] a CROSS-OBJECT definition-level filter: served as the engine\'s nested-relation condition, refused where it cannot be served exactly', () => {
+  // [#33626] The card's second door: the dataset's own `filter` takes the
+  // route the caller's `where` takes (`servedScope`), so the engine receives
+  // the nested-relation condition and serves it as a read-scoped subquery.
+  it('execute() hands the engine the relation condition in the leaf\'s place — never the dotted member', async () => {
     const { execute, calls } = await bothDoors('xobj_scoped_sales', {
       dimensions: ['stage'], measures: ['revenue'],
     }, [XOBJ_SCOPED_SALES]);
-
-    expect(execute, 'accepted — the dataset scope was invisible to the envelope check')
-      .toBeInstanceOf(Error);
-    // Read exactly as `rest-server.ts`'s catch reads them: a 4xx status AND a
-    // code, or the route falls through to 500 ANALYTICS_QUERY_FAILED. Asserting
-    // only that it throws would pass on a bare `Error` and report the platform
-    // broken for what is a dataset-authoring mistake on this deployment.
-    expect(execute?.code, 'no `code` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe('INVALID_FIELD');
-    expect(execute?.status, 'no `status` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe(400);
-    // The member as the DATASET spelled it, and the dataset named as the
-    // document to go and edit.
-    expect(execute?.member).toBe('account.region');
-    expect(execute?.cube).toBe('xobj_scoped_sales');
-    expect(String(execute?.message)).toMatch(DATASET_SCOPE_MESSAGE);
-    // `param` is ABSENT on purpose, and this assertion is the pin on that
-    // choice rather than an omission nobody noticed. `AnalyticsRequestKey` is
-    // the analytics REQUEST vocabulary; `AnalyticsQuerySchema` is strict and has
-    // no `filter` key, and this request carries no `where` at all. Both
-    // `param: 'where'` and a widened `param: 'filter'` would send the caller to
-    // a key that does not exist on what they sent. `cube` is the locator that
-    // does.
-    expect(execute?.param, '`param` must not name a key the request has no room for')
-      .toBeUndefined();
-    // Refused BEFORE the engine was asked, not after it mis-bucketed. This is
-    // the assertion the whole card is about: the BEFORE run reached it once,
-    // carrying `{"$and":[{"account.region":"West"}]}`.
-    expect(calls, 'engine.aggregate was reached — it cannot join').toEqual([]);
+    expect(execute, `refused: ${execute?.message}`).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    const sent = JSON.stringify(calls[0].filter);
+    expect(sent).toContain(RELATION_FORM);
+    expect(sent, 'the dotted member reached the engine, which cannot join it').not.toContain('account.region');
   });
 
-  it('both doors agree', async () => {
-    const { execute, generateSql } = await bothDoors('xobj_scoped_sales', {
+  it('the SQL echo refuses the served scope in the where-door envelope, naming the dataset\'s member', async () => {
+    const { generateSql } = await bothDoors('xobj_scoped_sales', {
       dimensions: ['stage'], measures: ['revenue'],
     }, [XOBJ_SCOPED_SALES]);
-    // One fact about one query, not two independent expectations — the same
-    // shape ① uses. Two expectations that happen to coincide do not pin an
-    // invariant BETWEEN two call sites; this does.
-    expect(
-      [execute === undefined, generateSql === undefined],
-      'the preview and the execution door accept/reject the same set',
-    ).toEqual([false, false]);
-    expect(generateSql?.code).toBe('INVALID_FIELD');
-    expect(generateSql?.status).toBe(400);
-    expect(String(generateSql?.message)).toMatch(DATASET_SCOPE_MESSAGE);
+    expect({ code: generateSql?.code, status: generateSql?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(String(generateSql?.message)).toContain('"account.region"');
+  });
+
+  it('a leaf this path cannot serve exactly (under $not) keeps the dataset-scope refusal on BOTH doors, before the engine', async () => {
+    const { execute, generateSql, calls } = await bothDoors('negated_scoped_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+    }, [NEGATED_SCOPED_SALES]);
+    expect([execute === undefined, generateSql === undefined]).toEqual([false, false]);
+    for (const refusal of [execute, generateSql]) {
+      // Read exactly as `rest-server.ts`'s catch reads them: a 4xx status AND a code.
+      expect(refusal?.code).toBe('INVALID_FIELD');
+      expect(refusal?.status).toBe(400);
+      expect(refusal?.member).toBe('account.region');
+      expect(refusal?.cube).toBe('negated_scoped_sales');
+      expect(String(refusal?.message)).toMatch(DATASET_SCOPE_MESSAGE);
+      // `param` is ABSENT on purpose: the request has no key that holds the dataset's filter.
+      expect(refusal?.param).toBeUndefined();
+    }
+    expect(calls, 'engine.aggregate was reached with a negated relation match').toEqual([]);
   });
 
   it('the still-served neighbour: an ORDINARY dataset scope still reaches the engine carrying its predicate', async () => {
@@ -584,16 +586,15 @@ describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doo
     ).toContain('is_deleted');
   });
 
-  it('a base-object leaf beside a cross-object one in the SAME dataset scope is still refused', async () => {
-    // The counter-shape for the test above: refusing is not a property of the
-    // scope having more than one leaf, and serving is not a property of it
-    // having a base leaf anywhere in it. The cross-object leaf decides.
-    const { execute, generateSql, calls } = await bothDoors('mixed_scoped_sales', {
+  it('a base-object leaf beside a cross-object one in the SAME dataset scope: both reach the engine, the base leaf as a column', async () => {
+    const { execute, calls } = await bothDoors('mixed_scoped_sales', {
       dimensions: ['stage'], measures: ['revenue'],
     }, [MIXED_SCOPED_SALES]);
-    expect([execute === undefined, generateSql === undefined]).toEqual([false, false]);
-    expect(execute?.member).toBe('account.region');
-    expect(calls).toEqual([]);
+    expect(execute, `refused: ${execute?.message}`).toBeUndefined();
+    const sent = JSON.stringify(calls[0]?.filter);
+    expect(sent).toContain('is_deleted');
+    expect(sent).toContain(RELATION_FORM);
+    expect(sent).not.toContain('account.region');
   });
 
   it('the KNOWN-PRESENT control: a cross-object member in the CALLER\u2019s where keeps its own diagnostic', async () => {
@@ -849,6 +850,21 @@ describe('[#33335] a one-hop cross-object where leaf reaches the engine as its n
     });
   });
 
+  it('[#33626] two and three relationships deep: each relation holds the next one\'s condition; leaves through one path share it', async () => {
+    const two = await planRun(planQuery({ 'cb_order.customer.tier': 'gold' }));
+    expect(two.execute, String(two.execute?.message)).toBeUndefined();
+    expect(two.calls[0]?.filter).toEqual({ $and: [{ cb_order: { customer: { tier: 'gold' } } }] });
+    const three = await planRun(planQuery({
+      'cb_order.customer.region.name': { $ne: 'EU' }, 'cb_order.customer.region.iso': 'x', 'cb_order.status': 'open',
+    }));
+    expect(three.calls[0]?.filter).toEqual({
+      $and: [{ cb_order: { customer: { region: { name: { $ne: 'EU' }, iso: 'x' } } } }, { cb_order: { status: 'open' } }],
+    });
+    // The echo refuses in the where-door envelope, spelling the nested form.
+    expect({ code: three.echo?.code, status: three.echo?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(String(three.echo?.message)).toContain('{ "cb_order": { "customer": { "region": { "name": … } } } }');
+  });
+
   it('a cross-object dimension\'s FK-expand carries the condition on its base aggregate', async () => {
     const { execute, calls } = await planRun(planQuery({ 'cb_order.region': 'EU' }, { dimensions: ['order_status'] }));
     expect(execute, String(execute?.message)).toBeUndefined();
@@ -865,7 +881,7 @@ describe('[#33335] a one-hop cross-object where leaf reaches the engine as its n
   });
 
   const REFUSED: Array<{ name: string; query: AnalyticsQuery; member: string; param: string; echoCode?: string }> = [
-    { name: 'two relationships deep', query: planQuery({ 'cb_order.customer.tier': 'gold' }), member: 'cb_order.customer.tier', param: 'where' },
+    { name: 'four relationships deep (ADR-0071\'s limit is three)', query: planQuery({ 'cb_order.customer.region.zone.tier': 'gold' }), member: 'cb_order.customer.region.zone.tier', param: 'where' },
     { name: 'under $not', query: planQuery({ $not: { 'cb_order.status': 'cancelled' } }), member: 'cb_order.status', param: 'where' },
     // The echo declines every `{ $field }` comparand first, in its own
     // envelope (#7598); the execution face is this card's refusal.

@@ -266,6 +266,20 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
 
 /**
+ * The header labels of an answer table's columns, shared by an action's
+ * `resultDialog` and `preflight` translation nodes: field path → column path
+ * → translated label. A field in either block whose `format` is `'table'`
+ * declares `columns: [{ path, label? }]` (`ui/action.zod.ts`), and each
+ * column's `label` is an `I18nLabel`; this map is its bundle key. Both levels
+ * are keyed by the LITERAL path from the action metadata — `"host.reason"` is
+ * one key, never two — so resolvers index each record directly.
+ *
+ * Module-local, like `ActionPreflightTranslationSchema`: a new named export
+ * would rewrite the published skills' reference indexes.
+ */
+const ActionAnswerColumnLabelsSchema = lazySchema(() => z.record(z.string(), z.record(z.string(), z.string())));
+
+/**
  * Action Result-Dialog Translation Schema
  *
  * Translations for an action's post-success `resultDialog` (the one-shot
@@ -277,10 +291,18 @@ export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
  *   …_actions.<action_name>.resultDialog.description
  *   …_actions.<action_name>.resultDialog.acknowledge
  *   …_actions.<action_name>.resultDialog.fields.<path>
+ *   …_actions.<action_name>.resultDialog.columns.<path>.<column_path>
  *
  * `fields` is keyed by the **literal** `resultDialog.fields[].path` from the
  * action metadata (e.g. `"user.email"`, `"temporaryPassword"`). Keys may
  * contain dots — resolvers must index the record directly, not split on `.`.
+ *
+ * `columns` carries the header labels of a `format: 'table'` field's
+ * `columns[]`: keyed first by the field's literal `path`, then by the
+ * column's literal `path` (`columns.rows["error.message"]`), both indexed
+ * directly. It is a SIBLING of `fields`, not a child of a field entry, so a
+ * `fields.<path>` value stays the field's label string and every bundle that
+ * carries no column key reads exactly as before.
  */
 export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject({
   surface: 'this action result dialog translation',
@@ -292,6 +314,8 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject
   acknowledge: z.string().optional().describe('Translated acknowledge button label'),
   fields: z.record(z.string(), z.string()).optional()
     .describe('Result field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
+  columns: ActionAnswerColumnLabelsSchema.optional()
+    .describe("Table column header labels: keyed by the literal path of a `format: 'table'` field, then by the literal path of one of its `columns[]` (keys may contain dots)"),
 }).describe('Translations for an action result dialog'));
 
 export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTranslationSchema>;
@@ -305,6 +329,7 @@ export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTra
  *
  * Convention:
  *   …_actions.<action_name>.preflight.fields.<path>
+ *   …_actions.<action_name>.preflight.columns.<path>.<column_path>
  *
  * `fields` is keyed exactly as `resultDialog.fields` is: by the **literal**
  * `preflight.fields[].path` from the action metadata (e.g. `"findings"`,
@@ -327,7 +352,63 @@ const ActionPreflightTranslationSchema = lazySchema(() => strictObject({
 }, {
   fields: z.record(z.string(), z.string()).optional()
     .describe('Preflight panel field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
+  columns: ActionAnswerColumnLabelsSchema.optional()
+    .describe("Table column header labels, keyed as `resultDialog.columns` is: by the literal path of a `format: 'table'` field, then by the literal path of one of its `columns[]` (keys may contain dots)"),
 }).describe('Translations for an action preflight panel'));
+
+/**
+ * The translations of a declared refusal catalogue, keyed by code — one shape
+ * for `hooks.<hook>.refusals` (#26170, #33214) and an action's
+ * `….refusals` (#34273, under `objects.<object>._actions.<action>` or
+ * `globalActions.<action>`), built by one factory so the two cannot drift.
+ */
+const refusalTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string(), strictObject({
+  surface: `this ${noun} refusal translation`,
+  history: TRANSLATION_HISTORY,
+  // The spellings the refusal entry schema renames onto its own `message` and `reasons`.
+  aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
+}, {
+  // The declared message's own form — plain text, or a template over the
+  // entry's declared `params`; an empty string is the untranslated
+  // skeleton slot `os i18n extract` writes (the declared message is served).
+  message: z.string().optional().describe(
+    `Translated refusal message of ${noun === 'action' ? 'an action' : 'a hook'}'s declared refusal code — served whole in the caller's locale in `
+    + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+  ),
+  // [#33214] A declared reason's sentence under the same code.
+  reasons: z.record(z.string(), strictObject({
+    surface: `this ${noun} refusal reason translation`,
+    history: TRANSLATION_HISTORY,
+    aliases: { text: 'message', description: 'message' },
+  }, {
+    message: z.string().optional().describe(
+      `Translated sentence of a declared reason under ${noun === 'action' ? 'an action' : 'a hook'}'s refusal code — served in place of the declared `
+      + 'reason message, its {{ }} holes filled after',
+    ),
+  })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
+})).optional().describe(`Refusal translations keyed by the code the ${noun}'s \`refusals\` declares`);
+
+/**
+ * The translations of a declared text catalogue, keyed by text key — one shape
+ * for `hooks.<hook>.texts` (#34374) and an action's `….texts` (#34374 PR2,
+ * under `objects.<object>._actions.<action>` or `globalActions.<action>`),
+ * built by one factory so the two cannot drift. Every sentence it produces for
+ * `hook` is the one the hook group carried before.
+ */
+const textTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string(), strictObject({
+  surface: `this ${noun} text translation`,
+  history: TRANSLATION_HISTORY,
+  // The spellings the text entry schema renames onto its own `message`.
+  aliases: { text: 'message', template: 'message', value: 'message', description: 'message' },
+}, {
+  // The declared message's own form — plain text, or a template over the
+  // entry's declared `params`; an empty string is the untranslated
+  // skeleton slot `os i18n extract` writes (the declared message is served).
+  message: z.string().optional().describe(
+    `Translated sentence of ${noun === 'action' ? 'an action' : 'a hook'}'s declared text — written into the record in the organization's language in `
+    + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+  ),
+})).optional().describe(`Text translations keyed by the key the ${noun}'s \`texts\` declares`);
 
 /**
  * Action translations — one shape, used at two addresses: an object's
@@ -352,6 +433,8 @@ const actionTranslationSchema = (surface: string) => strictObject({
     cancelLabel: 'cancelText',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
+    refusal: 'refusals',
+    text: 'texts',
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
@@ -400,10 +483,24 @@ const actionTranslationSchema = (surface: string) => strictObject({
     .describe('Translations for the action result dialog'),
   // `ActionSchema.preflight` (#31840) — the panel's field labels, keyed by
   // the literal `preflight.fields[].path` exactly as `resultDialog.fields`
-  // is; overlaid by `translateAction` (`resolveActionPreflight`) for the
-  // fields the action declares.
+  // is, and its table column headers under `columns` (#34652); overlaid by
+  // `translateAction` (`resolveActionPreflight`) for the fields and columns
+  // the action declares.
   preflight: ActionPreflightTranslationSchema.optional()
     .describe('Translations for the action preflight panel'),
+  // [#34273] `ActionSchema.refusals` — one translated sentence per declared
+  // refusal code (and per declared reason under it), picked by the action
+  // body runner in the caller's locale through `actionRefusalMessageKey`
+  // (`system/i18n-resolver.ts`) before the refusal leaves the server, the
+  // declared sentence on a miss. Server-rendered like a hook refusal, so no
+  // client overlay reads it.
+  refusals: refusalTranslationsSchema('action'),
+  // [#34374 PR2] `ActionSchema.texts` — one translated sentence per declared
+  // text key, picked by the action body runner in the ORGANIZATION's language
+  // through `actionTextMessageKey` (`system/i18n-resolver.ts`) when the body
+  // asks for it (`ctx.text`), the declared sentence on a miss. Written into a
+  // record server-side like a hook text, so no client overlay reads it.
+  texts: textTranslationsSchema('action'),
 });
 
 /**
@@ -680,6 +777,10 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
    *   objects.<object>._actions.<action_name>.resultDialog.*
    *   objects.<object>._actions.<action_name>.preflight.fields.<path>
+   *   objects.<object>._actions.<action_name>.preflight.columns.<path>.<column_path>
+   *   objects.<object>._actions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
+   *   objects.<object>._actions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
+   *   objects.<object>._actions.<action_name>.texts.<key>.message                      (#34374 PR2, `ActionSchema.texts`)
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
     .optional().describe('Action translations keyed by action name'),
@@ -965,10 +1066,10 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + 'application\'s own copy use the sixteen groups this bundle does declare, in the order it '
+  + 'application\'s own copy use the seventeen groups this bundle does declare, in the order it '
   + "declares them — 'objects', 'picklists', 'apps', 'messages', 'globalActions', 'dashboards', "
   + "'datasets', 'reports', 'pages', 'flows', 'hooks', 'positions', 'permissions', 'books', "
-  + "'metadataForms', 'settingsCommon'. "
+  + "'mappings', 'metadataForms', 'settingsCommon'. "
   + "Note the last one: 'settingsCommon' IS "
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
   + 'badges, under `settingsCommon.sourceLabels`) are NOT what is being refused here — only the '
@@ -1010,7 +1111,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same sixteen a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same seventeen a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -1049,12 +1150,12 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  */
 /**
  * The translation groups an APPLICATION may author, as a shape rather than a
- * schema. Sixteen groups — the seventeenth, `settings`, is platform-only and lives in
+ * schema. Seventeen groups — the eighteenth, `settings`, is platform-only and lives in
  * {@link platformSettingsShape}.
  *
  * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
- * entry of a per-app file-authored bundle — these sixteen and no more),
- * {@link PlatformTranslationDataSchema} (these sixteen plus `settings`) and
+ * entry of a per-app file-authored bundle — these seventeen and no more),
+ * {@link PlatformTranslationDataSchema} (these seventeen plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
  * the per-app face plus `locale`, its identity keys and the ADR-0010
  * envelope; it carried the platform face's `settings` too until #19620). The item used to
@@ -1209,6 +1310,10 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.params.<param_name>.options.<value>
    *   globalActions.<action_name>.resultDialog.*
    *   globalActions.<action_name>.preflight.fields.<path>
+   *   globalActions.<action_name>.preflight.columns.<path>.<column_path>
+   *   globalActions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
+   *   globalActions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
+   *   globalActions.<action_name>.texts.<key>.message                      (#34374 PR2, `ActionSchema.texts`)
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
     .optional().describe('Global action translations keyed by action name'),
@@ -1683,6 +1788,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
    * keys or recorded, with its reason, in the family pin
@@ -1824,6 +1930,32 @@ const appTranslationDataShape = () => ({
    * `objectstack validate` refuses a key over an unknown flow, an unknown
    * node, or a node that is not a `save_notice`.
    *
+   * ## `records` — the text a record write keeps (ruling 6913660232)
+   *
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>
+   *
+   * A `create_record` / `update_record` node's `fields` value MARKED as text —
+   * a text envelope, `{ dialect: 'template', source }`
+   * (`FlowRecordFieldValueSchema`) — is a sentence the record keeps for people
+   * to read ("Auto-escalated: critical priority"). Under the maintainer's
+   * ruling on objectstack#34062 (letter B, 「B 平台按组织语言挑译文」) it is
+   * translated where it is written: the engine reads
+   * `flowRecordFieldTextKey(flow, node, field)` (`system/i18n-resolver.ts`)
+   * through the `i18n` service in the ORGANIZATION's language — its
+   * Localization setting when somebody set it, else the app's declared
+   * `i18n.defaultLocale` — and only then fills the holes. Never the language
+   * of the person who started the run: stored text is data the whole
+   * organization reads. With no entry, or no language to pick, the authored
+   * text is written and the run goes on. A bare string in `fields` is a
+   * literal value and has no key.
+   *
+   * Addressed by `Flow.name`, the record node's `FlowNode.id` (at any depth,
+   * an ADR-0031 region included) and the field name, the `fields` map's own
+   * key. Judged as the text slot it translates (`flowTextSlotTranslation`).
+   * `objectstack validate` refuses a key over an unknown flow, an unknown
+   * node, a node that is not a record write, or a field the node does not
+   * mark as text.
+   *
    * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
    *
    *   flows.<flow_name>.successMessage
@@ -1907,6 +2039,7 @@ const appTranslationDataShape = () => ({
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
+      record: 'records',
       // The spellings the toast pair arrives in from an action translation,
       // which spells its own success toast `successMessage` with these aliases.
       success: 'successMessage', successText: 'successMessage',
@@ -2041,6 +2174,28 @@ const appTranslationDataShape = () => ({
           + "by the engine in the triggering writer's locale in place of the authored one",
         ),
     })).optional().describe('Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node'),
+    // [ruling 6913660232] The text a record write keeps, picked by the ENGINE
+    // in the ORGANIZATION's language before its holes are filled — addressed
+    // by `FlowNode.id` like `notices`, then by the field name.
+    records: z.record(z.string(), strictObject({
+      surface: 'this flow record-write translation',
+      history: TRANSLATION_HISTORY,
+      // The map's own name on the node is `fields`; the spellings an author
+      // holding a neighbouring surface's word arrives with.
+      aliases: { values: 'fields', fieldValues: 'fields' },
+    }, {
+      // The one text-slot judge, applied to each translation exactly as
+      // `FlowRecordFieldValueSchema` applies it to the text envelope's
+      // `source`; an empty string is the untranslated skeleton slot (the
+      // authored text is written).
+      fields: z.record(z.string(), flowTextSlotTranslation()).optional().describe(
+        'Translated text keyed by field name — each a `{{ }}` template like the text envelope it translates, picked by '
+        + "the engine in the organization's language and written in its place; only a field the node marks as text "
+        + 'is translated',
+      ),
+    })).optional().describe(
+      'Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node',
+    ),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**
@@ -2049,6 +2204,7 @@ const appTranslationDataShape = () => ({
    *
    *   hooks.<hook_name>.refusals.<CODE>.message                      (a declared refusal, `HookSchema.refusals`)
    *   hooks.<hook_name>.refusals.<CODE>.reasons.<REASON>.message     (a declared reason under it, #33214)
+   *   hooks.<hook_name>.texts.<key>.message                          (a declared text, `HookSchema.texts`, #34374)
    *
    * A hook's business refusal ("A current clean version is required before
    * signing.") is the sentence a user reads most often when an app says "not
@@ -2077,44 +2233,31 @@ const appTranslationDataShape = () => ({
    * posture (translated before it is rendered). A sentence whose entry declares
    * no `params` is plain text and nothing in it is filled.
    *
+   * **A declared text is picked in the organization's language (#34374,
+   * ruling 6913660232 parameter 7).** A sentence a hook writes into a record
+   * (`HookSchema.texts`) is answered by `ctx.text(key, params)` through
+   * `hookTextMessageKey(hook, key)` in the ORGANIZATION's language — the
+   * Localization setting when somebody set it, else the app's
+   * `i18n.defaultLocale` — never the caller's; the declared sentence on a miss,
+   * its holes filled after, as for a refusal.
+   *
    * `objectstack validate` refuses a key over an unknown hook, a code the hook's
-   * `refusals` does not declare, or a reason that code does not declare.
+   * `refusals` does not declare, a reason that code does not declare, or a text
+   * key the hook's `texts` does not declare.
    */
   hooks: z.record(z.string(), strictObject({
     surface: 'this hook translation',
     history: TRANSLATION_HISTORY,
-    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals' },
+    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals', text: 'texts', sentences: 'texts' },
     guidance: {
       label:
-        'A hook has no translated label — the one string of a hook a user reads is a refusal. Translate '
-        + '`refusals.<CODE>.message`.',
+        'A hook has no translated label — the strings of a hook a user reads are its refusals and the texts it '
+        + 'writes into records. Translate `refusals.<CODE>.message` or `texts.<key>.message`.',
     },
   }, {
-    refusals: z.record(z.string(), strictObject({
-      surface: 'this hook refusal translation',
-      history: TRANSLATION_HISTORY,
-      // The spellings `HookRefusalSchema` renames onto its own `message` and `reasons`.
-      aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
-    }, {
-      // The declared message's own form — plain text, or a template over the
-      // entry's declared `params`; an empty string is the untranslated
-      // skeleton slot `os i18n extract` writes (the declared message is served).
-      message: z.string().optional().describe(
-        "Translated refusal message of a hook's declared refusal code — served whole in the caller's locale in "
-        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
-      ),
-      // [#33214] A declared reason's sentence under the same code.
-      reasons: z.record(z.string(), strictObject({
-        surface: 'this hook refusal reason translation',
-        history: TRANSLATION_HISTORY,
-        aliases: { text: 'message', description: 'message' },
-      }, {
-        message: z.string().optional().describe(
-          "Translated sentence of a declared reason under a hook's refusal code — served in place of the declared "
-          + 'reason message, its {{ }} holes filled after',
-        ),
-      })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
-    })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
+    refusals: refusalTranslationsSchema('hook'),
+    // [#34374] A declared text's sentence, picked in the organization's language.
+    texts: textTranslationsSchema('hook'),
   })).optional().describe('Hook translations keyed by hook name'),
 
   /**
@@ -2197,6 +2340,33 @@ const appTranslationDataShape = () => ({
       label: z.string().describe("Translated section title — overlays the group's own `label`"),
     })).optional().describe('Group (section) translations keyed by the group `key`'),
   })).optional().describe('Doc-book translations keyed by book name'),
+
+  /**
+   * Import-mapping translations keyed by mapping name (`Mapping.name`,
+   * `data/mapping.zod.ts`, the stack's `mappings[]`).
+   *
+   *   mappings.<name>.label  → the mapping's own `label`
+   *
+   * A named import mapping is offered by name in the console's import wizard
+   * (the saved-mapping selector and the hints that name the chosen mapping),
+   * so its label is end-user copy. Overlaid by `translateMapping`
+   * (`i18n-resolver.ts`) on every served `mapping` document
+   * (`GET /meta/mapping`, the list the wizard reads). The face stops at the
+   * one string a mapping authors for a reader: its `fieldMapping` entries are
+   * column names and field names, and the target fields' labels translate
+   * under `objects.<object>.fields`.
+   */
+  mappings: z.record(z.string(), strictObject({
+    surface: 'this import mapping translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label' },
+    guidance: {
+      description: 'an import mapping declares no `description` — only its `label` is shown to a reader, so `label` is the one key to translate',
+      fieldMapping: 'a mapping\'s `fieldMapping` holds column and field names, not copy — translate a target field\'s label under `objects.<object>.fields.<field>.label`',
+    },
+  }, {
+    label: z.string().optional().describe("Translated import mapping label — overlays the mapping's own `label`"),
+  })).optional().describe('Import-mapping translations keyed by mapping name'),
 
   /**
    * Translations for **metadata-type configuration forms** — the forms
@@ -2457,10 +2627,10 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Sixteen groups: every group the platform bundle declares EXCEPT `settings`,
+ * Seventeen groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
- * {@link PlatformTranslationDataSchema} for the seventeen-group face and for why
+ * {@link PlatformTranslationDataSchema} for the eighteen-group face and for why
  * the two are separate namespaces.
  */
 export const TranslationDataSchema = lazySchema(() => strictObject({
@@ -2471,7 +2641,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   // `settings`, and an alias prescribing a key the shape rejects is a
   // suggestion the author cannot take (the `alias-integrity` audit judges
   // exactly that). Both spellings are answered by `guidance` above instead.
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -2481,7 +2651,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
 export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 /**
- * One locale of a PLATFORM translation bundle — the seventeen groups, `settings`
+ * One locale of a PLATFORM translation bundle — the eighteen groups, `settings`
  * included.
  *
  * The platform's own bundles are code, not authored metadata
@@ -2516,7 +2686,7 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   extraKeys: ['locale'],
 }, {
   ...appTranslationDataShape(),
@@ -2681,15 +2851,19 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
    * `defaultLocale`'s. Their `--default-locale` flag overrides it.
    * Like `defaultLocale`, it need not appear in `supportedLocales`.
    *
-   * ⚠️ Not yet read by the serving layer: the runtime label resolvers still
-   * treat `defaultLocale` as the authored label's language when they decide
-   * whether a request walks the fallback chain.
+   * Read by the serving layer too (#33634): `AppPlugin` threads it into the
+   * i18n service (`II18nService.setSourceLocale`), and every runtime label
+   * resolver passes it — else `defaultLocale` — as the authored label's
+   * language (`ResolveOptions.defaultLocale`), so a request in this locale
+   * answers from the inline text and never walks the fallback chain ahead of
+   * it. A request in `defaultLocale` (when the two differ) walks the chain
+   * like any other translated locale.
    */
   sourceLocale: LocaleSchema.optional().describe(
     'Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale '
     + '(e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. '
     + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it. '
-    + 'Not yet read by the serving layer: the runtime label resolvers still treat defaultLocale as the authored label\'s language.',
+    + 'The serving layer reads it as the authored label\'s language too: a request in this locale is answered from the inline text.',
   ),
 }).describe('Internationalization configuration'));
 
@@ -2721,7 +2895,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same sixteen groups as
+ * the item takes the PER-APP face, the same seventeen groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
@@ -2760,7 +2934,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // this door no longer declares `settings`, and an alias prescribing a key
   // the shape rejects is a suggestion the author cannot take. Both spellings
   // are answered by `guidance` above instead.
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

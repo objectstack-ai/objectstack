@@ -169,12 +169,16 @@ const EXPECTED_NAMES: Record<string, string[]> = {
     buildIndexName(DELIVERY.name, ['status', 'claimed_at'], false),
     buildIndexName(DELIVERY.name, ['notification_id'], false),
     buildIndexName(DELIVERY.name, ['digest_key', 'status', 'next_attempt_at'], false),
+    // [#33695] The default-order key every table carries, declared or not.
+    buildIndexName(DELIVERY.name, ['created_at', 'id'], false),
     `sqlite_autoindex_${DELIVERY.name}_1`,
   ].sort(),
   [JOB_QUEUE.name]: [
     buildIndexName(JOB_QUEUE.name, ['queue', 'status', 'priority', 'scheduled_for'], false),
     buildIndexName(JOB_QUEUE.name, ['idempotency_key', 'queue'], false),
     buildIndexName(JOB_QUEUE.name, ['status'], false),
+    // [#33695] The default-order key every table carries, declared or not.
+    buildIndexName(JOB_QUEUE.name, ['created_at', 'id'], false),
     `sqlite_autoindex_${JOB_QUEUE.name}_1`,
   ].sort(),
   [SCOPED.name]: [
@@ -184,6 +188,8 @@ const EXPECTED_NAMES: Record<string, string[]> = {
     buildIndexName(SCOPED.name, ['region', 'slug'], false),
     'os17609_scoped_by_region',
     'os17609 scoped-by "slug"',
+    // [#33695] The default-order key every table carries, declared or not.
+    buildIndexName(SCOPED.name, ['created_at', 'id'], false),
     `sqlite_autoindex_${SCOPED.name}_1`,
   ].sort(),
 };
@@ -408,8 +414,12 @@ describe('[#17609] declared object-level indexes land identically on both TursoD
 
     // The production state: tables the pre-fix remote face provisioned, holding rows.
     await remote.driver.initObjects(OBJECTS.map(withoutDeclaredIndexes));
-    expect(await indexNames(remote.query, DELIVERY.name)).toEqual([`sqlite_autoindex_${DELIVERY.name}_1`]);
-    expect(await indexNames(remote.query, JOB_QUEUE.name)).toEqual([`sqlite_autoindex_${JOB_QUEUE.name}_1`]);
+    // [#33695] …but for the default-order key, which needs no declaration.
+    for (const o of [DELIVERY, JOB_QUEUE]) {
+      expect(await indexNames(remote.query, o.name)).toEqual(
+        [buildIndexName(o.name, ['created_at', 'id'], false), `sqlite_autoindex_${o.name}_1`].sort(),
+      );
+    }
     for (let i = 0; i < 3; i++) {
       await remote.driver.create(DELIVERY.name, {
         notification_id: `n${i}`,

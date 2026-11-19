@@ -1,14 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * One card, end to end, in up to two modes:
+ * One card, end to end, in up to three modes:
  *
  *   scratch   scaffold → the agent builds from the card prompt → `os validate`,
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
- *             artifact → boot, seed, one user + key per persona → the Run half
+ *             artifact (with a failed check per roll-up it leaves readable
+ *             over child data the card withholds, `rollupSourceCharges`)
+ *             → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, `askRepeats` times
  *             each, every operation once as its persona, each over the app's
- *             own MCP, and a probed
+ *             own MCP; a `pending_confirmation` operation the agent met by
+ *             asking first gets a second turn carrying the person's
+ *             confirmation, whose write is graded on its own; and a probed
  *             operation's declared write — the validation operation's and
  *             each permission overstep's — re-sent by the runner itself as
  *             that persona, `observeProbe`; an `applied` operation's too
@@ -23,6 +27,26 @@
  *             change to the installed copy → score it → seed → the Run half.
  *             A refused install (`UNCOPYABLE`, …) is a finding, recorded and
  *             never worked around.
+ *   ask       the same install of the same verified build as `template`, into
+ *             a blank host of its own → seed → the Run half, and nothing else:
+ *             no authoring turn, no score, no iterate. Two ask models run this
+ *             way on one build are graded on the same app, so a difference in
+ *             their answers is theirs, not the build's. Ask mode edits nothing,
+ *             so when the unmanaged door refuses the build
+ *             `UNMANAGED_INSTALL_UNCOPYABLE` (it carries an item no environment
+ *             row can hold, such as a `capability`) it installs the same build
+ *             managed instead, and records which mode it ran on
+ *             (`ModeRun.template.installMode`); no other refusal falls back.
+ *   door      scaffold a blank host → boot → the runner, as a person, creates a
+ *             writable package in the card's namespace and connects an MCP
+ *             client (an OAuth token scoped to the draft door) → the agent
+ *             builds from the card prompt through the draft door ALONE, in an
+ *             empty directory of its own with no project file → the runner
+ *             publishes the package's drafts as Studio's Changes > Publish
+ *             does → score what the environment then serves, as template mode
+ *             scores its iterate → seed → the Run half. No iterate. The arm
+ *             the client ran in (skills and rules given and left out, `door.ts`)
+ *             is the driver's, on the record (`DriverInfo.door`).
  *
  * Names: the app is always in the card's own namespace, `demo` + its code
  * (`democrm`). Scratch mode scaffolds the project under that name; template
@@ -34,32 +58,66 @@
  * else; this module only gathers what the graders take.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { resolveStackCollection } from '@objectstack/core';
+import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
+
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
+  askedFirst,
+  askNamesTarget,
+  flowRefusalOf,
   gradeCardAnswer,
+  gradeCardDatasetQuestion,
   gradeCardInjection,
+  gradeConfirmedWrite,
   buildDeniesWrite,
   gradeCardOperation,
   INJECTION_AS_DATA_CHECK,
   isWriteDenial,
   readArtifactFacts,
+  refusalCodeOf,
   scoreCardArtifact,
   type CardTurn,
   type CheckResult,
+  type ConfirmedWriteGrade,
+  type ConfirmedWriteObservation,
+  type DatasetGrade,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
   type ProbeObservation,
   type ScenarioArtifactScore,
 } from '../score/index.js';
-import type { AppHarness, PersonaAccount } from './app.js';
-import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
+import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
+import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
+import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
-import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
+import {
+  buildPrompt,
+  confirmPrompt,
+  doorBuildPrompt,
+  datasetQuestionPrompt,
+  iteratePrompt,
+  operationPrompt,
+  personaHandles,
+  personaRecords,
+  promptLanguageRefusal,
+  statedPromptChoice,
+  questionPrompt,
+  rowOwner,
+  templateIteratePrompt,
+  userHandleFields,
+  verifyArgs,
+  type PromptChoice,
+} from './prompts.js';
+import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -79,17 +137,49 @@ export interface ProjectOps {
   scaffold(name: string, under: string): Promise<{ dir: string; result: CommandResult }>;
   os(dir: string, args: readonly string[]): Promise<CommandResult>;
   readArtifact(dir: string): unknown | undefined;
-  boot(dir: string): Promise<BootedApp>;
+  /**
+   * `objectstack dev` in `dir`. `options.authoringDoor` (door mode) boots it
+   * with the OAuth authorization server on (`OS_OIDC_PROVIDER_ENABLED`), which
+   * the draft door's tokens come from.
+   */
+  boot(dir: string, options?: { authoringDoor?: boolean }): Promise<BootedApp>;
   harness(url: string): AppHarness;
   /** The `namespace` the scaffolded project's manifest declares; checked against the card's own before a build. */
   namespace?(dir: string): string | undefined;
 }
 
+/**
+ * Another copy of the app a Run half runs on: booted anew from the same
+ * project, with the same build installed the same way, holding no rows of
+ * the card's yet ({@link runHalf} seeds it). `release` stops it. A half that
+ * has one starts an operation an earlier turn's write would otherwise meet on
+ * a copy of its own instead of writing the rows back
+ * ({@link restoreSeededRows}).
+ */
+export type FreshCopy = () => Promise<{ app: AppHarness; release(): Promise<void> }>;
+
+/** A {@link FreshCopy} of the project in `dir`: `ops.boot` again, and nothing installed (the project is the build). */
+function freshBoot(ops: Pick<ProjectOps, 'boot' | 'harness'>, dir: string): FreshCopy {
+  return async () => {
+    const booted = await ops.boot(dir);
+    try {
+      return { app: ops.harness(booted.url), release: () => booted.stop() };
+    } catch (e) {
+      await booted.stop();
+      throw e;
+    }
+  };
+}
+
 export interface RunOptions {
-  modes: ReadonlyArray<'scratch' | 'template'>;
+  modes: ReadonlyArray<'scratch' | 'template' | 'ask' | 'door'>;
   /** Re-run the Run half after the iterate (scratch mode). Default true. */
   iterateRun?: boolean;
-  /** A verified build to install in template mode (e.g. the gallery's last passing export). */
+  /**
+   * A verified build to install in template and ask modes (e.g. the gallery's
+   * last passing export); without it they install this run's from-scratch
+   * build when it passed. Ask mode needs one or the other ({@link askModeRefusal}).
+   */
   templateArtifact?: unknown;
   /** The dev admin the runner signs in as (`os dev --fresh` seeds it). */
   admin: { email: string; password: string };
@@ -100,6 +190,16 @@ export interface RunOptions {
    * the rows the first one changed.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice (`--lang`, `--prompt`, {@link PromptChoice}), sent in
+   * every mode: the build turn, the iterate turn (scratch and template), and
+   * every question and operation turn, each ask of a repeated one included.
+   * Absent ⇒ today's prompts, byte for byte. A card that lacks a text the
+   * run would render in the chosen language is refused before any mode
+   * runs ({@link promptLanguageRefusal}); the CLI skips it before the first
+   * card instead.
+   */
+  promptChoice?: PromptChoice;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -166,7 +266,32 @@ export interface BuildHalf {
   score: ScenarioArtifactScore | null;
   /** The card's reference cycles this build made required on every side: its seed cannot load them (a Build finding). */
   requiredCycles?: SeedLookup[][];
+  /**
+   * Each roll-up the build leaves readable to a persona over child data the
+   * card withholds from that persona ({@link rollupSourceCharges}): a failed
+   * Build check apiece, out of passed and in total, and a Build finding.
+   * Absent when there is none.
+   */
+  rollupSourceUnreadable?: RollupSourceCharge[];
   error?: string;
+}
+
+/**
+ * One standing `security-rollup-source-unreadable` finding charged to the
+ * build ({@link rollupSourceCharges}): the persona whose permission set reads
+ * the roll-up, the roll-up column, and what of its child the card withholds
+ * from that persona. `finding` is the rule's own report, carried verbatim.
+ */
+export interface RollupSourceCharge {
+  persona: string;
+  permissionSet: string;
+  /** The roll-up column, `parent.field`. */
+  rollup: string;
+  /** The roll-up's child object. */
+  child: string;
+  /** What the card withholds from the persona: the child object, or one child field (`child.field`). */
+  withheld: { object: string } | { field: string };
+  finding: Pick<RollupSourceVisibilityFinding, 'rule' | 'where' | 'path' | 'message'>;
 }
 
 export interface QuestionResult {
@@ -189,6 +314,27 @@ export interface QuestionResult {
   error?: string;
 }
 
+/**
+ * One ask of a dataset question (`run.datasetQuestions`), graded on the route
+ * its answer took (`gradeCardDatasetQuestion`: `metric-selected`,
+ * `asked-back` or `fallback-labelled`). Asked as the admin, like a question
+ * that lists no persona, and as many times as `--ask-repeats` says.
+ */
+export interface DatasetQuestionResult {
+  question: string;
+  /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
+  repeat?: number;
+  /**
+   * Why this ask measures nothing: it was replayed and the recording holds no
+   * turn for it ({@link datasetQuestionNotRecorded}), or the replay was not
+   * faithful. Never a fail.
+   */
+  notMeasured?: string;
+  grade?: DatasetGrade;
+  turn?: TurnSummary;
+  error?: string;
+}
+
 export interface OperationResult {
   operation: string;
   persona: string;
@@ -198,9 +344,21 @@ export interface OperationResult {
    * grade measured nothing (`OperationGrade.notMeasured`: the build denies the
    * persona the write the card gives it, `buildDeniesWrite`); or it was
    * replayed and the app did not answer its re-sent writes as it answered the
-   * recorded run (`ReplayNotFaithfulError`). Never a fail.
+   * recorded run (`ReplayNotFaithfulError`); or it was not run, because the
+   * rows an earlier turn moved could not be restored to the seeded state, or
+   * no fresh copy of the app could be seeded for it (`restore: …`,
+   * {@link runHalf}). Never a fail.
    */
   notMeasured?: string;
+  /**
+   * How this operation started from the seeded state although an earlier
+   * turn had moved its rows: on a fresh copy of the app, seeded anew
+   * (`freshCopy`, {@link FreshCopy}), or with the rows set back through the
+   * app's doors ({@link restoreSeededRows}). Either way it started from the
+   * card's own rows, as if it ran first. Absent when nothing had moved, so a
+   * run with no earlier write records exactly what it recorded before restores.
+   */
+  restored?: RowRestore;
   /**
    * The write the build denies the acting persona, when the grade charged a
    * check to it (`buildDeniesWrite`): the persona, the operation's object as
@@ -210,8 +368,81 @@ export interface OperationResult {
   observation?: OperationObservation;
   grade?: OperationGrade;
   turn?: TurnSummary;
+  /**
+   * The second turn of a `pending_confirmation` operation, sent only when the
+   * first one passed by asking first (`OperationGrade.confirmation` is
+   * `asked first`): the person confirms, and the turn's write is graded on
+   * its own ({@link ConfirmTurnResult}). Absent on every other operation, and
+   * on one whose first turn wrote, failed or measured nothing. On one whose
+   * ask names no single row it is not sent, and carries only
+   * {@link confirmationAmbiguous}.
+   */
+  confirmTurn?: ConfirmTurnResult;
   error?: string;
 }
+
+/**
+ * The confirmation turn of a `pending_confirmation` operation
+ * ({@link OperationResult.confirmTurn}): a fresh turn as the same persona whose
+ * prompt carries the first turn's ask and reply and then the person's
+ * confirmation (`confirmPrompt`), its write observed and graded against the
+ * operation's declared write (`gradeCardConfirmedWrite`). Its own grade, never
+ * merged into the first turn's, so neither half hides the other.
+ */
+export interface ConfirmTurnResult {
+  /**
+   * Why the confirmed write measured nothing: the replayed recording holds no
+   * confirmation turn ({@link confirmationNotRecorded}), the replay of it
+   * was not faithful (`ReplayNotFaithfulError`), or the ask matches more than
+   * one row and no turn was sent ({@link confirmationAmbiguous}). Never a fail; the operation
+   * is then scored on its first turn alone, as before.
+   */
+  notMeasured?: string;
+  observation?: ConfirmedWriteObservation;
+  grade?: ConfirmedWriteGrade;
+  turn?: TurnSummary;
+  error?: string;
+}
+
+/**
+ * What one restore did ({@link OperationResult.restored}), each row as
+ * `object/id`. A list is absent when the restore did none of that.
+ */
+export interface RowRestore {
+  /** Rows an earlier turn added, deleted. */
+  deleted?: string[];
+  /** Rows of the seeded state an earlier turn removed, inserted again. */
+  reinserted?: string[];
+  /** Rows of the seeded state an earlier turn changed: `object/id` → the columns set back. */
+  setBack?: Record<string, string[]>;
+  /**
+   * The rows an earlier turn had moved (`object/id`: added, removed or
+   * changed), when the operation ran on a fresh copy of the app, seeded anew
+   * ({@link FreshCopy}), instead: nothing was written to the app to undo them,
+   * so no rule, hook or flow of the app judged or followed a restore. The
+   * other three lists are then absent.
+   */
+  freshCopy?: string[];
+}
+
+/**
+ * Why a replayed dataset question is not measured: the recording holds no turn
+ * for it. Dataset questions came later than most recordings, so a recording
+ * made before its card declared them holds none, and a replay of it has asked
+ * the agent nothing; nothing was graded, so nothing failed.
+ */
+const datasetQuestionNotRecorded = 'the recording holds no turn for this dataset question (it was made before the card declared it, or the run stopped short of it), so it was not replayed';
+
+/** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
+export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
+
+/**
+ * Why an ambiguous operation's confirmed write is not measured, and no confirmation turn is sent: its ask
+ * matches more than one row (`askNamesTarget`), and the person's confirmation words ("Yes, I confirm. Go
+ * ahead.") say no row, so whatever the agent then writes cannot be graded against the one target the card
+ * declares. The first turn, which asked, is graded as before.
+ */
+export const confirmationAmbiguous = 'the ask matches more than one row and the confirmation words say no row, so no confirmation turn was sent';
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -236,6 +467,11 @@ export interface RunHalf {
     secondPass?: Record<string, number>;
   };
   questions: QuestionResult[];
+  /**
+   * The card's dataset questions, each ask graded on its route; absent when
+   * the card declares none, so a card without them keeps its record's bytes.
+   */
+  datasetQuestions?: DatasetQuestionResult[];
   operations: OperationResult[];
   /**
    * The card's guardrails graded over the half's turns as a whole: today
@@ -257,13 +493,82 @@ export interface ChangeSize {
 }
 
 export interface ModeRun {
-  mode: 'scratch' | 'template';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
+  /** Absent in template and ask modes, which build nothing first. */
   build?: BuildHalf;
   run?: RunHalf;
+  /** Absent in ask mode, which authors nothing. */
   iterate?: { build: BuildHalf; run?: RunHalf; changeSize?: ChangeSize };
-  template?: { source: string; install: { ok: boolean; status: number; code?: string; message?: string }; installModesSupplied: boolean };
+  /**
+   * The verified build template and ask modes installed: where it came from
+   * (`supplied template`, or `this run’s from-scratch build`) and how the
+   * install door answered the install the mode ran on ({@link InstalledBuild}).
+   */
+  template?: InstalledBuild;
+  /** Door mode's own steps, each as its door answered ({@link DoorSteps}). */
+  door?: DoorSteps;
   skipped?: string;
   findings: string[];
+}
+
+/**
+ * What door mode's person-equivalent steps met, each as its door answered:
+ * the package created for the build, the token minted for the client (never
+ * the token itself), the drafts the client left pending, and the publish.
+ */
+export interface DoorSteps {
+  package: { id: string; namespace: string; create: InstallAnswer };
+  token?: InstallAnswer & { scope?: string };
+  /** The package's pending drafts when the client finished, as Studio's Changes review lists them. */
+  drafts?: { answer: InstallAnswer; items: Array<{ type: string; name: string }> };
+  /** The publish of the package's drafts, as Studio's Changes > Publish sends it. */
+  publish?: DoorPublish;
+}
+
+/** The publish's answer: its `outcome`, and each draft it refused with the reason. */
+export interface DoorPublish extends InstallAnswer {
+  outcome?: string;
+  publishedCount?: number;
+  failed?: Array<{ type: string; name: string; code?: string; error: string }>;
+}
+
+/** A refused install, as the door answered it. */
+export interface InstallAnswer {
+  ok: boolean;
+  status: number;
+  code?: string;
+  message?: string;
+}
+
+/**
+ * The install a template or ask mode ran on. `install` is how the door
+ * answered the install that decided the mode (`installMode`), and
+ * `installModesSupplied` whether the runner added `installModes` to that
+ * install's manifest ({@link installableManifest}). `installMode` is absent on
+ * a record from before it was written (those installed unmanaged).
+ * `unmanagedRefusal` is present only when ask mode fell back: the unmanaged
+ * door refused the build `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged}),
+ * and the build was then installed managed.
+ */
+export interface InstalledBuild {
+  source: string;
+  install: InstallAnswer;
+  installModesSupplied: boolean;
+  installMode?: 'unmanaged' | 'managed';
+  unmanagedRefusal?: InstallAnswer & { code: string };
+}
+
+/**
+ * Whether an unmanaged install's refusal is the one ask mode falls back to a
+ * managed install on: `UNMANAGED_INSTALL_UNCOPYABLE`, the build carries an
+ * item an unmanaged copy cannot write as an environment row (`capability` is
+ * runtime-uncreatable), so the door refuses the copy whole and names the
+ * managed install. Every other refusal is a finding, as before. The code is
+ * the platform's (`@objectstack/metadata-protocol` stamps it); the runner only
+ * compares against it.
+ */
+export function fallsBackToManaged(refusal: Pick<HttpAnswer, 'ok' | 'code'>): boolean {
+  return !refusal.ok && refusal.code === 'UNMANAGED_INSTALL_UNCOPYABLE';
 }
 
 export interface CardRun {
@@ -278,6 +583,12 @@ export interface CardRun {
    * reader may hold exact.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice the run was given ({@link RunOptions.promptChoice}),
+   * when a flag set one; absent ⇒ the default prompts. Outside `counts`, like
+   * `askRepeats`, so a default record keeps its bytes.
+   */
+  promptChoice?: PromptChoice;
   modes: ModeRun[];
 }
 
@@ -395,6 +706,105 @@ export function seedOrder(scenario: LoadedScenario, required?: ReadonlySet<strin
 export function requiredCyclesOf(scenario: LoadedScenario, artifact: unknown): SeedLookup[][] {
   const required = requiredLookups(artifact);
   return required ? seedPlan(scenario.card, required).unseedable : [];
+}
+
+/** An object or field machine name, as the spec spells one (snake_case). */
+const ITEM = '[a-z_][a-z0-9_]*';
+
+/**
+ * `security-rollup-source-unreadable`'s report, read against the rule's own
+ * wording (`validate-rollup-source-visibility.ts` in `@objectstack/lint`):
+ * `where` names the set and the roll-up column; the message's first clause
+ * names the roll-up's child, and which of it the set cannot read — the child
+ * object (`… cannot read object "C"`), the aggregated child field (`… summarizes
+ * "C.f", which permission set "S" cannot read`) or a child field the roll-up's
+ * filter tests (`… filtered on "C.f", which …`). The suite runs the rule
+ * itself on each arm, so a change of wording fails there.
+ */
+const ROLLUP_WHERE = new RegExp(`^permission set "([^"]+)" · summary field "(${ITEM}\\.${ITEM})"$`);
+const ROLLUP_OBJECT_GATE = new RegExp(`^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"|counts "(${ITEM})" records), and permission set "[^"]+" cannot read object "(${ITEM})"`);
+const ROLLUP_FIELD_GATE = new RegExp(
+  `^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"(?: over rows filtered on "(${ITEM})\\.(${ITEM})")?|counts "(${ITEM})" records filtered on "(${ITEM})\\.(${ITEM})"), which permission set "[^"]+" cannot read`,
+);
+
+/** One `security-rollup-source-unreadable` finding, read: the set, the roll-up, its child, and what of the child the set cannot read. */
+export interface RollupSourceReading {
+  permissionSet: string;
+  rollup: string;
+  child: string;
+  /** The child fields the finding names the roll-up reading: the aggregated one, and the filtered one the set cannot read. */
+  childFields: string[];
+  /** The child object, or the one child field, the set cannot read. */
+  unreadable: { object: string } | { field: string };
+}
+
+/**
+ * Read a `security-rollup-source-unreadable` finding against the rule's
+ * wording; throws, naming the finding, when it does not read — a finding the
+ * runner cannot read is never silently left uncharged.
+ */
+export function readRollupSourceFinding(f: Pick<RollupSourceVisibilityFinding, 'where' | 'message'>): RollupSourceReading {
+  const where = ROLLUP_WHERE.exec(f.where);
+  const object = ROLLUP_OBJECT_GATE.exec(f.message);
+  if (where && object) {
+    const child = object[4]!;
+    const aggregated = object[1] === child ? object[2] : undefined;
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: aggregated ? [aggregated] : [], unreadable: { object: child } };
+  }
+  const field = ROLLUP_FIELD_GATE.exec(f.message);
+  if (where && field) {
+    if (field[5] !== undefined) {
+      // A filtered count: the set cannot read the filtered field.
+      return { permissionSet: where[1]!, rollup: where[2]!, child: field[6]!, childFields: [field[7]!], unreadable: { field: field[7]! } };
+    }
+    const [child, aggregated, filteredChild, filtered] = [field[1]!, field[2]!, field[3], field[4]];
+    // `… over rows filtered on "C.g", which …`: the set reads the aggregated field and cannot read the filtered one.
+    if (filteredChild !== undefined && filtered !== undefined) {
+      return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated, filtered], unreadable: { field: filtered } };
+    }
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated], unreadable: { field: aggregated } };
+  }
+  throw new Error(`a ${SECURITY_ROLLUP_SOURCE_UNREADABLE} finding the runner cannot read (the rule's wording moved?): ${f.where}: ${f.message}`);
+}
+
+/**
+ * The standing `security-rollup-source-unreadable` findings a build is charged
+ * for (the maintainer's ruling on #33818: the build's fault, charged on the
+ * Build side). The rule (`@objectstack/lint` `validateRollupSourceVisibility`)
+ * runs on the built artifact itself — its `objects`, `objectExtensions` and
+ * `permissions`, read through `resolveStackCollection` as the scorer reads
+ * them — so nothing depends on how much of `os build`'s output was kept, and
+ * no model or network is consulted (cloud#3600). Deterministic.
+ *
+ * A finding is charged when the set it names is a card persona's own
+ * (`permissionSetName`) and that persona's `hidden` withholds the roll-up's
+ * child object, or a child field the finding names the roll-up reading and the
+ * set not reading: the aggregated field when the set cannot read the child
+ * object or that field, the filtered field when it cannot read that one. Any
+ * other finding — a set no persona holds, a child the card lets the persona
+ * read, the `info` row-scope arm — is not charged.
+ */
+export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown): RollupSourceCharge[] {
+  const card = scenario.card;
+  const personas = new Map(card.run.personas.map((p) => [permissionSetName(card, p.id), p] as const));
+  const stack = {
+    objects: resolveStackCollection(artifact, 'objects'),
+    objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+    permissions: resolveStackCollection(artifact, 'permissions'),
+  };
+  const out: RollupSourceCharge[] = [];
+  for (const f of validateRollupSourceVisibility(stack)) {
+    if (f.rule !== SECURITY_ROLLUP_SOURCE_UNREADABLE) continue;
+    const r = readRollupSourceFinding(f);
+    const persona = personas.get(r.permissionSet);
+    if (!persona) continue;
+    const named = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
+    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && named.includes(h.field));
+    const withheld = (persona.hidden.objects ?? []).includes(r.child) ? { object: r.child } : hiddenField ? { field: `${hiddenField.object}.${hiddenField.field}` } : undefined;
+    if (!withheld) continue;
+    out.push({ persona: persona.id, permissionSet: r.permissionSet, rollup: r.rollup, child: r.child, withheld, finding: { rule: f.rule, where: f.where, path: f.path, message: f.message } });
+  }
+  return out;
 }
 
 /**
@@ -597,6 +1007,45 @@ export function actionGatesOf(built: unknown, op: Operation): Record<string, boo
   return gates;
 }
 
+/**
+ * The confirmation turn of a `pending_confirmation` operation, as the grader's
+ * `ConfirmedWriteObservation` (`gradeConfirmedWrite`), read the way
+ * `observe.ts` reads the first turn: the door's answer by its ordered rules
+ * (`observedAnswer`), the ids of the operation object's rows the turn added,
+ * removed or changed (keyed by `id`, every column but the clock), the target
+ * after it, the write doors that applied a write there (`run_action <name>`
+ * for a business action; reported, never graded), the dates the platform's
+ * clock read and the fields the turn's own writes set.
+ */
+export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, before: readonly Row[], after: readonly Row[], runDates?: readonly string[]): ConfirmedWriteObservation {
+  const writes = countWrites(before, after);
+  const was = new Map(before.map((r) => [String(r.id), fingerprint(r)]));
+  const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
+  const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
+  const applied = writeCallsOn(turn, op.object).filter(
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+  );
+  const via = applied.map((c) => {
+    if (c.name !== 'run_action') return c.name;
+    let action: unknown;
+    try {
+      action = (JSON.parse(typeof c.output === 'string' ? c.output : JSON.stringify(c.output)) as { action?: unknown }).action;
+    } catch {
+      action = undefined;
+    }
+    return typeof action === 'string' ? `run_action ${action}` : c.name;
+  });
+  return {
+    answer: observedAnswer(turn, op.object, writes),
+    writes,
+    changed,
+    target: (op.target !== undefined ? after.find((r) => String(r.id) === op.target) : undefined) ?? null,
+    via,
+    ...(runDates !== undefined ? { runDates } : {}),
+    agentSet: agentSetOf(op, turn),
+  };
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -604,8 +1053,15 @@ function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[
   return userId === adminId ? 'admin' : userId;
 }
 
-/** A stack's flat manifest for the unmanaged install door: the artifact's manifest plus its collections. */
-export function installableManifest(artifact: unknown): { manifest: Record<string, unknown>; installModesSupplied: boolean } {
+/**
+ * A stack's flat manifest for the install door: the artifact's manifest plus
+ * its collections. For an unmanaged install (the default) a build that does
+ * not list `unmanaged` in its `installModes` gets `installModes:
+ * ['unmanaged']` added (`installModesSupplied`); for a managed install nothing
+ * is added, so the door reads the build's own `installModes` (absent means
+ * managed).
+ */
+export function installableManifest(artifact: unknown, mode: 'unmanaged' | 'managed' = 'unmanaged'): { manifest: Record<string, unknown>; installModesSupplied: boolean } {
   const a = (artifact ?? {}) as Record<string, unknown>;
   const head = (typeof a.manifest === 'object' && a.manifest !== null ? a.manifest : {}) as Record<string, unknown>;
   const manifest: Record<string, unknown> = { ...head };
@@ -614,6 +1070,7 @@ export function installableManifest(artifact: unknown): { manifest: Record<strin
     if (Array.isArray(v) && v.length === 0) continue;
     manifest[k] = v;
   }
+  if (mode === 'managed') return { manifest, installModesSupplied: false };
   const declared = Array.isArray(head.installModes) && head.installModes.includes('unmanaged');
   if (!declared) manifest.installModes = ['unmanaged'];
   return { manifest, installModesSupplied: !declared };
@@ -638,7 +1095,11 @@ async function authorInto(half: BuildHalf, author: () => Promise<ParsedTurn>): P
   }
 }
 
-/** Score `artifact` against `scoreAgainst`, and name the card's reference cycles it made required on every side. */
+/**
+ * Score `artifact` against `scoreAgainst`, name the card's reference cycles it
+ * made required on every side, and charge each roll-up it leaves readable over
+ * child data the card withholds ({@link rollupSourceCharges}).
+ */
 function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: LoadedScenario, artifact: unknown): void {
   try {
     half.score = scoreCardArtifact(scoreAgainst, artifact);
@@ -647,6 +1108,12 @@ function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: Loaded
   }
   const cycles = requiredCyclesOf(seeded, artifact);
   if (cycles.length) half.requiredCycles = cycles;
+  try {
+    const charges = rollupSourceCharges(scoreAgainst, artifact);
+    if (charges.length) half.rollupSourceUnreadable = charges;
+  } catch (e) {
+    half.error = half.error ?? `rollup-source: ${errText(e)}`;
+  }
 }
 
 async function buildHalf(
@@ -669,6 +1136,44 @@ async function buildHalf(
   }
   scoreInto(half, scenario, scoreAgainst, artifact);
   return half;
+}
+
+/**
+ * One seed row as the seed path sends it ({@link seedApp}): the card's row,
+ * with each user-handle field rewritten to a user id (and the row owned by
+ * that user), a persona's own record bound to that persona's user, and the row
+ * owned by the persona the card makes its owner. `rewritten` names the
+ * user-handle fields it rewrote (`object.field`), `asAdmin` the handles no
+ * persona holds, each loaded as the admin user. A restore sends the same body
+ * for a seeded row it inserts again ({@link restoreSeededRows}).
+ */
+function seedRowBody(
+  card: Card,
+  object: string,
+  row: Card['run']['seed'][string][number],
+  accounts: readonly PersonaAccount[],
+  adminId: string,
+): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[] } {
+  const handles = personaHandles(card);
+  const userFields = userHandleFields(card);
+  const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
+  const body: Record<string, unknown> = { ...row };
+  const rewritten: string[] = [];
+  const asAdmin: string[] = [];
+  for (const [k, v] of Object.entries(row)) {
+    if (typeof v !== 'string' || !userFields.has(`${object}.${k}`)) continue;
+    const acct = accountOf(handles.get(v));
+    const userId = acct?.userId ?? adminId;
+    body[k] = userId;
+    body.owner_id = userId;
+    rewritten.push(`${object}.${k}`);
+    if (!acct) asAdmin.push(v);
+  }
+  const self = accountOf(personaRecords(card).get(`${object}/${row.id}`));
+  if (self) body[PERSON_USER_FIELD] = self.userId;
+  const owner = accountOf(rowOwner(card, object, row));
+  if (owner) body.owner_id = owner.userId;
+  return { body, rewritten, asAdmin };
 }
 
 /**
@@ -697,12 +1202,21 @@ async function buildHalf(
  * user lookup, which refuses the handle text. Every other value is sent
  * verbatim.
  *
- * The tally is kept in `seed` as each row is loaded, and `seed` is what is
- * returned: when an insert throws, the caller's tally already holds what was
- * inserted and refused before it (the record shows the partial seed next to the
- * half's error). A row whose second-pass update is refused moves from
- * `inserted` to `refused` (with the `fields` it could not set), so the tally
- * still counts each row sent once.
+ * The rows go in through the platform's own seed path ({@link loadSeedRows}):
+ * one data-only package whose `data[]` holds them, installed managed, so the
+ * platform's seed loader writes them as established facts. That posture skips
+ * the object's `state_machine` rule (its `initialStates` entry check), which a
+ * user write meets: a card's row that is already `paid` or `closed` is a fact,
+ * not a record entering its lifecycle. Every other validation rule and hook
+ * still judges each row, and record-triggered flows do not fire on it. The
+ * second pass is an ordinary update through the data API.
+ *
+ * The tally is kept in `seed` and `seed` is what is returned: when the load
+ * throws, the caller's tally already holds what was counted before it (the
+ * record shows the partial seed next to the half's error). A row the load
+ * wrote with a lookup it could not resolve, or whose second-pass update is
+ * refused, moves from `inserted` to `refused` (with the `fields` it does not
+ * hold as the card states them), so the tally still counts each row sent once.
  */
 export async function seedApp(
   scenario: LoadedScenario,
@@ -712,10 +1226,6 @@ export async function seedApp(
   required?: ReadonlySet<string>,
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
-  const handles = personaHandles(card);
-  const records = personaRecords(card);
-  const userFields = userHandleFields(card);
-  const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
   const plan = seedPlan(card, required);
   /** `object/id` → the lookup values its second-pass update sets. */
   const later = new Map<string, { object: string; id: string; patch: Record<string, string> }>();
@@ -725,31 +1235,24 @@ export async function seedApp(
     later.get(key)!.patch[d.field] = d.value;
   }
   if (later.size) seed.secondPass = Object.fromEntries([...new Set(plan.deferred.map((d) => lookupKey(d)))].map((k) => [k, 0]));
+  const datasets: SeedDataset[] = [];
   for (const object of plan.order) {
+    const records: Array<Record<string, unknown>> = [];
     for (const row of card.run.seed[object] ?? []) {
-      const body: Record<string, unknown> = { ...row };
-      for (const [k, v] of Object.entries(row)) {
-        if (typeof v !== 'string' || !userFields.has(`${object}.${k}`)) continue;
-        const acct = accountOf(handles.get(v));
-        const userId = acct?.userId ?? app.adminUserId();
-        body[k] = userId;
-        body.owner_id = userId;
-        seed.rewritten = [...new Set([...(seed.rewritten ?? []), `${object}.${k}`])].sort();
-        if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
-      }
-      const self = accountOf(records.get(`${object}/${row.id}`));
-      if (self) body[PERSON_USER_FIELD] = self.userId;
-      const owner = accountOf(rowOwner(card, object, row));
-      if (owner) body.owner_id = owner.userId;
+      const { body, rewritten, asAdmin } = seedRowBody(card, object, row, accounts, app.adminUserId());
+      if (rewritten.length) seed.rewritten = [...new Set([...(seed.rewritten ?? []), ...rewritten])].sort();
+      if (asAdmin.length) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), ...asAdmin])].sort();
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
-      const r = await app.insertRow(object, body);
-      if (r.ok) seed.inserted++;
-      else {
-        seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
-        later.delete(`${object}/${row.id}`); // nothing to update: the row is not there
-      }
+      records.push(body);
     }
+    if (records.length) datasets.push({ object, records });
+  }
+  const load = await loadSeedRows(app, datasets);
+  seed.inserted += load.inserted;
+  for (const r of load.refused) {
+    seed.refused.push(r);
+    if (!r.fields) later.delete(`${r.object}/${r.id}`); // nothing to update: the row is not there
   }
   // The second pass: every row each waiting lookup names is in by now.
   for (const { object, id, patch } of later.values()) {
@@ -764,6 +1267,375 @@ export async function seedApp(
   return seed;
 }
 
+/** One object's rows for a seed load ({@link loadSeedRows}): each row's body as the seed sends it, `id` included. */
+interface SeedDataset {
+  object: string;
+  records: Array<Record<string, unknown>>;
+}
+
+/** The seed loader's answer as the install door reports it (`data.seeded`). */
+interface SeedLoaderAnswer {
+  mode?: string;
+  reason?: string;
+  inserted?: number;
+  skipped?: number;
+  errorList?: Array<{ sourceObject?: string; field?: string; targetField?: string; recordIndex?: number; attemptedValue?: unknown; code?: string; message?: string }>;
+}
+
+/** The seed loads made in this process, which name each load's package apart (one namespace per installed package). */
+let seedLoads = 0;
+
+/** `n` (from 1) as lowercase letters, `a` … `z`, `aa` …: a namespace takes no digit. */
+function seedLoadLetters(n: number): string {
+  let out = '';
+  for (let k = n; k > 0; k = Math.floor((k - 1) / 26)) out = String.fromCharCode(97 + ((k - 1) % 26)) + out;
+  return out;
+}
+
+/**
+ * Why the install door skipped a row of a load and the object does not hold it
+ * ({@link loadSeedRows}): an install reads a recorded row that is gone as a
+ * person's removal, which it must not undo. Short, so the restore's refusal
+ * line ({@link restoreSeededRows}) keeps the reason after it.
+ */
+const WITHHELD = 'withheld by the install door: its key is recorded as landed (`sys_seed_landed_key`), the row gone';
+
+/**
+ * Write rows through the platform's own seed path: one data-only package
+ * whose `data[]` carries them, each object a dataset keyed on `id`
+ * (`externalId: 'id'`) under the default seed mode (`ignore`), installed
+ * through the managed install door (`installManaged`). The dataset names no
+ * `mode`: `insert` and `replace` are retired (#34613), and the door refuses a
+ * dataset declaring either, every row of it. The platform's seed loader writes
+ * a package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
+ * `@objectstack/spec/kernel`): the object's `state_machine` rule is skipped,
+ * every other validation rule and hook still runs, and record-triggered flows
+ * do not fire. A row keeps the card's own `id`, and a lookup value naming a
+ * row of the same load resolves to it, so a child loaded with `claim: 'c001'`
+ * holds the claim seeded as `c001`. A user id in a row (`owner_id`, a `user`
+ * field, a rewritten handle) is written as sent.
+ *
+ * `ignore` at the install door is not "create every row the object does not
+ * hold". The door keeps the organization's record of landed seed rows
+ * (`sys_seed_landed_key`, keyed on the organization, the object and the row's
+ * key, with no package in it) and installs under its `honour` posture: a row
+ * the object holds is left as it is, and a row it does not hold whose key is
+ * recorded is withheld, as a person's removal, counted in `skipped` with no
+ * error. A fresh seed meets no record. A restore does: every row it sends is a
+ * seeded row a turn removed, recorded when the seed landed it. So with
+ * `reseedWithheld` (the restore, {@link restoreSeededRows}) a load the door
+ * skipped rows of goes on through that package's sample-data reseed
+ * (`reseedManaged`), the platform's deliberate re-seed, which inserts every
+ * missing row whatever the record says. Whenever the door skipped a row, each
+ * object of the load is read back, and every row sent that the door did not
+ * refuse and the object does not hold is refused by name with the reason
+ * ({@link WITHHELD}, and why the reseed did not bring it back), never counted
+ * as written. A read refused there leaves the rows of that object unconfirmed:
+ * each is refused with the read's answer.
+ *
+ * Each package takes a namespace of its own, because one environment refuses
+ * a second package claiming a namespace another already holds.
+ *
+ * The answer's `errorList` names each row the loader could not write
+ * (`field: '(write)'`), which is refused; each dataset it refused whole
+ * (`field: 'mode'`, `targetField: '(dataset)'`, a retired mode), every row of
+ * which is refused; and each reference it could not resolve on a row it did
+ * write, which is refused with the `fields` the row does not hold. An entry
+ * carries the loader's message and no error code. A door that refuses the
+ * package, a harness with no managed door, or a load that did not run inline
+ * (`seeded.mode` other than `inline`) refuses every row, with that reason in
+ * its message (the door's status and code included).
+ */
+async function loadSeedRows(
+  app: AppHarness,
+  datasets: readonly SeedDataset[],
+  opts: { reseedWithheld?: boolean } = {},
+): Promise<{ inserted: number; refused: RunHalf['seed']['refused'] }> {
+  const sent = datasets.flatMap((d) => d.records.map((r) => ({ object: d.object, id: String(r.id) })));
+  if (sent.length === 0) return { inserted: 0, refused: [] };
+  const all = (message: string) => ({ inserted: 0, refused: sent.map((r) => ({ ...r, message: message.slice(0, 300) })) });
+  if (!app.installManaged) return all('this app harness has no managed install door, which the seed loads through');
+  const namespace = `scenarioseed${seedLoadLetters(++seedLoads)}`;
+  const manifest = {
+    id: `com.scenario.seed.${namespace}`,
+    namespace,
+    version: '0.0.1',
+    type: 'app',
+    scope: 'project',
+    name: 'Scenario seed',
+    data: datasets.map((d) => ({ object: d.object, externalId: 'id', records: d.records })),
+  };
+  const answer = await app.installManaged(manifest);
+  if (!answer.ok) return all(`the seed package was refused: ${answer.status}${answer.code ? ` ${answer.code}` : ''}${answer.message ? ` ${answer.message}` : ''}`);
+  const seeded = (answer.body as { data?: { seeded?: SeedLoaderAnswer } } | null)?.data?.seeded;
+  if (seeded?.mode !== 'inline') return all(`the seed did not load inline: ${seeded ? `mode ${String(seeded.mode)}${seeded.reason ? ` (${seeded.reason})` : ''}` : 'the install answered no seed result'}`);
+
+  const records = new Map(datasets.map((d) => [d.object, d.records]));
+  const position = new Map(sent.map((r, i) => [`${r.object}/${r.id}`, i]));
+  const unwritten = new Map<string, RunHalf['seed']['refused'][number]>();
+  const unheld = new Map<string, RunHalf['seed']['refused'][number] & { fields: string[] }>();
+  for (const e of seeded.errorList ?? []) {
+    const object = String(e.sourceObject ?? '');
+    const said = { ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.message ? { message: e.message.slice(0, 300) } : {}) };
+    if (e.field === 'mode' && e.targetField === '(dataset)') {
+      // The dataset refused whole: no row of it was attempted.
+      for (const row of records.get(object) ?? []) {
+        const id = String(row.id);
+        if (!unwritten.has(`${object}/${id}`)) unwritten.set(`${object}/${id}`, { object, id, ...said });
+      }
+      continue;
+    }
+    const row = typeof e.recordIndex === 'number' ? records.get(object)?.[e.recordIndex] : undefined;
+    const id = String(row?.id ?? e.attemptedValue ?? '');
+    const key = `${object}/${id}`;
+    if (e.field === '(write)') {
+      if (!unwritten.has(key)) unwritten.set(key, { object, id, ...said });
+    } else {
+      const held = unheld.get(key) ?? { object, id, fields: [], ...said };
+      if (e.field && !held.fields.includes(e.field)) held.fields.push(e.field);
+      unheld.set(key, held);
+    }
+  }
+  for (const key of unwritten.keys()) unheld.delete(key);
+  let written = typeof seeded.inserted === 'number' ? seeded.inserted : sent.length - unwritten.size;
+
+  // Rows the door skipped: brought back through the reseed when asked, then named if still not held.
+  const notBack = new Map<string, RunHalf['seed']['refused'][number]>();
+  if (typeof seeded.skipped === 'number' && seeded.skipped > 0) {
+    let why: string | undefined;
+    if (opts.reseedWithheld) {
+      if (!app.reseedManaged) why = 'no reseed door';
+      else {
+        const r = await app.reseedManaged(manifest.id);
+        const again = (r.body as { data?: { inserted?: unknown } } | null)?.data?.inserted;
+        if (r.ok && typeof again === 'number') written += again;
+        else why = `reseed refused: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message}` : ''}`;
+      }
+      why ??= 'the reseed left it out';
+    }
+    for (const [object, rows] of records) {
+      const asked = rows.map((row) => String(row.id)).filter((id) => !unwritten.has(`${object}/${id}`));
+      if (!asked.length) continue;
+      const read = await app.listRows(object);
+      const holds = new Set(read.ok ? read.rows.map((row) => String(row.id)) : []);
+      for (const id of asked) {
+        if (holds.has(id)) continue;
+        const message = read.ok
+          ? `${WITHHELD}${why ? `; ${why}` : ''}`
+          : `the door skipped ${seeded.skipped} row(s) of this load, and the read that would say whether this one is in was refused: ${read.status}${read.code ? ` ${read.code}` : ''}`;
+        notBack.set(`${object}/${id}`, { object, id, message: message.slice(0, 300) });
+      }
+    }
+    for (const key of notBack.keys()) unheld.delete(key);
+  }
+  const order = (r: { object: string; id: string }) => position.get(`${r.object}/${r.id}`) ?? sent.length;
+  const refused = [...unwritten.values(), ...notBack.values(), ...unheld.values()].sort((a, b) => order(a) - order(b));
+  return { inserted: written - unheld.size, refused };
+}
+
+/**
+ * How a fresh copy's seed differs from the half's own ({@link FreshCopy}): the
+ * rows it loaded and refused (each refusal as `object/id` with its code and
+ * the fields a second pass could not set), and whose permission set was not
+ * assigned alike. `undefined` when it loaded alike, so an operation on the
+ * copy meets the rows and the access the questions met.
+ */
+function seedDifference(half: Pick<RunHalf, 'seed' | 'personas'>, accounts: readonly PersonaAccount[], seed: RunHalf['seed']): string | undefined {
+  const refusals = (s: RunHalf['seed']) => s.refused.map((r) => `${r.object}/${r.id}${r.code ? ` ${r.code}` : ''}${r.fields ? ` [${r.fields.join(', ')}]` : ''}`).sort().join('; ');
+  const access = (list: ReadonlyArray<Pick<PersonaAccount, 'persona' | 'permissionSet'>>) => list.map((a) => `${a.persona}: ${a.permissionSet.assigned ? 'assigned' : 'not assigned'}`).join(', ');
+  const out: string[] = [];
+  if (seed.inserted !== half.seed.inserted) out.push(`it loaded ${seed.inserted} rows, the run ${half.seed.inserted}`);
+  if (refusals(seed) !== refusals(half.seed)) out.push(`it refused ${refusals(seed) || 'nothing'}, the run ${refusals(half.seed) || 'nothing'}`);
+  if (access(accounts) !== access(half.personas)) out.push(`its permission sets read ${access(accounts)}, the run's ${access(half.personas)}`);
+  return out.length ? `the copy's seed did not load as the run's did: ${out.join('; ')}` : undefined;
+}
+
+/**
+ * The objects whose rows a restore keeps at the seeded state: every seeded
+ * object, then every object an operation writes or its outcome reads that the
+ * seed does not name (a row an earlier turn added there is deleted again), in
+ * that order.
+ */
+export function restoreObjects(card: Card): string[] {
+  const out = new Set(Object.keys(card.run.seed));
+  for (const op of card.run.operations) {
+    out.add(op.object);
+    if (op.outcome.kind === 'applied') for (const st of op.outcome.state) out.add(st.object);
+  }
+  return [...out];
+}
+
+/** The seeded state a restore returns to: each object's rows as the app held them right after the seed loaded. */
+export type SeededRows = Map<string, HeldRow[]>;
+
+/**
+ * Read the seeded state ({@link SeededRows}) of every object in `objects`, as
+ * the admin, right after the seed loaded. An object the app does not answer
+ * for (no such object in the build, a refused read) is left out: there is no
+ * state to return it to, and the operation reads it as it always did.
+ */
+export async function seededRows(app: AppHarness, objects: readonly string[]): Promise<SeededRows> {
+  const out: SeededRows = new Map();
+  for (const object of objects) {
+    const r = await app.listRows(object);
+    if (r.ok) out.set(object, r.rows);
+  }
+  return out;
+}
+
+/** How many rounds of writes a restore takes before it gives up: a cascade (a delete that takes a child, a reference set back) can need a second. */
+const RESTORE_ROUNDS = 3;
+
+/** The order a restore reads and writes the objects of `seeded` in: the seed's load order, then the objects the seed does not name. */
+const restoreOrder = (card: Card, seeded: SeededRows): string[] => [...seedPlan(card).order, ...[...seeded.keys()].filter((o) => !(o in card.run.seed))];
+
+/**
+ * How far the rows of `seeded` ({@link seededRows}) have moved in `app` now,
+ * each object read as the admin and compared by {@link rowDrift} (every
+ * column but the clock, the last writer and the fields the build computes,
+ * {@link derivedFields}). Only reads: nothing is written. `failed` names the
+ * first object the app would not list.
+ */
+async function seedDrift(card: Card, app: AppHarness, seeded: SeededRows, built?: unknown): Promise<{ drifts: RowDrift[]; failed?: undefined } | { failed: string }> {
+  const derived = derivedFields(built);
+  const drifts: RowDrift[] = [];
+  for (const object of restoreOrder(card, seeded)) {
+    const was = seeded.get(object);
+    if (!was) continue;
+    const now = await app.listRows(object);
+    if (!now.ok) return { failed: `the rows of ${object} could not be read to restore them: ${now.status}${now.code ? ` ${now.code}` : ''}` };
+    const d = rowDrift(object, was, now.rows, new Set([...RESTORE_UNCOMPARED, ...(derived.get(object) ?? [])]));
+    if (d) drifts.push(d);
+  }
+  return { drifts };
+}
+
+/**
+ * Put the rows an earlier turn moved back to the seeded state `seeded`
+ * ({@link seededRows}), as the admin, before an operation runs, so every
+ * operation starts from the card's own rows and is graded on its own turn,
+ * never on the turn before it.
+ *
+ * Each object in `seeded` is read and compared with its seeded rows
+ * ({@link rowDrift}: every column but the clock, the last writer and the
+ * fields the build computes, {@link derivedFields}). Nothing moved ⇒ nothing
+ * is written and `{}` is returned: a run with no earlier write is unchanged.
+ * Otherwise, in rounds until nothing has moved:
+ *
+ *   1. a row a turn added is deleted;
+ *   2. a seeded row a turn removed is inserted again through the seed path
+ *      ({@link loadSeedRows}, the posture the seed loaded it under, so a row
+ *      already `paid` is not refused as a new record; the install withholds a
+ *      row the seed recorded as landed, so the load goes on through that
+ *      package's reseed, and a row still not back is refused by name, never
+ *      counted as reinserted) — the very body the
+ *      seed sent ({@link seedRowBody}), or, for a row the app made itself
+ *      while seeding, the row as it was read, less the columns the platform
+ *      stamps ({@link RESTORE_UNWRITTEN}); the round's rows go in as one
+ *      load, so a lookup between two of them resolves, and a lookup the load
+ *      cannot resolve is set back by a later round;
+ *   3. a seeded row a turn changed has those columns set back to the values
+ *      the seeded state read.
+ *
+ * After {@link RESTORE_ROUNDS} rounds, rows that still differ make the restore
+ * fail: `failed` names what still differs and the first refusals met, and the
+ * operation is not measured — never graded on rows the card did not declare.
+ */
+export async function restoreSeededRows(
+  scenario: LoadedScenario,
+  app: AppHarness,
+  accounts: readonly PersonaAccount[],
+  seeded: SeededRows,
+  built?: unknown,
+): Promise<{ restored?: RowRestore; failed?: string }> {
+  const { card } = scenario;
+  const derived = derivedFields(built);
+  const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
+  const order = restoreOrder(card, seeded);
+  const deleted = new Set<string>();
+  const reinserted = new Set<string>();
+  const setBack = new Map<string, Set<string>>();
+  /** The refusals met, each named once however many rounds met it. */
+  const refusals = new Set<string>();
+  const refused = (what: string, r: { status: number; code?: string; message?: string }) =>
+    refusals.add(`${what}: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message.slice(0, 120)}` : ''}`);
+  const record = (): RowRestore | undefined =>
+    deleted.size || reinserted.size || setBack.size
+      ? {
+          ...(deleted.size ? { deleted: [...deleted] } : {}),
+          ...(reinserted.size ? { reinserted: [...reinserted] } : {}),
+          ...(setBack.size ? { setBack: Object.fromEntries([...setBack].map(([k, v]) => [k, [...v]])) } : {}),
+        }
+      : undefined;
+
+  for (let round = 0; ; round++) {
+    const read = await seedDrift(card, app, seeded, built);
+    if (read.failed !== undefined) {
+      const restored = record();
+      return { ...(restored ? { restored } : {}), failed: read.failed };
+    }
+    const { drifts } = read;
+    if (!drifts.length) {
+      const restored = record();
+      return restored ? { restored } : {};
+    }
+    if (round === RESTORE_ROUNDS) {
+      const restored = record();
+      const still = drifts.map(driftText).join('; ');
+      return { ...(restored ? { restored } : {}), failed: `the rows could not be restored to the seeded state: ${still}${refusals.size ? ` (refused: ${[...refusals].slice(0, 3).join('; ')})` : ''}` };
+    }
+    // 1. The rows a turn added.
+    for (const d of drifts) {
+      for (const id of d.added) {
+        if (!app.deleteRow) {
+          refusals.add(`delete ${d.object} ${id}: this app harness has no row delete`);
+          continue;
+        }
+        const r = await app.deleteRow(d.object, id);
+        if (r.ok) deleted.add(`${d.object}/${id}`);
+        else refused(`delete ${d.object} ${id}`, r);
+      }
+    }
+    // 2. The seeded rows a turn removed, through the seed path ({@link loadSeedRows}), in its load order, one load a round;
+    //    the install withholds the ones the seed recorded as landed, which the package's reseed puts back.
+    const back: Array<{ object: string; records: Array<Record<string, unknown>> }> = [];
+    for (const d of [...drifts].sort((a, b) => order.indexOf(a.object) - order.indexOf(b.object))) {
+      const records: Array<Record<string, unknown>> = [];
+      for (const id of d.missing) {
+        const seedRow = card.run.seed[d.object]?.find((r) => r.id === id);
+        const was = seeded.get(d.object)!.find((r) => String(r.id) === id)!;
+        const skip = unwritten(d.object);
+        skip.delete('id');
+        records.push(
+          seedRow
+            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
+            : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k))),
+        );
+      }
+      if (records.length) back.push({ object: d.object, records });
+    }
+    const load = await loadSeedRows(app, back, { reseedWithheld: true });
+    const notBack = new Set(load.refused.filter((r) => !r.fields).map((r) => `${r.object}/${r.id}`));
+    for (const r of load.refused) refusals.add(`insert ${r.object} ${r.id}: ${r.code ? `${r.code} ` : ''}${r.fields ? `[${r.fields.join(', ')}] ` : ''}${(r.message ?? '').slice(0, 120)}`.trim());
+    for (const d of back) for (const row of d.records) if (!notBack.has(`${d.object}/${String(row.id)}`)) reinserted.add(`${d.object}/${String(row.id)}`);
+    // 3. The seeded rows a turn changed, set back to the values the seeded state read.
+    for (const d of drifts) {
+      const skip = unwritten(d.object);
+      for (const { id, fields } of d.changed) {
+        const was = seeded.get(d.object)!.find((r) => String(r.id) === id)!;
+        const writable = fields.filter((f) => !skip.has(f));
+        if (!writable.length) continue;
+        const r = await app.updateRow(d.object, id, Object.fromEntries(writable.map((f) => [f, was[f] ?? null])));
+        if (r.ok) {
+          const key = `${d.object}/${id}`;
+          if (!setBack.has(key)) setBack.set(key, new Set());
+          for (const f of writable) setBack.get(key)!.add(f);
+        } else refused(`update ${d.object} ${id}`, r);
+      }
+    }
+  }
+}
+
 /**
  * Seed, personas, every question and every operation, against one booted app.
  * `built` is the artifact the app serves, whose required lookups decide which
@@ -775,16 +1647,39 @@ export async function seedApp(
  * key is the one a single ask has. Every question is asked before any
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
- * once. The guardrails are graded over every turn that ran, each ask included.
+ * once; a `pending_confirmation` one the agent met by asking first is followed
+ * by its confirmation turn ({@link OperationResult.confirmTurn}). Before
+ * each operation the rows of the seeded state, read once right after the seed
+ * loaded, are read again; when an earlier turn moved one, the operation starts
+ * from the seeded rows all the same, never between its ask and its
+ * confirmation:
+ *
+ *   - with `fresh` ({@link FreshCopy}), on a fresh copy of the app, seeded
+ *     anew with the same personas, and every later turn of the half runs
+ *     there. Nothing is written to undo the move, so no validation rule, hook
+ *     or flow of the app judges a restore or runs on one: a one-way state rule
+ *     (approved never goes back to submitted) cannot refuse it. The copy's
+ *     seed must load as the run's did ({@link seedDifference}), or the
+ *     operation is not measured. Each copy costs one boot, sign-ins and a
+ *     seed load, paid only before an operation an earlier write would meet;
+ *   - without, the rows are written back through the app's own doors
+ *     ({@link restoreSeededRows}), which the app's rules judge.
+ *
+ * The guardrails are graded over every turn that ran, each ask and each
+ * confirmation turn included.
+ * Every question and operation turn is sent in the prompt choice `choice`
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
 export async function runHalf(
   scenario: LoadedScenario,
-  app: AppHarness,
+  firstApp: AppHarness,
   driver: AgentDriver,
   ref: Pick<StepRef, 'card' | 'mode' | 'phase'>,
   objectLabels?: Record<string, string[]>,
   built?: unknown,
   askRepeats = 1,
+  choice?: PromptChoice,
+  fresh?: FreshCopy,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -792,6 +1687,10 @@ export async function runHalf(
   const accounts: PersonaAccount[] = [];
   // Every turn the agent answered, for the guardrails graded over the half (a replay that was not faithful measures nothing).
   const turns: CardTurn[] = [];
+  // The app the next turn runs on: the one booted for the half, until an operation moves to a fresh copy.
+  let app = firstApp;
+  /** Stops the fresh copy the half runs on now, if it runs on one. */
+  let releaseCopy: (() => Promise<void>) | undefined;
   try {
     await app.signInAdmin();
     for (const p of card.run.personas) {
@@ -800,9 +1699,40 @@ export async function runHalf(
       const { apiKey: _k, ...shown } = acct;
       half.personas.push(shown);
     }
-    const adminKey = await app.adminApiKey();
+    let adminKey = await app.adminApiKey();
 
     await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
+    // The state every operation starts from: the rows as the seed left them.
+    let seeded = await seededRows(app, restoreObjects(card));
+
+    /**
+     * Move the half to a fresh copy of the app, seeded anew: the personas again,
+     * the admin's key, the seed, and the seeded state read from it. The copy
+     * is taken only when its seed loaded as the run's did; the copy it
+     * replaces is released then. Answers why not, or `undefined`.
+     */
+    const moveToFreshCopy = async (copyOf: FreshCopy): Promise<string | undefined> => {
+      let copy: Awaited<ReturnType<FreshCopy>> | undefined;
+      try {
+        copy = await copyOf();
+        await copy.app.signInAdmin();
+        const copyAccounts: PersonaAccount[] = [];
+        for (const p of card.run.personas) copyAccounts.push(await copy.app.createPersona(p.id, permissionSetName(card, p.id)));
+        const copyKey = await copy.app.adminApiKey();
+        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built));
+        const differs = seedDifference(half, copyAccounts, copySeed);
+        if (differs !== undefined) throw new Error(differs);
+        const copySeeded = await seededRows(copy.app, restoreObjects(card));
+        const previous = releaseCopy;
+        [app, adminKey, seeded, releaseCopy] = [copy.app, copyKey, copySeeded, copy.release];
+        accounts.splice(0, accounts.length, ...copyAccounts);
+        await previous?.();
+        return undefined;
+      } catch (e) {
+        await copy?.release().catch(() => undefined);
+        return errText(e);
+      }
+    };
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // The door a turn is given: the app's MCP endpoint as the persona, and the
@@ -825,7 +1755,7 @@ export async function runHalf(
             continue;
           }
           try {
-            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id, choice), ...doorOf(persona) });
             turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
             res.turn = summarize(turn);
             res.grade = gradeCardAnswer(scenario, {
@@ -845,6 +1775,27 @@ export async function runHalf(
       }
     }
 
+    // Dataset questions read too, so they run before any operation writes; as the admin, who reads every row.
+    for (const q of card.run.datasetQuestions ?? []) {
+      half.datasetQuestions ??= [];
+      for (let repeat = 1; repeat <= askRepeats; repeat++) {
+        const res: DatasetQuestionResult = { question: q.id, ...(askRepeats > 1 ? { repeat } : {}) };
+        try {
+          const turn = await driver.ask({ ...ref, step: q.id, ...(repeat > 1 ? { repeat } : {}), prompt: datasetQuestionPrompt(card, q.id, choice), ...doorOf(null) });
+          turns.push({ step: q.id, turn });
+          res.turn = summarize(turn);
+          res.grade = gradeCardDatasetQuestion(scenario, q.id, turn);
+        } catch (e) {
+          if (e instanceof MissingRecordingError) res.notMeasured = datasetQuestionNotRecorded;
+          else if (e instanceof ReplayNotFaithfulError) {
+            res.turn = summarize(e.turn);
+            res.notMeasured = replayNotFaithful(e);
+          } else res.error = errText(e);
+        }
+        half.datasetQuestions.push(res);
+      }
+    }
+
     for (const op of card.run.operations) {
       const res: OperationResult = { operation: op.id, persona: op.actingAs };
       const notMeasured = dependence.operation(op);
@@ -853,11 +1804,36 @@ export async function runHalf(
         continue;
       }
       try {
+        // An earlier turn's write (the agent's, a probe's, a confirmed one) is
+        // left behind first — on a fresh copy, or undone through the app's
+        // doors — so this operation is graded on its own turn alone.
+        if (fresh) {
+          const moved = await seedDrift(card, app, seeded, built);
+          if (moved.failed !== undefined) {
+            half.operations.push({ ...res, notMeasured: `restore: ${moved.failed}` });
+            continue;
+          }
+          if (moved.drifts.length) {
+            const why = await moveToFreshCopy(fresh);
+            if (why !== undefined) {
+              half.operations.push({ ...res, notMeasured: `restore: no fresh copy of the app could be seeded for it (${why}); what had moved: ${moved.drifts.map(driftText).join('; ')}` });
+              continue;
+            }
+            res.restored = { freshCopy: moved.drifts.flatMap((d) => [...d.added, ...d.missing, ...d.changed.map((c) => c.id)].map((id) => `${d.object}/${id}`)) };
+          }
+        } else {
+          const { restored, failed } = await restoreSeededRows(scenario, app, accounts, seeded, built);
+          if (restored) res.restored = restored;
+          if (failed !== undefined) {
+            half.operations.push({ ...res, notMeasured: `restore: ${failed}` });
+            continue;
+          }
+        }
         const before = (await app.listRows(op.object)).rows as Row[];
         const started = new Date();
         let turn: ParsedTurn;
         try {
-          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id, choice), ...doorOf(op.actingAs) });
         } catch (e) {
           if (!(e instanceof ReplayNotFaithfulError)) throw e;
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
@@ -872,15 +1848,19 @@ export async function runHalf(
         const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()), agentSet: agentSetOf(op, turn) };
         const rowsByObject: Record<string, Row[]> = { [op.object]: after };
         if (op.outcome.kind === 'applied') {
-          for (const s of op.outcome.state) if (!rowsByObject[s.object]) rowsByObject[s.object] = (await app.listRows(s.object)).rows as Row[];
+          // A post-state's relation path (`claim.trip`) reads the rows of the objects it hops to.
+          for (const o of [...op.outcome.state.map((s) => s.object), ...relationObjects(op, card.expect.lookups)]) {
+            if (!rowsByObject[o]) rowsByObject[o] = (await app.listRows(o)).rows as Row[];
+          }
         }
+        const lookups = card.expect.lookups ?? [];
         let auditActor: string | null | undefined;
         if (op.outcome.kind === 'applied' && op.outcome.auditActor !== undefined) {
-          const id = touchedRowId(op, rowsByObject, today);
+          const id = touchedRowId(op, rowsByObject, today, lookups);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
         const actionGates = op.outcome.kind === 'pending_confirmation' ? actionGatesOf(built, op) : undefined;
-        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
+        const observed = { op, turn, before, after, rowsByObject, lookups, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
         // The runner's probe: it sends the declared write itself, as the same
         // persona through the same MCP door, after the turn. A probed operation
         // (the validation operation, or a permission overstep) is always
@@ -910,6 +1890,45 @@ export async function runHalf(
         if (op.kind !== 'delete' && res.grade.checks.some((c) => c.notMeasured?.startsWith(buildDeniesWrite))) {
           res.buildDenial = { persona: op.actingAs, object: op.object, verb: op.kind };
         }
+        // The agent asked first and wrote nothing: the person confirms, in a
+        // turn of its own, and that turn's write is graded on its own. An ask
+        // that matches more than one row gets no such turn: a bare yes says no row.
+        if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst && !askNamesTarget(card, op.id).names) {
+          res.confirmTurn = { notMeasured: confirmationAmbiguous };
+        } else if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst) {
+          const confirmed: ConfirmTurnResult = {};
+          try {
+            const beforeConfirm = (await app.listRows(op.object)).rows as Row[];
+            const startedConfirm = new Date();
+            let second: ParsedTurn | undefined;
+            try {
+              second = await driver.ask({
+                ...ref,
+                step: op.id,
+                persona: op.actingAs,
+                confirmation: true,
+                prompt: confirmPrompt(card, op.id, turn.replyText, choice),
+                ...doorOf(op.actingAs),
+              });
+            } catch (e) {
+              if (e instanceof MissingRecordingError) confirmed.notMeasured = confirmationNotRecorded;
+              else if (e instanceof ReplayNotFaithfulError) {
+                confirmed.turn = summarize(e.turn);
+                confirmed.notMeasured = replayNotFaithful(e);
+              } else throw e;
+            }
+            if (second !== undefined) {
+              turns.push({ step: op.id, persona: op.actingAs, turn: second });
+              confirmed.turn = summarize(second);
+              const afterConfirm = (await app.listRows(op.object)).rows as Row[];
+              confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
+              confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
+            }
+          } catch (e) {
+            confirmed.error = errText(e);
+          }
+          res.confirmTurn = confirmed;
+        }
       } catch (e) {
         res.error = errText(e);
       }
@@ -917,6 +1936,8 @@ export async function runHalf(
     }
   } catch (e) {
     half.error = errText(e);
+  } finally {
+    await releaseCopy?.().catch(() => undefined);
   }
   try {
     half.guardrails = [gradeCardInjection(scenario, turns, half.seed)];
@@ -948,11 +1969,15 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
  * scaffolded in (`ProjectOps.scaffold`'s `under`): one per card and mode. The
  * gallery exporter finds a run's scratch project by it.
  */
-export const modeDir = (card: { id: string }, mode: 'scratch' | 'template'): string => `${card.id.replace(/_/g, '-')}-${mode}`;
+export const modeDir = (card: { id: string }, mode: ModeRun['mode']): string => `${card.id.replace(/_/g, '-')}-${mode}`;
 
-/** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
+/**
+ * Did the build pass — every counted check of the card's `expect`, no bare
+ * item name, and no roll-up left readable over child data the card withholds
+ * ({@link BuildHalf.rollupSourceUnreadable})?
+ */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
-  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
+  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass) && !b.rollupSourceUnreadable?.length;
 
 async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
   const mode: ModeRun = { mode: 'scratch', findings: [] };
@@ -972,14 +1997,14 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card, opts.promptChoice), tier: card.tier })).turn, scenario);
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
   if (build.notMeasured) {
     mode.iterate = { build };
     return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -987,35 +2012,67 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
 }
 
-async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: { artifact: unknown; source: string } | undefined): Promise<ModeRun> {
+/** The door's answer as the record keeps it: the message cut to 500 characters. */
+function installAnswerOf(a: HttpAnswer): InstallAnswer {
+  return { ok: a.ok, status: a.status, ...(a.code ? { code: a.code } : {}), ...(a.message ? { message: a.message.slice(0, 500) } : {}) };
+}
+
+/** A verified build to install, and where it came from (`ModeRun.template.source`). */
+interface VerifiedBuild {
+  artifact: unknown;
+  source: string;
+}
+
+/**
+ * Install `verified` into a blank host of its own, booted, for template or ask
+ * mode, then hand the app to `use`. The host is scaffolded under the mode's
+ * own directory ({@link modeDir}) with a namespace of its own
+ * (`templateHostName` says why), and the build goes in through the unmanaged
+ * install door (ADR-0131 D6), recorded on `mode.template`. Nothing is
+ * installed, and the mode is skipped with the reason, when there is no
+ * verified build or it declares another namespace than the card's; a refused
+ * install is a finding, recorded and never worked around, and `use` is not
+ * called. The one exception is `managedFallback` (ask mode, which edits
+ * nothing): the unmanaged refusal {@link fallsBackToManaged} names installs
+ * the same build, unchanged, through the managed door instead, and the record
+ * names both (`installMode: 'managed'`, `unmanagedRefusal`). Template mode
+ * never falls back: its agent edits the installed copy, which only an
+ * unmanaged install makes the environment's own. `fresh` boots another blank
+ * host from the same directory and installs the same build into it, the same
+ * way — in the mode the run's own install landed in ({@link FreshCopy}); a
+ * refused install there is that copy's failure.
+ */
+async function withInstalledBuild(
+  original: LoadedScenario,
+  ops: ProjectOps,
+  mode: ModeRun,
+  verified: VerifiedBuild | undefined,
+  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; fresh: FreshCopy }) => Promise<void>,
+  options: { managedFallback?: boolean } = {},
+): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
   const ns = scenarioNamespace(original.card);
-  const scenario = namespacedScenario(original);
-  const labels = citationLabels(original);
-  const card = scenario.card;
-  const mode: ModeRun = { mode: 'template', findings: [] };
   if (!verified) {
     mode.skipped = 'no verified build of this card to install: the from-scratch build did not pass and no template was supplied';
-    return mode;
+    return;
   }
   const templateNs = namespaceOfArtifact(verified.artifact);
   if (templateNs !== ns) {
     mode.skipped = `the template declares namespace \`${templateNs ?? '(none)'}\`, not the card's \`${ns}\`: its names would not be the card's`;
-    return mode;
+    return;
   }
   // The blank host gets a namespace of its own (`templateHostName` says why).
-  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(card, 'template'));
+  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(original.card, mode.mode));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
-    return mode;
+    return;
   }
-  const iterated = iteratedScenario(scenario);
   await withApp(ops, dir, mode.findings, async (app, booted) => {
     await app.signInAdmin();
     const { manifest, installModesSupplied } = installableManifest(verified.artifact);
@@ -1023,18 +2080,64 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     // What the environment serves before the copy lands — the platform's own items (`setup`, `admin_full_access`, …) and the host's — is not the app.
     const baseline = await app.metadataAsArtifact(collections);
     const install = await app.installUnmanaged(manifest);
-    mode.template = {
-      source: verified.source,
-      install: { ok: install.ok, status: install.status, ...(install.code ? { code: install.code } : {}), ...(install.message ? { message: install.message.slice(0, 500) } : {}) },
-      installModesSupplied,
+    mode.template = { source: verified.source, install: installAnswerOf(install), installModesSupplied, installMode: 'unmanaged' };
+    // What the run's own install landed as: the fresh copy installs the same way.
+    let landed: { manifest: Record<string, unknown>; install: (a: AppHarness, m: Record<string, unknown>) => Promise<HttpAnswer>; mode: 'unmanaged' | 'managed' } = {
+      manifest,
+      install: (a, m) => a.installUnmanaged(m),
+      mode: 'unmanaged',
     };
     if (!install.ok) {
-      mode.findings.push(`unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim());
-      return;
+      const refusal = `unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim();
+      const installManaged = app.installManaged?.bind(app);
+      const fallsBack = options.managedFallback === true && fallsBackToManaged(install);
+      if (!fallsBack || installManaged === undefined) {
+        mode.findings.push(fallsBack ? `${refusal} (this app harness has no managed install door to fall back to)` : refusal);
+        return;
+      }
+      // Ask mode edits nothing: the same build, unchanged, installed managed (the door's own prescription).
+      const managed = installableManifest(verified.artifact, 'managed');
+      const again = await installManaged(managed.manifest);
+      mode.template = {
+        source: verified.source,
+        install: installAnswerOf(again),
+        installModesSupplied: managed.installModesSupplied,
+        installMode: 'managed',
+        unmanagedRefusal: { ...installAnswerOf(install), code: install.code! },
+      };
+      if (!again.ok) {
+        mode.findings.push(`${refusal}; the managed install of the same build was refused too: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+        return;
+      }
+      mode.findings.push(`unmanaged install refused ${install.code} (${install.status}): installed the same build managed instead`);
+      landed = { manifest: managed.manifest, install: (a, m) => a.installManaged!(m), mode: 'managed' };
     }
+    const fresh: FreshCopy = async () => {
+      const copy = await freshBoot(ops, dir)();
+      try {
+        await copy.app.signInAdmin();
+        const again = await landed.install(copy.app, landed.manifest);
+        if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+        return copy;
+      } catch (e) {
+        await copy.release();
+        throw e;
+      }
+    };
+    await use(app, { dir, url: booted.url, collections, baseline, fresh });
+  });
+}
+
+async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: VerifiedBuild | undefined): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const card = scenario.card;
+  const mode: ModeRun = { mode: 'template', findings: [] };
+  const iterated = iteratedScenario(scenario);
+  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
     if (build.notMeasured) {
       mode.iterate = { build };
       return;
@@ -1043,9 +2146,178 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats);
+    // No fresh copy here: the app holds the agent's iterate, made live through its doors, which a host booted
+    // again would not hold; an earlier write is undone through those doors instead (`restoreSeededRows`).
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
   });
   return mode;
+}
+
+/** The package door mode builds into: `com.scenario.<namespace>`, declaring the card's namespace. */
+export function doorPackageOf(card: { code: string }): { id: string; namespace: string } {
+  const namespace = scenarioNamespace(card);
+  return { id: `com.scenario.${namespace}`, namespace };
+}
+
+/** A publish's answer as the record keeps it: `outcome`, the counts, and each refused draft. */
+function doorPublishOf(a: HttpAnswer): DoorPublish {
+  const bag = (v: unknown): Record<string, unknown> | undefined => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
+  const body = bag(a.body);
+  const data = bag(body?.data) ?? body;
+  const failed = Array.isArray(data?.failed)
+    ? data.failed.map(bag).filter((f): f is Record<string, unknown> => f !== undefined).map((f) => ({
+        type: String(f.type ?? ''),
+        name: String(f.name ?? ''),
+        ...(typeof f.code === 'string' ? { code: f.code } : {}),
+        error: String(f.error ?? '').slice(0, 500),
+      }))
+    : undefined;
+  return {
+    ...installAnswerOf(a),
+    ...(typeof data?.outcome === 'string' ? { outcome: data.outcome } : {}),
+    ...(typeof data?.publishedCount === 'number' ? { publishedCount: data.publishedCount } : {}),
+    ...(failed?.length ? { failed } : {}),
+  };
+}
+
+/** Why a harness cannot run door mode, or `undefined` when it can: each door it needs, named. */
+export function doorHarnessGap(app: AppHarness): string | undefined {
+  const missing = (['createPackage', 'mintAuthoringToken', 'listDrafts', 'publishDrafts'] as const).filter((m) => typeof app[m] !== 'function');
+  return missing.length ? `this app harness has no ${missing.join(', ')}: door mode creates a package, connects a client, lists and publishes its drafts` : undefined;
+}
+
+/**
+ * Door mode (the module header states the steps). The client's directory is
+ * a fresh empty one, made here and removed after the turn: the turn's `cwd`
+ * holds no project file, and the host project lives elsewhere. The token is
+ * minted for the turn and handed to the driver, never recorded. A step the
+ * app refuses is a finding with the door's answer, and what needed it does
+ * not run; a publish that refuses drafts is recorded with each refusal, and
+ * what the environment then serves is scored as it is.
+ */
+async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const card = scenario.card;
+  const mode: ModeRun = { mode: 'door', findings: [] };
+  const target = doorPackageOf(card);
+  // The host gets a namespace of its own (`templateHostName`): the package the runner creates holds the card's.
+  const { dir, result } = await ops.scaffold(templateHostName(card), modeDir(card, 'door'));
+  if (result.exit !== 0) {
+    mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
+    return mode;
+  }
+  let booted: BootedApp | undefined;
+  try {
+    booted = await ops.boot(dir, { authoringDoor: true });
+    const app = ops.harness(booted.url);
+    const gap = doorHarnessGap(app);
+    if (gap) {
+      mode.skipped = gap;
+      return mode;
+    }
+    await app.signInAdmin();
+    const baseline = await app.metadataAsArtifact(DOOR_COLLECTIONS);
+    // The person: a new package in Studio, in the card's namespace.
+    const created = await app.createPackage!({ id: target.id, name: card.title.en, version: '0.1.0', type: 'app', namespace: target.namespace });
+    mode.door = { package: { ...target, create: installAnswerOf(created) } };
+    if (!created.ok) {
+      mode.findings.push(`the package \`${target.id}\` was not created: ${created.status} ${created.code ?? ''} ${created.message ?? ''}`.trim());
+      return mode;
+    }
+    // The person connects an MCP client: an OAuth token scoped to the authoring tools.
+    const minted = await app.mintAuthoringToken!(DOOR_TOKEN_SCOPE);
+    const scope = (minted.body as { scope?: unknown } | null)?.scope;
+    mode.door.token = { ...installAnswerOf(minted), ...(typeof scope === 'string' ? { scope } : {}) };
+    if (!minted.ok || minted.token === undefined) {
+      mode.findings.push(`no token for the draft door: ${minted.status} ${minted.code ?? ''} ${minted.message ?? ''}`.trim());
+      return mode;
+    }
+    const token = minted.token;
+    const build: BuildHalf = { commands: [], score: null };
+    const cwd = mkdtempSync(join(tmpdir(), 'scenario-door-client-'));
+    try {
+      await authorInto(build, async () =>
+        (
+          await driver.author({
+            card: card.id,
+            mode: 'door',
+            phase: 'build',
+            step: 'author',
+            cwd,
+            prompt: doorBuildPrompt(card, { packageId: target.id }, opts.promptChoice),
+            tier: card.tier,
+            door: { mcp: { url: app.mcpUrl, token }, callTool: (tool, args) => app.callTool(token, tool, args) },
+          })
+        ).turn,
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+    mode.build = build;
+    if (build.notMeasured) return mode;
+    // The person reviews the package's drafts, then publishes them.
+    const drafts = await app.listDrafts!(target.id);
+    mode.door.drafts = { answer: installAnswerOf(drafts), items: drafts.drafts };
+    const published = await app.publishDrafts!(target.id);
+    const publish = (mode.door.publish = doorPublishOf(published));
+    // A refusal answers on a 200 (`outcome: refused` under `data`): only a whole `published` is a clean publish.
+    if (!published.ok || publish.outcome !== 'published' || publish.failed?.length) {
+      const failed = publish.failed?.map((f) => `${f.type} ${f.name}${f.code ? ` (${f.code})` : ''}`).join(', ');
+      mode.findings.push(`the publish of \`${target.id}\` answered ${publish.outcome ?? `${published.status} ${published.code ?? ''}`.trim()}${failed ? `: ${failed}` : ''}`);
+    }
+    // What the environment serves now is the build, as a person meets it.
+    const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
+    scoreInto(build, scenario, scenario, served);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+  } catch (e) {
+    mode.findings.push(`boot/run: ${errText(e)}`);
+  } finally {
+    await booted?.stop();
+  }
+  return mode;
+}
+
+/**
+ * Ask mode: the verified build template mode installs, installed the same way
+ * ({@link withInstalledBuild}) — or managed, when the unmanaged door refuses it
+ * `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged};
+ * `ModeRun.template.installMode` says which) —
+ * then the Run half on it — seed, personas, every
+ * question (`askRepeats` times) and every operation — and nothing else. The
+ * driver is never asked to author: there is no build half, no score and no
+ * iterate, and the record names the build's source (`ModeRun.template`). Its
+ * turns key as `card/ask/run/<step>/<persona>`. The Run half reads the
+ * verified build itself as the artifact the app serves (`runHalf`'s `built`),
+ * as scratch mode's first Run half reads the same build, so on the same build
+ * and the same turns the two grade alike.
+ */
+async function askMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: VerifiedBuild | undefined): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const mode: ModeRun = { mode: 'ask', findings: [] };
+  await withInstalledBuild(
+    original,
+    ops,
+    mode,
+    verified,
+    async (app, { fresh }) => {
+      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
+    },
+    { managedFallback: true },
+  );
+  return mode;
+}
+
+/**
+ * Why a run asking for `modes` cannot start, or `undefined` when it can: ask
+ * mode runs on a verified build and authors none, so it needs `--template`
+ * (`templateSupplied`) or scratch mode in the same run, whose build it
+ * installs when that build passes. Refused before any card runs.
+ */
+export function askModeRefusal(modes: ReadonlyArray<ModeRun['mode']>, templateSupplied: boolean): string | undefined {
+  if (!modes.includes('ask') || templateSupplied || modes.includes('scratch')) return undefined;
+  return 'ask mode runs the questions and operations on a verified build and authors none: give it one with --template F, or run scratch mode with it (--modes scratch,ask), whose build it installs when that build passes';
 }
 
 /** Run one card in the requested modes. */
@@ -1053,6 +2325,9 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   const { card } = scenario;
   const askRepeats = opts.askRepeats ?? 1;
   assertAskRepeats(askRepeats);
+  const languageRefusal = promptLanguageRefusal(card, opts.promptChoice, opts.modes);
+  if (languageRefusal) throw new Error(`${card.id}: ${languageRefusal}`);
+  const stated = statedPromptChoice(opts.promptChoice);
   const questionTurns = card.run.questions.reduce((n, q) => n + (q.personas?.length ? q.personas.length : 1), 0);
   const out: CardRun = {
     card: card.id,
@@ -1060,15 +2335,19 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
     capabilities: card.capabilities,
     counts: { questions: card.run.questions.length, questionTurns, operations: card.run.operations.length, personas: card.run.personas.length },
     ...(askRepeats > 1 ? { askRepeats } : {}),
+    ...(stated !== undefined ? { promptChoice: stated } : {}),
     modes: [],
   };
-  let verified: { artifact: unknown; source: string } | undefined =
-    opts.templateArtifact !== undefined ? { artifact: opts.templateArtifact, source: 'supplied template' } : undefined;
+  const refusal = askModeRefusal(opts.modes, opts.templateArtifact !== undefined);
+  if (refusal) throw new Error(refusal);
+  let verified: VerifiedBuild | undefined = opts.templateArtifact !== undefined ? { artifact: opts.templateArtifact, source: 'supplied template' } : undefined;
   if (opts.modes.includes('scratch')) {
     const r = await scratchMode(scenario, driver, ops, opts);
     out.modes.push(r.mode);
     if (!verified && r.verified !== undefined) verified = { artifact: r.verified, source: 'this run’s from-scratch build' };
   }
   if (opts.modes.includes('template')) out.modes.push(await templateMode(scenario, driver, ops, opts, verified));
+  if (opts.modes.includes('ask')) out.modes.push(await askMode(scenario, driver, ops, opts, verified));
+  if (opts.modes.includes('door')) out.modes.push(await doorMode(scenario, driver, ops, opts));
   return out;
 }

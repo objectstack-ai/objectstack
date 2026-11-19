@@ -31,9 +31,8 @@
 
 ## 常设承诺
 
-- findings 首触定级归分诊席,本席只供证据;例外见 `triage-duties.md` 车道席自分诊。
 - 门禁强制的跨车道 ledger 追加整类预批(`error-code-ledger.zod.ts`),三条全中即免本席签字。
-- ①:码的存在已在归属卡裁过;②:兜底不变,条款②路径肢照命中,入队前仍过契约复核。
+- ①:码的存在已在归属卡裁过;②:兜底不变,条款②路径肢照命中,入队前仍过 L2 审核。
 - ③:纯增量 —— 不动 schema 形状、既有条目与 ledger 机制,只落追加方自己的包分节。
 - 出类(新 ledger 字段、重构、别道条目、准入或拒收语义)⇒ 本席卡,不论谁需要它。
 - 分支信息测试(原文不译):Does this defect give a consumer a branch it could act on differently?

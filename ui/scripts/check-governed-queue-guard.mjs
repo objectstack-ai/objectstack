@@ -334,7 +334,7 @@ export const GOVERNED_SURFACES = Object.freeze([
  * a one-line maintainer decision here and nowhere else.
  *
  * ⚠️ Provenance, stated because it is INHERITED rather than ruled for this
- * repository: these are the two accounts the sibling repository's maintainer
+ * repository: these were the two accounts the sibling repository's maintainer
  * ruled authoritative for its own governed surface on 2026-08-27 (verbatim:
  * 「os-zhuang hotlong 批准算数」). objectui's own card rules the MECHANISM, not
  * the roster. The roster is carried across because it is the same maintainer
@@ -345,8 +345,14 @@ export const GOVERNED_SURFACES = Object.freeze([
  * these accounts is what hands a governed pull request to the claiming seat to
  * land. So a wrong roster fails in the safe direction: governed pull requests
  * stay parked as drafts, and none lands unreviewed.
+ *
+ * 2026-11-17 the maintainer narrowed that roster to one account, in the
+ * triage session (card objectstack#34626), verbatim: 「hotlong 从批准账户中去掉，
+ * 只保留 os-zhuang」. It supersedes the 2026-08-27 membership above, which stays
+ * here as history, and this copy moves with the root guard's constant in the
+ * same change; the self-test pins the one account and refuses the removed one.
  */
-export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
+export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang']);
 
 /**
  * The clause-② enqueue gate's label (objectui#9018).
@@ -1442,7 +1448,7 @@ export async function selfTest() {
   assert('an-unsupported-event-CANNOT-RUN-and-names-both-events-it-does-read', !unsupported.ok && /merge_group/.test(unsupported.reason) && /pull_request/.test(unsupported.reason), unsupported.reason);
 
   // -- the any-approver predicate (the early-warning leg's) -------------------
-  assert('an-approval-is-an-approval', approvalVerdict(approved('hotlong')).state === 'approved');
+  assert('an-approval-is-an-approval', approvalVerdict(approved('os-zhuang')).state === 'approved');
   assert('no-reviews-at-all-is-unapproved', approvalVerdict([]).state === 'unapproved');
   assert('a-COMMENTED-review-is-not-an-approval', approvalVerdict([{ state: 'COMMENTED', user: { login: 'a' } }]).state === 'unapproved');
   // ⭐ The fail-open direction a naive `.some(r => r.state === 'APPROVED')` gets
@@ -1477,7 +1483,13 @@ export async function selfTest() {
   // approval counts on whichever commit it was left, and every way an approval
   // never counted still never counts. The first three cases are the ones that
   // used to assert the opposite; they are flips, not additions.
-  assert('the-authorized-set-is-the-two-carried-accounts', GOVERNED_APPROVERS.join() === 'os-zhuang,hotlong');
+  assert('the-authorized-set-is-the-one-account-of-2026-11-17', GOVERNED_APPROVERS.join() === 'os-zhuang');
+  {
+    // The account 2026-11-17 removed (「hotlong 从批准账户中去掉，只保留 os-zhuang」): its approval alone no longer counts.
+    const retired = authorizedApprovalVerdict([approvedAt('hotlong', HEAD)]);
+    assert('⛔ a-head-approved-ONLY-by-the-account-removed-2026-11-17-is-UNAPPROVED',
+      !GOVERNED_APPROVERS.includes('hotlong') && retired.state === 'unapproved' && retired.unauthorizedApprovers.join() === 'hotlong', JSON.stringify(retired));
+  }
   for (const login of GOVERNED_APPROVERS) {
     assert(`an-authorized-approval-counts: ${login}`, authorizedApprovalVerdict([approvedAt(login, HEAD)]).state === 'approved');
   }
@@ -1499,12 +1511,12 @@ export async function selfTest() {
   );
   assert(
     'a-DISMISSED-authorized-approval-never-counts',
-    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[1], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[1] }, commit_id: HEAD }]).state === 'unapproved',
+    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }]).state === 'unapproved',
   );
   assert('no-reviews-at-all-is-unapproved-under-the-authorized-predicate-too', authorizedApprovalVerdict([]).state === 'unapproved');
   assert(
     'an-unauthorized-approval-does-not-mask-an-authorized-one',
-    authorizedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[1], HEAD)]).approvers.join() === GOVERNED_APPROVERS[1],
+    authorizedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[0], HEAD)]).approvers.join() === GOVERNED_APPROVERS[0],
   );
   assert(
     'an-authorized-approval-on-an-UNPARSABLE-commit_id-counts-too-nothing-reads-a-sha-any-more',
@@ -1514,7 +1526,7 @@ export async function selfTest() {
     'only-DECISIVE-states-carry-a-decision-COMMENTED-and-PENDING-are-not-approvals',
     authorizedApprovalVerdict([
       { state: 'COMMENTED', user: { login: GOVERNED_APPROVERS[0] } },
-      { state: 'PENDING', user: { login: GOVERNED_APPROVERS[1] } },
+      { state: 'PENDING', user: { login: GOVERNED_APPROVERS[0] } },
     ]).state === 'unapproved',
   );
 

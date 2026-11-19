@@ -494,6 +494,10 @@ export const ObjectTimeline: React.FC<ObjectTimelineProps> = ({
                 $filter: queryFilter,
                 $orderby: convertSortToQueryParams(schema.sort),
                 $top: resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT),
+                // The rail draws the rows it was handed and never a record
+                // count, so it declines the total: the server then skips the
+                // `count(*)` it runs beside every paged read.
+                $count: false,
                 ...(expand.length > 0 ? { $expand: expand } : {}),
             });
             const data = extractRecords(results);

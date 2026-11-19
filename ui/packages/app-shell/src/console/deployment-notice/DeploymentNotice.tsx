@@ -14,14 +14,17 @@
  * Who sees it is the server's decision: the state is served behind the
  * settings door and the `manage_platform_settings` capability, so a member's
  * read is refused and draws nothing. The workspace-admin check here only
- * spares a member's browser that refused request.
+ * spares a member's browser that refused request. Nor is it asked of a host
+ * that does not serve it: a hosted environment mounts the settings routes
+ * without the notice and says so (`features.deploymentNotice: false` on the
+ * runtime config, objectstack#34186).
  *
  * After a hide, the home page draws nothing and System Overview keeps one
  * small line, with a way to show the notice again in this browser.
  *
  * On Home it sits in the page's 1120 px content column, like every other card
  * above the apps. It says nothing about mail: an unset email service is not a
- * finding this console draws (`deploymentNotice.ts`, objectstack#32643), and the
+ * finding this console draws (`deploymentNoticeState.ts`, objectstack#32643), and the
  * first-run checklist's optional Email delivery row is where mail is set up.
  *
  * @module
@@ -32,6 +35,7 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Check, Copy, HardDrive, Info } from 'lucide-react';
+import { isDeploymentNoticeServed } from '../../runtime-config.js';
 import {
   deploymentVariablesText,
   fetchDeploymentNotice,
@@ -42,7 +46,7 @@ import {
   type DeploymentFinding,
   type DeploymentNoticeState,
   type HideAnswer,
-} from './deploymentNotice.js';
+} from './deploymentNoticeState.js';
 
 export interface DeploymentNoticeProps {
   /** `home`: nothing once hidden. `system-overview`: one small line once hidden. */
@@ -91,6 +95,8 @@ export function DeploymentNotice({ placement }: DeploymentNoticeProps) {
 
   useEffect(() => {
     if (!isResolved || !isAdmin || !userId) return;
+    // A host that does not serve the notice answers it 503: never asked.
+    if (!isDeploymentNoticeServed()) return;
     let cancelled = false;
     setHidden(hiddenFingerprint(userId));
     fetchDeploymentNotice().then((next) => {

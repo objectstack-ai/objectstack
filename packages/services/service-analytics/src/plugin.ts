@@ -59,6 +59,17 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
  * (#21080), whose absence the bridge below reads as "cannot say".
  */
+/** One bridged `executeAggregate` call's input (the plugin option's own declaration). */
+type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOptions['executeAggregate']>>[1];
+
+/**
+ * [relation group join] The data engine's read-option key for a relation
+ * group request: objectql's `RELATION_GROUP_BY` (`relation-group-join.ts`),
+ * the same `Symbol.for` key — this package does not import the engine at
+ * runtime. A symbol, so no wire request can carry one.
+ */
+const RELATION_GROUP_BY: unique symbol = Symbol.for('objectstack.objectql.relationGroupBy');
+
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
@@ -106,7 +117,7 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * property of the SQL driver family, not of every driver.
  */
 type DateBucketingDriver = {
-  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
 };
 
 /**
@@ -369,6 +380,7 @@ export class AnalyticsServicePlugin implements Plugin {
     //   `new AnalyticsServicePlugin({ cubes })`
     // without re-implementing the bridge in every app.
     let executeAggregate = this.options.executeAggregate;
+    let executeRelationGroupAggregate: AnalyticsServiceConfig['executeRelationGroupAggregate'];
     let autoBridged = false;
     // [#19995, ruling C] The engine's judge-only `where` admission, filled below
     // ONLY when this plugin bridges `executeAggregate` itself, and then to the
@@ -393,15 +405,9 @@ export class AnalyticsServicePlugin implements Plugin {
           'will retry per-query. Register ObjectQLPlugin or pass executeAggregate.',
         );
       }
-      executeAggregate = async (objectName, { groupBy, aggregations, filter, timezone, context }) => {
-        const engine = tryGetDataEngine();
-        if (!engine) {
-          throw new Error(
-            '[Analytics] Cannot execute aggregate: no IDataEngine ("data") service is registered. ' +
-            'Add ObjectQLPlugin to the kernel or supply AnalyticsServicePlugin({ executeAggregate }).',
-          );
-        }
-        const rows = await engine.aggregate(objectName, {
+      // The engine's own query for one bridged call — the shape both the
+      // aggregate below and its relation group twin hand the engine.
+      const engineAggregateQuery = ({ groupBy, aggregations, filter, timezone, context }: BridgedAggregateInput) => ({
           where: filter,
           groupBy,
           // [#10413 phase 2 / #10576] `a.filter` is the per-aggregation
@@ -471,7 +477,46 @@ export class AnalyticsServicePlugin implements Plugin {
           // engine with no principal and plugin-security fell open (#3597).
           context,
         });
+      const requireDataEngine = (): DataEngineLike => {
+        const engine = tryGetDataEngine();
+        if (!engine) {
+          throw new Error(
+            '[Analytics] Cannot execute aggregate: no IDataEngine ("data") service is registered. ' +
+            'Add ObjectQLPlugin to the kernel or supply AnalyticsServicePlugin({ executeAggregate }).',
+          );
+        }
+        return engine;
+      };
+      executeAggregate = async (objectName, input) => {
+        const rows = await requireDataEngine().aggregate(objectName, engineAggregateQuery(input));
         return rows as Record<string, unknown>[];
+      };
+      // [relation group join] …and the same aggregate grouped also by related
+      // records' attributes, which a SQL driver answers as one `LEFT JOIN …
+      // GROUP BY` (objectql `relation-group-join.ts`). The request rides on a
+      // symbol-keyed READ option, so no wire request can carry it; the engine
+      // writes back whether it joined, and on a decline `ObjectQLStrategy`
+      // serves the dimension by its FK-expand. Same engine as the executor
+      // above, by construction.
+      executeRelationGroupAggregate = async (objectName, input, relations) => {
+        const request: { relations: typeof relations; outcome?: { kind: string; reason?: string; error?: unknown } } = { relations };
+        const engine = requireDataEngine();
+        const aggregate = engine.aggregate as unknown as (
+          object: string, query: unknown, options: Record<symbol, unknown>,
+        ) => Promise<unknown>;
+        const rows = await aggregate.call(engine, objectName, engineAggregateQuery(input), {
+          [RELATION_GROUP_BY]: request,
+        });
+        if (request.outcome?.kind === 'joined') return { joined: true, rows: rows as Record<string, unknown>[] };
+        // [#33876] The read's driver compiles no semi-join: the engine's
+        // refusal travels back for the strategy to throw — no FK-expand.
+        if (request.outcome?.kind === 'refused' && request.outcome.error instanceof Error) {
+          return { joined: false, reason: request.outcome.error.message, refusal: request.outcome.error };
+        }
+        return {
+          joined: false,
+          reason: request.outcome?.reason ?? 'the "data" engine does not serve a relation group join',
+        };
       };
       autoBridged = true;
 
@@ -1189,7 +1234,12 @@ export class AnalyticsServicePlugin implements Plugin {
         const bundle = buildTranslationBundle(i18n);
         if (!bundle) return undefined;
         const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-        const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        // [#33634] The authored language: the declared `sourceLocale`, else the
+        // users' `defaultLocale` — the metadata route's rule.
+        const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+        const defaultLocale = typeof source === 'string' && source.length > 0
+            ? source
+            : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
         // `value` here is `unknown` (an option's stored value, of whatever
         // shape the field declares); `ObjectFieldLike.options[].value` narrows
         // to `string | number | boolean` (`SelectOptionSchema.value`'s real
@@ -1382,13 +1432,20 @@ export class AnalyticsServicePlugin implements Plugin {
      * the engine's in-memory bucketing (it answers `null`), a throw. On
      * `undefined` the echo refuses the bucket (#21647): it prints a bucket in
      * no expression but the one answered here.
+     *
+     * [#33697] `timezone`, when given, is the resolved area/location zone the
+     * engine pushes a zoned bucket down with; the driver answers the zoned
+     * expression it groups by, or nothing where it buckets no zone (the engine
+     * buckets that zone in memory there).
      */
-    const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
+    const dateBucketSql = (objectName: string, field: string, granularity: string, timezone?: string): string | undefined => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
         const driver = svc?.getDriverForObject?.(objectName) as DateBucketingDriver | undefined;
         if (typeof driver?.dateBucketSql !== 'function') return undefined;
-        const rendered = driver.dateBucketSql(objectName, field, granularity);
+        const rendered = timezone === undefined
+          ? driver.dateBucketSql(objectName, field, granularity)
+          : driver.dateBucketSql(objectName, field, granularity, timezone);
         return typeof rendered === 'string' && rendered !== '' ? rendered : undefined;
       } catch {
         return undefined;
@@ -1548,6 +1605,9 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,
+      // [relation group join] The executing engine's relation group join —
+      // see beside the `executeAggregate` auto-bridge above.
+      executeRelationGroupAggregate,
       // [#21080] The data engine's per-object middleware answer — see
       // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
       // middlewares live in the engine either way.

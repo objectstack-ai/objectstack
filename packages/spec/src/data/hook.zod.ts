@@ -31,21 +31,19 @@ import type { IScopedContext } from '../contracts/scoped-context';
 // reads too, so this schema's import graph is unchanged.
 import {
   HOOK_REFUSAL_CODE_PATTERN,
-  HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
-  HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
-  HOOK_REFUSAL_PARAM_PATTERN,
-  HOOK_REFUSAL_REASON_PATTERN,
+  HOOK_TEXT_KEY_PATTERN,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
   hookRefusalsWithoutSandboxedBody,
+  hookTextKeysAskedIn,
+  hookTextsWithoutRunnableCode,
   undeclaredHookRefusalCodeAtSave,
   undeclaredHookRefusalReasonAtSave,
+  undeclaredHookTextKeyAtSave,
 } from './hook-refusal-codes';
-// [#33214] The closed-scope `{{ }}` judge a refusal message with declared
-// `params` is read by — the one the action copy slots and a bulk action's
-// `confirmText` use, over the same hole grammar the flow `end` refusal
-// renders. It imports nothing outside its own leaf.
-import { closedScopeTemplateRefusal } from '../automation/flow-text-slot-template';
+// [#34273] One entry shape for a hook's and an action's refusal catalogue, and
+// for a hook's declared texts (#34374) — the shared declared-entry factory.
+import { declaredRefusalEntrySchema, declaredTextEntrySchema } from './declared-entry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -337,146 +335,72 @@ function refuseUndeclaredLiteralRefusalCode(
 }
 
 /**
- * One sentence under a declared refusal code (#33214, ruling 6879477573,
- * S1): the sentence the user reads when the hook throws the code with this
- * reason. Translated through `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
- * Its `{{ }}` holes are judged against the entry's `params`, like the entry's
- * own message. Not exported: it is published as part of {@link HookRefusalSchema}.
+ * [#34374, ruling 6913660232 parameter 7] The object-level check that refuses
+ * `texts` nothing could ask for, and a key a hook's source asks for literally
+ * (`ctx.text('key')`) that `texts` does not declare — the refusal catalogue's
+ * two halves above, for the sentences a hook writes into a record.
  */
-const HookRefusalReasonSchema = lazySchema(() => strictObject(
-  {
-    surface: 'this hook refusal reason',
-    history: 'Closed from the day it was declared — a key this reason does not declare would be served nowhere.',
-    aliases: { text: 'message', description: 'message' },
-    guidance: {
-      code:
-        'A reason has no `code` of its own — it sits under the code it refines (`refusals.CODE.reasons.REASON`), and '
-        + 'the wire code is that code.',
-      status:
-        'A reason has no `status` of its own — the code it sits under decides the status. Declare a second code if '
-        + 'the status differs.',
-    },
+function refuseUndeclaredLiteralTextKey(
+  hook: {
+    texts?: Record<string, unknown>;
+    body?: { language?: string; source?: unknown };
+    handler?: unknown;
   },
-  {
-    message: z.string().trim().min(1).describe(
-      'The sentence the user reads when the hook throws this reason under its code — in the source locale, '
-      + 'translated through hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message in the caller\'s locale; its {{ }} '
-      + 'holes follow the entry\'s message rule',
-    ),
-  },
-));
-
-/** The slot a refusal message's `{{ }}` holes are judged in, as a sentence names it. */
-const HOOK_REFUSAL_MESSAGE_SLOT = 'A hook refusal `message`';
-
-/**
- * Why `message` is refused as a sentence of an entry declaring `params`, or
- * `undefined`. No params: the plain-text rule (a hole is refused). Params: the
- * closed-scope template rule over the declared names (a hole over a declared
- * param only, a single-brace token prescribed its hole).
- */
-function hookRefusalMessageRefusal(message: string, params: readonly string[] | undefined): string | undefined {
-  if (!params || params.length === 0) {
-    return HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE.test(message) ? undefined : HOOK_REFUSAL_MESSAGE_HOLE_REFUSED;
+  ctx: z.RefinementCtx,
+): void {
+  if (!hook.texts) return;
+  const hasHandler = typeof hook.handler === 'function' || (typeof hook.handler === 'string' && hook.handler.length > 0);
+  const answered = hook.body === undefined ? hasHandler : hook.body.language === 'js';
+  if (!answered) {
+    ctx.addIssue({ code: 'custom', path: ['texts'], message: hookTextsWithoutRunnableCode(hook.body?.language) });
+    return;
   }
-  return closedScopeTemplateRefusal(message, { slot: HOOK_REFUSAL_MESSAGE_SLOT, roots: params });
+  const read = refusalSourceOf(hook);
+  if (!read) return;
+  const path = read.at === 'body.source' ? ['body', 'source'] : ['handler'];
+  const declared = Object.keys(hook.texts);
+  for (const key of hookTextKeysAskedIn(read.source)) {
+    if (Object.prototype.hasOwnProperty.call(hook.texts, key)) continue;
+    ctx.addIssue({ code: 'custom', path, message: undeclaredHookTextKeyAtSave(key, declared, read.at) });
+  }
 }
 
 /**
  * One entry of a hook's refusal catalogue (#26170): the sentence the user
  * reads when the hook throws this entry's code, and the status the refusal is
- * answered with.
- *
- * The message is handed over in the source locale and replaced whole by its
- * translation, `hooks.<hook>.refusals.<CODE>.message` — the validation-rule
- * message's posture (`objects.<object>._validations.<rule>.message`).
- *
- * [#33214, ruling 6879477573] Two optional parts, both declared and counted:
- *
- *  - `reasons` — further sentences under the SAME code, keyed by a snake_case
- *    reason. The hook throws `{ code, reason }`; the runtime answers with the
- *    reason's sentence, the code's status and the code on the wire, unchanged.
- *    A reason the code does not declare is refused loudly, like a code. Under
- *    a code that declares no `reasons`, a thrown `reason` is not read, as before.
- *  - `params` — the names the entry's sentences may fill. The hook throws
- *    `{ code, params: { NAME: value } }`, and each `{{ NAME }}` hole renders
- *    through the template engine the flow `end` refusal renders with. A hole
- *    over a name the entry does not declare is refused at parse; a hole
- *    holding logic, an unknown formatter, an empty hole and a `currency`
- *    formatter with no code (a hook refusal carries no default currency) are
- *    refused where the sentence is compiled — `os validate`, `compile` and the
- *    publish gate (`@objectstack/lint` `validate-hook-refusal-templates.ts`).
- *    An entry that declares no `params` is plain text and every `{{ }}` hole
- *    in it is refused, as before.
+ * answered with. The message is translated whole through
+ * `hooks.<hook>.refusals.<CODE>.message`; `reasons` and `params` (#33214,
+ * ruling 6879477573) are documented on the shared factory
+ * (`declared-entry.zod.ts`), which builds `ActionSchema`'s catalogue
+ * entry (#34273) from the same rules, so the two cannot drift.
  */
-export const HookRefusalSchema = lazySchema(() => strictObject(
-  {
-    surface: 'this hook refusal',
-    history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
-    aliases: {
-      text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status',
-      variants: 'reasons', messages: 'reasons', placeholders: 'params', parameters: 'params', variables: 'params',
-    },
-    guidance: {
-      code:
-        '`code` is not a refusal key — the code is the entry\'s KEY in `refusals` '
-        + '(`refusals: { CLEAN_VERSION_REQUIRED: { message } }`), and the body throws it.',
-      title:
-        'A hook refusal has no heading — the caller reads the `message` alone. Write the sentence in `message`.',
-    },
-  },
-  {
-    message: z.string().trim().min(1).describe(
-      'The sentence the user reads when the hook throws this code — in the source locale, translated whole through '
-      + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale. With no params every {{ }} hole is refused; '
-      + 'with params a hole is a path over one of them with an optional known formatter, and a hole over another name, '
-      + 'a hole holding logic, an unknown formatter, an empty hole and a currency formatter with no code are refused',
-    ),
-    status: z.number().int().min(400).max(499).optional().describe(
-      'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
-      + 'body itself sets on the throw is not read — the catalogue decides',
-    ),
-    reasons: z.record(
-      z.string().regex(HOOK_REFUSAL_REASON_PATTERN, {
-        message: 'A refusal reason is snake_case (e.g. plan_locked) — the reason the hook throws beside the code',
-      }),
-      HookRefusalReasonSchema,
-    ).optional().describe(
-      'Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code '
-      + '({ code, reason }): { message }. The wire code and status stay this entry\'s. A reason not declared here '
-      + 'is refused loudly. Absent: the code has the one sentence, and a thrown reason is not read',
-    ),
-    params: z.array(
-      z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
-        message: 'A refusal param is an identifier (e.g. state) — the root a {{ }} hole names',
-      }),
-    ).optional().describe(
-      'The names this entry\'s sentences may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value '
-      + 'the hook throws in `params` ({ code, params: { NAME: value } }). A hole over any other name, logic, an '
-      + 'unknown formatter, an empty hole and a currency formatter with no code are refused. Absent: the sentences '
-      + 'are plain text and a {{ }} hole is refused',
-    ),
-  },
-).superRefine((entry, ctx) => {
-  const params = entry.params;
-  if (params) {
-    const seen = new Set<string>();
-    params.forEach((name, i) => {
-      if (seen.has(name)) {
-        ctx.addIssue({ code: 'custom', path: ['params', i], message: `\`params\` names '${name}' twice — declare each once.` });
-      }
-      seen.add(name);
-    });
-  }
-  const own = hookRefusalMessageRefusal(entry.message, params);
-  if (own !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: own });
-  for (const [reason, sentence] of Object.entries(entry.reasons ?? {})) {
-    const refusal = hookRefusalMessageRefusal(sentence.message, params);
-    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['reasons', reason, 'message'], message: refusal });
-  }
-}));
+export const HookRefusalSchema = declaredRefusalEntrySchema('hook');
 
 export type HookRefusal = z.input<typeof HookRefusalSchema>;
+
+/**
+ * One declared text of a hook (#34374, ruling 6913660232 parameter 7): a
+ * sentence the hook writes into a record for people to read, picked in the
+ * ORGANIZATION's language when the hook asks for it (`ctx.text(key, params)`).
+ *
+ * The message is the source-locale sentence and the fallback; its translation
+ * is `hooks.<hook>.texts.<key>.message`, picked first, its `{{ NAME }}` holes
+ * filled from the call's `params` after — a declared refusal's posture
+ * ({@link HookRefusalSchema}), with the organization's language in place of
+ * the caller's. An entry that declares no `params` is plain text and a hole in
+ * it is refused. With `params`, a hole over an undeclared name is refused at
+ * parse; a hole holding logic, an unknown formatter, an empty hole and a
+ * `currency` formatter with no code are refused where the text is compiled —
+ * `os validate`, `compile` and the publish gate (`@objectstack/lint`
+ * `validate-hook-refusal-templates.ts`, which judges `texts` beside
+ * `refusals`). A translation whose holes do not render at run time is dropped
+ * for this `message`, filled. Built by the shared declared-entry factory
+ * (`declared-entry.zod.ts`), the refusal entry's core with no `status` or
+ * `reasons`, which the action half of #34374 reuses.
+ */
+export const HookTextSchema = declaredTextEntrySchema('hook');
+
+export type HookText = z.input<typeof HookTextSchema>;
 
 /**
  * Hook Lifecycle Events
@@ -493,7 +417,11 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  * write happened". They are dispatched before the enclosing transaction (if
  * there is one) commits, so a later refusal can roll the row back after the
  * hook has already run. Ruled on #7477 (2026-08-11) as the declared semantics,
- * not an implementation detail to be re-timed later.
+ * not an implementation detail to be re-timed later. A blocking hook RUNS at
+ * that dispatch; an `async: true` hook is dispatched there too but runs only
+ * once the unit commits, and never when it rolls back (#33760, see `async`
+ * below) — so for an async hook, what this section says about a hook that
+ * "has already run" does not apply.
  *
  * Four ordinary ways a write ends up inside such a unit:
  *   - the write door itself, when the object has a blocking (not `async`)
@@ -510,15 +438,20 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  *     around the write itself.
  *
  * What that means for a handler:
- *   - **Effects through the same engine are safe.** `ctx.api` / `ctx.ql` writes
- *     join the same transaction and roll back with everything else — which is
- *     exactly what makes an in-engine audit hook correct.
+ *   - **Effects through the same engine are safe — in a blocking hook.** A
+ *     blocking (not `async`) hook's `ctx.api` / `ctx.ql` writes join the same
+ *     transaction and roll back with everything else — which is exactly what
+ *     makes an in-engine audit hook correct. An `async: true` hook is the
+ *     exception: it runs after the unit commits and not at all if it rolls
+ *     back (see `async` below), so its writes are never part of the unit.
  *   - **Effects OUTSIDE the engine are the hook's own responsibility to make
  *     rollback-tolerant** — webhooks, notifications, external index updates,
  *     file deletion, email. On a rollback the row survives and the
  *     announcement has already gone out. Make such an effect idempotent and
  *     reconcilable, or enqueue it for a worker that re-reads the row before
- *     acting rather than trusting the event alone.
+ *     acting rather than trusting the event alone. This is a blocking hook's
+ *     burden: an `async: true` hook runs only after the commit, so it never
+ *     announces a write that was rolled back.
  *
  * The `before*` events carry no such caveat: they run before the write is
  * issued, and throwing from one refuses the operation.
@@ -719,6 +652,18 @@ export const HookSchema = lazySchema(() => strictObject(
    * If true, the hook runs in the background and does not block the transaction.
    * Only applicable for 'after*' events.
    * Default: false (Blocking)
+   *
+   * Fired inside a unit of work (see {@link HookEvent}), an async hook starts
+   * once the outermost unit commits, and is dropped without running when that
+   * unit rolls back; its `ctx.api` reads then see the committed write, and its
+   * writes run outside the unit, on their own connection. Outside any unit it
+   * starts at once, after the write. Nothing waits for it, and its errors
+   * never reach the caller.
+   *
+   * That waiting is for a WRITE event's hook (`afterInsert` / `afterUpdate` /
+   * `afterDelete`). A rollback does not undo a read, so an async `afterFind`
+   * hook starts when the read is dispatched, outside the unit, whatever the
+   * unit it was read in does next.
    */
   async: z.boolean().default(false).describe('Run specifically as fire-and-forget'),
 
@@ -849,6 +794,48 @@ export const HookSchema = lazySchema(() => strictObject(
   ),
 
   /**
+   * The hook's declared texts (#34374, ruling 6913660232 parameter 7): every
+   * sentence it writes into a record for people to read, keyed by a snake_case
+   * key its code asks for.
+   *
+   *   texts: {
+   *     follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] },
+   *   }
+   *
+   *   await ctx.api.object('crm_task').insert({ subject: await ctx.text('follow_up_subject', { lead }) });
+   *
+   * `ctx.text(key, params?)` answers the sentence in the ORGANIZATION's
+   * language, never the caller's (parameter 2): the Localization setting when
+   * somebody set it, else the app's `i18n.defaultLocale` (parameter 3, the one
+   * shared reader `resolveOrganizationLocale` the flow record write reads). It
+   * picks `hooks.<hook>.texts.<key>.message` first and fills the `{{ }}` holes
+   * from `params` after (parameter 1). With no translation, or no language,
+   * the declared sentence is answered and the hook goes on (parameter 5). A
+   * Localization setting that cannot be READ rejects the call: the
+   * organization's language may exist and could not be known. A string the
+   * hook builds itself is written as it is (parameter 4).
+   *
+   * A key the hook's source asks for literally that `texts` does not declare
+   * is refused at save; any other undeclared key is refused when the hook
+   * runs. Served on every path a hook runs on — a sandboxed `js` body and an
+   * in-process `handler` — and refused on a hook whose code cannot ask for one
+   * (an `expression` body, or neither a body nor a handler). Keyed by hook
+   * name, not by object. Absent: `ctx.text` has nothing to answer.
+   */
+  texts: z.record(
+    z.string().regex(HOOK_TEXT_KEY_PATTERN, {
+      message: 'A text key is snake_case (e.g. follow_up_subject) — the key the hook asks for with ctx.text',
+    }),
+    HookTextSchema,
+  ).optional().describe(
+    'Texts the hook writes into records, keyed by the snake_case key its code asks for with ctx.text(KEY, params): '
+    + '{ message, params? }. ctx.text answers the sentence in the organization\'s language (the Localization setting '
+    + 'when somebody set it, else the app\'s i18n.defaultLocale), translated through hooks.<hook>.texts.<key>.message '
+    + 'with the declared message as the fallback, its holes filled from params. A key not declared here is refused — '
+    + 'at save when the hook asks for it literally, otherwise at run time',
+  ),
+
+  /**
    * Execution identity for the hook's `ctx.api` data operations (#14010;
    * ruling 2026-09-01). The value semantics of `'system'` / `'user'` are
    * FlowSchema's, word for word (`automation/flow.zod.ts` `runAs`): `system`
@@ -923,11 +910,13 @@ export const HookSchema = lazySchema(() => strictObject(
   // [#25653] the second `runAs` with `body`, [#26170] the third `refusals`
   // with `body`, pairs no field-level refine can see together; [#32004] the
   // fourth refuses a body's `email.send` grant, which only the hook can judge,
-  // since an action's body takes it. A schema DERIVED from this one by overriding a key must use `.safeExtend()` (zod
+  // since an action's body takes it; [#34374] the fifth pairs `texts` with
+  // `body` / `handler`, as the third pairs `refusals`. A schema DERIVED from this one by overriding a key must use `.safeExtend()` (zod
   // refuses `.extend()` over a refined object), which is what keeps every
   // check on the derived schema too.
 }).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite)
-  .superRefine(refuseUndeclaredLiteralRefusalCode).superRefine(refuseHookBodyMailGrant));
+  .superRefine(refuseUndeclaredLiteralRefusalCode).superRefine(refuseHookBodyMailGrant)
+  .superRefine(refuseUndeclaredLiteralTextKey));
 
 /**
  * Hook Runtime Context
@@ -1359,7 +1348,16 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    *  - `mode` — `'record'` when this call is the caller's whole write (a
    *    single-id update/delete, a non-batch insert); `'per-row'` when it is
-   *    one of N dispatches for one caller write.
+   *    one of N dispatches for one caller write. A cascade delete removes a
+   *    relation's children as one predicate delete per chunk of 500 (ruling
+   *    6893661036), so a cascaded child is `'per-row'` with
+   *    `input.options.multi` set, and within one chunk of one relation every
+   *    child's `beforeDelete` runs before any of that chunk is gone (not
+   *    across chunks or relations). A chunk is deleted by id instead, each
+   *    child keeping `'record'`, when the caller's scope narrows it (a child
+   *    the caller may not read or delete), when the child's driver has no
+   *    `deleteMany` or is a floored external driver, and when the child
+   *    object is the organization object; so one cascade can show both.
    *  - `index` — 0-based position within that fan-out; always 0 when
    *    `mode` is `'record'`. `index === 0` is how a handler does batch-scoped
    *    work exactly once instead of N times.
@@ -1635,7 +1633,7 @@ export const HookContextSchema = lazySchema(() => z.object({
    * or the audit writer — can tell "the run / the person this write belongs
    * to" from "an unrelated caller".
    *
-   * Four marks, none authorizing, for four different questions:
+   * Five marks, none authorizing, for five different questions:
    *  - `flowRunId` — WHAT produced the write (a machine origin, no person);
    *  - `attributedUserId` — WHO is CREDITED for a write the system authorized
    *    (a person, but never the subject the write was authorized as);
@@ -1643,6 +1641,20 @@ export const HookContextSchema = lazySchema(() => z.object({
    *    human in `session.userId` (ADR-0090 D10 rule 4's `performed_by`; the
    *    `on_behalf_of` half is that same `session.userId`, so it is not carried
    *    a second time here);
+   *  - `performedByAgentId`, with `performedByConversationId` and
+   *    `performedByConfirmationId` — WHICH IN-PRODUCT AI performed a write for
+   *    the signed-in person in `session.userId`, in which conversation, and
+   *    under which confirmation. Rule 4's attribution from its second
+   *    producer, the server-constructed in-product AI path, whose write runs as
+   *    that person (owner ruling on objectstack-ai/cloud#3826, 「3826 照建议
+   *    （征询版）」, carried by #33694 and #33786); each key is copied from its
+   *    `ExecutionContext.performedBy` sibling, as `performedByClientId` is from
+   *    `clientId`. The record-write audit writer records the agent as
+   *    `performed_by` beside `on_behalf_of`, the same key it records
+   *    `performedByClientId` in; only beside the agent does it also record
+   *    the conversation as `conversation_id` and the confirmation as
+   *    `confirmation_id` (#33694). What a reader can and cannot tell from
+   *    such a row is stated on `ExecutionContext.performedBy`;
    *  - `impersonatedBy` — WHICH ADMINISTRATOR made a write from an
    *    impersonation session, authorized as the impersonated user in
    *    `session.userId`.
@@ -1659,7 +1671,10 @@ export const HookContextSchema = lazySchema(() => z.object({
   provenance: z.object({
     flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request.'),
     attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
-    performedByClientId: z.string().optional().describe('[ADR-0090 D10 rule 4] The AGENT that performed this write — the OAuth client (`azp`, a registered sys_oauth_application id) the access token was issued to, when an AI client acted on behalf of the human in `session.userId`. Copied from `ExecutionContext.performedBy.clientId`, which only the /mcp OAuth door sets. ATTRIBUTION ONLY, exactly like `attributedUserId`: the audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every non-delegated write, so a hook tells the two apart by the key being there rather than by guesswork.'),
+    performedByClientId: z.string().optional().describe('[ADR-0090 D10 rule 4] The AGENT that performed this write — the OAuth client (`azp`, the `client_id` of a registered sys_oauth_application) the access token was issued to, when an AI client acted on behalf of the human in `session.userId`. Copied from `ExecutionContext.performedBy.clientId`, which only the /mcp OAuth door sets. ATTRIBUTION ONLY, exactly like `attributedUserId`: the audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every non-delegated write, so a hook tells the two apart by the key being there rather than by guesswork.'),
+    performedByAgentId: z.string().optional().describe('The in-product AI agent that performed this write for the signed-in person in `session.userId`, whose write it runs as: the agent the chat runs as. Copied from `ExecutionContext.performedBy.agentId`, which only the server-constructed in-product AI path sets, after resolving it as the agent it actually ran. ATTRIBUTION ONLY, exactly like `performedByClientId`: the record-write audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`, the key an OAuth client id is also recorded in (when `performedByClientId` is also present the row records the client instead). A value matching the `client_id` of an existing `sys_oauth_application` row is an OAuth client, and a row carrying `conversation_id` or `confirmation_id` names an in-product agent; a row meeting neither may name an agent or the client of a since-deleted application, which the row alone cannot tell apart, and the contract does not keep an agent name and a `client_id` from being the same string (where both tells apply the mark decides, and a matching value with no mark is the client unless an agent shares that string); no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every write the person made themselves.'),
+    performedByConversationId: z.string().optional().describe('The AI conversation an in-product AI write was performed in. Copied from `ExecutionContext.performedBy.conversationId`, set beside `performedByAgentId`. ATTRIBUTION ONLY: the record-write audit writer records it as `sys_audit_log.metadata.conversation_id`, only when `performed_by` names the in-product agent; no security middleware reads it.'),
+    performedByConfirmationId: z.string().optional().describe('The confirmation the person gave before an AI-performed write ran: the id of the pending item their approval decided. Copied from `ExecutionContext.performedBy.confirmationId`; absent when the write needed no confirmation. ATTRIBUTION ONLY: the record-write audit writer records it as `sys_audit_log.metadata.confirmation_id`, only when `performed_by` names the in-product agent; no security middleware reads it, and it is never the authorization for the write, which runs as the person with every gate re-checked.'),
     impersonatedBy: z.string().optional().describe('The ADMINISTRATOR (a sys_user id) who made this write from an impersonation session, while `session.userId` is the impersonated user the write is authorized as. Copied from `ExecutionContext.impersonatedBy`, which the shared request-identity resolution sets from the session read. ATTRIBUTION ONLY, exactly like `performedByClientId`: the audit writer records it as `sys_audit_log.metadata.impersonated_by` and on the sys_activity row; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every write the user made themselves.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
@@ -1752,9 +1767,14 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * The engine deletes each child AS THE CALLER: the cascade recurses through
    * the public delete with the caller's own context, so on the path a real
-   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user`,
-   * `ctx.session` and `ctx.input` are identical between a child the cascade
-   * removes and a user's hand delete of that same child. An app guard that
+   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user` and
+   * `ctx.session` are identical between a child the cascade removes and a
+   * user's hand delete of that same child. `ctx.input` and `ctx.dispatch`
+   * tell nothing apart either: a batched child carries the same
+   * `{ where: { id: { $in } }, multi: true }` options and `'per-row'` mode a
+   * user's own predicate delete of those rows carries, and a child deleted by
+   * id the same `{ where: { id } }` and `'record'` a hand delete carries. An
+   * app guard that
    * freezes settled records (a quote's lines once the quote is accepted) had
    * no declared way to refuse the hand delete while yielding to the cascade,
    * and refusing both leaves the parent, and every record whose own cascade
@@ -1765,8 +1785,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Unlike `referentialFieldClear`, this fact has no `__`-prefixed twin on the
    * ExecutionContext, and nothing on that envelope is the contract. The engine
    * recognises the delete it issued through an engine-private ambient record
-   * keyed on the exact object and id its cascade is deleting, claimed by that
-   * one delete. Two consequences follow, and both are part of the contract:
+   * keyed on the exact object and id (or, for a batch of children, the exact
+   * id set) its cascade is deleting, claimed by that one delete. Two
+   * consequences follow, and both are part of the contract:
    *
    *  - it does not ride the envelope, so a write a hook issues through
    *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:

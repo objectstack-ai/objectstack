@@ -417,18 +417,22 @@ for await (const frame of await client.ai.agents.chatStream('build', { messages 
 // decision parks here instead of executing.
 await client.ai.pendingActions.list({ status: 'pending', limit: 20 });
 await client.ai.pendingActions.get('pa_1');
+// Listing takes `ai:read`. Deciding (approve or reject) is the person's own
+// act: only the person the call ran as decides their item, on their signed-in
+// session to the app. Another user's `ai:approve` does not decide it; a client
+// on an API key or token (even the person's own) lists, it does not decide; an
+// AI identity is refused too. Handle the refusal.
 const outcome = await client.ai.pendingActions.approve('pa_1');
 // CHECK `outcome.status`: approve runs the tool, and a tool that fails comes
 // back { status: 'failed', error } on HTTP 200 — the approval succeeded, the
 // execution did not. Code that reads only `res.ok` calls that a success.
 if (outcome.status === 'failed') console.error(outcome.error);
 await client.ai.pendingActions.reject('pa_1', 'wrong account');
-// Listing takes `ai:read`, deciding takes `ai:approve` — a caller that can see
-// the queue may still be refused on approve. Handle the 403.
 
 // In a React chat UI prefer `useChat()` (`@ai-sdk/react`) over `ai.chatStream`:
 // it speaks the same protocol and owns message state. These methods are for
-// everything that is not a component — server code, jobs, CLIs, tests.
+// everything that is not a component — server code, jobs, CLIs, tests
+// (approve and reject excepted: those are the person's own act in the app).
 //
 // #3718 history: `client.ai` used to hold `nlq`, `suggest` and `insights`,
 // building /api/v1/ai/{nlq,suggest,insights}. No server in any repo ever

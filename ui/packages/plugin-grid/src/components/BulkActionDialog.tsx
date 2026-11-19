@@ -29,7 +29,7 @@ import { getLazyFieldWidget } from '@object-ui/fields';
 // Their TSDoc carries the rationale that used to be repeated in each copy.
 // See `paramNeedsDependentValues` below for why this surface ORs them;
 // ⛔ never copied into a local literal, and ⛔ never merged into one set.
-import { CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, declaredNameField, getRecordDisplayName, recordDisplayValueAt } from '@object-ui/core';
+import { CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, csvBlob, declaredNameField, getRecordDisplayName, recordDisplayValueAt } from '@object-ui/core';
 import type { BulkActionDef, BulkActionParam } from '@object-ui/types';
 import { useBulkExecutor, type BulkExecutorOptions, type BulkResult } from '../hooks/useBulkExecutor';
 import { hasMultiValueShape, type MultiValueFieldDef } from '../hooks/multiValueFields';
@@ -343,7 +343,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
     const csv = [header, ...result.errors.map(e =>
       `${e.id},"${e.error.replace(/"/g, '""')}"`,
     )].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = csvBlob(csv);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -562,7 +562,32 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </div>
         )}
 
-        {step === 'result' && result && (
+        {step === 'result' && result?.aggregateRejection && (
+          /* A rejected aggregate run (objectui#3139) is ONE outcome for the
+             whole selection (objectstack#34173): the one call cannot say which
+             rows it wrote before it stopped, so the panel reports no per-row
+             count ("Succeeded 0 / N" would be false after a partial move) and
+             no per-row list — it says the action did not complete, and shows
+             the rejection's message once. */
+          <div className="space-y-3 text-sm" data-testid="bulk-aggregate-rejection">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+              <span>
+                {t('grid.bulk.aggregateNotCompleted', {
+                  defaultValue: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
+                })}
+              </span>
+            </div>
+            <p
+              className="rounded border bg-destructive/5 p-2 text-xs break-words"
+              data-testid="bulk-aggregate-rejection-message"
+            >
+              {result.aggregateRejection.message}
+            </p>
+          </div>
+        )}
+
+        {step === 'result' && result && !result.aggregateRejection && (
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2">
               {result.failed === 0 ? (
@@ -613,7 +638,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
                         <div className="min-w-0 flex-1">
                           <div className="break-words">
-                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.error}
+                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
                           </div>
                         </div>
                         {/* A plain `custom` callout has nothing to re-run, but

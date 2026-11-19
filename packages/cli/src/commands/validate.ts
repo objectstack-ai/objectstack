@@ -23,7 +23,11 @@ import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import {
+  preflightDeclaredCapabilities,
+  preflightProviderWiring,
+  renderCapabilityMessage,
+} from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { collectSeedFiles } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
@@ -1035,7 +1039,16 @@ export default class Validate extends Command {
         projectDir: dirname(absolutePath),
       });
       const capProviderErrors = capProviderPreflight.errors;
-      capProviderWarnings = capProviderPreflight.warnings.map((c) => ({
+      // An `enterprise` token whose package resolves is still enforced by
+      // nothing until a `plugins[]` entry provides it: no runtime mounts an
+      // enterprise provider from `requires` (`preflightProviderWiring`).
+      const capProviderWiring = await preflightProviderWiring({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
+        plugins: (config as { plugins?: unknown }).plugins,
+        projectDir: dirname(absolutePath),
+      });
+      capProviderWarnings = [...capProviderPreflight.warnings, ...capProviderWiring].map((c) => ({
         token: c.token,
         message: renderCapabilityMessage(c),
       }));

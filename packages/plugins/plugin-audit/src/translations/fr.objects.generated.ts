@@ -41,11 +41,12 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Changement de statut d’administrateur de plateforme",
           action_invocation: "Appel d’action",
           package_uninstall: "Désinstallation de package",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "Import de package non géré",
+          credential_use: "Utilisation d’identifiants",
+          scim_refused: "Requête SCIM refusée",
+          audit_signing_key_change: "Changement de clé de signature d’audit",
+          dataset_query: "Requête de jeu de données",
+          scim_manager_unresolved: "Responsable SCIM non résolu"
         }
       },
       user_id: {

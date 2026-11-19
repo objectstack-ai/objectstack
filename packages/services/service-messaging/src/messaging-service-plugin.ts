@@ -3,9 +3,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
+import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
 import { IN_APP_MESSAGE_ROUTE, registerInAppMessageRoutes } from './in-app-message-routes.js';
+import { MY_PREFERENCES_ROUTE, registerMyPreferencesRoutes } from './my-preferences-routes.js';
 import { resolveMessagingCaller, type MessagingCallerSources } from './messaging-request-caller.js';
 import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
@@ -153,6 +155,16 @@ export interface MessagingServicePluginOptions {
      * `prefix.` entry for a prefix match (default none).
      */
     mandatoryTopics?: readonly string[];
+    /**
+     * The outbound-request guard's policy for the HTTP outbox — every webhook
+     * delivery and durable flow `http` callout connects through it. Omitted,
+     * the open-core default applies: only public addresses, plus the targets
+     * the operator lists in `OS_EGRESS_ALLOWED_TARGETS`; link-local and cloud
+     * metadata addresses are never reachable. A multi-tenant host binds a
+     * stricter policy here (it is asked per organization and source). A
+     * malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -223,13 +235,18 @@ export class MessagingServicePlugin implements Plugin {
     type = 'standard' as const;
     dependencies = ['com.objectstack.engine.objectql'];
 
-    private readonly options: Required<MessagingServicePluginOptions>;
+    private readonly options: Required<Omit<MessagingServicePluginOptions, 'egressPolicy'>>;
+    private readonly egressPolicy?: EgressPolicy;
+    /** The outbound-request guard the HTTP outbox sends through — installed at init, or the boot fails. */
+    private egress?: EgressGuard;
     private dispatcher?: NotificationDispatcher;
     private httpDispatcher?: HttpDispatcher;
     /** The engine the template placement hooks are bound to — unbound on teardown. */
     private placementEngine?: PlacementHookEngine;
 
     constructor(options: MessagingServicePluginOptions = {}) {
+        const { egressPolicy, ...rest } = options;
+        this.egressPolicy = egressPolicy;
         this.options = {
             registerInbox: true,
             reliableDelivery: true,
@@ -238,11 +255,17 @@ export class MessagingServicePlugin implements Plugin {
             dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
             dispatchSoleWriter: false,
             mandatoryTopics: [],
-            ...options,
+            ...rest,
         };
     }
 
     async init(ctx: PluginContext): Promise<void> {
+        // The outbound-request guard, installed before anything can send: a
+        // malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which the
+        // guard cannot prove it judges every connection, fails the boot here,
+        // and there is no unguarded fallback for the HTTP outbox to take.
+        this.egress = await installEgressGuard({ policy: this.egressPolicy, logger: ctx.logger });
+
         // Shared lazy data-engine resolver — used to persist the L2
         // `sys_notification` event in `emit()`, by the inbox channel to
         // materialize rows, and (at kernel:ready) to back the outbox. Resolved
@@ -631,6 +654,7 @@ export class MessagingServicePlugin implements Plugin {
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
+                    egress: this.egress,
                 });
                 this.httpDispatcher.start();
                 ctx.logger.info(
@@ -675,9 +699,10 @@ export class MessagingServicePlugin implements Plugin {
         const http = optional<IHttpServer>('http-server');
         if (!http) {
             ctx.logger.warn(
-                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
-                    `nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) is mounted: the console draws notification topic ` +
-                    'and channel as plain text boxes, and the Setup action "Send in-app message" has nothing to call.',
+                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}), ` +
+                    `the caller's own preferences (GET ${MY_PREFERENCES_ROUTE}) nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) ` +
+                    'is mounted: the console draws notification topic and channel as plain text boxes, the Account page Notification ' +
+                    'Settings has nothing to read, and the Setup action "Send in-app message" has nothing to call.',
             );
             return;
         }
@@ -691,8 +716,7 @@ export class MessagingServicePlugin implements Plugin {
                 ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
                 : undefined,
         };
-        registerPreferenceOptionsRoutes(http, {
-            ...callerSources,
+        const optionSources = {
             knownChannels: () => service.getKnownChannels(),
             getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
             readFlows: async () => {
@@ -701,8 +725,18 @@ export class MessagingServicePlugin implements Plugin {
                 const raw = await protocol.getMetaItems({ type: 'flow' });
                 return Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | null)?.items ?? []);
             },
-        });
+        };
+        registerPreferenceOptionsRoutes(http, { ...callerSources, ...optionSources });
         ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
+        // [rulings 6968686390 and 6969143776] The caller's own effective
+        // preferences, decided by the same resolver `emit` filters with.
+        registerMyPreferencesRoutes(http, {
+            ...callerSources,
+            ...optionSources,
+            effectivePreferences: (userId, organizationId, topics, channels) =>
+                service.effectivePreferencesFor(userId, organizationId, topics, channels),
+        });
+        ctx.logger.info(`[messaging] caller's own preferences mounted at GET ${MY_PREFERENCES_ROUTE}`);
         registerInAppMessageRoutes(http, {
             resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
             getMessaging: () => service,

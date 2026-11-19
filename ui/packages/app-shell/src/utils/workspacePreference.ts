@@ -152,6 +152,16 @@ export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<Prefer
 });
 
 /**
+ * Whether deciding a request on its page opens the next one of the approvals
+ * queue it was opened from (objectstack#34586) — the reader's 「处理后打开下一条」,
+ * across requests (scope `user`). With no choice: on.
+ */
+export const APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
+  name: 'approvals.queue.open-next',
+  codec: switchCodec,
+});
+
+/**
  * How the reader arranged the record page's related panels, per object
  * (scope `object:OBJECT_NAME`, objectstack#27055, objectstack#27524):
  * `{ v, order, hidden, basedOn }` — plus `seen`, the first-seen stamps of

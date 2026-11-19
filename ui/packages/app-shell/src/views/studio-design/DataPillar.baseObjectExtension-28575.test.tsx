@@ -237,7 +237,9 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     // Wanted 3 — it shows in the Form at once, and its inspector edits the extension.
     expect(cardOf('Region')).toHaveLength(1);
     const inspector = await screen.findByTestId('data-field-inspector');
-    expect(within(inspector).getByText('region__c')).toBeInTheDocument();
+    // objectstack#35018 — the header names the field by its label; its machine name is under 开发者信息.
+    expect(within(inspector.querySelector('header') as HTMLElement).getByText('Region')).toBeInTheDocument();
+    expect(within(within(inspector).getByTestId('field-developer-section')).getByDisplayValue('region__c')).toBeInTheDocument();
     const label = within(inspector).getByTestId('field-label-input');
     expect(label).toBeEnabled();
     expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();

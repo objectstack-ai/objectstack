@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { FieldType, SelectOptionSchema } from '../data/field.zod';
+import { FieldType, SelectOptionSchema, multiDeclarableFieldTypes } from '../data/field.zod';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
@@ -211,8 +211,8 @@ const BLUEPRINT_DEFAULT_VALUE_ADMITTED = (() => {
 
 /** Which types take a default and what each takes, read by both describes. */
 const DEFAULT_VALUE_TYPE_RULE = `It must fit \`type\`, and only these types take one: ${BLUEPRINT_DEFAULT_VALUE_ADMITTED}. `
-  + 'Every other type is refused by name: a date is fixed at design time, a reference or file names no record yet, a '
-  + 'multi-value field stores a list, a formula / summary / autonumber is computed, and a credential, signature or '
+  + 'Every other type is refused by name, and so is a "select" with `multiple: true`: a date is fixed at design time, a '
+  + 'reference or file names no record yet, a multi-value field stores a list, a formula / summary / autonumber is computed, and a credential, signature or '
   + 'structured value has no one value right for every record.';
 
 /**
@@ -274,7 +274,7 @@ const STORED_EXPRESSION_RULE =
  */
 function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
   if (typeof field !== 'object' || field === null) return;
-  const { name, type, options, defaultValue } = field as Record<string, unknown>;
+  const { name, type, options, defaultValue, multiple } = field as Record<string, unknown>;
   // Absence. The strict mirror's null is stripped before this schema reads it,
   // and a lenient null is refused by the key's own union.
   if (defaultValue === undefined || defaultValue === null) return;
@@ -283,6 +283,19 @@ function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
   const subject = `Field "${typeof name === 'string' ? name : '<unnamed>'}" (${type})`;
   const shown = JSON.stringify(defaultValue) ?? String(defaultValue);
   const refuse = (message: string) => ctx.addIssue({ code: 'custom', path: ['defaultValue'], message });
+
+  // An admitted type that `multiple: true` makes multi-value ("select") stores
+  // a list, which this scalar key cannot carry, and the built field judges its
+  // default against the list contract. True of a token as of a literal, so it is
+  // judged first. `radio` is left to the `multiple` refusal: dropping the flag
+  // is its remedy, and the single-value default is then judged as on any radio.
+  // A type that takes no default keeps its own reason.
+  if (multiple === true && 'takes' in rule && type !== 'radio' && multiDeclarableFieldTypes().has(type)) {
+    refuse(`${subject}: a "${type}" field with \`multiple: true\` takes no defaultValue in a blueprint, because it stores a `
+      + 'list of values, and a blueprint default is one value. Remove defaultValue, or drop `multiple` for a '
+      + 'single-value field.');
+    return;
+  }
 
   // A token is judged before the type. On a type that takes no default, that
   // type's reason is false of a token (`current_user` names no record, `NOW()`
@@ -316,6 +329,107 @@ function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
 }
 
 /**
+ * The refusal of `multiple: true` on a type that cannot hold several values,
+ * judged against `FieldSchema`'s own declarable set
+ * ({@link multiDeclarableFieldTypes}), so `multiple: true` is refused here on
+ * exactly the types `FieldSchema` refuses it on (the blueprint test pins every
+ * `FieldType`). `radio` is in that set and is refused by its own branch, as
+ * `FieldSchema` refuses it: a radio group is single-choice. Each issue lands
+ * on the field's `multiple`. What `multiple: true` rules out on the REST of a
+ * field is judged by the two rules beside it (a `defaultValue`, an option
+ * `kind`), each pinned against `FieldSchema` on its own.
+ *
+ * Guarded like the `defaultValue` refusal: it runs on every parse, so a
+ * `type` outside `FieldType` is left to that key's own issue.
+ */
+function refuseUndeclarableMultiple(field: unknown, ctx: z.RefinementCtx): void {
+  if (typeof field !== 'object' || field === null) return;
+  const { name, type, multiple } = field as Record<string, unknown>;
+  if (multiple !== true || typeof type !== 'string' || !(FieldType.options as readonly string[]).includes(type)) return;
+  const subject = `Field "${typeof name === 'string' ? name : '<unnamed>'}" (${type})`;
+  const declarable = multiDeclarableFieldTypes();
+  const remedies = [...declarable].filter((t) => t !== 'radio').map((t) => `"${t}"`).join(' / ');
+  const refuse = (message: string) => ctx.addIssue({ code: 'custom', path: ['multiple'], message });
+  if (type === 'radio') {
+    refuse(`${subject}: a "radio" field cannot take \`multiple: true\`, because a radio group is single-choice: the `
+      + 'built field refuses the pair. For several chosen options use "checkboxes" (all options visible), '
+      + '"multiselect" (dropdown) or "tags" (free-form values); for one, drop `multiple`.');
+    return;
+  }
+  if (declarable.has(type)) return;
+  refuse(`${subject}: \`multiple: true\` is declarable only on ${remedies}, and a "${type}" field holds one value: `
+    + 'the built field refuses the pair. For several related records use a "lookup" with `multiple: true`, for '
+    + 'several files a "file" or "image" with `multiple: true`, for several option codes a "multiselect" / '
+    + '"checkboxes" / "tags" field. For a single value, drop `multiple`.');
+}
+
+/**
+ * The refusal of an option `kind` on a `select` with `multiple: true`
+ * (`FieldSchema`'s #23809 rule, in its wording): a lifecycle kind says where
+ * ONE record stands, and a multi-value select holds no single option code per
+ * record, so the built field refuses it. One issue per option that declares a
+ * kind, at that option's `kind`. `radio` with `multiple: true` is left to the
+ * `multiple` refusal, whose remedy (drop the flag) makes the kinds legal; the
+ * `multiselect` / `checkboxes` / `tags` kind case is outside this rule.
+ */
+function refuseKindOnMultiValueSelect(field: unknown, ctx: z.RefinementCtx): void {
+  if (typeof field !== 'object' || field === null) return;
+  const { name, type, options, multiple } = field as Record<string, unknown>;
+  if (type !== 'select' || multiple !== true || !Array.isArray(options)) return;
+  const subject = `Field "${typeof name === 'string' ? name : '<unnamed>'}" (select)`;
+  options.forEach((option: unknown, index: number) => {
+    if (typeof option !== 'object' || option === null) return;
+    const { value, kind } = option as Record<string, unknown>;
+    if (kind === undefined || kind === null) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['options', index, 'kind'],
+      message: `${subject}: option '${String(value)}' declares \`kind: '${String(kind)}'\`, but \`kind\` is only valid on `
+        + 'the options of a single-value `select` or `radio` field (this field is `select` with `multiple: true`): it '
+        + 'says where one record stands in its lifecycle, and this field holds no single option code per record. '
+        + 'Delete `kind`, or make the field a single-value `select`.',
+    });
+  });
+}
+
+/** The cross-key rules of a blueprint field, in one refinement. */
+function refineBlueprintField(field: unknown, ctx: z.RefinementCtx): void {
+  refuseUnfitDefaultValue(field, ctx);
+  refuseUndeclarableMultiple(field, ctx);
+  refuseKindOnMultiValueSelect(field, ctx);
+}
+
+/**
+ * Where the three media / multi-value keys apply and what they do on the built
+ * field, read by both describes so the lenient field and the strict mirror
+ * teach the same thing. The type lists are pinned against `FieldSchema`'s own
+ * sets (`multiDeclarableFieldTypes`, `FILE_REFERENCE_TYPES`) by the blueprint
+ * test, not imported: the strict mirror is built when this module loads, and
+ * the declarable set is computed on first use (see its docblock).
+ *
+ * No describe says the field "is built with" the key: nothing in this
+ * repository turns a blueprint field into an object field, so the wording is
+ * the one `defaultValue`'s describe uses, "carried into the built field by the
+ * applier".
+ */
+const MULTIPLE_RULE =
+  'Several values in one field: true makes the built field hold a list — several related records on a "lookup" / '
+  + '"user", several files on a "file" / "image", several chosen options on a "select". Declarable only on "select" / '
+  + '"lookup" / "user" / "file" / "image" (and redundantly on "multiselect" / "checkboxes" / "tags", which are '
+  + 'lists already); `multiple: true` on any other type, "radio" included, is refused by name. A multi-value '
+  + '"select" takes no defaultValue, and its options take no `kind` (a lifecycle is one value per record, so it is '
+  + 'never an object\'s stage field). Carried into the built field by the applier as its `multiple`.';
+const MEDIA_TYPES_PHRASE = 'a media field ("file" / "image" / "avatar" / "video" / "audio")';
+const ACCEPT_RULE =
+  `The upload types ${MEDIA_TYPES_PHRASE} permits, as MIME types or extensions, e.g. ["application/pdf", "image/*", `
+  + '".ofd"]. Read only on the media family: on any other type it parses and nothing reads it. Carried into the '
+  + 'built field by the applier as its `accept`, which the built field offers to the file picker and checks on write.';
+const MAX_SIZE_RULE =
+  `The largest file ${MEDIA_TYPES_PHRASE} takes, in BYTES (a positive integer: 10485760 for 10 MB). Read only on the `
+  + 'media family: on any other type it parses and nothing reads it. Carried into the built field by the applier as '
+  + 'its `maxSize`, which the built field checks on write against the stored file size.';
+
+/**
  * A proposed field on a blueprint object. `reference` carries the target
  * object for `lookup` / `master_detail` types — relationships are expressed
  * inline as reference fields rather than in a separate block.
@@ -347,7 +461,18 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   // rule across `type` / `options` and this key, so it is the refinement below.
   defaultValue: z.union([z.boolean(), z.number(), z.string()]).optional()
     .describe(`The built field's default: the value a new record gets when it is created without one, carried into the object field as its \`defaultValue\` and stored as written. ${DEFAULT_VALUE_TYPE_RULE} ${booleanFlagRule('omit `required` or set it false')} Omit it for a field with no default.`),
-}).superRefine(refuseUnfitDefaultValue, { when: () => true }));
+  // ⛔ The three keys below must stay in lockstep with the strict
+  // `StrictField` keys of the same names, and their value shapes with
+  // `FieldSchema`'s (`multiple` without its `.default(false)`, so a field that
+  // omits it parses as before). The field key-parity pin and the FieldSchema
+  // value-parity pin fail if either side drifts.
+  multiple: z.boolean().optional()
+    .describe(`${MULTIPLE_RULE} Omit it for a single value.`),
+  accept: z.array(z.string()).optional()
+    .describe(`${ACCEPT_RULE} Omit it to permit any type.`),
+  maxSize: z.number().int().positive().optional()
+    .describe(`${MAX_SIZE_RULE} Omit it to set no limit on the field.`),
+}).superRefine(refineBlueprintField, { when: () => true }));
 export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
 /**
@@ -760,6 +885,16 @@ const StrictField = z.object({
   // if either side drops the key.
   defaultValue: z.union([z.boolean(), z.number(), z.string()]).nullable()
     .describe(`The built field's default, or null for none: the value a new record gets when it is created without one, carried into the object field as its \`defaultValue\` and stored as written. ${DEFAULT_VALUE_TYPE_RULE} Null on every other type. ${booleanFlagRule('`required` null or false')}`),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema` keys of the
+  // same names. Strict mode makes each key required, so the model decides on
+  // every field; the cross-key rule (`multiple` by type) is the lenient field's
+  // refinement, run when `apply_blueprint` parses, and refuses BY NAME.
+  multiple: z.boolean().nullable()
+    .describe(`${MULTIPLE_RULE} Null (or false) for a single value.`),
+  accept: z.array(z.string()).nullable()
+    .describe(`${ACCEPT_RULE} Null to permit any type, and null on every non-media field.`),
+  maxSize: z.number().int().positive().nullable()
+    .describe(`${MAX_SIZE_RULE} Null to set no limit, and null on every non-media field.`),
 });
 
 const StrictObject = z.object({

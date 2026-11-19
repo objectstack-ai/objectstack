@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+
+// Section names are read inside the <form>: the section navigation above it
+// repeats each name once two or more sections are drawn (objectstack#34605).
+const inForm = () => within(document.querySelector('form') as HTMLElement);
 import { ObjectForm } from './ObjectForm';
 import { registerAllFields } from '@object-ui/fields';
 import React from 'react';
@@ -145,9 +149,9 @@ describe('ObjectForm Integration', () => {
         );
 
         await waitFor(() => {
-            expect(screen.getByText('Contact Info')).toBeTruthy();
+            expect(inForm().getByText('Contact Info')).toBeTruthy();
         });
-        expect(screen.getByText('Billing')).toBeTruthy();
+        expect(inForm().getByText('Billing')).toBeTruthy();
         // All fields still render, including the ungrouped one.
         expect(container.querySelector('input[name="email"]')).toBeTruthy();
         expect(container.querySelector('input[name="amount"]')).toBeTruthy();
@@ -186,7 +190,7 @@ describe('ObjectForm Integration', () => {
 
         // Collapse the Contact Info group → its email field leaves the DOM,
         // while the other group's field and the ungrouped field stay.
-        fireEvent.click(screen.getByText('Contact Info'));
+        fireEvent.click(inForm().getByText('Contact Info'));
         await waitFor(() => {
             expect(container.querySelector('input[name="email"]')).toBeNull();
         });
@@ -194,7 +198,7 @@ describe('ObjectForm Integration', () => {
         expect(container.querySelector('[name="notes"]')).toBeTruthy();
 
         // Expand again → the field returns.
-        fireEvent.click(screen.getByText('Contact Info'));
+        fireEvent.click(inForm().getByText('Contact Info'));
         await waitFor(() => {
             expect(container.querySelector('input[name="email"]')).toBeTruthy();
         });
@@ -337,5 +341,40 @@ describe('ObjectForm Integration', () => {
             expect(screen.getByTestId('md-form-submit')).toBeTruthy();
         });
         expect(screen.getByText('Lines')).toBeTruthy();
+    });
+});
+
+// objectstack#34807 — the console's draft preview marks a field only the draft
+// declares `_draftOnly: true` (an underscore-private convention with
+// `@object-ui/app-shell`, never an authoring key). The form draws it, disabled.
+describe('ObjectForm draws a `_draftOnly` field disabled (objectstack#34807)', () => {
+    const renderCreate = (priority: Record<string, unknown>) => {
+        const ds: any = {
+            getObjectSchema: vi.fn().mockResolvedValue({
+                name: 'tracker_task',
+                fields: { title: { type: 'text', label: 'Title' }, priority },
+            }),
+            create: vi.fn(),
+        };
+        render(
+            <ObjectForm
+                schema={{ type: 'object-form', objectName: 'tracker_task', mode: 'create', fields: ['title', 'priority'] }}
+                dataSource={ds}
+            />,
+        );
+    };
+    const input = (name: string) => document.querySelector(`input[name="${name}"]`) as HTMLInputElement | null;
+
+    it('a marked field is drawn, and disabled', async () => {
+        renderCreate({ type: 'text', label: 'Priority', _draftOnly: true });
+        await waitFor(() => expect(screen.getByText('Priority')).toBeTruthy());
+        expect(input('priority')?.disabled).toBe(true);
+        expect(input('title')?.disabled).toBe(false);
+    });
+
+    it('CONTROL: the same field without the marker is editable', async () => {
+        renderCreate({ type: 'text', label: 'Priority' });
+        await waitFor(() => expect(screen.getByText('Priority')).toBeTruthy());
+        expect(input('priority')?.disabled).toBe(false);
     });
 });

@@ -26,7 +26,9 @@ function makeRecordingDriver() {
     return true;
   };
   const driver: any = {
-    name: 'memory', version: '0.0.0', supports: {},
+    // [#33876] Declares the `readableIdsLeaf` bit: a nested-relation
+    // condition on a read verb is refused up front on a driver without it.
+    name: 'memory', version: '0.0.0', supports: { readableIdsLeaf: true },
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {

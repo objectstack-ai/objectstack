@@ -33,15 +33,22 @@
  *    now only through a pre-normalized declaration) re-probes for duplicates
  *    and refuses over them, leaving the old index exactly as it was.
  * 4. A column entry this transport cannot perform (it needs the SQLite table
- *    rebuild) is skipped, not reported applied.
+ *    rebuild: a tightened NOT NULL) is skipped, not reported applied.
  * 5. Once the report is applied, the remote face reports no drift, and the
  *    local face over the same file agrees.
+ * 6. [#33724] `relax_not_null` is applied in place, with libSQL's own
+ *    `ALTER TABLE … ALTER COLUMN … TO …` (ruling 6915086281, letter A): only
+ *    the NOT NULL clause leaves the stored definition, the rows, the indexes,
+ *    the DEFAULT and the CHECK stay, and the entry is reported applied only on
+ *    a read-back. A statement the database refuses, or a splice the plan did
+ *    not predict, rolls back whole and is skipped. Through the install's
+ *    declared relax (`relaxDeclaredNotNull`) too, and never by a boot.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
 import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
@@ -97,6 +104,25 @@ const indexesOf = async (file: string, table: string) =>
       .map((r) => [String(r.name), String(r.sql)]),
   );
 
+/** The table's stored `CREATE TABLE`, read through a connection of its own. */
+const tableSqlOf = async (file: string, table: string) =>
+  String((await secondConnection(file, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '${table}'`))[0]?.sql);
+/** `name → { type, notNull, dflt }` from `pragma_table_info`, read through a connection of its own. */
+const columnFactsOf = async (file: string, table: string) =>
+  Object.fromEntries(
+    (await secondConnection(file, `SELECT name, type, "notnull" AS nn, dflt_value FROM pragma_table_info('${table}')`))
+      .map((r) => [String(r.name), { type: r.type, notNull: Number(r.nn) === 1, dflt: r.dflt_value }]),
+  );
+/** Run one statement on the file through a connection of its own: its error message, or `'ok'`. */
+async function tryOnDisk(file: string, sql: string): Promise<string> {
+  try {
+    await onDisk(file, sql);
+    return 'ok';
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
 /** `t` as the release declares it: no `legacy`. */
 const T = { name: 't', fields: { name: { type: 'text' } } };
 
@@ -120,13 +146,14 @@ async function withLegacyColumn(): Promise<{ file: string; remote: TursoDriver; 
 describe('drop_column', () => {
   it('drops the column and every index keyed on it, keeping the rows', async () => {
     const { file, remote, drop } = await withLegacyColumn();
-    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_legacy', 'idx_t_name_legacy']);
+    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_created_at_id', 'idx_t_legacy', 'idx_t_name_legacy']);
 
     const { applied, skipped } = await remote.applyMigrationEntries([drop], { allowDestructive: true });
 
     expect([applied, skipped]).toEqual([[drop], []]);
     expect(await columnsOf(file, 't')).not.toContain('legacy');
-    expect(await indexesOf(file, 't')).toEqual({});
+    // [#33695] The implicit default-order index is keyed on no dropped column, so it stays.
+    expect(Object.keys(await indexesOf(file, 't'))).toEqual(['idx_t_created_at_id']);
     expect(await secondConnection(file, 'SELECT id, name FROM "t" ORDER BY id')).toEqual([
       { id: 'a', name: 'A' },
       { id: 'b', name: 'B' },
@@ -139,7 +166,7 @@ describe('drop_column', () => {
     const { file, remote, drop } = await withLegacyColumn();
     expect(await remote.applyMigrationEntries([drop])).toEqual({ applied: [], skipped: [drop] });
     expect(await columnsOf(file, 't')).toContain('legacy');
-    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_legacy', 'idx_t_name_legacy']);
+    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_created_at_id', 'idx_t_legacy', 'idx_t_name_legacy']);
   });
 
   it('a column SQLite refuses to drop is skipped, and the indexes dropped before it are rolled back', async () => {
@@ -190,7 +217,8 @@ describe('the index entries', () => {
     expect(drop).toBeDefined();
 
     expect(await remote.applyMigrationEntries([drop], { allowDestructive: true })).toEqual({ applied: [drop], skipped: [] });
-    expect(await indexesOf(file, 'indexed_t')).toEqual({});
+    // [#33695] Only the undeclared index goes; the implicit default-order index stays.
+    expect(Object.keys(await indexesOf(file, 'indexed_t'))).toEqual(['idx_indexed_t_created_at_id']);
     expect(await remote.applyMigrationEntries([drop], { allowDestructive: true })).toEqual({ applied: [drop], skipped: [] });
   });
 
@@ -288,12 +316,12 @@ describe('what this transport cannot perform, and convergence', () => {
   it('a column entry that needs the SQLite table rebuild is skipped, never reported applied', async () => {
     const { file, remote } = await withLegacyColumn();
     const entry = {
-      table: 't', column: 'name', kind: 'nullability', category: 'safe', severity: 'warning', message: 'probe',
-      op: { type: 'relax_not_null', table: 't', column: 'name' },
+      table: 't', column: 'name', kind: 'nullability', category: 'destructive', severity: 'warning', message: 'probe',
+      op: { type: 'tighten_not_null', table: 't', column: 'name' },
     } as unknown as Entry;
-    const before = await columnsOf(file, 't');
+    const before = await tableSqlOf(file, 't');
     expect(await remote.applyMigrationEntries([entry], { allowDestructive: true })).toEqual({ applied: [], skipped: [entry] });
-    expect(await columnsOf(file, 't')).toEqual(before);
+    expect(await tableSqlOf(file, 't')).toBe(before);
   });
 
   it('once the report is applied the remote face reports no drift, and the local face agrees', async () => {
@@ -312,23 +340,183 @@ describe('what this transport cannot perform, and convergence', () => {
   });
 });
 
+/**
+ * `p` as a hosted table can hold it: `price` NOT NULL with a DEFAULT and a
+ * CHECK, `code` under a named NOT NULL with ON CONFLICT and a COLLATE, an index
+ * on each, two rows. Declared with neither NOT NULL, so the report relaxes both.
+ */
+const P_DDL =
+  `CREATE TABLE "p" ("id" TEXT PRIMARY KEY, "price" REAL NOT NULL DEFAULT 0 CHECK ("price" >= 0), ` +
+  `"code" TEXT CONSTRAINT "nn_code" NOT NULL ON CONFLICT ABORT COLLATE NOCASE, "memo" TEXT)`;
+const P = { name: 'p', fields: { price: { type: 'number' }, code: { type: 'text' }, memo: { type: 'text' } } };
+
+async function withNotNullColumns(ddl = P_DDL): Promise<{ file: string; remote: TursoDriver }> {
+  const file = nextFile();
+  await onDisk(
+    file,
+    ddl,
+    'CREATE INDEX "idx_p_price" ON "p" ("price")',
+    'CREATE UNIQUE INDEX "uniq_p_code" ON "p" ("code")',
+    `INSERT INTO "p" ("id", "price", "code", "memo") VALUES ('a', 1.5, 'A', 'x'), ('b', 2, 'B', NULL)`,
+  );
+  const remote = await remoteOver(file);
+  remote.registerObjectMetadata([P] as Objects);
+  return { file, remote };
+}
+
+/** The driver's `logger.warn` lines, captured (the diagnostic channel the apply door logs a skipped entry's reason on). */
+function warnLines(driver: TursoDriver): () => string[] {
+  const logger = (driver as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger;
+  const spy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  return () => spy.mock.calls.map((c) => c.map(String).join(' '));
+}
+
+const relaxes = async (remote: TursoDriver) =>
+  (await remote.detectManagedDrift([P] as Objects)).filter((d) => d.op.type === 'relax_not_null');
+
+describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6915086281)', () => {
+  it('both columns are relaxed and reported applied; only the NOT NULL clauses leave the stored SQL', async () => {
+    const { file, remote } = await withNotNullColumns();
+    const entries = await relaxes(remote);
+    expect(entries.map((d) => d.column).sort()).toEqual(['code', 'price']);
+    const facts = await columnFactsOf(file, 'p');
+    const indexes = await indexesOf(file, 'p');
+
+    expect(await remote.applyMigrationEntries(entries)).toEqual({ applied: entries, skipped: [] });
+
+    expect(await tableSqlOf(file, 'p')).toBe(
+      `CREATE TABLE "p" ("id" TEXT PRIMARY KEY, "price" REAL DEFAULT 0 CHECK ("price" >= 0), "code" TEXT COLLATE NOCASE, "memo" TEXT)`,
+    );
+    // The type and the DEFAULT the database held, the index set, the rows.
+    expect(await columnFactsOf(file, 'p')).toEqual({
+      ...facts,
+      price: { ...facts.price, notNull: false },
+      code: { ...facts.code, notNull: false },
+    });
+    expect(await indexesOf(file, 'p')).toEqual(indexes);
+    expect(await secondConnection(file, 'SELECT id, price, code, memo FROM "p" ORDER BY id')).toEqual([
+      { id: 'a', price: 1.5, code: 'A', memo: 'x' },
+      { id: 'b', price: 2, code: 'B', memo: null },
+    ]);
+    // The write the constraint used to refuse; the CHECK, the DEFAULT and the COLLATE still hold.
+    expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "price", "code") VALUES ('c', NULL, NULL)`)).toBe('ok');
+    expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "price", "code") VALUES ('d', -1, 'D')`)).toMatch(/CHECK constraint failed/);
+    expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "code") VALUES ('e', 'E')`)).toBe('ok');
+    expect(await secondConnection(file, `SELECT price FROM "p" WHERE id = 'e'`)).toEqual([{ price: 0 }]);
+    expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "code") VALUES ('f', 'a')`)).toMatch(/UNIQUE constraint failed/);
+    expect((await secondConnection(file, 'PRAGMA integrity_check'))[0]).toEqual({ integrity_check: 'ok' });
+
+    // Converged: the remote face reports no relax, and a re-run has nothing to
+    // do, and says so: the apply tells the operator its log says why.
+    expect(await relaxes(remote)).toEqual([]);
+    const warned = warnLines(remote);
+    expect(await remote.applyMigrationEntries(entries)).toEqual({ applied: [], skipped: entries });
+    expect(warned().filter((l) => l.includes('relax_not_null on p.')).map((l) => l.replace(/^.*relax_not_null on (p\.\w+).*: /, '$1: ')).sort()).toEqual([
+      'p.code: the column is already nullable; nothing was sent',
+      'p.price: the column is already nullable; nothing was sent',
+    ]);
+  });
+
+  it('a DEFAULT libSQL cannot splice (a comma inside it) is refused whole: skipped, and the table byte-identical', async () => {
+    // Measured on libSQL (SQLite 3.45.1): it ends the old definition at the
+    // first comma after the column's name, so a comma inside a DEFAULT, a
+    // CHECK, a width or a comment makes the spliced CREATE TABLE unparseable,
+    // and the statement is refused. Ruling parameter 4: no fall-back.
+    const ddl = `CREATE TABLE "p" ("id" TEXT PRIMARY KEY, "price" REAL, "code" TEXT NOT NULL DEFAULT ('a,b'), "memo" TEXT)`;
+    const { file, remote } = await withNotNullColumns(ddl);
+    const entries = await relaxes(remote);
+    expect(entries.map((d) => d.column)).toEqual(['code']);
+    const before = await tableSqlOf(file, 'p');
+    const warned = warnLines(remote);
+
+    expect(await remote.applyMigrationEntries(entries)).toEqual({ applied: [], skipped: entries });
+
+    expect(await tableSqlOf(file, 'p')).toBe(before);
+    expect((await columnFactsOf(file, 'p')).code?.notNull).toBe(true);
+    // Called refused only because the stored SQL, read again, is what it was.
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.code'));
+    expect(line).toContain('and the stored table SQL reads as before, so nothing landed');
+    // …and names the class (ruling 6922037129): the comma, and the NOT NULL the column keeps.
+    expect(line).toContain("The column's stored definition holds a comma");
+    expect(line).toContain('so this transport cannot relax it: the column keeps its NOT NULL');
+  });
+
+  it('a transport error after the server committed is logged as an unknown outcome, never as a rollback', async () => {
+    const { file, remote } = await withNotNullColumns();
+    const [entry] = (await relaxes(remote)).filter((d) => d.column === 'price');
+    const transport = (remote as unknown as { remoteTransport: { batch: (s: unknown[], m: string) => Promise<unknown> } }).remoteTransport;
+    const send = transport.batch.bind(transport);
+    transport.batch = async (statements, mode) => {
+      const answer = await send(statements, mode);
+      if (typeof statements[0] === 'string' && statements[0].includes('ALTER COLUMN')) throw new Error('fetch failed: socket hang up');
+      return answer;
+    };
+    const warned = warnLines(remote);
+
+    expect(await remote.applyMigrationEntries([entry!])).toEqual({ applied: [], skipped: [entry] });
+
+    // The batch did land: the column is nullable, and the log does not say otherwise.
+    expect((await columnFactsOf(file, 'p')).price?.notNull).toBe(false);
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.price'));
+    expect(line).toContain('failed (fetch failed: socket hang up), and its outcome is unknown');
+    expect(line).toContain('the next drift read decides');
+    expect(line).not.toContain('nothing landed');
+    // …and the next drift read finds no relax left to do on it.
+    expect((await relaxes(remote)).map((d) => d.column)).toEqual(['code']);
+  });
+
+  it('a splice the plan did not predict lands nowhere: the check in the same batch rolls the statement back', async () => {
+    const { file, remote } = await withNotNullColumns();
+    const [entry] = (await relaxes(remote)).filter((d) => d.column === 'price');
+    const before = await tableSqlOf(file, 'p');
+    // A database that accepts the statement but stores another definition than
+    // the one sent: here, the statement itself is altered on its way out.
+    const transport = (remote as unknown as { remoteTransport: { batch: (s: unknown[], m: string) => Promise<unknown> } }).remoteTransport;
+    const send = transport.batch.bind(transport);
+    let checked = false;
+    transport.batch = (statements, mode) => {
+      if (typeof statements[0] === 'string' && statements[0].includes('ALTER COLUMN')) {
+        checked = statements.length === 2;
+        statements = [statements[0].replace(/ CHECK \("price" >= 0\)$/, ''), ...statements.slice(1)];
+      }
+      return send(statements, mode);
+    };
+    const warned = warnLines(remote);
+
+    expect(await remote.applyMigrationEntries([entry!])).toEqual({ applied: [], skipped: [entry] });
+
+    expect(checked).toBe(true);
+    expect(await tableSqlOf(file, 'p')).toBe(before);
+    // A comma-free definition is not called the comma class.
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.price'));
+    expect(line).toContain('so nothing landed');
+    expect(line).not.toContain('holds a comma');
+    expect((await columnFactsOf(file, 'p')).price?.notNull).toBe(true);
+  });
+});
+
 describe('the install\'s declared NOT NULL relax (#33724)', () => {
-  it('a declared `storage: { notNull: false }` over a NOT NULL column is skipped with the face\'s reason, and the column stays', async () => {
+  it('a declared `storage: { notNull: false }` over a NOT NULL column is relaxed in place and reported applied', async () => {
     const file = nextFile();
     const remote = await remoteOver(file);
     const V1 = { name: 'p', fields: { price: { type: 'number', storage: { notNull: true } } } };
     const V2 = { name: 'p', fields: { price: { type: 'number', storage: { notNull: false } } } };
     await remote.syncSchemasBatch([{ object: 'p', schema: V1 }]);
-    const notNullOf = async () =>
-      (await secondConnection(file, `SELECT "notnull" AS nn FROM pragma_table_info('p') WHERE name = 'price'`))[0]?.nn;
-    expect(Number(await notNullOf())).toBe(1);
+    const priceOf = async () => (await columnFactsOf(file, 'p')).price;
+    const before = await priceOf();
+    expect(before?.notNull).toBe(true);
+
+    // ADR-0113 D5: the boot's sync of the upgraded declaration never relaxes.
+    await remote.syncSchemasBatch([{ object: 'p', schema: V2 }]);
+    expect((await priceOf())?.notNull).toBe(true);
     remote.registerObjectMetadata([V2] as Objects);
 
     const report = await remote.relaxDeclaredNotNull(V2, ['price'], { packageId: 'com.acme.crm' });
 
-    expect(report.applied).toEqual([]);
-    expect(report.skipped.map((e) => `${e.op.type}:${e.column}`)).toEqual(['relax_not_null:price']);
-    expect(Number(await notNullOf())).toBe(1);
+    expect(report.skipped).toEqual([]);
+    expect(report.applied.map((e) => `${e.op.type}:${e.column}`)).toEqual(['relax_not_null:price']);
+    expect(await priceOf()).toEqual({ ...before, notNull: false });
+    expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "price") VALUES ('n', NULL)`)).toBe('ok');
   });
 });
 

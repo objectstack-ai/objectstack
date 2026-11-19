@@ -26,7 +26,10 @@
  *  - `code`, nullable, under a field declaring `storage: { notNull: true }`: a
  *    `tighten_not_null` (destructive), which needs the SQLite table rebuild;
  *  - `memo`, NOT NULL, under a field declaring no constraint: a
- *    `relax_not_null` (needs confirm), which needs the rebuild too.
+ *    `relax_not_null` (needs confirm), which the remote face applies in place
+ *    with libSQL's `ALTER TABLE … ALTER COLUMN … TO …` [#33724, ruling
+ *    6915086281], so the first apply that confirms it relaxes the column and
+ *    the cases after it no longer find it.
  *
  * The table is made by hand so the drift does not depend on what the remote
  * schema sync creates. Then the environment's own syncing boot, then the real
@@ -34,8 +37,9 @@
  * libSQL connection.
  *
  * [#23925] The human plan says the same thing up front, read from the driver's
- * declaration (`TursoDriver.driftApplyLimit`): the tightening and the relax
- * are listed with the transport's limit instead of a remedy it cannot run, and
+ * declaration (`TursoDriver.driftApplyLimit`): the tightening is listed with
+ * the transport's limit instead of a remedy it cannot run (the relax, which the
+ * transport applies, with none [#33724]), and
  * the drop keeps `--allow-destructive`. So does the apply's own listing before
  * its prompt, whose held-back count offers a re-run only for the drop. The
  * local file is the control: its plan and its apply read as they always have.
@@ -72,6 +76,13 @@ import MigratePlan from './plan.js';
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
 import '@objectstack/runtime';
 import '@objectstack/objectql';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-sql';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/platform-objects/system';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
 
 const SQLD = process.env.OS_TEST_SQLD_BIN;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -384,7 +395,7 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
 
   // [#23925] Before the apply below names them as not applied, the plan says so:
   // read from the driver's declaration, never from the dialect or the URL.
-  it('plan, human face: the tightening and the relax name the transport\'s limit, never --allow-destructive; the drop keeps it', async () => {
+  it('plan, human face: the tightening names the transport\'s limit, never --allow-destructive; the relax names none; the drop keeps it', async () => {
     const before = await logicalDump();
     const plan = await run(MigratePlan, ['--database-url', url]);
     expect(plan.exitCode, plan.lines.slice(-1500)).toBe(0);
@@ -396,7 +407,8 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
       + '"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE '
       + 'transport does not run.',
     );
-    expect(planEntryLine(plan.lines, 'relax_not_null')).toContain('"os migrate apply" cannot apply it on this database');
+    // [#33724] Applied in place on this transport: no limit beside it.
+    expect(planEntryLine(plan.lines, 'relax_not_null')).not.toContain('cannot apply it on this database');
     const drop = planEntryLine(plan.lines, 'drop_column');
     expect(drop).toContain('"os migrate apply --allow-destructive" to drop it.');
     expect(drop).not.toContain('cannot apply it on this database');
@@ -404,13 +416,13 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     const footer = planFooter(plan.lines);
     expect(footer).not.toContain('drops / tightenings');
     expect(footer).toContain('Apply with: os migrate apply (add --allow-destructive for the 1 destructive change(s) it can apply on this database)');
-    expect(footer).toMatch(/2 change\(s\) above cannot be applied on this database by "os migrate apply"/);
+    expect(footer).toMatch(/1 change\(s\) above cannot be applied on this database by "os migrate apply"/);
     expect(await logicalDump()).toBe(before);
   }, CASE_TIMEOUT_MS);
 
   // [#23925] The apply's own listing says the same before its prompt, and offers
   // a re-run with --allow-destructive only for the drop that re-run could apply.
-  it('apply --yes, human face: the listing names the limit, and only the drop is offered a re-run', async () => {
+  it('apply --yes, human face: the listing names the limit, only the drop is offered a re-run, and the confirmed relax lands', async () => {
     const apply = await run(MigrateApply, ['--database-url', url, '--yes']);
     expect(apply.exitCode, apply.lines.slice(-1500)).toBe(0);
     const tighten = planEntryLine(apply.lines, 'tighten_not_null');
@@ -419,49 +431,52 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
       '"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE '
       + 'transport does not run.',
     );
-    expect(planEntryLine(apply.lines, 'relax_not_null')).toContain('"os migrate apply" cannot apply it on this database');
+    expect(planEntryLine(apply.lines, 'relax_not_null')).not.toContain('cannot apply it on this database');
     expect(planEntryLine(apply.lines, 'drop_column')).toContain('"os migrate apply --allow-destructive" to drop it.');
     expect(heldBackLines(apply.lines)).toEqual([
       '  ⚠ 1 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).',
       '  ⚠ 1 destructive change(s) remain drift that a re-run with --allow-destructive cannot apply on this database either (each says why above).',
     ]);
-    // Unchanged after the prompt: the relax the driver could not apply is still named.
-    expect(apply.lines).toContain(`${TABLE}.memo — relax_not_null`);
+    // [#33724] After the prompt: the relax was applied, so it is not named among what was not.
+    expect(apply.lines).not.toContain(`${TABLE}.memo — relax_not_null`);
     // The post-apply held-back line splits the same way.
     expect(postApplySkippedLines(apply.lines)).toEqual([
       '  ⚠ Skipped 1 destructive change(s) (re-run with --allow-destructive to include them).',
       '  ⚠ Skipped 1 destructive change(s) that a re-run could not apply on this database either: they remain drift (each says why above).',
     ]);
-    expect(await remote(columnsOf)).toMatchObject({ code: false, memo: true, legacy_23848: false });
+    expect(await remote(columnsOf)).toMatchObject({ code: false, memo: false, legacy_23848: false });
   }, CASE_TIMEOUT_MS);
 
-  it('apply without --allow-destructive: names the entry it could not apply, keeps the destructive two back, exits 0', async () => {
+  it('apply without --allow-destructive: nothing left it cannot apply, keeps the destructive two back, exits 0', async () => {
     const apply = await run(MigrateApply, ['--database-url', url, '--yes', '--json']);
     expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
     expect(apply.exitCode).toBe(0);
     expect(apply.payload.schemaSync).toBe('skipped');
     expect(apply.payload.created).toEqual([]);
     expect(kinds(apply.payload.applied)).toEqual([]);
-    expect(kinds(apply.payload.notApplied)).toEqual([RELAX]);
-    expect(kinds(apply.payload.skipped)).toEqual([DROP, TIGHTEN, RELAX].sort());
-    expect(apply.payload.message).toBeUndefined();
-    expect(await remote(columnsOf)).toMatchObject({ code: false, memo: true, legacy_23848: false });
+    // [#33724] The relax landed in the case before: it is drift no more.
+    expect(kinds(apply.payload.notApplied)).toEqual([]);
+    expect(kinds(apply.payload.skipped)).toEqual([DROP, TIGHTEN].sort());
+    // With the relax applied, nothing is left that this run may apply, and the
+    // apply says so (measured on sqld 0.24.33, record 6921391723).
+    expect(apply.payload.message).toBe('nothing_safe_to_apply');
+    expect(await remote(columnsOf)).toMatchObject({ code: false, memo: false, legacy_23848: false });
   }, CASE_TIMEOUT_MS);
 
-  it('apply --allow-destructive: the drop lands on the server, the two it cannot express are named, the verdict is partial', async () => {
+  it('apply --allow-destructive: the drop lands on the server, the tightening it cannot express is named, the verdict is partial', async () => {
     const apply = await run(MigrateApply, ['--database-url', url, '--allow-destructive', '--yes', '--json']);
     expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
     expect(apply.exitCode).toBe(1);
     expect(apply.payload.message).toBe('partial');
     expect(kinds(apply.payload.applied)).toEqual([DROP]);
-    expect(kinds(apply.payload.notApplied)).toEqual([TIGHTEN, RELAX].sort());
+    expect(kinds(apply.payload.notApplied)).toEqual([TIGHTEN]);
 
     const after = await remote(async (exec) => ({
       columns: await columnsOf(exec),
       rows: (await exec(`SELECT id, code, memo FROM "${TABLE}" ORDER BY id`)).map((r) => ({ ...r })),
     }));
     expect(after.columns).not.toHaveProperty('legacy_23848');
-    expect(after.columns).toMatchObject({ code: false, memo: true });
+    expect(after.columns).toMatchObject({ code: false, memo: false });
     expect(after.rows).toEqual([{ id: 'n1', code: 'c1', memo: 'm1' }]);
   }, CASE_TIMEOUT_MS);
 
@@ -473,7 +488,7 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     expect(planEntryLine(apply.lines, 'tighten_not_null')).toContain('"os migrate apply" cannot apply it on this database');
     expect(planEntryLine(apply.lines, 'tighten_not_null')).not.toContain('--allow-destructive');
     expect(apply.lines).toContain(`${TABLE}.code — tighten_not_null`);
-    expect(apply.lines).toContain(`${TABLE}.memo — relax_not_null`);
+    expect(apply.lines).not.toContain(`${TABLE}.memo — relax_not_null`);
     expect(apply.lines).toMatch(/PARTIAL/);
   }, CASE_TIMEOUT_MS);
 });

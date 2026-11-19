@@ -581,7 +581,7 @@ export const fr: PlatformTranslationData = {
           help: 'Exemples : deepseek-chat (V3), deepseek-reasoner (raisonnement R1).',
         },
         dashscope_api_key: { label: 'Clé API DashScope', help: 'sk-... — délivrée sur dashscope.console.aliyun.com.' },
-        dashscope_model: { label: 'Modèle' },
+        dashscope_model: { label: 'Modèle', help: 'Exemples : qwen-plus, qwen-max, qwen3-max, qwen-turbo.' },
         cloudflare_account_id: {
           label: 'ID de compte Cloudflare',
           help: 'L’ID hexadécimal de 32 caractères présent dans l’URL de votre tableau de bord Cloudflare.',
@@ -594,7 +594,10 @@ export const fr: PlatformTranslationData = {
           label: 'Jeton Cloudflare AI Gateway',
           help: 'Délivré dans AI Gateway → onglet « API tokens » (cfut_… ou sk_…).',
         },
-        cloudflare_model: { label: 'Modèle' },
+        cloudflare_model: {
+          label: 'Modèle',
+          help: 'Format : provider/model. Fournisseurs autorisés (selon Cloudflare /compat) : anthropic, openai, groq, mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
+        },
         siliconflow_api_key: { label: 'Clé API SiliconFlow' },
         siliconflow_model: {
           label: 'Modèle',
@@ -605,7 +608,10 @@ export const fr: PlatformTranslationData = {
           label: 'Modèle',
           help: 'Format : provider/model (par ex. anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'Résumer automatiquement les titres des conversations' },
+        title_generation_enabled: {
+          label: 'Résumer automatiquement les titres des conversations',
+          help: 'Activé, le LLM est invité à produire un titre court après la première réponse de l’assistant. Désactivez-le pour économiser des tokens, ou laissez le titre vide pour que les utilisateurs nomment eux-mêmes les conversations.',
+        },
         title_max_length: {
           label: 'Longueur max. du titre (caractères)',
           help: 'Plafond strict du titre généré. Tout dépassement est tronqué côté serveur.',

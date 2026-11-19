@@ -196,6 +196,8 @@ const ru = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Заполните поля формы, затем отправьте или отмените.",
+    sectionNav: "Разделы формы",
+    sectionNavErrors: "Поля для исправления: {{number}}",
     deniedDescription: "У вас нет прав на редактирование этого поля.",
     serverDefaultHint: "Задаётся автоматически при сохранении.",
     requiredForAction: "Обязательно для выполнения «{{action}}».",
@@ -566,6 +568,7 @@ const ru = {
       succeeded: "Успешно {{count}} / {{total}}",
       resultFailed: " · Ошибок {{count}}",
       succeededRecords: "Успешные записи",
+      aggregateNotCompleted: "Действие не было выполнено для выбранных записей. Некоторые записи могли уже измениться; после закрытия список покажет их текущие значения.",
       retry: "Повторить",
       downloadErrorCsv: "Скачать CSV с ошибками",
       cancel: "Отмена",
@@ -603,6 +606,7 @@ const ru = {
         "Это представление сгруппировано, но его источник данных не реализует queryGroupHeaders, поэтому группы невозможно подсчитать. Уберите группировку, чтобы показать записи.",
       needsWholeRows:
         "Для группировки нужны все записи, но этой таблице передана только одна их страница, поэтому группы невозможно подсчитать. Передайте все записи или позвольте таблице загрузить их из источника данных, который реализует queryGroupHeaders.",
+      draftOnly: "Без группировки по {{fields}}: это поле существует только в черновике до публикации.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -987,6 +991,8 @@ const ru = {
     removeGroup: "Удалить",
     groupingUnstoredNotice: "Этот список нельзя сгруппировать по полю {{fields}}: его значение вычисляется при отображении и не хранится. Список показан без этой группировки.",
     groupingUnstoredRemove: "Убрать из группировки",
+    draftOnlyQueryDropped: "Без фильтрации и сортировки по {{fields}}: поле есть только в черновике до публикации.",
+    withheldFieldsLeftOut: "Не показано, без фильтрации, сортировки и группировки по {{fields}}: пакет, который добавляет это поле, отключён. Поле вернётся, когда пакет будет включён.",
     inlineEditShort: "Встроенное редактирование",
     inlineEditLabel: "Редактировать записи в таблице (щёлкните ячейку для редактирования)",
   },
@@ -1534,6 +1540,8 @@ const ru = {
     writeStrippedUnknownReason: "Не применены сервером: {{fields}}",
     approvalPendingEditable: "На согласовании · редактирование доступно",
     approvalPendingTooltip: "У этой записи есть ожидающий запрос на согласование, но этот шаг всё ещё разрешает редактирование",
+    approvalPending: "На согласовании",
+    approvalPendingNotEditableTooltip: "У этой записи есть ожидающий запрос на согласование",
     approvalProgress: "Согласования — {{got}} из {{need}}",
     approvalProgressGroups: "Подписи — {{got}} из {{need}} групп",
     approvalProgressLabel: "Ход согласования",
@@ -1663,7 +1671,6 @@ const ru = {
     widgetForbiddenMessage: "У вас нет прав на просмотр данных этого виджета.",
     allWidgetsForbiddenMessage: "У вас нет прав на просмотр данных этой панели.",
     details: "Подробности",
-    exportCsv: "Экспорт в CSV",
     openInList: "Открыть в списке",
     filters: {
       label: "Фильтры дашборда",
@@ -1693,6 +1700,9 @@ const ru = {
     },
     total: "Итого",
     noDataSourceFor: "Нет источника данных для",
+    drillTooMany: 'С этим значением связано слишком много записей, чтобы показать их здесь. Сузьте фильтры панели и повторите попытку.',
+    drillUnavailable: 'Записи, стоящие за этим значением, нельзя показать здесь.',
+    drillFailed: 'Не удалось загрузить записи, стоящие за этим значением. Повторите попытку позже.',
     config: {
       breadcrumb: {
         dashboard: "Дашборд",
@@ -2028,10 +2038,26 @@ const ru = {
       },
       passwordsNote: "Временные пароли — показываются один раз и нигде не сохраняются. Сохраните их сейчас; каждый пользователь должен сменить свой при первом входе.",
       passwordsMore: "Остальные записи опущены — воспользуйтесь загрузкой файла.",
+      positionsHint: "Должности: сопоставьте столбец с машинными именами должностей, несколько — через «;». Каждая назначается так же, как в Setup; имя, которого нет или которое вы не можете назначить, указывается в его строке, а пользователь всё равно создаётся.",
+      managerHint: "Руководитель: сопоставьте столбец с руководителем каждого пользователя — по адресу эл. почты (или номеру телефона, если включён вход по телефону). Руководители связываются после загрузки всех строк, поэтому учитывается и руководитель ниже по файлу; руководитель, которого не удалось найти или связать, указывается в его строке, а пользователь всё равно создаётся.",
       passwordsDownload: "Скачать CSV",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} неопубликованных изменений. Опубликуйте их в панели черновика вверху.',
+        publishFromBar_one: '{{count}} неопубликованное изменение. Опубликуйте его в панели черновика вверху.',
+        publishFromBar_few: '{{count}} неопубликованных изменения. Опубликуйте их в панели черновика вверху.',
+        publishFromBar_many: '{{count}} неопубликованных изменений. Опубликуйте их в панели черновика вверху.',
+        publishFromBar_other: '{{count}} неопубликованного изменения. Опубликуйте их в панели черновика вверху.',
+        showDraftToPublish: '{{count}} неопубликованных изменений. Откройте черновик, чтобы проверить и опубликовать их.',
+        showDraftToPublish_one: '{{count}} неопубликованное изменение. Откройте черновик, чтобы проверить и опубликовать его.',
+        showDraftToPublish_few: '{{count}} неопубликованных изменения. Откройте черновик, чтобы проверить и опубликовать их.',
+        showDraftToPublish_many: '{{count}} неопубликованных изменений. Откройте черновик, чтобы проверить и опубликовать их.',
+        showDraftToPublish_other: '{{count}} неопубликованного изменения. Откройте черновик, чтобы проверить и опубликовать их.',
+        showDraft: 'Показать черновик',
+        receipt: 'Опубликовано. Изменения вступили в силу.',
+        dismissReceipt: 'Закрыть',
         // Число вынесено в конец («…: {{count}}») — так этот пак пишет
         // количества, как в home.pendingDrafts.publishedVerified.
         count: "Ещё не опубликовано изменений: {{count}} — пользователи их не видят.",
@@ -2133,6 +2159,9 @@ const ru = {
           title: "Редактирование «{{app}}»",
           titleGeneric: "Редактировать это приложение",
           description: "Что нужно изменить? Я изменю это приложение на месте — добавлю поле, объект, представление или дашборд либо скорректирую существующее.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Спросите о данных этого приложения — количествах, списках и сводках — или скажите, что изменить, и я изменю приложение на месте: поле, объект, представление или дашборд.",
         },
       },
       clearConversation: "Очистить",
@@ -2284,7 +2313,7 @@ const ru = {
       changesApplied: "Применено",
       changesDrafted: "Сохранено как черновик",
       changesFailed: "Не применено",
-      discussing: "Обсуждается: {{target}}",
+      discussing: "Просмотр: {{target}}",
       changeVerb: {
         createObject: "Создать объект",
         addField: "Добавить поле",
@@ -2332,11 +2361,16 @@ const ru = {
       unavailableRetry: "Повторить",
       unavailableHome: "На главную",
       dock: {
-        title: "Ассистент",
+        title: "ИИ-ассистент",
         description: "Чат с ассистентом ИИ",
         resize: "Изменить размер чата",
         collapse: "Свернуть чат",
         maximize: "Открыть на всю страницу",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "История",
+        backToChat: "Вернуться к чату",
+        expand: "Развернуть",
+        restore: "Вернуть боковую панель",
         open: "Открыть ассистента",
         planAwaitingApproval: "Предложенный план ожидает вашего подтверждения",
       },
@@ -2387,6 +2421,9 @@ const ru = {
       fieldErrorsToast_many: "{{count}} настроек требуют внимания: {{settings}}",
       fieldErrorsToast_other: "{{count}} настройки требуют внимания: {{settings}}",
       cryptoRefusalTitle: "Эта установка не может шифровать секреты",
+      platformManagedTitle: "Управляется платформой",
+      platformManagedBody: "Хостинг-платформа предоставляет и настраивает это для данной среды, поэтому здесь это не настраивается.",
+      aiProviderManaged: "Поставщик ИИ, его модель и учётные данные управляются платформой.",
       cryptoRefusalSubjectSuffix: "объявлен зашифрованным, поэтому ничего не было записано.",
       cryptoRefusalNoSubject: "Значение, объявленное зашифрованным, было отклонено, поэтому ничего не было записано.",
       cryptoRefusalToast: "Не удалось зашифровать секреты: {{subject}}",
@@ -2439,6 +2476,7 @@ const ru = {
       view: "Открыть",
       confirm: "Подтвердить",
       cancel: "Отмена",
+      continue: "Продолжить",
       prefilled: "Для ещё не заданных значений предложены значения из вашего браузера. Ничего не сохраняется, пока вы не подтвердите.",
       organizationName: {
         title: "Назовите организацию",
@@ -2485,6 +2523,8 @@ const ru = {
         done: 'Ваш ИИ-ассистент или API-ключ подключён.',
         action: 'Подключить',
       },
+      firstApp: { title: 'Добавьте первое приложение', todo: 'У вас пока нет собственного приложения. Установите его из маркетплейса или создайте — оно появится на главной.', done: 'Ваше собственное приложение есть на главной.' },
+      firstRecord: { title: 'Добавьте первую запись', todo: 'В ваших приложениях ещё никто не создал запись.', done: 'В ваших приложениях создана запись.', action: 'Открыть приложение' },
     },
     error: {
       connectionFailed: "Не удаётся подключиться к серверу",
@@ -2623,8 +2663,16 @@ const ru = {
       },
       viewTypeTree: "Дерево",
       viewTypeTreeDesc: "Выстраивает самоссылающиеся записи в иерархию по родительскому полю.",
+      viewTypeTimesheet: "Табель",
+      viewTypeTimesheetDesc: "Введите число для каждой строки и дня недели; каждая заполненная ячейка — одна запись.",
       parentField: "Родительское поле",
       parentFieldHelp: "Поле, указывающее на родительскую запись (тот же объект) и задающее иерархию. Подходят только самоссылающиеся поля.",
+      timesheetRowField: "Поле строки",
+      timesheetRowFieldHelp: "Каждая строка сетки — одно значение этого поля, например проект.",
+      timesheetDateField: "Поле даты",
+      timesheetDateFieldHelp: "Записи размещаются в столбце дня недели по этой дате.",
+      timesheetValueField: "Поле значения",
+      timesheetValueFieldHelp: "Число, которое показывает и редактирует каждая ячейка, например часы.",
       viewName: "Название",
       viewNameHelp: "Машинный ключ (snake_case). Заполняется автоматически из заголовка — при желании измените.",
       viewNameRequired: "Введите ключ (строчные буквы, цифры, подчёркивание). Для нелатинских заголовков автозаполнение не работает.",
@@ -2653,7 +2701,7 @@ const ru = {
       expandToPage: "Открыть на всю страницу",
       openAsPage: "Открыть на всю страницу",
       objectNotFound: "Объект не найден",
-      objectNotFoundDescription: "Объект «{{objectName}}» не существует в текущей конфигурации.",
+      objectNotFoundDescription: "Объект «{{objectName}}» не существует, или у вас нет к нему доступа.",
       objectNotFoundHint: "Проверьте настройки навигации приложения или выберите другой объект на боковой панели.",
       objectPackageDisabled: "Объект «{{objectName}}» принадлежит отключённому пакету, поэтому он не предоставляется.",
       filterOrGroupNotEditable: "В этом фильтре рядом с другими условиями есть группа ИЛИ, которую редактор фильтров не может показать, поэтому здесь он доступен только для чтения. Представление по-прежнему его применяет.",
@@ -2819,6 +2867,10 @@ const ru = {
       launcherLabel: "Панель приложений",
       menuLabel: "Навигация приложения",
       menuEmpty: "В этом приложении нет доступных для открытия элементов навигации.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Панель меню приложения",
+      searchMenu: "Поиск в меню",
+      phoneBarHint: "Отметьте пункт звёздочкой, чтобы добавить его на нижнюю панель. На панели показываются первые четыре.",
       itemMenu: "Другие действия для {{name}}",
       openInNewTab: "Открыть в новой вкладке",
       copyLink: "Копировать ссылку",
@@ -2849,6 +2901,7 @@ const ru = {
         retry: "Продолжить через единый вход",
       },
       ssoHandoff: "Перейти к {{target}}",
+      ssoHandoffClient: "Войдите, чтобы продолжить в {{clientName}}",
       devAdminHint: {
         title: "Локальная среда разработки",
         signIn: "Войти как администратор разработки",
@@ -2878,6 +2931,8 @@ const ru = {
         directSignInRateLimited: "Только что из этой сети было начато слишком много входов. Подождите несколько секунд и повторите попытку.",
         networkNotAllowed: "Эта система не разрешает вход из вашей сети. Подключитесь из разрешённой сети (например, офисной сети или VPN вашей организации) или обратитесь к администратору.",
         ssoAccessDenied: "У учётной записи, с которой вы вошли, нет доступа к этой среде. Войдите с учётной записью, у которой есть доступ, или попросите администратора организации этой среды добавить вас в участники.",
+        ssoAccessDeniedNotMember: "Учётная запись, с которой вы вошли, не является участником организации этой среды. Войдите с учётной записью участника или попросите администратора организации пригласить вас.",
+        ssoAccessDeniedInvitationPending: "Вас пригласили в организацию этой среды, но приглашение ещё не принято. Примите приглашение из письма и войдите снова.",
         ssoSwitchAccount: "Сменить учётную запись",
         ssoBackToConsole: "Вернуться в консоль",
         ssoSwitchAccountHint: "«Сменить учётную запись» открывает вашу службу входа в новой вкладке и выполняет там выход. Затем снова войдите здесь с учётной записью, у которой есть доступ.",
@@ -3056,6 +3111,10 @@ const ru = {
       missingToken: "В ссылке подтверждения отсутствует токен.",
       emailMissing: "Email не указан",
       resendButton: "Отправить письмо повторно",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ваш email ещё не подтверждён. Отправьте ссылку подтверждения на {{email}}, затем нажмите на ссылку для подтверждения аккаунта.",
+      sendButton: "Отправить письмо подтверждения",
       resending: "Отправка…",
       resent: "Письмо отправлено! Проверьте входящие",
       resentSuccess: "Письмо с подтверждением отправлено!",
@@ -3190,6 +3249,10 @@ const ru = {
       granted: "Доступ предоставлен",
       denied: "Доступ запрещён",
       noRedirect: "Сервер не вернул URL для перенаправления.",
+      returnToApp: "Вернитесь в {{appName}}, чтобы продолжить. Эту вкладку можно закрыть.",
+      returnToUnnamedApp: "Вернитесь в приложение, чтобы продолжить. Эту вкладку можно закрыть.",
+      openApp: "Открыть {{appName}}",
+      openUnnamedApp: "Открыть приложение",
       failed: "Не удалось выдать согласие",
       footer: "Вы можете отозвать доступ в любое время в настройках аккаунта.",
     },
@@ -3326,7 +3389,7 @@ const ru = {
     aiAssistant: "ИИ-ассистент",
     designInStudio: "Дизайн в Studio",
     editApp: "Редактировать приложение",
-    openAppInStudio: "Открыть приложение в Studio",
+    openAppInStudio: "Открыть {{app}} в Studio",
   },
   home: {
     build: {
@@ -3529,7 +3592,6 @@ const ru = {
   },
   empty: {
     objectNotFound: "Объект не найден",
-    objectNotFoundDescription: "Определение объекта \"{{name}}\" отсутствует. Проверьте конфигурацию или вернитесь назад.",
     interfacePageSourceMissing: "Эта интерфейсная страница ссылается на \"{{name}}\", который недоступен.",
     pageNotFound: "Страница не найдена",
     pageNotFoundDescription: "Страница \"{{name}}\" не найдена. Возможно, она была удалена или переименована.",
@@ -3873,6 +3935,17 @@ const ru = {
       accept: "Принять приглашение",
       accepted: "Приглашение принято",
       joinedDescription: "Добро пожаловать в {{orgName}}. Вы присоединились в роли {{role}}.",
+      joinedWelcome: "Добро пожаловать в {{orgName}}.",
+      verifyEmailTitle: "Подтвердите адрес электронной почты",
+      verifyEmailDescription: "Адрес электронной почты этой учётной записи должен совпадать с приглашённым и быть подтверждён. Подтвердите его, затем снова откройте ссылку приглашения из почтового ящика.",
+      proofInvalid: "Эту ссылку приглашения больше нельзя использовать. Запросите новое приглашение или войдите в существующую учётную запись.",
+      signInInstead: "Войти в существующую учётную запись",
+      proofTitle: "Присоединиться к {{orgName}}",
+      proofDescription: "Настройте учётную запись для {{email}}, чтобы принять приглашение.",
+      proofDivider: "или задайте пароль",
+      proofNameLabel: "Имя",
+      proofPasswordLabel: "Пароль",
+      proofSubmit: "Создать учётную запись и присоединиться",
       continue: "Продолжить",
       acceptFailed: "Не удалось принять приглашение",
       decline: "Отклонить",
@@ -3910,6 +3983,8 @@ const ru = {
     viewApprovals: "Показать утверждения",
     noPendingApprovals: "Нет ожидающих утверждений",
     openApprovalsInbox: "Открыть входящие утверждений",
+    needsYou: "Требует вашего действия",
+    viewApprovalDetails: "Подробнее",
     badgeTotal: "Всего: {{total}}",
     badgeNotifications: "{{count}} непрочитанных тем",
     badgeNotifications_one: "{{count}} непрочитанная тема",
@@ -4150,13 +4225,11 @@ const ru = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Осталось {{left}} лимита ИИ. Модель с пометкой ×N расходует его в N раз быстрее, чем модель по умолчанию.',
@@ -4221,6 +4294,7 @@ const ru = {
       get_metadata_schema: "Изучить формат метаданных",
       get_package: "Посмотреть сведения о пакете",
       get_record_history: "Прочитать историю этой записи",
+      list_flow_runs: "Проверить запуски процесса",
       list_metadata: "Перечислить имеющиеся метаданные",
       list_objects: "Перечислить имеющиеся объекты",
       list_packages: "Перечислить имеющиеся пакеты",
@@ -4327,6 +4401,30 @@ const ru = {
       needsAttention_few: "{{count}} требуют внимания",
       needsAttention_many: "{{count}} требуют внимания",
       needsAttention_other: "{{count}} требуют внимания",
+      health: {
+        sampleRowsLive: "опубликовано строк примеров: {{count}}",
+        sampleRowsLive_one: "опубликована {{count}} строка примеров",
+        sampleRowsLive_few: "опубликованы {{count}} строки примеров",
+        sampleRowsLive_many: "опубликовано {{count}} строк примеров",
+        sampleRowsLive_other: "опубликовано {{count}} строки примеров",
+        views: "представлений: {{count}}",
+        views_one: "{{count}} представление",
+        views_few: "{{count}} представления",
+        views_many: "{{count}} представлений",
+        views_other: "{{count}} представления",
+        widgets: "виджетов: {{count}}",
+        widgets_one: "{{count}} виджет",
+        widgets_few: "{{count}} виджета",
+        widgets_many: "{{count}} виджетов",
+        widgets_other: "{{count}} виджета",
+        seeds: "наборов примеров: {{count}}",
+        seeds_one: "{{count}} набор примеров",
+        seeds_few: "{{count}} набора примеров",
+        seeds_many: "{{count}} наборов примеров",
+        seeds_other: "{{count}} набора примеров",
+        verified: "Проверено: {{checks}}",
+        seedFailed: "Не удалось загрузить примеры данных.",
+      },
       unknownPhase: "Неизвестный этап сборки",
       nextStepsLead: "Дальше можно сказать: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4523,13 +4621,26 @@ const ru = {
     progressBar: 'Ход решения',
     declaredActions: 'Действия',
     decisionPanelOffRequestPage: 'Панель решения по согласованию работает только на страницах запросов на согласование.',
+    openNextAfterDecision: 'Открывать следующий после решения',
+    queueDone: 'В этом списке больше нет ожидающих запросов.',
     snapshotAsSubmitted: 'На момент подачи',
+    snapshotChanged: 'Изменено',
+    snapshotCurrentValue: 'Текущее значение',
+    snapshotOpenRecord: 'Открыть запись',
+    snapshotCurrentUnreadable: 'Не удаётся прочитать текущую запись, поэтому изменения после подачи не отмечены.',
+    snapshotChildCurrent: 'Текущие строки: при подаче дочерние строки не сохраняются.',
+    progressTitle: 'Ход согласования',
+    attachmentsTitle: 'Вложения',
     attachmentChip: 'Вложение',
     attachmentOpenFailed: 'Не удалось открыть вложение — попробуйте ещё раз',
     approveOneTitle: 'Согласовать «{{title}}»?',
     approveOneBody: 'Запрос будет согласован от вашего имени. Чтобы добавить комментарий или вложение, откройте запрос.',
     flowOrigin: 'Инициировано потоком',
     submittedByYou: 'Отправлено вами',
+    awaitingYourDecision: 'Ожидает вашего согласования',
+    stepNumber: 'Шаг {{n}}',
+    submittedByName: 'Отправитель: {{name}}',
+    moreDecisionActions: 'Другие действия согласования',
     sortBy: 'Сортировка',
     sortRecent: 'Сначала новые',
     sortOldest: 'Сначала старые',
@@ -4725,6 +4836,12 @@ const ru = {
       pendingHere_few: 'Предпросмотр черновика · {{count}} неопубликованных изменения на этой странице',
       pendingHere_many: 'Предпросмотр черновика · {{count}} неопубликованных изменений на этой странице',
       pendingHere_other: 'Предпросмотр черновика · {{count}} неопубликованного изменения на этой странице',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Предпросмотр черновика · {{count}} неопубликованных изменений в этом приложении. Ничего здесь не действует, пока вы не опубликуете.',
+      pendingInApp_one: 'Предпросмотр черновика · {{count}} неопубликованное изменение в этом приложении. Ничего здесь не действует, пока вы не опубликуете.',
+      pendingInApp_few: 'Предпросмотр черновика · {{count}} неопубликованных изменения в этом приложении. Ничего здесь не действует, пока вы не опубликуете.',
+      pendingInApp_many: 'Предпросмотр черновика · {{count}} неопубликованных изменений в этом приложении. Ничего здесь не действует, пока вы не опубликуете.',
+      pendingInApp_other: 'Предпросмотр черновика · {{count}} неопубликованного изменения в этом приложении. Ничего здесь не действует, пока вы не опубликуете.',
     },
     changes: {
       title: 'Ожидающие изменения',
@@ -4741,7 +4858,7 @@ const ru = {
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
       fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
+      draftedByCopilot: 'Включает изменения, подготовленные ИИ-ассистентом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',
       draftedByMcp: 'Включает изменения, подготовленные MCP-клиентом',
       detailChangedKeys: 'Также изменено:',
@@ -4907,7 +5024,8 @@ const ru = {
       securityBlockTitle_few: 'Публикация будет отклонена — {{count}} элемента требуют решения',
       securityBlockTitle_many: 'Публикация будет отклонена — {{count}} элементов требуют решения',
       securityBlockTitle_other: 'Публикация будет отклонена — {{count}} элемента требуют решения',
-      securityBlockWhere: 'Исправьте это в объекте в разделе «Настройки → Общий доступ к записям» и опубликуйте снова.',
+      securityBlockWhere: 'Исправьте это в объекте в разделе «Настройки → Кто может видеть какие записи» и опубликуйте снова.',
+      flowChecksTitle: 'Перед публикацией: проверка публикации сообщит следующее',
       securityRule: {
         owdUnset: 'Базовый уровень общего доступа к записям (sharingModel) не объявлен. Среда выполнения использует private, но базовый уровень должен быть осознанным решением.',
         owdAlias: 'Базовый уровень общего доступа к записям (sharingModel) — неканоническое значение, поэтому среда выполнения считает объект private.',
@@ -4918,6 +5036,8 @@ const ru = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Это приложение ещё не опубликовано. Оно работает, но видят его только разработчики. Опубликуйте его, чтобы его увидели пользователи.',
       message: 'Неопубликованное приложение — полностью работает, но видно только создателям. Опубликуйте, чтобы его увидели ваши пользователи.',
       publish: 'Опубликовать',
       publishing: 'Публикация…',
@@ -5383,6 +5503,52 @@ const ru = {
     sourceRequired: "Странице {{kind}} требуется непустое значение {{source}}.",
     loading: "Загрузка среды выполнения React…",
     error: "Ошибка страницы React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Мобильное приложение",
+    subtitle: "Подключите мобильное приложение ObjectOS к этому серверу",
+    scanHint: "Откройте мобильное приложение ObjectOS и отсканируйте этот код, чтобы подключить его к этому серверу.",
+    qrAlt: "QR-код для подключения мобильного приложения ObjectOS к этому серверу",
+    linkLabel: "Ссылка для подключения",
+    copy: "Копировать ссылку",
+    copied: "Ссылка скопирована",
+    privacy: "Код содержит только адрес этого сервера и никогда — вашу учётную запись.",
+    loadFailed: "Не удалось прочитать публичный адрес этого сервера. Перезагрузите страницу, чтобы повторить попытку.",
+    unreachableTitle: "Телефон не может открыть адрес этого сервера",
+    unreachableBody: "Адрес этого сервера — {{address}}: это локальный или частный адрес, который телефон не может открыть, поэтому код не показан. Укажите на сервере в {{setting}} его публичный адрес, например {{example}}, и перезапустите сервер.",
+    insecureTitle: "Адрес этого сервера не использует HTTPS",
+    insecureBody: "Адрес этого сервера — {{address}}. Мобильное приложение входит через него, поэтому он должен использовать HTTPS, и код не показан. Настройте работу сервера по HTTPS, укажите в {{setting}} его адрес https://, например {{example}}, и перезапустите сервер.",
+    unpublishedTitle: "Этот сервер не публикует свой публичный адрес",
+    unpublishedBody: "Код не показан: этот сервер пока не сообщает мобильному приложению свой публичный адрес. Обновите сервер до версии, которая это поддерживает.",
+  },
+  notificationSettings: {
+    title: "Настройки уведомлений",
+    subtitle: "Выберите, какие уведомления вы получаете и по каким каналам",
+    loading: "Загрузка настроек уведомлений…",
+    loadFailed: "Не удалось прочитать ваши настройки уведомлений. Перезагрузите страницу и попробуйте снова.",
+    saveFailed: "Изменение не сохранено: {{reason}}",
+    general: "Общие",
+    generalWarning: "Изменение сводки или тихих часов сохраняет вашу собственную общую настройку. После этого она действует для каждой темы и канала, которые вы не настроили сами, вместо значений вашей организации по умолчанию.",
+    digest: "Сводка",
+    digestNone: "Без сводки",
+    digestDaily: "Ежедневно",
+    digestWeekly: "Еженедельно",
+    digestNoOff: "Вариант «Без сводки» недоступен: его сохранение не отключает сводку, заданную вашей организацией, поэтому может не подействовать.",
+    quietHours: "Тихие часы",
+    quietHoursNoClear: "Пустой интервал нельзя сохранить: он не отключает тихие часы, заданные вашей организацией, поэтому может не подействовать. Укажите время начала и окончания.",
+    save: "Сохранить",
+    matrix: "Темы и каналы",
+    topic: "Тема",
+    allTopics: "Все темы",
+    alwaysDelivered: "Доставляется всегда",
+    notConfigured: "Не настроен",
+    toggleLabel: "{{topic}} через {{channel}}",
+    sourceOwn: "Ваша настройка",
+    sourceDefault: "По умолчанию в организации",
+    sourceBuiltin: "По умолчанию",
+    sourceMandatory: "Обязательно",
   },
 };
 

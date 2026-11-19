@@ -1401,8 +1401,11 @@ function engineJudgeProbe(probe: UserProbe): { probe: UserProbe; rebound: boolea
  * it admits it or the predicate has no lowering to judge.
  *
  * Asked of the ENGINE, through the method the caller handed in — the same
- * function the engine runs before any driver is resolved (`judgeFilter`). No
- * context is passed: at authoring time there is no caller.
+ * admission the engine runs before any driver call (`judgeFilter`). Its one
+ * driver-dependent verdict (a nested-relation condition on a driver that does
+ * not declare `DriverCapabilities.readableIdsLeaf`, #33876) is left unjudged
+ * by an engine with no driver, as at authoring time. No context is passed: at
+ * authoring time there is no caller.
  */
 function engineRefusal(
   judge: FilterJudge,

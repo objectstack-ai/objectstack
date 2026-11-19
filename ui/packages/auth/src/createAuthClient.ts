@@ -10,7 +10,7 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig,
   SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
@@ -653,6 +653,33 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
+  /** How long sign-out waits for `/auth/config` when this tab holds none: one attempt, never the retry ladder. */
+  const SIGN_OUT_CONFIG_TIMEOUT_MS = 3_000;
+
+  /**
+   * Where the identity provider sends the browser back after an explicit
+   * sign-out: the start door `{basePath}/sign-in/direct` when the deployment
+   * serves `afterSignOut: 'identity-provider'` and `directSignIn: true` (the
+   * door is mounted and can start), otherwise `loginPath`, the sign-in page
+   * (the `hold` ruling). The door starts a fresh sign-in with no cookie, and
+   * the provider has just ended its session, so the person meets the
+   * provider's own sign-in page; the door never sends the browser back to
+   * itself. Read from the config this tab holds; with none, one bounded
+   * attempt. A config that cannot be read keeps `loginPath`.
+   */
+  async function signOutReturn(loginPath: string): Promise<string> {
+    let config: AuthPublicConfig | null;
+    try {
+      config = configPromise ? await configPromise : await fetchConfigAttempt(SIGN_OUT_CONFIG_TIMEOUT_MS);
+    } catch {
+      config = null;
+    }
+    const features = config?.features;
+    return features?.directSignIn === true && features.afterSignOut === 'identity-provider'
+      ? `${basePath}/sign-in/direct`
+      : loginPath;
+  }
+
   const client: AuthClient = {
     async signIn(credentials: SignInCredentials) {
       const { data, error } = await betterAuth.signIn.email({
@@ -770,17 +797,21 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
     async signOut() {
       // `callbackURL` is where the identity provider sends the browser after
-      // ending its own session: this SPA's sign-in page. better-auth uses it
-      // only when it answers with a provider-logout URL (see
-      // `providerLogoutURL`); without a provider the answer is
-      // `{ success: true }` and the caller's in-app route to the sign-in page
-      // stays as it was.
+      // ending its own session: this SPA's sign-in page, or, under the
+      // deployment's `afterSignOut: 'identity-provider'`, the direct sign-in
+      // start door (`signOutReturn`). better-auth uses it only when it answers
+      // with a provider-logout URL (see `providerLogoutURL`); without a
+      // provider the answer is `{ success: true }` and the caller's in-app
+      // route to the sign-in page stays as it was.
       //
       // The sign-in page comes next, so it must read the doors the server
       // has now; forgotten before the request, so a failed sign-out (which
-      // still leaves this tab without its token) forgets it too.
+      // still leaves this tab without its token) forgets it too. The return
+      // is read first, from the config this tab already holds.
+      const loginPath = resolveSpaRoute('/login');
+      const callbackURL = await signOutReturn(loginPath);
       forgetConfig();
-      const { data, error } = await betterAuth.signOut({ callbackURL: resolveSpaRoute('/login') });
+      const { data, error } = await betterAuth.signOut({ callbackURL });
       TokenStorage.clear();
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
@@ -800,9 +831,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // page load, so `AuthProvider`'s in-memory "ended by sign-out" is gone by
       // then; the tab's note carries it across (`./signOutRoundTrip`), and the
       // page holds instead of starting a direct sign-in (objectstack#33183).
+      // Returning through the door instead, the browser never lands on the
+      // sign-in page on the way back, so there is no hold to carry.
       const url = providerLogoutURL(data);
       if (url && typeof window !== 'undefined') {
-        markSignOutRoundTrip(resolveSpaRoute('/login'));
+        if (callbackURL === loginPath) markSignOutRoundTrip(loginPath);
         window.location.assign(url);
       }
     },
@@ -1382,6 +1415,40 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     async acceptInvitation(invitationId: string): Promise<void> {
       const { error } = await (betterAuth as any).organization.acceptInvitation({ invitationId });
       if (error) throw toAuthError(error, 'Failed to accept invitation');
+    },
+
+    async acceptInvitationOneStep(input: AuthInvitationOneStepInput): Promise<AuthInvitationOneStepOutcome> {
+      const url = `${origin}${basePath}/organization/accept-invitation-one-step`;
+      const response = await bearerFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(input),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | {
+            data?: { outcome?: unknown; organizationId?: unknown };
+            code?: string;
+            message?: string;
+            error?: { code?: string; message?: string };
+          }
+        | null;
+      if (!response.ok) {
+        const code = body?.code ?? body?.error?.code;
+        const err = new Error(
+          body?.message ?? body?.error?.message ?? `Invitation acceptance failed with status ${response.status}`,
+        ) as Error & { code?: string; status?: number };
+        if (code) err.code = code;
+        err.status = response.status;
+        throw err;
+      }
+      // A success answers in the envelope, `{ success: true, data }`.
+      const data = body?.data;
+      if (data?.outcome === 'accepted' && typeof data.organizationId === 'string') {
+        return { outcome: 'accepted', organizationId: data.organizationId };
+      }
+      if (data?.outcome === 'sign_in' || data?.outcome === 'verify_email') return { outcome: data.outcome };
+      throw new Error('acceptInvitationOneStep: unexpected response body');
     },
 
     async rejectInvitation(invitationId: string): Promise<void> {

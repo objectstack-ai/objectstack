@@ -84,7 +84,7 @@ import { isListComparandOperator } from '@objectstack/spec/data';
 // compiles the same operator independently and calls the same two functions.
 // [#20041] And the U+0000 gate beside the dangling-escape one, for the same reason.
 import { hasDanglingLikeEscape, hasNulInLikePattern } from '@objectstack/spec/data';
-import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverAggregateQuery, DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -175,7 +175,7 @@ import {
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
 // [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
 // what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
-import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, applyPublishedColumnChanges, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, relaxDeclaredNotNull, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, applyPublishedColumnChanges, backfillCanonicalBooleans, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewBooleanConvergence, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, relaxDeclaredNotNull, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 import type { ConcurrentIndexDeferral } from './pg-concurrent-index.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
@@ -393,6 +393,26 @@ export class SqlDriver implements IDataDriver {
       // collation's, as for this datasource's `where` (the latitude the bit's
       // TSDoc in `data/driver.zod.ts` states, measured dialects named there).
       aggregationFilter: true,
+      // `find()` honours `DriverOptions.lockRows` inside a transaction (see
+      // `lockRowsIfAsked` in `sql-driver-crud.ts`): `FOR UPDATE` / `UPDLOCK`,
+      // and on SQLite the single-connection pool and the database lock. A
+      // subclass whose transport takes no transaction handle (TursoDriver's
+      // remote mode, `transactionsUnsupported`) is never sent the key: the
+      // engine sends it only inside a transaction.
+      lockRows: true,
+      // [#33697] ADR-0053 Phase 2 D2 as amended: PostgreSQL buckets a
+      // non-UTC reference zone in the database (`AT TIME ZONE` over the
+      // server's tz database, `buildDateBucketExpr`). SQLite has no tz
+      // database, and MySQL / SQL Server / Oracle declare nothing here, so the
+      // engine keeps bucketing those zones in memory. TursoDriver is SQLite in
+      // every mode and inherits `false` through this getter.
+      zonedDateBucketing: this.isPostgres,
+      // [#33876] The filter compiler compiles a composed `ReadableIds` leaf
+      // to one nested subquery (ADR-0139 D3, `applyFilterCondition`), so the
+      // engine plans a nested-relation condition on a read verb as that leaf
+      // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
+      // (Turso's remote transport compiles the leaf with its own compiler).
+      readableIdsLeaf: true,
     };
   }
 
@@ -1194,7 +1214,19 @@ export class SqlDriver implements IDataDriver {
    *
    * Exposed as `{sql, bindings}` (not `Knex.Raw`) so callers can both
    * `groupByRaw()` and embed the same expression inside a `select() as alias`
-   * with correctly forwarded identifier bindings.
+   * with correctly forwarded identifier bindings. A zoned bucket (below) also
+   * binds a VALUE, the zone, and then must not be spelled twice: PostgreSQL
+   * numbers each `?` as its own parameter, sees two different expressions in
+   * the select list and the GROUP BY, and refuses (42803). {@link aggregate}
+   * groups such a bucket by its select-list position instead.
+   *
+   * ## A reference zone (#33697, ADR-0053 Phase 2 D2 as amended)
+   *
+   * `timezone`, when given, is the resolved IANA area/location name the engine
+   * sends on a driver that declares `supports.zonedDateBucketing`. Only the
+   * PostgreSQL arm reads it (`(col)::timestamptz AT TIME ZONE ?`); every other
+   * dialect answers `null` for it, never a UTC bucket under a zone's name. A
+   * `Field.date` ignores it: a calendar day is never zone-shifted.
    *
    * `table` is the coercion key of the object being aggregated (what
    * {@link coercionKey} returns for the builder). It is what makes the SQLite
@@ -1228,6 +1260,7 @@ export class SqlDriver implements IDataDriver {
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
     column?: string,
+    timezone?: string,
   ): { sql: string; bindings: any[] } | null {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
     const readDateFields = () => this.dateFields;
@@ -1248,7 +1281,7 @@ export class SqlDriver implements IDataDriver {
       sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
       temporalFieldKind: (...a) => this.temporalFieldKind(...a),
     };
-    return buildDateBucketExpr.call(host, field, granularity, table, column);
+    return buildDateBucketExpr.call(host, field, granularity, table, column, timezone);
   }
 
   /**
@@ -1267,18 +1300,26 @@ export class SqlDriver implements IDataDriver {
    * Reading the expression from here keeps this driver the one source of its
    * bucketing. The text is `buildDateBucketExpr`'s, unchanged, with each `??`
    * rendered by knex (`Raw.toQuery`) through this dialect's own identifier
-   * quoting. The expression binds identifiers only, so the text carries no
+   * quoting. The UTC expression binds identifiers only, so the text carries no
    * value placeholder. `objectName` goes in as the coercion key, as
    * `aggregate` passes it, so a SQLite `Field.datetime` column that may still
    * hold pre-canonical values renders the repair the GROUP BY runs (#3773),
    * and a `Field.date` renders its calendar day on every dialect (#21485).
    *
+   * [#33697] `timezone`, when given, is the resolved IANA area/location name
+   * the engine pushes a zoned bucket down with (ADR-0053 Phase 2 D2 as
+   * amended): the text is then the zoned expression {@link aggregate} groups
+   * by, with the zone rendered as a quoted literal (a zone name is not tenant
+   * data), and `null` on every dialect that does not declare
+   * `supports.zonedDateBucketing` — exactly where the engine buckets that zone
+   * in memory instead.
+   *
    * Read structurally by its caller, like {@link dialectName}. It is not a
    * member of the `IDataDriver` contract.
    */
-  public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue): string | null {
+  public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue, timezone?: string): string | null {
     // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
-    return ClassHeadFacet.dateBucketSql.call(classHeadHost.of(this), objectName, field, granularity);
+    return ClassHeadFacet.dateBucketSql.call(classHeadHost.of(this), objectName, field, granularity, timezone);
   }
 
   /**
@@ -3731,7 +3772,7 @@ export class SqlDriver implements IDataDriver {
    * below is the contract's own, pinned at the type level in
    * `sql-driver-doors-declared-types.test.ts`.
    */
-  aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  aggregate(object: string, query: DriverAggregateQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-aggregation.ts` (see `AggregationHost`).
     return AggregationFacet.aggregate.call(aggregationHost.of(this), object, query, options);
   }
@@ -4922,6 +4963,26 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Converge one table's boolean columns on the integer storage form: legacy
+   * text `'true'` / `'false'` on SQLite becomes `1` / `0` (#34973). The
+   * contract is the docblock of `backfillCanonicalBooleans` in
+   * `sql-driver-schema-sync.ts`.
+   */
+  protected backfillCanonicalBooleans(table: string, tableExisted: boolean): Promise<void> {
+    const readBooleanFields = () => this.booleanFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalBooleans> = {
+      get booleanFields() { return readBooleanFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+    };
+    return backfillCanonicalBooleans.call(host, table, tableExisted);
+  }
+
+  /**
    * The `Field.datetime` (and audit) columns of `table` that MySQL still stores
    * as a legacy `TIMESTAMP`, with the nullability each must keep.
    *
@@ -5266,6 +5327,7 @@ export class SqlDriver implements IDataDriver {
       get deferredSchemaObjects() { return readDeferredSchemaObjects(); },
       get knex() { return readKnex(); },
       planDeclaredRenames: (...a) => this.planDeclaredRenames(...a),
+      previewBooleanConvergence: (...a) => this.previewBooleanConvergence(...a),
       previewDatetimeConvergence: (...a) => this.previewDatetimeConvergence(...a),
       previewTimeConvergence: (...a) => this.previewTimeConvergence(...a),
       rotationShardKey: (...a) => this.rotationShardKey(...a),
@@ -5346,6 +5408,24 @@ export class SqlDriver implements IDataDriver {
       get timeFields() { return readTimeFields(); },
     };
     return previewTimeConvergence.call(host, table, fields, existingColumns);
+  }
+
+  /**
+   * The work {@link backfillCanonicalBooleans} would do for `table`, measured,
+   * not performed (#34973): `normalize_boolean_storage` in `os migrate plan`.
+   * The contract is the docblock of `previewBooleanConvergence` in
+   * `sql-driver-schema-sync.ts`.
+   */
+  protected previewBooleanConvergence(table: string, existingColumns: Set<string>): Promise<PendingSchemaWork[]> {
+    const readBooleanFields = () => this.booleanFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof previewBooleanConvergence> = {
+      get booleanFields() { return readBooleanFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+    };
+    return previewBooleanConvergence.call(host, table, existingColumns);
   }
 
   /**
@@ -9395,6 +9475,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
+      get isPostgres() { return driver.isPostgres; },
       get knex() { return driver.knex; },
       mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
       get numericFields() { return driver.numericFields; },
@@ -9721,6 +9802,7 @@ export class SqlDriver implements IDataDriver {
     rotationHost.install((driver) => ({
       assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
       get autoNumberFields() { return driver.autoNumberFields; },
+      backfillCanonicalBooleans: (...a) => driver.backfillCanonicalBooleans(...a),
       backfillCanonicalDatetimes: (...a) => driver.backfillCanonicalDatetimes(...a),
       backfillCanonicalJsonEncoding: (...a) => driver.backfillCanonicalJsonEncoding(...a),
       backfillCanonicalTimes: (...a) => driver.backfillCanonicalTimes(...a),

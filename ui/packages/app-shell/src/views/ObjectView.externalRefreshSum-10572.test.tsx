@@ -18,10 +18,11 @@
  * (`ObjectView.refreshInPlace-10035.test.tsx` went red on exactly that). The
  * page now sums the prop into its refresh signal in the render.
  *
- * What this file adds to that pin: the sum still reaches the page's OTHER
- * `refreshKey` readers — the record-count probe (`$top: 0`) is the one counted
- * here — and a counter-only bump (nothing on the bus) still reaches the list,
- * once. Harness copied from the objectui#10035 pin, minus its gantt stand-in.
+ * What this file adds to that pin: a counter-only bump (nothing on the bus)
+ * still reaches the list, once. It also counted the page's record-count probe
+ * (`$top: 0`) as a second `refreshKey` reader; objectstack#34207 removed that
+ * probe (nothing drew its number), so the count reads are now asserted absent.
+ * Harness copied from the objectui#10035 pin, minus its gantt stand-in.
  */
 
 import * as React from 'react';
@@ -87,6 +88,9 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { notifyDataChanged } from '@object-ui/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -120,7 +124,7 @@ function objectsWith(allView: Record<string, unknown>) {
 
 /** The list queries `ListView` issued; the page's `$top: 0` count probe is excluded. */
 let listQueries = 0;
-/** The page's own record-count probe (`$top: 0`), a non-list `refreshKey` reader. */
+/** `$top: 0` count probes — the page sends none since objectstack#34207. */
 let countQueries = 0;
 /**
  * One row, never none: `ListView` draws its loading skeleton IN PLACE of the
@@ -241,7 +245,7 @@ afterEach(() => {
 const GRID = { type: 'grid' };
 
 describe('the console refresh counter reaches the object page in the commit that carries it (objectui#10572)', () => {
-  it('an undo-shaped write (counter bump AND bus notice, one tick) costs one list read and one count read', async () => {
+  it('an undo-shaped write (counter bump AND bus notice, one tick) costs one list read and no count probe', async () => {
     const page = await mountPage(GRID);
     const list = listQueries;
     const count = countQueries;
@@ -249,10 +253,10 @@ describe('the console refresh counter reaches the object page in the commit that
     await page.write();
 
     expect(listQueries - list, 'one write, one list read — the counter and the bus notice landed in different commits').toBe(1);
-    expect(countQueries - count, 'the record-count probe must re-read on an external bump').toBe(1);
+    expect(countQueries - count, 'objectstack#34207: the page sends no `$top: 0` count probe').toBe(0);
   });
 
-  it('a counter-only bump (nothing on the bus) still re-reads the list once and the count once', async () => {
+  it('a counter-only bump (nothing on the bus) still re-reads the list once, with no count probe', async () => {
     const page = await mountPage(GRID);
     const list = listQueries;
     const count = countQueries;
@@ -260,7 +264,7 @@ describe('the console refresh counter reaches the object page in the commit that
     await page.bumpOnly();
 
     expect(listQueries - list, 'the external counter no longer reaches `ListView` as `refreshTrigger`').toBe(1);
-    expect(countQueries - count, 'the external counter no longer reaches the page\'s other `refreshKey` readers').toBe(1);
+    expect(countQueries - count, 'objectstack#34207: the page sends no `$top: 0` count probe').toBe(0);
   });
 
   it('a realtime change (the page\'s own counter AND its own bus notice) costs one list read', async () => {

@@ -29,6 +29,10 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import React from 'react';
 
 let captured: Record<string, unknown> = {};
+// objectstack#32984 — the conversation the pane reads, and the field a change
+// card in it names (the recorder resolves it during its render, as the card does).
+let chatMessages: Array<{ id: string; role: string; content: string }> = [];
+let cardField: [objectName: string, fieldName: string] | null = null;
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -36,10 +40,16 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     ...actual,
     ChatbotEnhanced: (props: Record<string, unknown>) => {
       captured = props;
-      return <div data-testid="ai-chat-panel" />;
+      const resolve = props.resolveFieldLabel as ((o: string, f: string) => string | undefined) | undefined;
+      const named = cardField ? (resolve?.(cardField[0], cardField[1]) ?? cardField[1]) : null;
+      return (
+        <div data-testid="ai-chat-panel">
+          {named !== null ? <span data-testid="card-field">{named}</span> : null}
+        </div>
+      );
     },
     useObjectChat: () => ({
-      messages: [],
+      messages: chatMessages,
       isLoading: false,
       error: undefined,
       sendMessage: vi.fn(),
@@ -57,6 +67,27 @@ let adapter: unknown = null;
 vi.mock('../../../providers/MetadataProvider', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, useMetadata: () => ({ apps: [] }) };
+});
+// objectstack#32984 — the draft overlay's by-name read, served from `overlay`.
+let overlay: Record<string, { name: string; label?: string; fields?: Record<string, { label?: string }> }> = {};
+const overlayGet = vi.fn(async (_type: string, name: string) => structuredClone(overlay[name]) ?? null);
+const overlayClients = new WeakMap<object, object>();
+vi.mock('../../../views/metadata-admin/useMetadata', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realHook = actual.useMetadataClient as (environmentId?: string) => object;
+  return {
+    ...actual,
+    useMetadataClient: (environmentId?: string) => {
+      const real = realHook(environmentId);
+      const cached = overlayClients.get(real);
+      if (cached) return cached;
+      const wrapped: object = Object.assign(Object.create(real) as object, {
+        withPreviewDrafts: () => ({ get: overlayGet }),
+      });
+      overlayClients.set(real, wrapped);
+      return wrapped;
+    },
+  };
 });
 vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -114,6 +145,10 @@ function renderPane(entry: string, editPackageId?: string) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  chatMessages = [];
+  cardField = null;
+  overlay = {};
+  overlayGet.mockClear();
   discardDrafts.mockReset();
   adapter = { getClient: () => ({ packages: { discardDrafts } }) };
   vi.stubGlobal(
@@ -187,5 +222,55 @@ describe('objectui#12725 — the chat column follows its slot', () => {
     const column = screen.getByTestId('ai-chat-panel').closest('[data-chat-column]');
     expect(column).not.toBeNull();
     expect(column!.className.split(/\s+/)).toContain('min-w-0');
+  });
+});
+
+describe('objectstack#32984 — a field a later change drafts is named on the next card', () => {
+  /** The pane as `renderPane` draws it, re-rendered in place (same conversation, same pane). */
+  function paneElement() {
+    return (
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+        <MemoryRouter initialEntries={['/ai/build/conv-1?package=app.b6bl']}>
+          <ChatPane
+            agents={AGENTS}
+            agentsLoading={false}
+            agentsError={undefined}
+            activeAgent="build"
+            chatApi="/api/v1/ai/agents/build/chat"
+            apiBase="/api/v1/ai"
+            conversationId="conv-1"
+            editPackageId="app.b6bl"
+            initialMessages={[]}
+            pendingFirstMessageRef={{ current: null }}
+            onSent={vi.fn()}
+            onShare={vi.fn()}
+          />
+        </MemoryRouter>
+      </I18nProvider>
+    );
+  }
+
+  it('the overlay gains the field after the first card; one message later the card shows its label', async () => {
+    overlay = { b6bl_quote_item: { name: 'b6bl_quote_item', label: '报价明细', fields: { line_total: { label: '小计' } } } };
+    chatMessages = [{ id: 'u1', role: 'user', content: '给报价明细加一个折扣字段' }];
+    cardField = ['b6bl_quote_item', 'discount'];
+    cleanup();
+    const view = render(paneElement());
+
+    // The first card: the overlay is read, and does not hold the field yet.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(overlayGet).toHaveBeenCalledWith('object', 'b6bl_quote_item');
+    expect(screen.getByTestId('card-field').textContent).toBe('discount');
+
+    // The change applies (the field is drafted) and the conversation moves on one message.
+    overlay.b6bl_quote_item!.fields!.discount = { label: '折扣' };
+    chatMessages = [...chatMessages, { id: 'a1', role: 'assistant', content: '已添加折扣字段。' }];
+    view.rerender(paneElement());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.getByTestId('card-field').textContent).toBe('折扣');
   });
 });

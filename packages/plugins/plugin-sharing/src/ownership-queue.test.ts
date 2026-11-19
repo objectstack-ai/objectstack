@@ -31,7 +31,7 @@ import {
 type Row = Record<string, any>;
 
 /**
- * Equality, `$in`, `$gt`, `$or` and `$and` — every predicate shape the queue
+ * Equality, `$in`, `$gt`, `$empty`, `$or` and `$and` — every predicate shape the queue
  * reads send (`$gt` is the keyset cursor of a paged read, #29604). Any other
  * combinator or operator is refused rather than misread.
  */
@@ -50,6 +50,10 @@ function matches(row: Row, filter: any): boolean {
     const rv = row[k] ?? null;
     if (v != null && typeof v === 'object') {
       const ops = Object.keys(v as object);
+      if (ops.length === 1 && ops[0] === '$empty') {
+        if ((rv == null || rv === '') !== Boolean((v as any).$empty)) return false;
+        continue;
+      }
       if (ops.length === 1 && ops[0] === '$gt') {
         if (!(rv != null && String(rv) > String((v as any).$gt))) return false;
         continue;
@@ -897,5 +901,194 @@ describe('[ADR-0142 D5] the sys_assignment_rule save guard', () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error.mock.calls[0][0]).toMatch(/assignment rule 'ticket_intake' is shadowed/);
     expect(logger.error.mock.calls[0][1]).toEqual({ rule: 'ticket_intake', organization: 'org_a' });
+  });
+});
+
+// ─── "Which objects use queues?" ─────────────────────────────────────────────
+
+// [#34602] The per-object answer `/auth/me/permissions` carries as
+// `objectsUsingQueues`: the union of "a record sits in a queue now" and "an
+// active assignment rule routes the object into a queue", over the objects that
+// carry the queue column with storage behind it.
+describe('[#34602] OwnershipQueueService.objectsUsingQueues — the per-object queue answer', () => {
+  /** `ownership` absent = the default `user` tier, which carries `owner_id` and `queue`. */
+  const OBJECTS = [
+    { name: 'crm_case', fields: {} },
+    { name: 'crm_lead', fields: {} },
+    { name: 'crm_opportunity', fields: {} },
+    { name: 'crm_product', ownership: 'org', fields: {} },
+  ];
+  const RULE_SCHEMA = { sys_assignment_rule: { name: 'sys_assignment_rule' } };
+
+  function engineWith(opts: {
+    rows?: Record<string, Row[]>;
+    declaredRules?: Row[];
+    ruleRows?: Row[];
+    ledger?: Row[];
+    withRuleObject?: boolean;
+    failOn?: string[];
+    objects?: Row[];
+  } = {}) {
+    const engine = makeEngine({
+      tables: {
+        ...(opts.rows ?? {}),
+        sys_assignment_rule: opts.ruleRows ?? [],
+        [METADATA_ACTIVATION_TABLE]: opts.ledger ?? [],
+      },
+      schemas: opts.withRuleObject === false ? {} : RULE_SCHEMA,
+      failOn: opts.failOn,
+    });
+    const listItems = engine.registry.listItems;
+    const reads: string[] = [];
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      reads.push(object);
+      return find(object, options);
+    };
+    return Object.assign(engine, {
+      reads,
+      registry: {
+        ...engine.registry,
+        listItems: (type: string) => (type === 'assignment_rule' ? (opts.declaredRules ?? []) : listItems(type)),
+        getAllObjects: () => opts.objects ?? OBJECTS,
+      },
+    });
+  }
+
+  it('no queued record and no rule: no object uses queues — and a non-owned object is never read', async () => {
+    const engine = engineWith();
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual([]);
+    expect(engine.reads).not.toContain('crm_product');
+    expect(engine.reads.filter((o) => o.startsWith('crm_')).sort()).toEqual(['crm_case', 'crm_lead', 'crm_opportunity']);
+  });
+
+  it('a record sitting in a queue (no owner, a queue set) names its object, in its organization only', async () => {
+    const rows = {
+      crm_case: [{ id: 'c1', owner_id: null, queue: 'case_intake', organization_id: 'org_a' }],
+      crm_opportunity: [{ id: 'o1', owner_id: 'u1', queue: null, organization_id: 'org_a' }],
+    };
+    expect(await service(engineWith({ rows })).objectsUsingQueues('org_a')).toEqual(['crm_case']);
+    expect(await service(engineWith({ rows })).objectsUsingQueues('org_b')).toEqual([]);
+  });
+
+  it('an owned record with a queue left on it is not sitting — the list filter would not return it either', async () => {
+    const rows = { crm_case: [{ id: 'c1', owner_id: 'u1', queue: 'case_intake', organization_id: 'org_a' }] };
+    expect(await service(engineWith({ rows })).objectsUsingQueues('org_a')).toEqual([]);
+  });
+
+  it('a declared rule routing into a queue names its object with nothing sitting yet; the ledger switching it off drops it', async () => {
+    const declaredRules = [{
+      name: 'lead_intake', object: 'crm_lead',
+      entries: [{ name: 'all', assignTo: { type: 'queue', value: 'lead_desk' }, strategy: 'round_robin' }],
+    }];
+    const engine = engineWith({ declaredRules });
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual(['crm_lead']);
+    // The routed object needs no "is anything sitting?" read of its own.
+    expect(engine.reads).not.toContain('crm_lead');
+    const off = engineWith({ declaredRules, ledger: [{ metadata_type: 'assignment_rule', name: 'lead_intake', active: false }] });
+    expect(await service(off).objectsUsingQueues('org_a')).toEqual([]);
+  });
+
+  it('a declared rule that assigns to a user, or is `active: false`, routes nothing into a queue', async () => {
+    const declaredRules = [
+      { name: 'to_user', object: 'crm_lead', entries: [{ name: 'e', assignTo: { type: 'user', value: 'u1' } }] },
+      { name: 'paused', object: 'crm_case', active: false, entries: [{ name: 'e', assignTo: { type: 'queue', value: 'q' } }] },
+    ];
+    expect(await service(engineWith({ declaredRules })).objectsUsingQueues('org_a')).toEqual([]);
+  });
+
+  it('an organization\'s own queue rule names its object for that organization only; an inactive or shadowed row does not', async () => {
+    const ruleRows = [
+      { id: 'r1', name: 'opp_desk', object_name: 'crm_opportunity', recipient_type: 'queue', recipient_id: 'q', active: true, organization_id: 'org_a' },
+      { id: 'r2', name: 'case_off', object_name: 'crm_case', recipient_type: 'queue', recipient_id: 'q', active: false, organization_id: 'org_a' },
+      { id: 'r3', name: 'lead_user', object_name: 'crm_lead', recipient_type: 'user', recipient_id: 'u1', active: true, organization_id: 'org_a' },
+      { id: 'r4', name: 'lead_intake', object_name: 'crm_lead', recipient_type: 'queue', recipient_id: 'q', active: true, organization_id: 'org_a' },
+    ];
+    // `lead_intake` is a declared rule's name, here assigning to a user: one name is one rule, the declared one.
+    const declaredRules = [{ name: 'lead_intake', object: 'crm_lead', entries: [{ name: 'e', assignTo: { type: 'user', value: 'u1' } }] }];
+    expect(await service(engineWith({ ruleRows, declaredRules })).objectsUsingQueues('org_a')).toEqual(['crm_opportunity']);
+    expect(await service(engineWith({ ruleRows, declaredRules })).objectsUsingQueues('org_b')).toEqual([]);
+  });
+
+  it('the union: a routed object and an object with a record sitting are both named, ordered by name', async () => {
+    const declaredRules = [{ name: 'lead_intake', object: 'crm_lead', entries: [{ name: 'e', assignTo: { type: 'queue', value: 'q' } }] }];
+    const rows = { crm_case: [{ id: 'c1', owner_id: '', queue: 'case_intake', organization_id: 'org_a' }] };
+    expect(await service(engineWith({ rows, declaredRules })).objectsUsingQueues('org_a')).toEqual(['crm_case', 'crm_lead']);
+  });
+
+  it('a rule naming an object without the queue column names nothing', async () => {
+    const declaredRules = [{ name: 'products', object: 'crm_product', entries: [{ name: 'e', assignTo: { type: 'queue', value: 'q' } }] }];
+    expect(await service(engineWith({ declaredRules })).objectsUsingQueues('org_a')).toEqual([]);
+  });
+
+  it('a stack without sys_assignment_rule reads no organization rules', async () => {
+    const engine = engineWith({ withRuleObject: false });
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual([]);
+    expect(engine.reads).not.toContain('sys_assignment_rule');
+  });
+
+  it('an object with the queue column but no tenant column is read without an organization filter', async () => {
+    // `systemFields.tenant: false` keeps owner_id and queue but no organization_id: a filter on that
+    // column would be refused by a SQL driver, and the object's toggle would stay hidden for good.
+    const objects = [...OBJECTS, { name: 'glb_notice', systemFields: { tenant: false }, fields: {} }];
+    const rows = { glb_notice: [{ id: 'n1', owner_id: null, queue: 'notice_desk' }] };
+    const engine = engineWith({ rows, objects });
+    const wheres: Record<string, unknown>[] = [];
+    const find = engine.find;
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'glb_notice' || object === 'crm_case') wheres.push({ object, ...(options?.where ?? {}) });
+      return find(object, options);
+    };
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual(['glb_notice']);
+    expect(wheres.find((w) => w.object === 'glb_notice')).not.toHaveProperty('organization_id');
+    // A tenant-scoped object in the same call still reads in its organization.
+    expect(wheres.find((w) => w.object === 'crm_case')).toHaveProperty('organization_id', 'org_a');
+  });
+
+  it('an object walled on a declared tenancy.tenantField (no organization_id) is read with the caller\'s tenantId — another organization\'s sitting row does not name it', async () => {
+    // `systemFields.tenant: false` + `tenancy.tenantField`: no organization_id column, but the driver walls
+    // rows on `tenant_org` whenever the read carries a tenantId. Emulated here exactly so: with a tenantId,
+    // only that tenant's rows are visible; without one, every row is.
+    const objects = [...OBJECTS, {
+      name: 'glb_ticket', systemFields: { tenant: false },
+      tenancy: { enabled: true, strategy: 'shared', tenantField: 'tenant_org' }, fields: { tenant_org: { type: 'text' } },
+    }];
+    const rows = { glb_ticket: [{ id: 't1', owner_id: null, queue: 'ticket_desk', tenant_org: 'org_b' }] };
+    const engine = engineWith({ rows, objects });
+    const find = engine.find;
+    const contexts: Record<string, unknown>[] = [];
+    engine.find = async (object: string, options?: any) => {
+      if (object !== 'glb_ticket') return find(object, options);
+      contexts.push(options?.context ?? {});
+      const tenantId = options?.context?.tenantId;
+      // The wall is a predicate the driver adds before its limit, as the SQL driver does.
+      return find(object, tenantId ? { ...options, where: { ...(options?.where ?? {}), tenant_org: tenantId } } : options);
+    };
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual([]);
+    expect(contexts[0]).toHaveProperty('tenantId', 'org_a');
+    expect(await service(engine).objectsUsingQueues('org_b')).toEqual(['glb_ticket']);
+  });
+
+  it('a failed read leaves that object out, logged once — the other objects still answer', async () => {
+    const warn = vi.fn();
+    const rows = { crm_lead: [{ id: 'l1', owner_id: null, queue: 'lead_desk', organization_id: 'org_a' }] };
+    const svc = service(engineWith({ rows, failOn: ['crm_case'] }), { warn });
+    expect(await svc.objectsUsingQueues('org_a')).toEqual(['crm_lead']);
+    expect(await svc.objectsUsingQueues('org_a')).toEqual(['crm_lead']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/'crm_case' record sits in a queue/);
+  });
+
+  it('a failed read of the organization\'s rules contributes no routed object, logged once', async () => {
+    const warn = vi.fn();
+    const ruleRows = [{ id: 'r1', name: 'opp_desk', object_name: 'crm_opportunity', recipient_type: 'queue', recipient_id: 'q', active: true, organization_id: 'org_a' }];
+    const svc = service(engineWith({ ruleRows, failOn: ['sys_assignment_rule'] }), { warn });
+    expect(await svc.objectsUsingQueues('org_a')).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/sys_assignment_rule read failed/);
+  });
+
+  it('no engine: no object', async () => {
+    expect(await new OwnershipQueueService({ engine: () => null }).objectsUsingQueues('org_a')).toEqual([]);
   });
 });

@@ -255,10 +255,25 @@ export function undeclaredHookRefusalCodeAtSave(
   declared: readonly string[],
   at: 'body.source' | 'handler' = 'body.source',
 ): string {
+  return undeclaredRefusalCodeAtSave('hook', code, declared, at);
+}
+
+/** [#34273] Which declaration a refusal catalogue sits on, as the sentences name it. */
+type RefusalSubject = 'hook' | 'action';
+
+/** The subject with its sentence-initial article: `A hook` / `An action`. */
+const capArticle = (subject: RefusalSubject): string => (subject === 'action' ? 'An action' : 'A hook');
+
+function undeclaredRefusalCodeAtSave(
+  subject: RefusalSubject,
+  code: string,
+  declared: readonly string[],
+  at: string,
+): string {
   return (
-    `\`${at}\` throws code '${code}', and this hook's \`refusals\` declares no such code `
-    + `(declared: ${declaredList(declared)}). A hook that declares \`refusals\` refuses by code only, so the `
-    + `throw is refused when the hook runs. Declare it under \`refusals.${code}\` with the message the user `
+    `\`${at}\` throws code '${code}', and this ${subject}'s \`refusals\` declares no such code `
+    + `(declared: ${declaredList(declared)}). ${capArticle(subject)} that declares \`refusals\` refuses by code only, so the `
+    + `throw is refused when the ${subject} runs. Declare it under \`refusals.${code}\` with the message the user `
     + 'reads, or throw one of the declared codes.'
   );
 }
@@ -273,10 +288,18 @@ export function undeclaredHookRefusalCodeAtSave(
 export const HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE = /^(?![\s\S]*\{\{[^{}]*\}\})[\s\S]*$/;
 
 /** The save-time refusal for a `{{ … }}` hole in a refusal message whose entry declares no `params`. */
-export const HOOK_REFUSAL_MESSAGE_HOLE_REFUSED =
-  'A hook refusal `message` whose entry declares no `params` is plain text, and nothing fills a `{{ }}` hole: the '
-  + 'caller would read the braces as written. Declare the name under the entry\'s `params` (`params: [\'state\']`) '
-  + 'and throw it in the error\'s `params` (`{ code, params: { state } }`), or write the sentence without the hole.';
+export const HOOK_REFUSAL_MESSAGE_HOLE_REFUSED = refusalMessageHoleRefused('hook');
+
+/** [#34273] The action twin of {@link HOOK_REFUSAL_MESSAGE_HOLE_REFUSED}. */
+export const ACTION_REFUSAL_MESSAGE_HOLE_REFUSED = refusalMessageHoleRefused('action');
+
+function refusalMessageHoleRefused(subject: RefusalSubject): string {
+  return (
+    `${capArticle(subject)} refusal \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
+    + 'caller would read the braces as written. Declare the name under the entry\'s `params` (`params: [\'state\']`) '
+    + 'and throw it in the error\'s `params` (`{ code, params: { state } }`), or write the sentence without the hole.'
+  );
+}
 
 /** How a hook carrying `refusals` names the code that would answer it, for the sentence below. */
 function refusalCarrier(language: string | undefined): string {
@@ -306,10 +329,19 @@ export function undeclaredHookRefusalAtRun(
   code: string | undefined,
   declared: readonly string[],
 ): string {
+  return undeclaredRefusalAtRun('hook', hookName, code, declared);
+}
+
+function undeclaredRefusalAtRun(
+  subject: RefusalSubject,
+  name: string,
+  code: string | undefined,
+  declared: readonly string[],
+): string {
   const thrown = code === undefined ? 'threw no `code`' : `threw code '${code}'`;
   return (
-    `hook '${hookName}' ${thrown}, and its \`refusals\` declares no such code (declared: ${declaredList(declared)}). `
-    + 'A hook that declares `refusals` refuses by code only: throw an error whose `code` is one of the declared '
+    `${subject} '${name}' ${thrown}, and its \`refusals\` declares no such code (declared: ${declaredList(declared)}). `
+    + `${capArticle(subject)} that declares \`refusals\` refuses by code only: throw an error whose \`code\` is one of the declared `
     + 'codes, or declare this one with the message the user reads.'
   );
 }
@@ -329,10 +361,20 @@ export function undeclaredHookRefusalReasonAtSave(
   declared: readonly string[],
   at: 'body.source' | 'handler',
 ): string {
+  return undeclaredRefusalReasonAtSave('hook', code, reason, declared, at);
+}
+
+function undeclaredRefusalReasonAtSave(
+  subject: RefusalSubject,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+  at: string,
+): string {
   return (
     `\`${at}\` throws code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares no such `
     + `reason (declared: ${reasonList(declared)}). A reason picks one of the code's declared sentences, so the `
-    + `throw is refused when the hook runs. Declare it under \`refusals.${code}.reasons.${reason}\` with the `
+    + `throw is refused when the ${subject} runs. Declare it under \`refusals.${code}.reasons.${reason}\` with the `
     + 'message the user reads, or throw one of the declared reasons.'
   );
 }
@@ -348,9 +390,240 @@ export function undeclaredHookRefusalReasonAtRun(
   reason: string,
   declared: readonly string[],
 ): string {
+  return undeclaredRefusalReasonAtRun('hook', hookName, code, reason, declared);
+}
+
+function undeclaredRefusalReasonAtRun(
+  subject: RefusalSubject,
+  name: string,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+): string {
   return (
-    `hook '${hookName}' threw code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares `
+    `${subject} '${name}' threw code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares `
     + `no such reason (declared: ${reasonList(declared)}). A reason picks one of the code's declared sentences: `
     + 'throw one of the declared reasons, or declare this one with the message the user reads.'
+  );
+}
+
+/*
+ * ── A hook's declared texts (#34374, ruling 6913660232 parameter 7) ─────────
+ *
+ * A sentence a hook writes into a record for people to read — the subject of
+ * the follow-up task it opens, the summary of the activity it logs — is
+ * written in the ORGANIZATION's language, never the starter's (parameter 2).
+ * The hook declares each such sentence under `texts: { <key>: { message,
+ * params? } }`, the way it declares a refusal, and its code asks for one by
+ * key: `await ctx.text('follow_up_subject', { lead })`. The runtime picks
+ * `hooks.<hook>.texts.<key>.message` in the organization's language (the one
+ * shared reader `resolveOrganizationLocale`, parameter 3), else the declared
+ * sentence (parameter 5), and fills its `{{ }}` holes from `params` after
+ * (parameter 1). A string the hook builds itself stays a literal value
+ * (parameter 4).
+ *
+ * The same two halves as a refusal code: a key the hook's source asks for
+ * LITERALLY and `texts` does not declare is refused at save
+ * ({@link hookTextKeysAskedIn}); any other key is refused when the hook runs.
+ */
+
+/**
+ * The spelling of a declared text key: snake_case, a machine name like every
+ * other key an author declares. It never reaches the wire.
+ */
+export const HOOK_TEXT_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+/** `ctx.text('key'` — the call a hook's code asks for a declared text with. */
+const TEXT_CALL = new RegExp(
+  String.raw`(?<![\w$.])ctx\s*\.\s*text\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>`,
+  'g',
+);
+
+/**
+ * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)` —
+ * in first-seen order: the cases a save can decide. A key that arrives any
+ * other way (a variable, a computed value) is left to the run-time refusal.
+ * Comments and longer strings are blanked first, as for a refusal code.
+ */
+export function hookTextKeysAskedIn(source: string): string[] {
+  const keys = new Set<string>();
+  for (const m of maskedSource(source).matchAll(TEXT_CALL)) keys.add(m.groups!.key);
+  return [...keys];
+}
+
+/** The save-time refusal for a key a hook's source asks for literally that `texts` does not declare. */
+export function undeclaredHookTextKeyAtSave(
+  key: string,
+  declared: readonly string[],
+  at: 'body.source' | 'handler' = 'body.source',
+): string {
+  return undeclaredTextKeyAtSave('hook', key, declared, at);
+}
+
+// [#34374 PR2] One subject-parameterised core per text sentence, as the
+// refusal sentences above are: the hook exports keep their bytes, and the
+// action twins below name the action.
+function undeclaredTextKeyAtSave(subject: RefusalSubject, key: string, declared: readonly string[], at: string): string {
+  return (
+    `\`${at}\` asks for text '${key}' (\`ctx.text('${key}')\`), and this ${subject}'s \`texts\` declares no such key `
+    + `(declared: ${declaredList(declared)}). Declare it under \`texts.${key}\` with the sentence the record keeps, `
+    + 'or ask for one of the declared keys.'
+  );
+}
+
+/** The save-time refusal for a `{{ … }}` hole in a text `message` whose entry declares no `params`. */
+export const HOOK_TEXT_MESSAGE_HOLE_REFUSED = textMessageHoleRefused('hook', 'lead');
+
+/** [#34374 PR2] The action twin of {@link HOOK_TEXT_MESSAGE_HOLE_REFUSED}. */
+export const ACTION_TEXT_MESSAGE_HOLE_REFUSED = textMessageHoleRefused('action', 'subject');
+
+function textMessageHoleRefused(subject: RefusalSubject, param: string): string {
+  return (
+    `${capArticle(subject)} text \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
+    + `record would keep the braces as written. Declare the name under the entry's \`params\` (\`params: ['${param}']\`) `
+    + `and pass it to \`ctx.text\` (\`ctx.text('KEY', { ${param} })\`), or write the sentence without the hole.`
+  );
+}
+
+/**
+ * The save-time refusal for `texts` on a hook whose code cannot ask for one:
+ * an `expression` body, or no body and no handler at all.
+ */
+export function hookTextsWithoutRunnableCode(language: string | undefined): string {
+  return (
+    '`texts` is served to a sandboxed `body` (`language: \'js\'`) and to an in-process `handler` (which '
+    + `\`os build\` lowers to a \`js\` body) through \`ctx.text\`, and this hook has ${refusalCarrier(language)}: `
+    + 'nothing it runs can ask for a declared text, while `os i18n` still demanded its translations. Give the hook a '
+    + '`js` body or a `handler` that writes the texts, or drop `texts`.'
+  );
+}
+
+/**
+ * The run-time refusal for `ctx.text(key)` with a key the hook's `texts` does
+ * not declare (or a hook that declares none). Fault text: it names the hook
+ * and the key and says how to fix it.
+ */
+export function undeclaredHookTextAtRun(hookName: string, key: string, declared: readonly string[]): string {
+  return undeclaredTextAtRun('hook', hookName, key, declared);
+}
+
+function undeclaredTextAtRun(subject: RefusalSubject, name: string, key: string, declared: readonly string[]): string {
+  return (
+    `${subject} '${name}' asked for text '${key}' (ctx.text), and its \`texts\` declares no such key `
+    + `(declared: ${declaredList(declared)}). Only a declared text is written in the organization's language: `
+    + 'declare it under `texts` with the sentence the record keeps, or ask for one of the declared keys.'
+  );
+}
+
+/*
+ * ── An action's refusal catalogue (#34273) ─────────────────────────────────
+ *
+ * `ActionSchema.refusals` is the hook catalogue's twin on an action: the same
+ * entry shape, the same literal reading of the code's throws at save, and the
+ * same run-time answer — the sentences below are the hook ones with the
+ * action named, built by the one subject-parameterised core above, so the two
+ * cannot drift. Where they differ is what an action runs: a sandboxed `js`
+ * `body` on a `script` action, or an inline `target` function `os build`
+ * lowers to one; and where its translation lives — beside the action's other
+ * copy, `objects.<object>._actions.<action>.refusals.…` or, for an object-less
+ * action, `globalActions.<action>.refusals.…` (`actionRefusalMessageKey`).
+ */
+
+/** The save-time refusal for a code an action's source throws literally that its `refusals` does not declare. */
+export function undeclaredActionRefusalCodeAtSave(code: string, declared: readonly string[]): string {
+  return undeclaredRefusalCodeAtSave('action', code, declared, 'body.source');
+}
+
+/** The save-time refusal for a reason an action's source throws literally under a code that does not declare it. */
+export function undeclaredActionRefusalReasonAtSave(code: string, reason: string, declared: readonly string[]): string {
+  return undeclaredRefusalReasonAtSave('action', code, reason, declared, 'body.source');
+}
+
+/** The run-time fault for an action's throw its catalogue cannot answer: an undeclared code, or none. */
+export function undeclaredActionRefusalAtRun(
+  actionName: string,
+  code: string | undefined,
+  declared: readonly string[],
+): string {
+  return undeclaredRefusalAtRun('action', actionName, code, declared);
+}
+
+/** The run-time fault for a declared code an action threw with a reason the code does not declare. */
+export function undeclaredActionRefusalReasonAtRun(
+  actionName: string,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+): string {
+  return undeclaredRefusalReasonAtRun('action', actionName, code, reason, declared);
+}
+
+/**
+ * The save-time refusal for a catalogue on an action that runs no sandboxed
+ * `js` body, so nothing it runs can throw a declared code: a type other than
+ * `script` (its `target` is a URL, page, flow or endpoint — a refused flow
+ * answers through its own `end` refusal), an `expression` body, or a `script`
+ * action with no `body` — which is what a string `target` naming a host
+ * handler, or an inline `target` function `os build` could not lower, leaves.
+ * `os i18n` would demand its translations and nothing would serve them.
+ */
+export function actionRefusalsWithoutSandboxedBody(type: string, language: string | undefined): string {
+  const has = actionCodeCarrier(type, language);
+  return (
+    "`refusals` is answered for a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and for its inline "
+    + `\`target\` function (which \`os build\` lowers to a \`js\` body), and this action has ${has}: nothing it runs `
+    + 'can throw a declared code, while `os i18n` still demanded its translations. Give the action a `js` body that '
+    + 'throws the declared codes, or drop `refusals`.'
+  );
+}
+
+/** How an action that runs no `js` body of its own names what it has, for the two sentences that refuse it. */
+function actionCodeCarrier(type: string, language: string | undefined): string {
+  return type !== 'script'
+    ? `\`type: '${type}'\`, which runs no code of the action's own`
+    : language !== undefined
+      ? `a \`${language}\` body`
+      : 'no `body` (an inline `target` function `os build` could not lower leaves none)';
+}
+
+/*
+ * ── An action's declared texts (#34374 PR2, ruling 6913660232 parameter 7) ──
+ *
+ * `ActionSchema.texts` is the hook texts' twin on an action: a sentence a
+ * `script` action's `js` body writes into a record for people to read — the
+ * subject of the email activity it logs — declared under `texts: { <key>: {
+ * message, params? } }` and asked for by key, `await ctx.text('email_subject',
+ * { subject })`. The runtime answers it in the ORGANIZATION's language through
+ * the action's own translation address (`actionTextMessageKey`:
+ * `objects.<object>._actions.<action>.texts.<key>.message`, or
+ * `globalActions.<action>.texts.<key>.message` for an object-less action).
+ * The same two halves as a hook text: a key the body asks for literally and
+ * `texts` does not declare is refused at save (the key reading is
+ * {@link hookTextKeysAskedIn}, one reading for both); any other key is refused
+ * when the action runs. The sentences are the hook ones with the action named.
+ */
+
+/** The save-time refusal for a key an action's body asks for literally that its `texts` does not declare. */
+export function undeclaredActionTextKeyAtSave(key: string, declared: readonly string[]): string {
+  return undeclaredTextKeyAtSave('action', key, declared, 'body.source');
+}
+
+/** The run-time fault for `ctx.text(key)` with a key the action's `texts` does not declare (or none at all). */
+export function undeclaredActionTextAtRun(actionName: string, key: string, declared: readonly string[]): string {
+  return undeclaredTextAtRun('action', actionName, key, declared);
+}
+
+/**
+ * The save-time refusal for `texts` on an action whose code cannot ask for
+ * one: a type other than `script`, an `expression` body, or a `script` action
+ * with no body. `os i18n` would demand its translations and nothing would
+ * serve them.
+ */
+export function actionTextsWithoutRunnableCode(type: string, language: string | undefined): string {
+  return (
+    "`texts` is served to a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and to its inline "
+    + `\`target\` function (which \`os build\` lowers to a \`js\` body) through \`ctx.text\`, and this action has `
+    + `${actionCodeCarrier(type, language)}: nothing it runs can ask for a declared text, while \`os i18n\` still `
+    + 'demanded its translations. Give the action a `js` body that writes the texts, or drop `texts`.'
   );
 }

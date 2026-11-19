@@ -1,15 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * UnifiedSidebar — on a narrow window the console sidebar is the icon rail,
- * and a click expands it OVER the content (objectstack#27593).
+ * UnifiedSidebar — on a narrow window the console sidebar folds on its own,
+ * and the app bar's trigger floats its menu OVER the content
+ * (objectstack#27593). Folded, the sidebar is hidden, with no icon column
+ * (ruling 6973617688 on objectstack#35062, which replaced the icon rail; the
+ * edge, the reader's own collapse and focus are pinned in
+ * `UnifiedSidebar.hiddenCollapse-35062.test.tsx`).
  *
- * - At 1280 px the sidebar mounts as the rail; at 1440 px nothing changes; at
- *   700 px the phone drawer still mounts.
- * - A click on the rail's background expands it as an overlay: the panel
- *   takes the expanded width above the page while the in-flow gap keeps the
- *   rail's width, so the content beside it does not move. Hover alone does
- *   not expand it, and a click on a rail icon navigates as before.
+ * - At 1280 px the sidebar mounts folded and hidden; at 1440 px nothing
+ *   changes; at 700 px the phone drawer still mounts.
+ * - The app bar's trigger floats the menu: the panel takes the expanded width
+ *   above the page while the in-flow gap keeps no width, so the content beside
+ *   it does not move. Resting the pointer on the window's left edge floats it
+ *   too (the ruling's change to "hover alone does not expand").
  * - A navigation choice, a press outside it or Esc folds it again; a press in
  *   an entry's own menu (a portal) does not, and the app bar's trigger
  *   toggles it once.
@@ -18,10 +22,10 @@
  *   tooltip an entry opens does not take the key (objectstack#28078).
  * - "Keep sidebar open" on a narrow window and the wide-window choice are kept
  *   apart, across a resize and a reload (objectstack#28079).
- * - A group declared `expanded: false` lists its entries in the rail, as an
- *   expanded group does, reachable by pointer and keyboard; the expanded
- *   sidebar (the overlay, a wide window) keeps the group collapsed
- *   (objectstack#32156).
+ * - A group declared `expanded: false` stays collapsed, with its count, in the
+ *   floated menu as in the expanded sidebar, and its disclosure opens it to
+ *   the pointer and the keyboard (objectstack#32156 listed its entries in the
+ *   icon rail, which is gone).
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -107,7 +111,12 @@ vi.mock('../ContextSelectors', () => ({
 import { SidebarProvider, useSidebar } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { useResponsiveSidebar } from '../../hooks/useResponsiveSidebar';
-import { RAIL_OVERLAY_FRAME_KEEPS_GAP, RAIL_OVERLAY_PANEL, primeConsoleSidebarOpen } from '../consoleSidebarRail';
+import {
+  RAIL_OVERLAY_FRAME_NO_GAP,
+  RAIL_OVERLAY_PANEL,
+  SIDEBAR_FLOAT_OPEN_DELAY_MS,
+  primeConsoleSidebarOpen,
+} from '../consoleSidebarRail';
 
 /**
  * Size the test window: happy-dom's own viewport, so `innerWidth`, the
@@ -212,16 +221,19 @@ const appBarTrigger = () => within(screen.getByTestId('app-bar')).getByRole('but
 const hiddenTooltip = () =>
   Array.from(document.querySelectorAll('[role="tooltip"]')).find((el) => el.closest('[hidden]'));
 
+/** The folded sidebar's menu, floated over the content from the app bar's trigger. */
 function expandRail() {
-  fireEvent.click(background());
+  fireEvent.click(appBarTrigger());
   expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
   expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
 }
 
+/** Folded: hidden, with no icon column, and nothing in it reachable. */
 function expectRail() {
   expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
-  expect(sidebarRoot()).toHaveAttribute('data-collapsible', 'icon');
-  expect(panel()).toHaveAttribute('data-console-rail', 'rail');
+  expect(sidebarRoot()).toHaveAttribute('data-collapsible', 'offcanvas');
+  expect(panel()).toHaveAttribute('data-console-rail', 'hidden');
+  expect(panel()).toHaveAttribute('inert');
   expect(tokens(frame())).toEqual(['contents']);
 }
 
@@ -237,24 +249,24 @@ afterEach(() => {
   document.cookie = 'sidebar_state=; path=/; max-age=0';
 });
 
-describe('the narrow-window icon rail (objectstack#27593)', () => {
-  it('at 1280 px the sidebar mounts as the icon rail, reserving only the rail', () => {
+describe('the narrow-window fold (objectstack#27593)', () => {
+  it('at 1280 px the sidebar mounts folded and hidden, reserving no width', () => {
     renderShell(1280);
     expectRail();
-    // Collapsed, the gap takes the primitive's own icon width: the content is the window minus the rail.
-    expect(tokens(gap()).some((t) => t.endsWith(':w-(--sidebar-width-icon)'))).toBe(true);
+    // Collapsed, the gap takes no width: the content is the whole window, with no icon column.
+    expect(tokens(gap())).toContain('group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:w-0');
     expect(keepOpen()).toBeNull();
   });
 
-  it('a click on the rail’s background expands it over the content; the gap keeps the rail’s width', () => {
+  it('the app bar’s trigger floats the menu over the content; the gap keeps no width', () => {
     renderShell(1280);
     expandRail();
 
     // The panel takes the expanded width above the page…
     for (const token of RAIL_OVERLAY_PANEL.split(' ')) expect(tokens(panel())).toContain(token);
-    // …and the frame holds the gap at the rail's width, so the content does not move.
-    expect(tokens(frame())).toContain(RAIL_OVERLAY_FRAME_KEEPS_GAP);
-    const selector = /^\[&>(.+)\]:w-\(--sidebar-width-icon\)$/.exec(RAIL_OVERLAY_FRAME_KEEPS_GAP)?.[1];
+    // …and the frame holds the gap at no width, so the content does not move.
+    expect(tokens(frame())).toContain(RAIL_OVERLAY_FRAME_NO_GAP);
+    const selector = /^\[&>(.+)\]:w-0$/.exec(RAIL_OVERLAY_FRAME_NO_GAP)?.[1];
     expect(selector, 'the frame variant names the element it narrows').toBeDefined();
     const target = frame().querySelector(`:scope > ${selector}`);
     expect(target, 'the variant reaches the primitive’s gap, not the panel').toBe(gap());
@@ -262,15 +274,30 @@ describe('the narrow-window icon rail (objectstack#27593)', () => {
     expect(tokens(panel())).toContain('fixed');
   });
 
-  it('hover alone does not expand it, and a click on a rail icon navigates without expanding', () => {
-    renderShell(1280);
-    fireEvent.pointerEnter(panel());
-    fireEvent.mouseOver(background());
-    expectRail();
+  it('resting the pointer on the window’s left edge floats it; nothing of the hidden panel answers the pointer', () => {
+    vi.useFakeTimers();
+    try {
+      renderShell(1280);
+      // The hidden panel is inert: hovering it does nothing.
+      fireEvent.pointerEnter(panel(), { pointerType: 'mouse' });
+      fireEvent.mouseOver(background());
+      act(() => {
+        vi.advanceTimersByTime(SIDEBAR_FLOAT_OPEN_DELAY_MS * 2);
+      });
+      expectRail();
 
-    fireEvent.click(within(panel()).getByRole('link', { name: 'Accounts' }));
-    expectRail();
-    expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/account');
+      // Ruling 6973617688 on objectstack#35062 changes this pin's "hover alone
+      // does not expand": with the icon rail gone, the left edge floats the menu
+      // on hover, as the app bar's trigger does on a click.
+      fireEvent.pointerEnter(screen.getByTestId('console-sidebar-edge'), { pointerType: 'mouse' });
+      act(() => {
+        vi.advanceTimersByTime(SIDEBAR_FLOAT_OPEN_DELAY_MS);
+      });
+      expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+      expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('choosing a navigation item folds it', () => {
@@ -318,7 +345,11 @@ describe('the narrow-window icon rail (objectstack#27593)', () => {
 
   it('Esc folds it; an Esc another layer already handled does not', () => {
     renderShell(1280);
-    expandRail();
+    // Floated by a press on the edge, which moves no focus: the trigger's
+    // float focuses an entry, whose hidden tooltip would take the Esc
+    // (objectstack#28078, below).
+    fireEvent.click(screen.getByTestId('console-sidebar-edge'));
+    expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
     const handled = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     handled.preventDefault();
     act(() => {
@@ -477,26 +508,38 @@ const COLLAPSED_GROUP_NAVIGATION = [
 const disclosure = () => within(panel()).getByRole('button', { name: /^Developer/ });
 const groupEntry = (name: string) => within(panel()).queryByRole('link', { name });
 
-describe('a collapsed group’s entries in the icon rail (objectstack#32156)', () => {
-  it('at 1360 px the rail lists the entries of a group declared expanded: false, and a click opens one', () => {
+describe('a collapsed group in the folded sidebar (objectstack#32156)', () => {
+  it('at 1360 px the hidden sidebar offers none of its entries; the floated menu opens the group by its disclosure', () => {
     renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
     expectRail();
-    expect(groupEntry('API Keys'), 'the collapsed group draws its entries in the rail').not.toBeNull();
-    expect(groupEntry('OAuth Applications')).not.toBeNull();
-
+    // objectstack#32156 listed the group's entries in the icon rail. With no
+    // rail (ruling 6973617688 on objectstack#35062) the hidden panel is inert,
+    // and the entries are reached through the floated menu.
+    expandRail();
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+    expect(groupEntry('OAuth Applications')).toBeNull();
+    fireEvent.click(disclosure());
     fireEvent.click(groupEntry('OAuth Applications')!);
     expectRail();
     expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/oauth_app');
   });
 
-  it('at 1360 px Tab reaches an entry of the collapsed group and Enter opens it', async () => {
+  it('at 1360 px the keyboard floats the menu from the trigger, opens the group and Enter opens an entry', async () => {
     const user = userEvent.setup();
     renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
-    expectRail();
-    act(() => within(panel()).getByRole('link', { name: 'Contacts' }).focus());
-    // The test DOM computes no Tailwind, so the group label the rail hides
-    // (`invisible`) is still a stop here: Tab on until the entry, a few presses at most.
-    for (let press = 0; press < 6 && document.activeElement !== groupEntry('API Keys'); press++) {
+    act(() => appBarTrigger().focus());
+    await user.keyboard('{Enter}');
+    expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
+    expect(panel(), 'the trigger moves focus into the floated menu').toContainElement(
+      document.activeElement as HTMLElement,
+    );
+    for (let press = 0; press < 8 && document.activeElement !== disclosure(); press++) {
+      await user.tab();
+    }
+    expect(document.activeElement, 'Tab reaches the group’s disclosure').toBe(disclosure());
+    await user.keyboard('{Enter}');
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'true');
+    for (let press = 0; press < 4 && document.activeElement !== groupEntry('API Keys'); press++) {
       await user.tab();
     }
     expect(document.activeElement, 'Tab reaches the entry').toBe(groupEntry('API Keys'));
@@ -505,26 +548,24 @@ describe('a collapsed group’s entries in the icon rail (objectstack#32156)', (
     expectRail();
   });
 
-  it('a wide window collapsed to icons by hand lists them too', () => {
+  it('a wide window collapsed by hand is hidden too: no entry of the group is reachable', () => {
     renderShell(1440, COLLAPSED_GROUP_NAVIGATION);
     fireEvent.click(appBarTrigger());
     expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
-    expect(groupEntry('API Keys')).not.toBeNull();
-    fireEvent.click(groupEntry('API Keys')!);
-    expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/api_key');
+    expect(sidebarRoot()).toHaveAttribute('data-collapsible', 'offcanvas');
+    expect(panel()).toHaveAttribute('data-console-rail', 'hidden');
+    expect(panel()).toHaveAttribute('inert');
   });
 
-  it('the rail expanded over the content keeps the group collapsed, with its count', () => {
+  it('the floated menu keeps the group collapsed, with its count, every time it floats', () => {
     renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
     expandRail();
     expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
     expect(disclosure()).toHaveTextContent('2');
     expect(groupEntry('API Keys')).toBeNull();
 
-    // Folded again, the rail lists the entries; the group is still collapsed underneath.
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expectRail();
-    expect(groupEntry('API Keys')).not.toBeNull();
     expandRail();
     expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
     expect(groupEntry('API Keys')).toBeNull();

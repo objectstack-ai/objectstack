@@ -97,6 +97,24 @@ export const RelatedListEnlargedContext = React.createContext(false);
 export const RelatedCardCountContext = React.createContext<number | null>(null);
 
 /**
+ * Where a related list reports how many records it holds (objectstack#34250):
+ * the count channel of the `page:tabs` panel it sits in, handed down by
+ * `record:related_list` when its parent is bound by `parentDataSource`, and
+ * `undefined` everywhere else.
+ *
+ * A parent-bound list has no parent the tab strip can name: on an app page
+ * there is no record context at all, and on a record page the page's record is
+ * not this list's parent. So the strip cannot probe the count itself, and the
+ * list says the number it holds, the one its own header shows, read off the
+ * query that drew its rows. The strip keeps such a tab mounted while inactive,
+ * so the number is there before the tab is opened. A list whose parent is the
+ * page's record never reports: the strip counts it by its own probe, as before.
+ *
+ * Package-internal: not exported from the package entry.
+ */
+export const RelatedListTotalReportContext = React.createContext<((total: number) => void) | undefined>(undefined);
+
+/**
  * Has `el` come near the viewport yet (objectstack#27056, Target 2: only the
  * cards in view read their rows)? A latch: once seen, a card keeps its rows
  * when scrolled away. Cards just below the fold count as near (a 200 px

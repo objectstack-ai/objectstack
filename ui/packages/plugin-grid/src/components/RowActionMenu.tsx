@@ -162,6 +162,21 @@ export interface RowActionMenuProps {
    * `record.owner == os.user.id` can be true (see `toPredicateRecord`).
    */
   objectFields?: unknown;
+  /**
+   * This row's actions are about to be used (objectstack#34208): called when a
+   * pointer or the focus reaches the row's actions cell, when its "⋮" opens,
+   * and when any menu holding its items mounts (the row context menu among
+   * them). The grid asks the record-grained Edit / Delete verdicts only from
+   * here, never on first paint; a call after the first is free.
+   */
+  onActionsDemand?: () => void;
+  /**
+   * The record-grained verdict for the built-in item is on its way
+   * (objectstack#34208). The item still shows — the object-level verdict
+   * stands until the answer lands — but inert, so it cannot be clicked into a
+   * write the answer is about to refuse.
+   */
+  crudVerdictPending?: { edit?: boolean; delete?: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +482,9 @@ export const BuiltinRowActionItem: React.FC<{
   className?: string;
   objectFields?: unknown;
   onSelect: (row: any) => void;
-}> = ({ name, predicates, row, icon, label, className, objectFields, onSelect }) => {
+  /** The record-grained verdict is on its way: shown, but inert (objectstack#34208). */
+  verdictPending?: boolean;
+}> = ({ name, predicates, row, icon, label, className, objectFields, onSelect, verdictPending = false }) => {
   // `visibleWhen` is read through the shared `isBuiltinRowActionVisible`, the
   // same function the "⋮" guard counts with — see objectui#3562.
   const scope = usePredicateScope();
@@ -482,10 +499,11 @@ export const BuiltinRowActionItem: React.FC<{
     fields: objectFields,
   });
   if (!isVisible) return null;
-  const disabled = predicates?.disabledWhen != null && isDisabled;
+  const disabled = verdictPending || (predicates?.disabledWhen != null && isDisabled);
   return (
     <DropdownMenuItem
       disabled={disabled}
+      aria-busy={verdictPending || undefined}
       onClick={() => { if (!disabled) onSelect(row); }}
       data-testid={`row-action-builtin-${name}`}
       className={className}
@@ -672,7 +690,16 @@ export const RowActionMenuItems: React.FC<{
   props: RowActionMenuProps;
 }> = ({ plan, props }) => {
   const t = useRowActionTranslation();
-  const { row, editPredicates, deletePredicates, objectFields, onEdit, onDelete, onAction, onActionDef } = props;
+  const {
+    row, editPredicates, deletePredicates, objectFields, onEdit, onDelete, onAction, onActionDef, crudVerdictPending,
+  } = props;
+  // [objectstack#34208] A menu showing this row's items is the row's actions
+  // in use — whichever menu hosts them. A repeat call is free, so a new
+  // callback identity re-running this costs nothing.
+  const { onActionsDemand } = props;
+  React.useEffect(() => {
+    onActionsDemand?.();
+  }, [onActionsDemand]);
   return (
     <>
       {/* Rendered off the PLAN, the same object the trigger's existence
@@ -687,6 +714,7 @@ export const RowActionMenuItems: React.FC<{
           icon={<Edit className="mr-2 h-4 w-4" />}
           label={t('grid.edit')}
           objectFields={objectFields}
+          verdictPending={!!crudVerdictPending?.edit}
           onSelect={(r) => onEdit?.(r)}
         />
       )}
@@ -698,6 +726,7 @@ export const RowActionMenuItems: React.FC<{
           icon={<Trash2 className="mr-2 h-4 w-4" />}
           label={t('grid.delete')}
           objectFields={objectFields}
+          verdictPending={!!crudVerdictPending?.delete}
           onSelect={(r) => onDelete?.(r)}
         />
       )}
@@ -724,7 +753,7 @@ export const RowActionMenuItems: React.FC<{
 };
 
 export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
-  const { row, objectFields, onActionDef, maxInlineActions = 1 } = props;
+  const { row, objectFields, onActionDef, onActionsDemand, maxInlineActions = 1 } = props;
   const t = useRowActionTranslation();
   // The one resolver both of this row's menus read (objectstack#28434).
   const plan = useRowActionPlan(props, maxInlineActions);
@@ -735,7 +764,15 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
   // a grid with no actions at all has always produced.
   const hasMenu = plan.menuCount > 0;
   return (
-    <div className="flex items-center justify-end gap-1 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="flex items-center justify-end gap-1 whitespace-nowrap"
+      onClick={(e) => e.stopPropagation()}
+      // [objectstack#34208] Reaching the cell is the earliest sign the row's
+      // actions are wanted: asking here usually lands the answer before the
+      // "⋮" opens. Focus covers the keyboard, pointer covers mouse and touch.
+      onPointerEnter={onActionsDemand}
+      onFocus={onActionsDemand}
+    >
       {plan.inline.map(def => (
         <RowActionInlineButton
           key={def.name}
@@ -746,7 +783,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
         />
       ))}
       {hasMenu && (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (open) onActionsDemand?.(); }}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"

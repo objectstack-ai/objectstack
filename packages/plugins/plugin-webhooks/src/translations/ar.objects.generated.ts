@@ -53,7 +53,6 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "أسلوب HTTP",
         help: "أسلوب HTTP المستخدم في طلب الاستدعاء",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

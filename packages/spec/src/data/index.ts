@@ -100,6 +100,11 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// Which filter operator fits which declared field type: one row per
+// declared-type door that judges an operator class (today the text-operator
+// door above, by reference), read through `filterOperatorFieldTypeFit` by every
+// door that reports a filter a type change leaves unfit.
+export * from './filter-operator-field-type-fit';
 // [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
 // off a field DEFINITION (text-like, multi-value, null only) plus the
 // value-level predicate for the faces with no declaration. The operator is
@@ -422,6 +427,12 @@ export * from './injected-system-column-provenance';
 // v18 stored-row listing and `@objectstack/lint`, and exported so a producer
 // that writes `controlled_by_parent` asks the spec instead of restating it.
 export * from './controlled-by-parent-master';
+
+// [ADR-0055 §1 as amended · ruling A] `defineStack`'s record that an author
+// omitted `required` on a `controlled_by_parent` object's `master_detail` —
+// the parse has already written `false` there. Only the reader is published;
+// `@objectstack/lint` reads it to report the omitted spelling.
+export { masterDetailRequiredOmitted } from './master-detail-required-omission';
 
 // record-currency path refusals (ADR-0144 D2/D6, amended) — the one wording of
 // "segment 2 of a `PARENT_FIELD.CODE_FIELD` path names no code field" and of a

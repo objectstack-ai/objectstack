@@ -34,8 +34,13 @@
  *
  * So {@link actionAdmittedByOverride} reads the action's OWN declared `visible`
  * gate — the very predicate that admitted the button — and asks whether it ORs
- * in `can_override`. The three core levers do
- * (`… record.viewer.can_act == true || … record.viewer.can_override == true`);
+ * in an override leaf. The served viewer block carries two: `can_override`,
+ * which Reject, Reassign and Recall read
+ * (`… record.viewer.can_act == true || … record.viewer.can_override == true`),
+ * and `can_override_approve`, which Approve reads in the same position. That
+ * second leaf is `can_override` minus an approval of the viewer's own request,
+ * so the server never serves it `true` beside a `false` `can_override`. The
+ * test is a substring match on `can_override`, which both leaf names carry;
  * `approval_remind` / `approval_resubmit` gate on `is_submitter` alone and
  * never match.
  *
@@ -56,7 +61,11 @@
  * `=== false` / `=== true` rather than truthiness.
  */
 
-/** The viewer capability block `getRequest` / `listRequests` attach (framework#3310). */
+/**
+ * The viewer capability block `getRequest` / `listRequests` attach
+ * (framework#3310). The served block has a fourth leaf, `can_override_approve`;
+ * this module reads it only through the Approve action's declared predicate.
+ */
 interface ViewerBlockLike {
   can_act?: unknown;
   is_submitter?: unknown;
@@ -102,9 +111,10 @@ function predicateSource(predicate: unknown): string {
 }
 
 /**
- * Does this declared action's own `visible` gate OR in `can_override`?
+ * Does this declared action's own `visible` gate OR in an override leaf —
+ * `can_override`, or Approve's `can_override_approve`?
  *
- * True for exactly the actions the override flag can admit. Combined with
+ * True for exactly the actions the override can admit. Combined with
  * {@link isOverrideOnlyViewer} — where `can_act` is `false` — the flag is then
  * the ONLY term that can have made the button visible, so the button the viewer
  * is looking at is an override.

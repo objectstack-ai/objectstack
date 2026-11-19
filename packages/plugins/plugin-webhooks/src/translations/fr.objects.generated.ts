@@ -53,7 +53,6 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Méthode HTTP",
         help: "Méthode HTTP utilisée pour la requête de rappel",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

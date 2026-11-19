@@ -9,16 +9,20 @@
  * full-viewport shell, so hosts mount it bare — no auth layout around it.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Button } from '@object-ui/components';
-import { useAuth } from '@object-ui/auth';
-import type { AuthInvitation } from '@object-ui/auth';
+import { Button, Input, Label } from '@object-ui/components';
+import { SocialSignInButtons, useAuth } from '@object-ui/auth';
+import type { AuthInvitation, AuthInvitationPreview } from '@object-ui/auth';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { Loader2, Building2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveOrgRoleLabel } from '../orgRoleLabel.js';
-import { resolveInvitationLookupMessage, resolveOrgErrorMessage } from '../orgErrorMessage.js';
+import {
+  isAcceptNeedsVerifiedEmail,
+  resolveInvitationLookupMessage,
+  resolveOrgErrorMessage,
+} from '../orgErrorMessage.js';
 import { resolveRootUrl } from '../resolveHomeUrl.js';
 
 type InvitationWithOrg = AuthInvitation & {
@@ -32,6 +36,55 @@ type InvitationWithOrg = AuthInvitation & {
   inviterEmail?: string;
 };
 
+/** The URL fragment key the invitation mail's link carries its mailbox proof under. */
+const PROOF_FRAGMENT_KEY = 'proof';
+
+/**
+ * The query marker a provider sign-in started on this page returns with, so
+ * the page redeems the invitation for the session the provider just opened.
+ */
+const PROVIDER_RETURN_KEY = 'via';
+const PROVIDER_RETURN_VALUE = 'provider';
+
+/**
+ * Reads the mailbox proof from the URL fragment once, and clears the fragment
+ * from the address bar, so the proof is not left in the visible URL, the
+ * history entry or a link copied from the page. A fragment never reaches the
+ * server, so the proof is only ever sent in the one-step request's body.
+ */
+function takeProofFromFragment(): string | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash;
+  if (!hash || hash.length < 2) return null;
+  const proof = new URLSearchParams(hash.slice(1)).get(PROOF_FRAGMENT_KEY);
+  if (!proof) return null;
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+  return proof;
+}
+
+/** This page's address with the provider-return marker set, for a provider sign-in to come back to. */
+function providerReturnUrl(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const url = new URL(window.location.href);
+  url.hash = '';
+  url.searchParams.set(PROVIDER_RETURN_KEY, PROVIDER_RETURN_VALUE);
+  return url.toString();
+}
+
+/** Removes the provider-return marker from the address bar once it has been read. */
+function clearProviderReturn(): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(PROVIDER_RETURN_KEY)) return;
+  url.searchParams.delete(PROVIDER_RETURN_KEY);
+  window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+}
+
+const readCode = (err: unknown): string | undefined => {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+};
+
 export function AcceptInvitationPage() {
   const { t } = useObjectTranslation();
   // Dates and numbers on this surface read the display locale; a bare
@@ -40,8 +93,16 @@ export function AcceptInvitationPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { invitationId } = useParams<{ invitationId: string }>();
-  const { isAuthenticated, isLoading: isAuthLoading, getInvitation, acceptInvitation, rejectInvitation, switchOrganization } =
-    useAuth();
+  const {
+    user,
+    isAuthenticated,
+    isLoading: isAuthLoading,
+    getInvitation,
+    acceptInvitation,
+    acceptInvitationOneStep,
+    rejectInvitation,
+    switchOrganization,
+  } = useAuth();
 
   const [invitation, setInvitation] = useState<InvitationWithOrg | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,6 +112,31 @@ export function AcceptInvitationPage() {
   // Set once the membership exists and the session is switched to it: the page
   // then says the user joined, and Continue enters the organization.
   const [joined, setJoined] = useState(false);
+  // The mailbox proof the invitation mail's link carries in its fragment. A
+  // signed-out visitor holding it is offered the one-step form in place of
+  // the sign-in redirect; without it (a copied link) the page keeps its path.
+  const [proof] = useState<string | null>(() =>
+    typeof window === 'undefined'
+      ? null
+      : new URLSearchParams(window.location.hash.slice(1)).get(PROOF_FRAGMENT_KEY) || null,
+  );
+  // True while the page redeems the invitation for a session a provider
+  // sign-in started here just opened.
+  const [providerReturn, setProviderReturn] = useState<boolean>(
+    () =>
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get(PROVIDER_RETURN_KEY) === PROVIDER_RETURN_VALUE,
+  );
+  // Joined through the one-step door: the organization's name to welcome the
+  // visitor to (the door answers no role).
+  const [oneStepJoined, setOneStepJoined] = useState<{ orgName: string } | null>(null);
+  // The provider session's address is not the invited one, or not verified.
+  const [needsVerifiedEmail, setNeedsVerifiedEmail] = useState(false);
+
+  // The proof leaves the address bar as soon as it has been read.
+  useEffect(() => {
+    if (proof) takeProofFromFragment();
+  }, [proof]);
 
   // Redirect to login if not authenticated.
   //
@@ -62,15 +148,54 @@ export function AcceptInvitationPage() {
   // `/console/console/accept-invitation/…`. Under the default `/` mount the two
   // spellings agree, which is why only the basename case can catch it
   // (objectui#3811).
+  //
+  // A visitor holding the mailbox proof is not redirected: the page offers the
+  // one-step form instead.
+  const loginRedirect = '/login?redirect=' + encodeURIComponent(location.pathname + location.search);
   useEffect(() => {
-    if (!isAuthLoading && !isAuthenticated) {
-      navigate('/login?redirect=' + encodeURIComponent(location.pathname + location.search));
+    if (!isAuthLoading && !isAuthenticated && !proof) {
+      navigate(loginRedirect);
     }
-  }, [isAuthenticated, isAuthLoading, navigate, location.pathname, location.search]);
+  }, [isAuthenticated, isAuthLoading, navigate, loginRedirect, proof]);
+
+  // Back from a provider sign-in started on this page: read the invitation
+  // while it is still pending, then redeem it for the new session. Anything
+  // but an acceptance falls back to the page's own path.
+  // Runs once: the redemption is not repeated when the effect re-runs.
+  const redeemStarted = useRef(false);
+  useEffect(() => {
+    if (!providerReturn || !invitationId || isAuthLoading || !isAuthenticated) return;
+    if (redeemStarted.current) return;
+    redeemStarted.current = true;
+    clearProviderReturn();
+    setIsLoading(true);
+    void (async () => {
+      const inv = await getInvitation(invitationId).catch(() => null);
+      try {
+        const outcome = await acceptInvitationOneStep({ invitationId });
+        if (outcome.outcome === 'accepted') {
+          await switchOrganization(outcome.organizationId).catch(() => null);
+          setOneStepJoined({
+            orgName: (inv as InvitationWithOrg | null)?.organizationName ?? outcome.organizationId,
+          });
+          setIsLoading(false);
+          return;
+        }
+        if (outcome.outcome === 'verify_email') {
+          setNeedsVerifiedEmail(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        // Falls through to the page's own path below.
+      }
+      setProviderReturn(false);
+    })();
+  }, [providerReturn, invitationId, isAuthLoading, isAuthenticated, getInvitation, acceptInvitationOneStep, switchOrganization]);
 
   // Fetch invitation details
   useEffect(() => {
-    if (!invitationId || !isAuthenticated) return;
+    if (!invitationId || !isAuthenticated || providerReturn) return;
     let cancelled = false;
     setIsLoading(true);
     setError(null);
@@ -92,6 +217,15 @@ export function AcceptInvitationPage() {
     };
   }, [invitationId, isAuthenticated, getInvitation, t]);
 
+  // The verification-mail screen for this account's address, whose link
+  // brings the person back to this page to answer the invitation.
+  const toVerifyEmailPrompt = () => {
+    const sp = new URLSearchParams();
+    if (user?.email) sp.set('email', user.email);
+    sp.set('redirect', location.pathname + location.search);
+    navigate(`/verify-email-prompt?${sp.toString()}`);
+  };
+
   const handleAccept = async () => {
     if (!invitation || !invitationId) return;
     setIsAccepting(true);
@@ -100,6 +234,12 @@ export function AcceptInvitationPage() {
       await switchOrganization(invitation.organizationId).catch(() => null);
       setJoined(true);
     } catch (err) {
+      // An address that was never verified may not accept. The next step is
+      // to verify it, so the page hands over to the verification-mail screen.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        toVerifyEmailPrompt();
+        return;
+      }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
       // English sentence under the translated title. Mapped by `code` now.
       toast.error(
@@ -157,6 +297,11 @@ export function AcceptInvitationPage() {
       toast.success(t('organization.accept.declined', { defaultValue: 'Invitation declined' }));
       navigate('/organizations');
     } catch (err) {
+      // Declining needs a verified address too: the same hand-over as accept.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        toVerifyEmailPrompt();
+        return;
+      }
       toast.error(
         resolveOrgErrorMessage(err, t, {
           key: 'organization.accept.declineFailed',
@@ -176,13 +321,68 @@ export function AcceptInvitationPage() {
     );
   }
 
-  // Will redirect if not authenticated — show nothing in the meantime
-  if (!isAuthenticated) return null;
+  // Joined in one step: welcomed by name, and Continue enters the organization.
+  const oneStepJoinedState = oneStepJoined ? (
+    <div className="flex flex-col items-center gap-6 text-center" data-testid="accept-invitation-joined">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+        <CheckCircle className="h-7 w-7 text-primary" />
+      </div>
+      <div role="status">
+        <h1 className="text-xl font-bold">
+          {t('organization.accept.accepted', { defaultValue: 'Invitation accepted' })}
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t('organization.accept.joinedWelcome', {
+            defaultValue: 'Welcome to {{orgName}}.',
+            orgName: oneStepJoined.orgName,
+          })}
+        </p>
+      </div>
+      <Button className="w-full" onClick={handleContinue} autoFocus>
+        {t('organization.accept.continue', { defaultValue: 'Continue' })}
+      </Button>
+    </div>
+  ) : null;
+
+  if (!isAuthenticated) {
+    // Will redirect when the link carries no proof — show nothing meanwhile.
+    if (!proof || !invitationId) return null;
+    return (
+      <div className="flex min-h-svh items-center justify-center px-4 py-12 bg-background">
+        <div className="w-full max-w-md rounded-xl border bg-card p-8 shadow-sm" data-testid="accept-invitation-page">
+          {oneStepJoinedState ?? (
+            <OneStepJoinForm
+              invitationId={invitationId}
+              proof={proof}
+              acceptInvitationOneStep={acceptInvitationOneStep}
+              onJoined={(orgName) => setOneStepJoined({ orgName })}
+              onSignIn={() => navigate(loginRedirect)}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-svh items-center justify-center px-4 py-12 bg-background">
       <div className="w-full max-w-md rounded-xl border bg-card p-8 shadow-sm" data-testid="accept-invitation-page">
-        {isLoading ? (
+        {oneStepJoinedState ? (
+          oneStepJoinedState
+        ) : needsVerifiedEmail ? (
+          <div className="flex flex-col items-center gap-4 py-8 text-center" data-testid="accept-invitation-verify-email">
+            <XCircle className="h-10 w-10 text-muted-foreground" />
+            <h1 className="text-xl font-semibold">
+              {t('organization.accept.verifyEmailTitle', { defaultValue: 'Verify your email address' })}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t('organization.accept.verifyEmailDescription', {
+                defaultValue:
+                  'The email address of this account must be the invited one, and verified. Verify it, then open the invitation link from your mailbox again.',
+              })}
+            </p>
+          </div>
+        ) : isLoading ? (
           <div className="flex flex-col items-center gap-4 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
@@ -304,6 +504,166 @@ export function AcceptInvitationPage() {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+interface OneStepJoinFormProps {
+  invitationId: string;
+  proof: string;
+  acceptInvitationOneStep: ReturnType<typeof useAuth>['acceptInvitationOneStep'];
+  /** The door accepted: the visitor has an account, a session and the membership. */
+  onJoined: (orgName: string) => void;
+  /** The address has an account the visitor signs in to, as today. */
+  onSignIn: () => void;
+}
+
+/**
+ * The one form a signed-out visitor holding the mailbox proof sees: a name and
+ * a password, or a provider sign-in. One request creates the account (or sets
+ * the password of an unverified one), verifies the address, accepts and signs
+ * in. A provider sign-in returns to this page, which redeems the invitation for
+ * the provider's session.
+ */
+function OneStepJoinForm({ invitationId, proof, acceptInvitationOneStep, onJoined, onSignIn }: OneStepJoinFormProps) {
+  const { t } = useObjectTranslation();
+  const { getInvitationPreview } = useAuth();
+  const [preview, setPreview] = useState<AuthInvitationPreview | null>(null);
+  const [gone, setGone] = useState(false);
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getInvitationPreview(invitationId)
+      .then((answer) => {
+        if (cancelled) return;
+        if (answer === null) setGone(true);
+        else setPreview(answer);
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [getInvitationPreview, invitationId]);
+
+  const invalidMessage = t('organization.accept.proofInvalid', {
+    defaultValue: 'This invitation link can no longer be used. Ask for a new invitation, or sign in to an existing account.',
+  });
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setFailure(null);
+    try {
+      const outcome = await acceptInvitationOneStep({ invitationId, proof, name: name.trim(), password });
+      if (outcome.outcome === 'accepted') {
+        onJoined(preview?.organizationName ?? outcome.organizationId);
+        return;
+      }
+      onSignIn();
+    } catch (err) {
+      setFailure(
+        readCode(err) === 'INVALID_TOKEN'
+          ? invalidMessage
+          : resolveOrgErrorMessage(err, t, {
+              key: 'organization.accept.acceptFailed',
+              defaultValue: 'Failed to accept invitation',
+            }),
+      );
+      setSubmitting(false);
+    }
+  };
+
+  if (gone) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-8 text-center" data-testid="accept-invitation-proof-gone">
+        <XCircle className="h-10 w-10 text-destructive" />
+        <h1 className="text-xl font-semibold">
+          {t('organization.accept.errorTitle', { defaultValue: 'Invitation unavailable' })}
+        </h1>
+        <p className="text-sm text-muted-foreground">{invalidMessage}</p>
+        <Button variant="outline" onClick={onSignIn}>
+          {t('organization.accept.signInInstead', { defaultValue: 'Sign in to an existing account' })}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6" data-testid="accept-invitation-one-step">
+      <div className="flex flex-col items-center gap-4 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+          <Building2 className="h-7 w-7 text-primary" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold">
+            {preview
+              ? t('organization.accept.proofTitle', {
+                  defaultValue: 'Join {{orgName}}',
+                  orgName: preview.organizationName,
+                })
+              : t('organization.accept.title', { defaultValue: 'You have been invited' })}
+          </h1>
+          {preview && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {t('organization.accept.proofDescription', {
+                defaultValue: 'Set up your account for {{email}} to accept the invitation.',
+                email: preview.email,
+              })}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <SocialSignInButtons
+        mode="sign-up"
+        callbackURL={providerReturnUrl()}
+        dividerText={t('organization.accept.proofDivider', { defaultValue: 'or set a password' })}
+      />
+
+      <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
+        {failure && (
+          <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive" role="alert">
+            {failure}
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="accept-invitation-name">
+            {t('organization.accept.proofNameLabel', { defaultValue: 'Name' })}
+          </Label>
+          <Input
+            id="accept-invitation-name"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="accept-invitation-password">
+            {t('organization.accept.proofPasswordLabel', { defaultValue: 'Password' })}
+          </Label>
+          <Input
+            id="accept-invitation-password"
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        <Button type="submit" className="w-full" disabled={submitting || !name.trim() || !password}>
+          {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {t('organization.accept.proofSubmit', { defaultValue: 'Create account and join' })}
+        </Button>
+        <Button type="button" variant="ghost" className="w-full" onClick={onSignIn} disabled={submitting}>
+          {t('organization.accept.signInInstead', { defaultValue: 'Sign in to an existing account' })}
+        </Button>
+      </form>
     </div>
   );
 }

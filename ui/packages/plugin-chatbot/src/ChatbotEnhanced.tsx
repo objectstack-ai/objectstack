@@ -726,6 +726,17 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
     packageId: string,
   ) => void | boolean | PublishOutcome | Promise<void | boolean | PublishOutcome>;
   /**
+   * objectstack#34610 — the host's screen has ONE Publish, its own shell bar
+   * (the draft bar or the unpublished-app bar), so the draft cards draw no
+   * Publish button: neither the drafted result's nor the applied card's. What
+   * stays: the Published badge (and its build-health line), Preview, Review
+   * and auto-publish (`autoPublishDrafts`, which still calls
+   * `onPublishDrafts`). The host says where to publish in its own line.
+   *
+   * @default false
+   */
+  publishFromShellBar?: boolean;
+  /**
    * objectui#12894 — 查看变更并发布 on the applied card of a change the copilot
    * saved as a draft (cloud#2924): open the host's review of the package's
    * pending drafts (Studio's 变更), where the user checks them and publishes.
@@ -826,9 +837,10 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   /**
    * ADR-0045: fires once per build whose tool result reports `materialized`
    * with an `app` in the draft set — the app is live (tables + seed data)
-   * but unlisted. Hosts switch the canvas to the real app URL.
+   * but unlisted. Hosts show the real app URL. `opts.appSegment` is the
+   * app's route segment, its package id (ADR-0048).
    */
-  onBuildMaterialized?: (appName: string) => void;
+  onBuildMaterialized?: (appName: string, opts?: { appSegment?: string }) => void;
   /**
    * The finished build card's own answer about the app it built: the app's
    * machine `appName`, the `label` the card shows, and whether the card says
@@ -1193,6 +1205,23 @@ function writtenRecordOf(
   if (!objectName || !recordId) return undefined;
   return { objectName, recordId, ...(typeof r.label === 'string' && r.label ? { label: r.label } : {}) };
 }
+
+/**
+ * The plain surface's left/right gutter, keyed to the chat's own width (the
+ * root is an `@container`), never to the viewport: a 16px gutter on both
+ * sides, shared by the message list and the composer so messages, cards and
+ * the input align. The gutter drops only once the container is wide enough
+ * (`@3xl`, 48rem) that the centred `max-w-2xl` (42rem) column already keeps
+ * more than 16px of margin on each side — the full-page chat at full width.
+ */
+const PLAIN_SURFACE_GUTTER = 'px-4 @3xl:px-0';
+
+/**
+ * An assistant turn on the plain surface spans the column below `@3xl`, so its
+ * prose, tables and cards end on the same 16px gutter as the composer; at
+ * full width it keeps the bubble's usual 95% cap.
+ */
+const PLAIN_SURFACE_ASSISTANT_WIDTH = 'max-w-full @3xl:max-w-[95%]';
 
 /** The item a selected model none of the offered models carries is shown by. */
 const OUTSIDE_MODELS = 'outside';
@@ -2527,24 +2556,67 @@ function summarizeTools(
  * Renders nothing without health data (older hosts return a bare boolean).
  */
 function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
+  // objectstack#32984 — the line's own words come from the pack, as count
+  // families (`chatbot.build.health.*`). A finding speaks on the line only
+  // through its producer's customer sentence (`issues[].userMessage`, ruling
+  // B: the producer writes it). Agent text (`message`, `fix`) and the seed
+  // loader's engine text (`seedError`) never do: without a `userMessage` the
+  // line says the generic sentence the draft-issues block says, and that text
+  // folds under the same "Technical details".
+  const { t } = useObjectTranslation();
   if (!health) return null;
+  // `defaultValue` is the English a provider-less host reads; with a pack,
+  // i18next picks the family's slot for `count` and never consults it.
+  const en = (count: number, one: string, other: string): string => (count === 1 ? one : other);
   const issues = health.issues ?? [];
   const errors = issues.filter((i) => i.severity === 'error');
-  const warnings = issues.filter((i) => i.severity !== 'error');
+  const seedFailed = health.seedFailed === true || !!health.seedError;
   const checked = health.checked;
   const probesRan = !!checked && checked.seeds + checked.views + checked.widgets > 0;
   const okParts: string[] = [];
-  if (typeof health.seededRows === 'number' && health.seededRows > 0 && !health.seedError) {
-    okParts.push(`${health.seededRows} sample row${health.seededRows === 1 ? '' : 's'} live`);
+  if (typeof health.seededRows === 'number' && health.seededRows > 0 && !seedFailed) {
+    const count = health.seededRows;
+    okParts.push(
+      t('chatbot.build.health.sampleRowsLive', {
+        count,
+        defaultValue: en(count, '{{count}} sample row live', '{{count}} sample rows live'),
+      }),
+    );
   }
   if (probesRan && errors.length === 0) {
     const planes: string[] = [];
-    if (checked!.views > 0) planes.push(`${checked!.views} view${checked!.views === 1 ? '' : 's'}`);
-    if (checked!.widgets > 0) planes.push(`${checked!.widgets} widget${checked!.widgets === 1 ? '' : 's'}`);
-    if (checked!.seeds > 0) planes.push(`${checked!.seeds} seed${checked!.seeds === 1 ? '' : 's'}`);
-    if (planes.length) okParts.push(`${planes.join(' · ')} verified`);
+    const { views, widgets, seeds } = checked!;
+    if (views > 0) {
+      planes.push(t('chatbot.build.health.views', { count: views, defaultValue: en(views, '{{count}} view', '{{count}} views') }));
+    }
+    if (widgets > 0) {
+      planes.push(
+        t('chatbot.build.health.widgets', { count: widgets, defaultValue: en(widgets, '{{count}} widget', '{{count}} widgets') }),
+      );
+    }
+    if (seeds > 0) {
+      planes.push(
+        t('chatbot.build.health.seeds', {
+          count: seeds,
+          defaultValue: en(seeds, '{{count}} sample data set', '{{count}} sample data sets'),
+        }),
+      );
+    }
+    if (planes.length) {
+      okParts.push(t('chatbot.build.health.verified', { checks: planes.join(' · '), defaultValue: '{{checks}} verified' }));
+    }
   }
-  if (okParts.length === 0 && !health.seedError && issues.length === 0) return null;
+  if (okParts.length === 0 && !seedFailed && issues.length === 0) return null;
+  // Errors first, as the line always listed them.
+  const ordered = [...errors, ...issues.filter((i) => i.severity !== 'error')];
+  const voiced = ordered.filter((i) => i.userMessage);
+  // One generic sentence speaks for every finding its producer left without a
+  // customer sentence, chosen by the whole set as the draft-issues block does.
+  const unvoiced = issues.some((i) => !i.userMessage);
+  const details = [
+    ...(health.seedError ? [health.seedError] : []),
+    ...ordered.map((i) => (i.fix ? `${i.message} — ${i.fix}` : i.message)),
+  ];
   return (
     <div className="flex flex-col gap-1 border-t bg-muted/20 px-3 py-2" data-testid="publish-health">
       {okParts.length > 0 ? (
@@ -2553,24 +2625,63 @@ function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
           <span>{okParts.join(' · ')}</span>
         </div>
       ) : null}
-      {health.seedError ? (
-        <div className="flex items-start gap-1.5 text-xs text-red-600">
+      {seedFailed ? (
+        <div className="flex items-start gap-1.5 text-xs text-red-600" data-testid="publish-health-seed">
           <XCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{health.seedError}</span>
+          <span>{t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' })}</span>
         </div>
       ) : null}
-      {errors.map((i, idx) => (
-        <div key={`e${idx}`} className="flex items-start gap-1.5 text-xs text-red-600">
-          <XCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{i.message}</span>
+      {voiced.map((i, idx) => (
+        <div
+          key={`v${idx}`}
+          className={cn('flex items-start gap-1.5 text-xs', i.severity === 'error' ? 'text-red-600' : 'text-amber-600')}
+          data-testid="publish-health-finding"
+        >
+          {i.severity === 'error' ? (
+            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          )}
+          <span>{i.userMessage}</span>
         </div>
       ))}
-      {warnings.map((i, idx) => (
-        <div key={`w${idx}`} className="flex items-start gap-1.5 text-xs text-amber-600">
-          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{i.message}</span>
+      {unvoiced ? (
+        <div
+          className={cn('flex items-start gap-1.5 text-xs', errors.length > 0 ? 'text-red-600' : 'text-amber-600')}
+          data-testid="publish-health-summary"
+        >
+          {errors.length > 0 ? (
+            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          )}
+          <span>
+            {errors.length > 0
+              ? t('chatbot.build.issuesSummary', {
+                  defaultValue:
+                    'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+                })
+              : t('chatbot.build.warningsSummary', {
+                  defaultValue:
+                    'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
+                })}
+          </span>
         </div>
-      ))}
+      ) : null}
+      {details.length > 0 ? (
+        <details className="text-xs text-muted-foreground" data-testid="publish-health-details">
+          <summary className="cursor-pointer select-none text-[11px]">
+            {t('chatbot.build.issuesDetails', { defaultValue: 'Technical details' })}
+          </summary>
+          <ul className="mt-1 flex flex-col gap-1 pl-5">
+            {details.map((text, idx) => (
+              <li key={idx} className="list-disc break-words font-mono text-[11px]">
+                {text}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -2625,6 +2736,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onReviewDraft,
       toolReviewLabel = (n) => `Review ${n} change${n === 1 ? '' : 's'}`,
       onPublishDrafts,
+      publishFromShellBar = false,
       onReviewDrafts,
       onDiscardDrafts,
       onOpenBuiltApp,
@@ -3145,7 +3257,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           const app = dr.items.find((i) => i.type === 'app');
           if (!app || materializedKeysRef.current.has(tool.toolCallId)) continue;
           materializedKeysRef.current.add(tool.toolCallId);
-          onBuildMaterialized(app.name);
+          onBuildMaterialized(app.name, dr.packageId ? { appSegment: dr.packageId } : undefined);
         }
       }
     }, [messages, onBuildMaterialized]);
@@ -3691,7 +3803,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // (`has`) only, never as a dependency.
     const supersededPlans = supersededPlanIds(messages);
 
-    const renderToolDetail = (tool: RenderedToolInvocation) => {
+    /**
+     * objectstack#34627 — `failureOnChecklist`: the turn's result card shows a
+     * failed checklist, which states the build's failure; this card then draws
+     * neither its issue-count chip nor the red summary beside it.
+     */
+    const renderToolDetail = (
+      tool: RenderedToolInvocation,
+      { failureOnChecklist = false }: { failureOnChecklist?: boolean } = {},
+    ) => {
       const state =
         tool.state ??
         (tool.errorText
@@ -3913,7 +4033,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                             })}`
                           : ''}
                       </span>
-                    ) : (
+                    ) : publishFromShellBar ? null : (
                       <button
                         type="button"
                         onClick={() => void handlePublishDrafts(tool.draftReview!.packageId!)}
@@ -3975,7 +4095,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                       WHY a build did or didn't auto-publish without reading
                       tool JSON. Green = referentially clean; amber = blocking
                       issues, the build stays draft until the agent repairs. */}
-                  {tool.draftReview.verification ? (
+                  {tool.draftReview.verification && !(failureOnChecklist && tool.draftReview.verification.errors > 0) ? (
                     tool.draftReview.verification.errors > 0 ? (
                       <span
                         className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 text-xs font-medium text-amber-700"
@@ -4019,6 +4139,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     {(() => {
                       const issues = tool.draftReview!.issues!;
                       const errorCount = issues.filter((i) => i.severity === 'error').length;
+                      if (errorCount > 0 && failureOnChecklist) return null;
                       return (
                         <div
                           className={cn(
@@ -4941,7 +5062,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         previewLabel={previewDraftLabel}
                         onReview={onReviewDrafts && packageId ? () => onReviewDrafts(packageId) : undefined}
                         onPublish={
-                          !onReviewDrafts && onPublishDrafts && packageId
+                          !publishFromShellBar && !onReviewDrafts && onPublishDrafts && packageId
                             ? () => void handlePublishDrafts(packageId)
                             : undefined
                         }
@@ -5108,8 +5229,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       <div
         ref={ref}
         className={cn(
+          // The plain surface is a size container: its gutters follow the
+          // width the chat is GIVEN (a ~420px dock or a full page), never the
+          // viewport — see PLAIN_SURFACE_GUTTER.
           isPlainSurface
-            ? 'flex min-h-0 flex-col overflow-hidden bg-background'
+            ? '@container flex min-h-0 flex-col overflow-hidden bg-background'
             : 'flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background',
           className
         )}
@@ -5144,7 +5268,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             className={cn(
               'space-y-4',
               isPlainSurface
-                ? 'mx-auto w-full max-w-2xl px-4 py-8 sm:px-0'
+                ? cn('mx-auto w-full max-w-2xl py-8', PLAIN_SURFACE_GUTTER)
                 : 'px-4 py-3',
             )}
           >
@@ -5316,7 +5440,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                   if (block.kind === 'text') lastTextBlock = i;
                 });
                 return (
-                  <Message key={message.id} from={formatMessageProps(message.role)}>
+                  <Message
+                    key={message.id}
+                    from={formatMessageProps(message.role)}
+                    className={isPlainSurface && !isUser ? PLAIN_SURFACE_ASSISTANT_WIDTH : undefined}
+                  >
                     <div
                       className={cn(
                         'flex w-full gap-2.5',
@@ -5374,6 +5502,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           live={buildIsLive}
                           nextSteps={builtNextSteps}
                           checklist={buildChecklist}
+                          publishFromShellBar={publishFromShellBar}
                           onOpenBuiltApp={onOpenBuiltApp}
                           openBuiltAppLabel={openBuiltAppLabel}
                           onDesignBuiltApp={onDesignBuiltApp}
@@ -5397,7 +5526,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         </Reasoning>
                       ) : null}
                       {!isUser && detailedTools.length > 0
-                        ? detailedTools.map(renderToolDetail)
+                        ? detailedTools.map((tool) =>
+                            renderToolDetail(tool, { failureOnChecklist: buildChecklist?.status === 'failed' }),
+                          )
                         : null}
                       {isUser ? (
                         message.content ? (
@@ -5569,7 +5700,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           ref={promptInputWrapRef}
           className={cn(
             'relative',
-            isPlainSurface && 'mx-auto w-full max-w-2xl px-4 pb-4 sm:px-0',
+            isPlainSurface && cn('mx-auto w-full max-w-2xl pb-4', PLAIN_SURFACE_GUTTER),
           )}
         >
           {/* objectui#12978 — in flow, so it pushes the conversation up instead
@@ -6419,28 +6550,51 @@ function PlanCardObjectRows({
  * rows): every line the producer measured on the build, objects in one column
  * and views and the sample data in the other, each with its own pass mark.
  * The lines are the producer's words, read verbatim from `checklist.lines`.
+ * objectstack#34627 — a `verification` line states the build's failed verdict
+ * in red: the producer's `label`, then its issue `count`. A failed checklist is
+ * then the one place the card's turn states the failure.
  */
 function BuildChecklistRows({ checklist }: { checklist: BuildResultChecklist }) {
+  const { t } = useObjectTranslation();
   const objectLines = checklist.lines.filter((l) => l.kind === 'object');
   const otherLines = checklist.lines.filter((l) => l.kind !== 'object');
   const column = (lines: BuildResultChecklist['lines'], testId: string) =>
     lines.length > 0 ? (
       <ul className="flex flex-col" data-testid={testId}>
-        {lines.map((l, idx) => (
-          <li
-            key={idx}
-            className="flex items-start gap-2 py-1 text-xs text-foreground/90"
-            data-testid="build-checklist-line"
-            data-status={l.status}
-          >
-            {l.status === 'passed' ? (
-              <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-            ) : (
-              <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-            )}
-            <span className="min-w-0">{l.line}</span>
-          </li>
-        ))}
+        {lines.map((l, idx) =>
+          l.kind === 'verification' ? (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-red-600 dark:text-red-400"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+              data-kind={l.kind}
+            >
+              <XCircle className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">
+                {l.label}
+                {' · '}
+                <span data-testid="build-checklist-verification-count">
+                  {t('chatbot.build.issuesCount', { count: l.count, defaultValue: '{{count}} to fix' })}
+                </span>
+              </span>
+            </li>
+          ) : (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-foreground/90"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+            >
+              {l.status === 'passed' ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+              )}
+              <span className="min-w-0">{l.line}</span>
+            </li>
+          ),
+        )}
       </ul>
     ) : null;
   return (
@@ -6473,6 +6627,7 @@ function BuildProgressPanel({
   live = false,
   nextSteps,
   checklist,
+  publishFromShellBar = false,
   waitingLabel = 'Waiting for server…',
   stalledLabel = 'Still working…',
   offlineLabel = 'Connection lost — reconnecting…',
@@ -6495,6 +6650,12 @@ function BuildProgressPanel({
   live?: boolean;
   /** objectui#12724 — the build envelope's `nextSteps`, for the 「接下来可以说」 line. */
   nextSteps?: string[];
+  /**
+   * objectstack#34610 — {@link ChatbotEnhancedProps.publishFromShellBar}: the
+   * chat draws no Publish, so the footer does not tell the user to click one
+   * here.
+   */
+  publishFromShellBar?: boolean;
   onOpenBuiltApp?: (appName: string) => void;
   openBuiltAppLabel?: string;
   onDesignBuiltApp?: (appName: string, appSegment?: string) => void;
@@ -6753,9 +6914,12 @@ function BuildProgressPanel({
           ) : null}
         </div>
       ) : null}
-      {isDone && builtApp ? (
+      {isDone && builtApp && ((nextSteps && nextSteps.length > 0) || !publishFromShellBar) ? (
         // objectui#12724 — what to say next (the envelope's `nextSteps`) and
         // the posture of every later change, under the finished build.
+        // objectstack#34610 — under the shell's Publish the posture sentence
+        // ("click Publish here in the chat") is not drawn: there is no
+        // Publish here, and the drafts line points to the bar.
         <p
           className="mt-3 border-t pt-2.5 text-xs text-muted-foreground"
           data-testid="build-result-footer"
@@ -6770,11 +6934,13 @@ function BuildProgressPanel({
               })}{' '}
             </span>
           ) : null}
-          <span data-testid="build-result-posture">
-            {t('chatbot.build.draftPosture', {
-              defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
-            })}
-          </span>
+          {publishFromShellBar ? null : (
+            <span data-testid="build-result-posture">
+              {t('chatbot.build.draftPosture', {
+                defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
+              })}
+            </span>
+          )}
         </p>
       ) : null}
     </div>

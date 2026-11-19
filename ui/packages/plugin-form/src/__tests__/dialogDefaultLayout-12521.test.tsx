@@ -26,6 +26,16 @@
  *   row from `@md`, beside any other section's count, on objectui#12548's
  *   per-section grid. A declared count, `1` included, is drawn as written.
  *
+ * ## Since objectstack-ai/objectstack#34607
+ *
+ * The undeclared GRID is no longer a fixed two: a field-heavy form spreads
+ * to three per row in a bounded dialog and four in a `full` one
+ * (`dialogUndeclaredColumns`). Two stays the floor, so a form of up to eight
+ * fields still draws the pins below as written; the twelve-field fixture
+ * (`inferColumns` → three) now draws the three-wide grid, and its pins read
+ * that. The size, the phone column and every authored count are unchanged.
+ * The full #34607 matrix is `dialogContainerColumns-34607.test.tsx`.
+ *
  * ## What it reads
  *
  * The real `ModalForm` with the real form renderer and field registry, as
@@ -118,24 +128,28 @@ async function openDialog(def: { fields: Record<string, unknown> }, extra: Recor
 }
 
 const DEFAULT_GRID = 'grid gap-4 grid-cols-1 @md:grid-cols-2';
+/** The undeclared grid of a twelve-field form in a bounded dialog (objectstack-ai/objectstack#34607). */
+const THREE_GRID = 'grid gap-4 grid-cols-1 @md:grid-cols-2 @2xl:grid-cols-3';
+/** A wide field's span on that grid: the whole row at every tier. */
+const WIDE_ON_THREE = ['@md:col-span-2', '@2xl:col-span-3'];
 /** objectui#12548's per-section grid, drawn when the sections' counts do not all fit one grid. */
 const TWELVE_TRACK_GRID = 'grid gap-4 grid-cols-1 @md:grid-cols-12';
 
 describe('a dialog with no authored layout (objectui#12521)', () => {
-  it('twelve fields: a bounded xl dialog, a two-column grid from @md, one cell per field, the textarea across the row', async () => {
+  it('twelve fields: a bounded xl dialog, a three-wide grid (two from @md, three from @2xl — #34607), one cell per field, the textarea across the row', async () => {
     const { dialog, grid, spanOf } = await openDialog(TWELVE);
 
     expect(dialog.className).toContain('sm:max-w-5xl');
     expect(dialog.className).not.toContain('sm:max-w-[95vw]');
 
-    expect(grid?.className).toBe(DEFAULT_GRID);
+    expect(grid?.className).toBe(THREE_GRID);
 
     // Fields of one kind share one width: every non-wide field is one cell.
     for (const name of Object.keys(TWELVE.fields).filter((n) => n !== 'notes')) {
       expect(spanOf(name), name).toEqual([]);
     }
-    // The wide kind spans both columns.
-    expect(spanOf('notes')).toEqual(['@md:col-span-2']);
+    // The wide kind spans the row at every tier.
+    expect(spanOf('notes')).toEqual(WIDE_ON_THREE);
   });
 
   it('a short form gets the lg bound, not a dialog wider than its fields', async () => {
@@ -149,13 +163,13 @@ describe('a dialog with no authored layout (objectui#12521)', () => {
     // Every multi-column tier is a container query from @md up; the base is one column.
     const tokens = (grid?.className ?? '').split(/\s+/);
     expect(tokens).toContain('grid-cols-1');
-    expect(tokens.filter((t) => /grid-cols-(?!1$)/.test(t)).every((t) => t.startsWith('@md:'))).toBe(true);
+    expect(tokens.filter((t) => /grid-cols-(?!1$)/.test(t)).every((t) => t.startsWith('@'))).toBe(true);
     // The phone sheet's own classes are untouched.
     expect(dialog.className).toContain('h-[100dvh]');
     expect(dialog.className).toContain('inset-0');
   });
 
-  it('object fieldGroups with no layout get the same two-column default', async () => {
+  it('object fieldGroups with no layout get the same undeclared grid as the flat form', async () => {
     const grouped = {
       ...TWELVE,
       fieldGroups: [
@@ -168,21 +182,21 @@ describe('a dialog with no authored layout (objectui#12521)', () => {
     };
     const { dialog, grid, spanOf } = await openDialog(grouped);
     expect(dialog.className).toContain('sm:max-w-5xl');
-    expect(grid?.className).toBe(DEFAULT_GRID);
+    expect(grid?.className).toBe(THREE_GRID);
     expect(spanOf('name')).toEqual([]);
-    expect(spanOf('notes')).toEqual(['@md:col-span-2']);
+    expect(spanOf('notes')).toEqual(WIDE_ON_THREE);
   });
 
-  it('sections that declare no columns anywhere get the two-column default too', async () => {
+  it('sections that declare no columns anywhere get the same undeclared grid too', async () => {
     const { grid, spanOf } = await openDialog(TWELVE, {
       sections: [
         { name: 'a', label: 'A', fields: ['name', 'code', 'email', 'phone', 'website', 'status'] },
         { name: 'b', label: 'B', fields: ['stage', 'source', 'amount', 'quantity', 'due', 'notes'] },
       ],
     });
-    expect(grid?.className).toBe(DEFAULT_GRID);
+    expect(grid?.className).toBe(THREE_GRID);
     expect(spanOf('name')).toEqual([]);
-    expect(spanOf('notes')).toEqual(['@md:col-span-2']);
+    expect(spanOf('notes')).toEqual(WIDE_ON_THREE);
   });
 });
 

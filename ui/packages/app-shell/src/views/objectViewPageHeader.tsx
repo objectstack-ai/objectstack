@@ -33,7 +33,7 @@ import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 /**
- * The list title 「OBJECT / VIEW ▾ · COUNT」 (objectstack#27950): the page
+ * The list title 「OBJECT / VIEW ▾」 (objectstack#27950): the page
  * header is the one place a page is named (objectui#12461), and with the view
  * switcher as the title (objectstack#27594) it names the object too, with the
  * sidebar collapsed or the list opened from a link alike. The object's plural
@@ -130,7 +130,7 @@ export function ObjectViewPageHeader({
              <div className="hidden sm:block">
              <PageHeader
                  // The title is the object's plural ahead of the view switcher,
-                 // 「OBJECT / VIEW ▾ · COUNT」 (objectstack#27594,
+                 // 「OBJECT / VIEW ▾」 (objectstack#27594,
                  // objectstack#27950). A view with no label is called by the
                  // plural (objectui#12774); with no view to switch, the page
                  // lists the object's records and is titled with the plural, as

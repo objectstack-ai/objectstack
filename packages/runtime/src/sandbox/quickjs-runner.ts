@@ -41,6 +41,7 @@ import {
 import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import { isUnlandedWriteRefusal } from '@objectstack/objectql';
+import { actionBodyFunctionExpression } from '@objectstack/lint/runtime';
 import type {
   ScriptContext,
   ScriptOrigin,
@@ -237,13 +238,35 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // Map a settled-VM state to the right budget error, or null if the body is
     // simply still progressing. Callers add the just-run slice to `cpuMs` first,
     // so `cpuMs` here is inclusive.
+    //
+    // An ACTION's timeout carries a caller sentence naming the action and its
+    // limit ({@link actionTimeoutSentence}); a hook's or a job's does not, and
+    // keeps the bare fault every door answers with the sanitised 500. Each
+    // construction keeps its message a literal template, which is what the core
+    // sandbox-fault census renders. The action's is marked as the runner's own
+    // fault ({@link isRunnerOwnFault}), so an action's refusal catalogue passes
+    // it through rather than reading its sentence as the body's code-less throw.
     const budgetError = (pumps: number): SandboxError | null => {
       if (cpuMs > cpuBudget) {
+        if (args.origin.kind === 'action') {
+          return markRunnerOwnFault(new SandboxError(
+            `action '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, cpuBudget, false),
+            { status: 500 },
+          ));
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
         );
       }
       if (Date.now() > wallDeadline) {
+        if (args.origin.kind === 'action') {
+          return markRunnerOwnFault(new SandboxError(
+            `action '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, wallCeiling, true),
+            { status: 500 },
+          ));
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
         );
@@ -271,9 +294,13 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // engine refusal leave unchanged ({@link relayedEngineRefusal}). Held, so
     // it is disposed in the finally, before `vm.dispose()`.
     let bodyPromise: QuickJSHandle | undefined;
+    // The encoder a data call's query argument crosses through; disposed with
+    // the other handles below, before the context.
+    let crossing: QueryArgumentCrossing | undefined;
 
     try {
-      this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds);
+      crossing = openQueryArgumentCrossing(vm);
+      this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds, crossing);
       // [#28898] `Intl.DateTimeFormat`, host-backed through plain values only.
       // Every body kind runs through here, so hooks, actions and jobs share one
       // global set (see `sandbox-intl.ts`).
@@ -388,6 +415,11 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
       // the whole surface. Only an action body is `(input, ctx)`.
       //
+      // The action wrapper is `actionBodyFunctionExpression` from
+      // `@objectstack/lint/runtime`, the expression the author-time rule
+      // `action-body-does-not-compile` compiles a body inside, so the two
+      // cannot disagree about it. ⛔ Never spell it inline here again.
+      //
       // [#23702] `SETTLE` attaches the same two handlers the bare `.then(…)`
       // did and hands back the BODY's own promise as the script's completion
       // value, so the host holds that promise ({@link relayedEngineRefusal}
@@ -402,7 +434,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
               ${REJECT_HANDLER}
             );`
         : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined; globalThis.__errorFromHost = undefined;
-            ${SETTLE}((async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx),
+            ${SETTLE}(${actionBodyFunctionExpression(args.source)}(globalThis.__input, globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`;
@@ -418,6 +450,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
         }
         const err = vm.dump(evalRes.error);
         evalRes.error.dispose();
+        if (args.origin.kind === 'action' && isCompileFailure(err)) {
+          throw actionBodyCompileFailure(args.origin.name, formatErr(err));
+        }
         throw new SandboxError(
           `${args.origin.kind} '${args.origin.name}' threw: ${formatErr(err)}`,
           userFacingMessage(formatErr(err)),
@@ -624,6 +659,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // to `vm.dispose()`, so no late host rejection can register a new one in
       // between.
       releaseEngineRefusalHandles(vm, bodyPromise);
+      crossing?.dispose();
       // Dispose the context — this frees its runtime + all QuickJS allocations
       // (QuickJSWASMModule.newContext: "the runtime will be disposed when the
       // context is disposed"). The sync `QuickJSWASMModule` has no dispose();
@@ -649,6 +685,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     origin: ScriptOrigin,
     txState: TxState,
     deferreds: Set<QuickJSDeferredPromise>,
+    crossing: QueryArgumentCrossing,
   ): void {
     setGlobalJson(vm, '__input', ctx.input);
     setGlobalJson(vm, '__previous', ctx.previous);
@@ -710,8 +747,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
       const wrap = vm.newObject();
       const READ = ['find', 'findOne', 'count', 'aggregate'] as const;
       const WRITE = ['insert', 'update', 'delete', 'updateMany', 'deleteMany', 'upsert'] as const;
-      for (const m of READ) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.read', origin, txState, deferreds);
-      for (const m of WRITE) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.write', origin, txState, deferreds);
+      for (const m of READ) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.read', origin, txState, deferreds, crossing);
+      for (const m of WRITE) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.write', origin, txState, deferreds, crossing);
       return wrap;
     });
     vm.setProp(apiObj, 'object', objectFn);
@@ -1025,6 +1062,45 @@ export class QuickJSScriptRunner implements ScriptRunner {
       });
       vm.setProp(ctxObj, 'title', titleFn);
       titleFn.dispose();
+    }
+
+    // ── [#34374] `ctx.text(key, params?)` — a declared text, in the
+    // organization's language ────────────────────────────────────────────────
+    //
+    // Installed when the host built the seam (hook bodies and, #34374 PR2,
+    // action bodies — `hook-text.ts`). The
+    // same deferred-promise pump as `title`, never `newAsyncifiedFunction`, for
+    // the same reason: a body awaits it beside `ctx.api` calls. No capability:
+    // it reads no record, and the language it reads is the platform's.
+    // `vm.dump` for both arguments, like every other bridge here; a `params`
+    // that is not a plain object is handed over as no params.
+    if (typeof ctx.text === 'function') {
+      const textFn = vm.newFunction('text', (keyH, paramsH) => {
+        const key = keyH === undefined ? undefined : vm.dump(keyH);
+        const rawParams = paramsH === undefined ? undefined : vm.dump(paramsH);
+        const params = rawParams !== null && typeof rawParams === 'object' && !Array.isArray(rawParams)
+          ? (rawParams as Record<string, unknown>)
+          : undefined;
+        const deferred = vm.newPromise();
+        deferreds.add(deferred);
+        void (async () => {
+          try {
+            const value = await ctx.text!(String(key), params);
+            if (!vm.alive) return;
+            const h = jsonToHandle(vm, value);
+            deferred.resolve(h);
+            h.dispose();
+          } catch (err) {
+            if (!vm.alive) return;
+            const errH = hostErrorToVm(vm, err);
+            deferred.reject(errH);
+            errH.dispose();
+          }
+        })();
+        return deferred.handle;
+      });
+      vm.setProp(ctxObj, 'text', textFn);
+      textFn.dispose();
     }
 
     // ── [#28251] `ctx.notice(message)` — tell the saver what the save did ───
@@ -1411,7 +1487,9 @@ function installApiMethod(
   origin: ScriptOrigin,
   txState: TxState,
   deferreds: Set<QuickJSDeferredPromise>,
+  crossing: QueryArgumentCrossing,
 ): void {
+  const queryAt = QUERY_ARGUMENT_INDEX.get(method);
   const fn = vm.newFunction(method, (...argHandles) => {
     // Capability gate — throw synchronously so the VM sees a normal exception at
     // the call site (mirrors ctx.log / ctx.crypto gating).
@@ -1428,8 +1506,9 @@ function installApiMethod(
       throwSandboxFault(vm, `ctx.api unavailable in ${origin.kind} '${origin.name}'`);
     }
     // Dump args now, while the handles are alive — they are freed when this
-    // function returns, long before the async work below runs.
-    const args = argHandles.map((h) => vm.dump(h));
+    // function returns, long before the async work below runs. The query
+    // argument keeps every filter key the body wrote ({@link dumpQueryArgument}).
+    const args = argHandles.map((h, i) => (i === queryAt ? dumpQueryArgument(vm, crossing, h, objectName, method) : vm.dump(h)));
 
     const deferred = vm.newPromise();
     deferreds.add(deferred);
@@ -1467,6 +1546,153 @@ function installApiMethod(
   });
   vm.setProp(parent, method, fn);
   fn.dispose();
+}
+
+/**
+ * The argument of each `ctx.api.object(name)` verb that carries its query or
+ * options bag: the one argument a filter can sit in. A verb not listed here
+ * takes no such argument on any repository a body reaches, so every argument
+ * of it crosses by {@link QuickJSContext.dump}, unchanged.
+ */
+const QUERY_ARGUMENT_INDEX: ReadonlyMap<string, number> = new Map([
+  ['find', 0],
+  ['findOne', 0],
+  ['count', 0],
+  ['aggregate', 0],
+  ['delete', 0],
+  ['update', 1],
+]);
+
+/**
+ * The keys whose value is a filter, wherever they sit in a query or options
+ * bag: `where`, the `filter` spelling the engine folds into it, `having`, and
+ * an aggregation's own `filter`. A nested query (an `expand` entry) carries the
+ * same keys, so the rule holds at every depth.
+ */
+const FILTER_KEYS: ReadonlySet<string> = new Set(['where', 'filter', 'having']);
+
+/**
+ * Writes a plain object or array as JSON text with each `undefined` value
+ * written as the call's `mark` string, or answers `undefined` when the value is
+ * not a plain object or array, or cannot be written. Evaluated before the body
+ * runs, so it holds the VM's own `JSON.stringify`.
+ */
+const UNDEFINED_KEEPING_ENCODER = `(function (stringify, isArray, getPrototypeOf, objectPrototype) {
+  return function (value, mark) {
+    if (typeof value !== 'object' || value === null) return undefined;
+    if (!isArray(value)) {
+      var proto = getPrototypeOf(value);
+      if (proto !== objectPrototype && proto !== null) return undefined;
+    }
+    try {
+      return stringify(value, function (key, v) { return v === undefined ? mark : v; });
+    } catch (e) {
+      return undefined;
+    }
+  };
+})(JSON.stringify, Array.isArray, Object.getPrototypeOf, Object.prototype)`;
+
+/**
+ * One invocation's crossing for a data call's query argument: the encoder
+ * above, and the mark it writes for `undefined`, unique per invocation so no
+ * value a body writes can be read as one.
+ */
+interface QueryArgumentCrossing {
+  encode: QuickJSHandle;
+  mark: QuickJSHandle;
+  markText: string;
+  dispose(): void;
+}
+
+function openQueryArgumentCrossing(vm: QuickJSContext): QueryArgumentCrossing {
+  const markText = `objectstack:undefined:${cryptoRandomUUID()}`;
+  const made = vm.evalCode(UNDEFINED_KEEPING_ENCODER);
+  if (made.error) {
+    const msg = vm.dump(made.error);
+    made.error.dispose();
+    throw new SandboxError(`failed to install the query argument encoder: ${formatErr(msg)}`);
+  }
+  const encode = made.value;
+  const mark = vm.newString(markText);
+  return {
+    encode,
+    mark,
+    markText,
+    dispose() {
+      if (encode.alive) encode.dispose();
+      if (mark.alive) mark.dispose();
+    },
+  };
+}
+
+/**
+ * A sandboxed data call reaches the engine with every filter key it was
+ * written with, so the engine's refusal of an absent comparand applies inside
+ * the sandbox too.
+ *
+ * Under a {@link FILTER_KEYS} key, at any depth, the query argument crosses
+ * with every key and value the body wrote, `undefined` included: the engine
+ * judges the filter the body wrote, by its own door and with its own refusal.
+ * Every value outside a filter crosses exactly as `vm.dump` crosses it, so
+ * nothing else about the argument changes. A value the encoder does not take
+ * (not a plain object or array, or one it cannot write) crosses by `vm.dump`.
+ *
+ * Fails closed: when the encoder itself does not complete, the call is refused
+ * before anything reaches the host, never sent on another crossing.
+ */
+function dumpQueryArgument(
+  vm: QuickJSContext,
+  crossing: QueryArgumentCrossing,
+  h: QuickJSHandle,
+  objectName: string,
+  method: string,
+): unknown {
+  const encoded = vm.callFunction(crossing.encode, vm.undefined, h, crossing.mark);
+  if (encoded.error) {
+    encoded.error.dispose();
+    throwSandboxFault(vm, `ctx.api.object('${objectName}').${method}: its query argument could not cross into the host`);
+  }
+  const text = vm.typeof(encoded.value) === 'string' ? vm.getString(encoded.value) : undefined;
+  encoded.value.dispose();
+  if (text === undefined) return vm.dump(h);
+  const value: unknown = JSON.parse(text);
+  return text.includes(crossing.markText) ? settleUndefinedMarks(value, crossing.markText) : value;
+}
+
+/**
+ * Settle each `mark` in a parsed query argument: under a {@link FILTER_KEYS}
+ * key, at any depth, it becomes the `undefined` the body wrote; elsewhere it
+ * becomes what `vm.dump` would have answered there. Iterative, so nesting depth
+ * costs no host stack.
+ */
+function settleUndefinedMarks(root: unknown, mark: string): unknown {
+  if (root === null || typeof root !== 'object') return root;
+  const pending: Array<{ node: Record<string, unknown> | unknown[]; keep: boolean }> = [
+    { node: root as Record<string, unknown> | unknown[], keep: false },
+  ];
+  while (pending.length > 0) {
+    const { node, keep } = pending.pop()!;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        const v = node[i];
+        if (v === mark) node[i] = keep ? undefined : null;
+        else if (v !== null && typeof v === 'object') pending.push({ node: v as Record<string, unknown> | unknown[], keep });
+      }
+      continue;
+    }
+    for (const key of Object.keys(node)) {
+      const v = node[key];
+      const keepHere = keep || FILTER_KEYS.has(key);
+      if (v === mark) {
+        // An own key of a `JSON.parse` result, so these touch that key only.
+        if (keepHere) node[key] = undefined;
+        else delete node[key];
+      } else if (v !== null && typeof v === 'object') {
+        pending.push({ node: v as Record<string, unknown> | unknown[], keep: keepHere });
+      }
+    }
+  }
+  return root;
 }
 
 /**
@@ -2168,6 +2394,72 @@ function cryptoRandomUUID(): string {
   return `${r()}-${r().slice(0, 4)}-4${r().slice(0, 3)}-${r().slice(0, 4)}-${r()}${r().slice(0, 4)}`;
 }
 
+/**
+ * Did evaluating the wrapper fail because the body does not COMPILE?
+ *
+ * Evaluating the wrapper compiles it and runs one statement, which calls the
+ * async arrow. An async function never throws synchronously: everything the
+ * body does, a `throw new SyntaxError(…)` or a `JSON.parse` of bad text
+ * included, rejects its promise and crosses `__error`, never `evalCode`'s
+ * error. So a `SyntaxError` here is the compiler's: the body did not start.
+ */
+function isCompileFailure(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { name?: unknown }).name === 'SyntaxError';
+}
+
+/**
+ * The error an action whose body does not compile answers with, on every run.
+ *
+ * Not a crash, and not a refusal. A crash (`TypeError` in `innerMessage`) is
+ * answered with the sanitised `500 Internal server error`, because its text may
+ * carry the data the body was reading; a compile error carries none, and the
+ * opaque answer was all an MCP caller of `run_action` ever saw for a body that
+ * can never run. So the sentence names the action and the compiler's reason,
+ * and the declared status is `500`: the caller sent nothing wrong, the
+ * deployed metadata is broken, and no retry of the same call can succeed. No
+ * code is declared, so the doors answer the status's own `INTERNAL_ERROR` and
+ * relay the sentence (a declared 5xx code would withhold it). The operator line
+ * keeps the runner's `KIND 'NAME' …` shape.
+ *
+ * The author-time rule `action-body-does-not-compile` refuses such a body at
+ * `os validate` / `os build` / publish; this is the answer for one that got
+ * past it (deployed before the rule, or syntax the author's host accepted).
+ */
+function actionBodyCompileFailure(actionName: string, compilerError: string): SandboxError {
+  const reason = compilerError.split('\n')[0].slice(0, 240);
+  return markRunnerOwnFault(new SandboxError(
+    `action '${actionName}' does not compile: ${compilerError}`,
+    `Action '${actionName}' cannot run: its body does not compile (${reason}). ` +
+      'The action\'s author must fix its body.source and publish it again.',
+    { status: 500 },
+  ));
+}
+
+/**
+ * The caller sentence an action that ran out of time answers with: the action's
+ * name and the limit it hit, in milliseconds, and nothing the body was doing.
+ *
+ * A timeout is neither a refusal nor a crash. It stays a server fault, so the
+ * declared status is `500` and no code is declared: the doors answer the
+ * status's own `INTERNAL_ERROR` and relay this sentence, as they do for an
+ * action body that does not compile ({@link actionBodyCompileFailure}). What
+ * the sentence adds is the one fact a caller cannot get any other way: this
+ * action was slow, the platform did not break. A crash keeps the sanitised
+ * `Internal server error`, because its native text may carry the data the body
+ * was reading; a limit and a name carry none.
+ *
+ * Actions only. A hook's or a job's timeout keeps no `innerMessage`, so the
+ * `/data` door and the import rows answer it as the sandbox's own fault, as
+ * before. The declared `500` is also what keeps this sentence off the `/data`
+ * door should an action's timeout ever reach it: that door relays an
+ * `innerMessage` only below the server band.
+ */
+function actionTimeoutSentence(actionName: string, limitMs: number, waitingOnHostCalls: boolean): string {
+  return waitingOnHostCalls
+    ? `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit while waiting on platform calls, and was stopped.`
+    : `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit and was stopped.`;
+}
+
 function formatErr(err: unknown): string {
   if (err && typeof err === 'object') {
     const o = err as { message?: string; name?: string; stack?: string };
@@ -2183,8 +2475,12 @@ export class SandboxError extends Error {
    * message without the `<kind> '<name>' threw:` debug wrapper that lives in
    * `.message`. Safe to surface to end users (e.g. an action's error toast);
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
-   * own internal errors (timeouts, marshalling failures), which have no
-   * user-meaningful inner message.
+   * own internal errors (a hook's or a job's timeout, marshalling failures),
+   * which have no user-meaningful inner message.
+   *
+   * An ACTION's timeout is not one of those either: it carries the sentence
+   * naming the action and the limit it hit, at a declared `500`
+   * (`actionTimeoutSentence`).
    *
    * [#26903/#26965] A capability denial is not one of those: it is a refusal
    * naming the body and the capability, so it carries this field and its
@@ -2298,6 +2594,32 @@ const hostRelayedErrors = new WeakSet<object>();
  */
 export function isHostRelayedSandboxError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && hostRelayedErrors.has(err);
+}
+
+/**
+ * The faults this runner made itself that still carry a caller sentence: an
+ * action's timeout ({@link actionTimeoutSentence}) and an action body that does
+ * not compile ({@link actionBodyCompileFailure}). Both are `innerMessage` + a
+ * declared `500` + no `code`, which is also what a body's own code-less throw
+ * of `{ status: 500 }` looks like, so no field tells them apart: identity does,
+ * for the reason {@link relayedRefusals} gives. The runner's other faults carry
+ * no `innerMessage` and need no mark.
+ */
+const runnerOwnFaults = new WeakSet<object>();
+
+function markRunnerOwnFault(err: SandboxError): SandboxError {
+  runnerOwnFaults.add(err);
+  return err;
+}
+
+/**
+ * Was this error made by the runner itself (an action's timeout, an action
+ * body that does not compile) rather than thrown by the body? A refusal
+ * catalogue passes it through unchanged: it is the platform speaking, never a
+ * refusal the body chose (`resolveActionRefusal`).
+ */
+export function isRunnerOwnFault(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && runnerOwnFaults.has(err);
 }
 
 /**

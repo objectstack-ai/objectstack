@@ -31,6 +31,7 @@ import {
   type InternalFieldResolvingEngine,
 } from './internal-field-readback.js';
 import { decodeOrganizationMetadataOnRead } from './organization-metadata-decode.js';
+import { endResetTokensOnCredentialWrite, type ResetTokenCache } from './credential-change-ends-reset-tokens.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -888,6 +889,19 @@ export function createObjectQLAdapterFactory(
   // the callback directly, and a driver without `beginTransaction` follows
   // the engine's ADR-0119 D1 warn-once degrade.
   let wrappedAdapter: unknown = null;
+  // The host's `secondaryStorage` and the verification store's identifier
+  // setting, read off the options better-auth builds this adapter with
+  // (below): a credential write ends the reset tokens' cache entries with
+  // their rows, and is refused where identifiers are not kept plain
+  // (`credential-change-ends-reset-tokens.ts`).
+  let resetTokenCache: ResetTokenCache | undefined;
+  let resetTokenIdentifierStorage: unknown;
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      cache: resetTokenCache,
+      internalFieldEngine,
+      identifierStorage: resetTokenIdentifierStorage,
+    });
   const engineWithTx = rawDataEngine as unknown as {
     transaction?<T>(
       cb: (trxCtx: unknown, info: unknown) => Promise<T>,
@@ -953,6 +967,9 @@ export function createObjectQLAdapterFactory(
         // other object, unidentifiable pair, no existing row — and then this is a
         // plain insert, byte for byte as before. See `adopt-membership.ts` for
         // why the seam is here and what adoption does to the role.
+        // A password set on an account the user did not hold ends the user's
+        // other reset tokens first (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, row, [row]);
         const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
         const result = adopted ?? (await dataEngine.insert(objectName, row));
         if (factoryOptions.onRecordCreated && result && typeof result === 'object') {
@@ -1132,6 +1149,9 @@ export function createObjectQLAdapterFactory(
           record as Record<string, unknown>,
           patch as Record<string, unknown>,
         );
+        // A password change ends the account holder's other reset tokens
+        // before it lands (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, [record]);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         // [#16231] The payload carries the resolved `id` and no `where`, so
         // the engine dispatches `by-id` and answers the record or `null`. The
@@ -1169,6 +1189,10 @@ export function createObjectQLAdapterFactory(
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
         restoreUserInfoEndpointOnWrite(objectName, patch);
+        // `internalAdapter.updatePassword` is this door: the password change
+        // ends each targeted holder's other reset tokens before any row lands
+        // (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, records);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.
@@ -1218,9 +1242,12 @@ export function createObjectQLAdapterFactory(
         return records.length;
       },
 
-      // Atomic single-row consume (better-auth 1.7+). ObjectQL has no native
-      // `DELETE ... RETURNING`, so we find the single guarded row, delete it,
-      // and return the consumed record — a find-then-write mirror of `delete`.
+      // Single-row consume (better-auth 1.7+): find the guarded row, delete it
+      // by id, and return it. A single-use auth value is redeemed at most
+      // once, even across processes sharing a database — the row goes back
+      // only to the call whose own delete removed it (`removedByThisDelete`),
+      // and every other call is answered `null`, as better-auth's `consumeOne`
+      // contract requires.
       consumeOne: async <T>(
         { model, where }: { model: string; where: CleanedWhere[] },
       ): Promise<T | null> => {
@@ -1237,7 +1264,8 @@ export function createObjectQLAdapterFactory(
         // privileged accessor reads the stored row, and after the delete
         // there is none.
         await reattachInternalFieldsOnRead(internalFieldEngine, objectName, record);
-        await dataEngine.delete(objectName, { where: { id: record.id } });
+        const deletion = dataEngine.delete(objectName, { where: { id: record.id } });
+        if (!(await removedByThisDelete(deletion, objectName))) return null;
         const norm = normaliseLegacyDates(model, record);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1286,8 +1314,45 @@ export function createObjectQLAdapterFactory(
   return (options: Parameters<typeof factory>[0]) => {
     const adapter = readEverySsoProviderRowWhenUnbounded(factory(options));
     wrappedAdapter = adapter;
+    const built = options as { secondaryStorage?: unknown; verification?: { storeIdentifier?: unknown } } | undefined;
+    const cache = built?.secondaryStorage as ResetTokenCache | undefined;
+    resetTokenCache = cache ?? undefined;
+    resetTokenIdentifierStorage = built?.verification?.storeIdentifier;
     return adapter;
   };
+}
+
+/**
+ * Answer whether a by-id delete of one `objectName` row (`deletion`, already
+ * issued) removed it for THIS call — the fact a single-use redemption
+ * (`consumeOne`) is decided on.
+ *
+ * The engine's by-id delete answers it one of three ways (`IDataEngine.delete`;
+ * `packages/objectql/src/engine-delete-and-aggregate.ts`): `true` when its
+ * driver removed the row; `false` when its driver removed nothing, the row
+ * being gone already; and a thrown `RECORD_NOT_FOUND` (`recordNotFoundError`,
+ * `@objectstack/core`) when its own read of the row before the delete found
+ * none. The last two are one fact — the row was removed, but not by this call
+ * — and both answer `false`. A count of 1 or 0 reads as `true` or `false`.
+ *
+ * Any other answer does not say who removed the row, so it is refused by name
+ * rather than read as either: a redemption the adapter cannot attribute to
+ * this call is never handed to its caller.
+ */
+async function removedByThisDelete(deletion: Promise<unknown>, objectName: string): Promise<boolean> {
+  let answer: unknown;
+  try {
+    answer = await deletion;
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === 'RECORD_NOT_FOUND') return false;
+    throw error;
+  }
+  if (answer === true || answer === 1) return true;
+  if (answer === false || answer === 0) return false;
+  throw new Error(
+    `[objectql-adapter] consumeOne: the delete of a ${objectName} row answered ${String(answer)}, ` +
+      'not whether this call removed it, so the value is not redeemed',
+  );
 }
 
 /**
@@ -1352,10 +1417,19 @@ function readEverySsoProviderRowWhenUnbounded<A extends {
  */
 export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
   const dataEngine = withSystemContext(rawDataEngine);
+  // A password write ends the account holder's other reset tokens before it
+  // lands, as the factory's does; this adapter is handed no secondary storage
+  // (`credential-change-ends-reset-tokens.ts`).
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      internalFieldEngine: rawDataEngine as unknown as InternalFieldResolvingEngine,
+    });
   return {
     create: async <T extends Record<string, any>>({ model, data, select: _select }: { model: string; data: T; select?: string[] }): Promise<T> => {
       const objectName = resolveProtocolName(model);
-      const result = await dataEngine.insert(objectName, normaliseIdentifierWrite(model, data));
+      const payload = normaliseIdentifierWrite(model, data);
+      await endResetTokens(objectName, payload, [payload]);
+      const result = await dataEngine.insert(objectName, payload);
       return result as T;
     },
 
@@ -1385,8 +1459,10 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const record = await dataEngine.findOne(objectName, { where: filter });
       if (!record) return null;
+      const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, [record]);
       const result = await dataEngine.update(objectName, {
-        ...normaliseIdentifierWrite(model, update),
+        ...patch,
         id: record.id,
       });
       return result ? result as T : null;
@@ -1397,6 +1473,7 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const records = await dataEngine.find(objectName, { where: filter });
       const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, records);
       for (const record of records) {
         await dataEngine.update(objectName, { ...patch, id: record.id });
       }

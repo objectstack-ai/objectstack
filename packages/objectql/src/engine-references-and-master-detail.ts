@@ -10,8 +10,8 @@
  * `callerReadableReferenceExists`, `resolveMasterDetailParent`,
  * `resolveMasterDetailParents`, `materializeParentHeader`,
  * `masterDeclaredFields`, `inspectDanglingReferences`, `inspectCascadeDelete`,
- * `getCascadeDeleteObjects` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `getCascadeDeleteObjects` moved out of `engine.ts` whole (split
+ * by #30012 and #30463).
  *
  * A MOVE, not a redesign. {@link ReferencesAndMasterDetailFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -101,6 +101,7 @@ export class ReferencesAndMasterDetailFacet {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
@@ -637,14 +638,85 @@ export class ReferencesAndMasterDetailFacet {
     return members;
   }
 
-  /** The body of `ObjectQL#getCascadeDeleteObjects`; the method's docblock there is its contract. */
+  /**
+   * The body of `ObjectQL#getCascadeDeleteObjects`; the method's docblock there is its contract.
+   *
+   * [#34206] Memoized per engine on the registry's `objectRevision`
+   * ({@link cascadeDeleteObjectsMemo}): the answer is computed once per
+   * object name per revision and each call gets its own copy.
+   */
   static getCascadeDeleteObjects(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'cascadeRelationBehavior' | 'resolveObjectName'>, object: string): string[] | undefined {
-    if (!this._registry.getObject(object)) return undefined;
-    const host: ThisParameterType<typeof collectCascadeDeleteObjects> = {
-      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
-    };
-    return collectCascadeDeleteObjects.call(
-      host, this.resolveObjectName(object), this._registry.getAllObjects(),
-    );
+    const revision = (this._registry as unknown as { objectRevision?: unknown }).objectRevision;
+    if (typeof revision !== 'number') return computeCascadeDeleteObjects.call(this, object);
+    let memo = cascadeDeleteObjectsMemo.get(this);
+    if (memo === undefined || memo.revision !== revision) {
+      memo = { revision, answers: new Map() };
+      cascadeDeleteObjectsMemo.set(this, memo);
+    }
+    let answer = memo.answers.get(object);
+    if (answer === undefined) {
+      const computed = computeCascadeDeleteObjects.call(this, object);
+      // A name the registry does not hold is not remembered: the miss is one
+      // index read, and remembering it would let a caller grow the memo with
+      // names that do not exist.
+      if (computed === undefined) return undefined;
+      answer = Object.freeze(computed);
+      memo.answers.set(object, answer);
+    }
+    return [...answer];
   }
+}
+
+/**
+ * [#34206] The memo of {@link ReferencesAndMasterDetailFacet.getCascadeDeleteObjects},
+ * one per engine (keyed on the engine's facet host, which `FacetHost.of`
+ * builds once per engine and keeps for its life).
+ *
+ * WHY: the metadata read serves this closure beside every `object` item
+ * (`cascadeDeleteObjects`), and an app bundle reads every object it names, so
+ * the walk over every registered object ran once per object per bundle
+ * request: about a fifth of a Setup bundle's server time, a 304 included.
+ *
+ * WHY THE KEY IS SOUND: the closure reads the registered object set and
+ * nothing else. `resolveObjectName` and `getObject` read the registry's
+ * object index; `getAllObjects` reads the merged objects;
+ * `cascadeRelationBehavior` reads one field definition and resolves its
+ * target's name through the same index (`statesDeleteSemantics`,
+ * `deleteWalkTargetOf`, `isFederatedUnprovisionedInjectedColumn` read the
+ * definitions they are handed). No row, no package flag of its own, no
+ * caller, no datasource. The registry's `objectRevision` moves on every
+ * change to that set: every site that drops its merged-object cache bumps it
+ * (`registerObject`, `unregisterObject`, `unregisterObjectsByPackage`,
+ * `removeObjectOverlay`, `withdrawObjectExtension`, `invalidate`,
+ * `invalidateAll` (which every package enable and disable calls), `reset`,
+ * and a refused registration run's restore, which `invalidateAll` follows).
+ * So this memo is exactly as fresh as the registry's own merged-object cache,
+ * and the roll-up summary index and the record-currency parent lock already
+ * key on the same counter.
+ *
+ * A registry without the counter (a test double) declines the memo: every
+ * call computes. Only a name the registry holds is remembered, so the memo
+ * grows with the registered objects, never with what callers ask. The
+ * cached list is frozen and every call returns a copy, so a caller that edits
+ * its list cannot change the next caller's answer.
+ *
+ * What it does not see: a subclass or spy that changes
+ * `cascadeRelationBehavior`'s answer AFTER the first call at a revision. The
+ * rule is code, not state, and the engine's own delete walk reads the same
+ * rule fresh, so this only matters to a test that swaps the rule mid-run.
+ */
+const cascadeDeleteObjectsMemo = new WeakMap<object, {
+  revision: number;
+  answers: Map<string, readonly string[]>;
+}>();
+
+/** The uncached closure: the body {@link ReferencesAndMasterDetailFacet.getCascadeDeleteObjects} memoizes. */
+function computeCascadeDeleteObjects(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'cascadeRelationBehavior' | 'resolveObjectName'>, object: string): string[] | undefined {
+  if (!this._registry.getObject(object)) return undefined;
+  const host: ThisParameterType<typeof collectCascadeDeleteObjects> = {
+    cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
+  };
+  return collectCascadeDeleteObjects.call(
+    host, this.resolveObjectName(object), this._registry.getAllObjects(),
+  );
 }

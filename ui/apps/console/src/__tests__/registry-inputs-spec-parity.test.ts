@@ -264,6 +264,11 @@ import {
 // test/hook timeout (AGENTS.md §测试纪律, objectui#3010).
 import '@object-ui/components';
 import '../register-plugins';
+// `@object-ui/plugin-form` too: the console registers its tags as lazy stubs
+// since its first load stopped carrying the package (objectstack#33581), and
+// a stub carries no `inputs`, so without this import the three form blocks
+// leave `covered`.
+import '@object-ui/plugin-form';
 
 // ── objectui#8176: the blocks `register-plugins` alone cannot show this gate ──
 //
@@ -3066,6 +3071,10 @@ const MEMBER_PINS: Record<string, MemberPin> = {
   'list-view.timeline': {
     file: LIST_VIEW_PIN_FILE,
     pins: 'The timeline block\'s `startDateField` (on the `object-timeline` node both flat and in its nested `timeline` config) and `titleField`; with no block, a `type: \'timeline\'` node hands no start date (objectui#13047).',
+  },
+  'list-view.timesheet': {
+    file: LIST_VIEW_PIN_FILE,
+    pins: 'The timesheet block\'s binding members `rowFields`, `dateField` and `valueField`, reaching the `object-timesheet` node `ListView` builds unchanged; with no block, a `type: \'timesheet\'` node hands the grid none (objectstack#34382).',
   },
   'list-view.tree': {
     file: LIST_VIEW_PIN_FILE,

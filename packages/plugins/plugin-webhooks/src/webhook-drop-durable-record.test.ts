@@ -158,7 +158,7 @@ function wire(engine: IDataEngine) {
 function makeFetch() {
     const calls: Array<{ headers: Record<string, string>; body: string }> = [];
     const impl: FetchImpl = async (_url, init) => {
-        calls.push({ headers: init.headers, body: init.body });
+        calls.push({ headers: init.headers, body: init.body ?? '' });
         return { ok: true, status: 200, async text() { return 'ok'; } };
     };
     return { impl, calls };

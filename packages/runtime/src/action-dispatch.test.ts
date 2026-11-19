@@ -832,7 +832,7 @@ describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action 
             const rig = makeRig([confirmed]);
             const mcp: any = await rig.viaMcp(ACCOUNT_EC, 'confirmed', input);
             expect({ status: mcp.status, code: mcp.code }, JSON.stringify(input)).toEqual({ status: 428, code: CODE });
-            expect(mcp.details).toEqual({ actionName: 'confirmed', objectName: OBJECT, confirmationMember: 'confirm' });
+            expect(mcp.details).toEqual({ actionName: 'confirmed', objectName: OBJECT, confirmationMember: 'confirm', reason: 'service_account' });
             expect(String(mcp.message)).not.toMatch(/retry/i);
             expect(rig.ran()).toBe(0);
             expect(rig.reads()).toBe(0);
@@ -857,13 +857,17 @@ describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action 
         }
     });
 
-    it('CONTROL: a person runs with the confirmation member at MCP, and runs with or without it at REST', async () => {
-        const mcp = makeRig([confirmed]);
-        expect((await mcp.viaMcp(MEMBER_EC, 'confirmed', { confirm: true })).status).toBe(200);
-        expect(mcp.ran()).toBe(1);
-        const refused: any = await makeRig([confirmed]).viaMcp(MEMBER_EC, 'confirmed');
-        expect({ status: refused.status, code: refused.code }).toEqual({ status: 428, code: CODE });
-        expect(String(refused.message)).toMatch(/retry/i);
+    // [#33690] At MCP a person's own `confirm: true` never counts: the call is
+    // handed to the host's pending-confirmation service, and this rig has none.
+    it('CONTROL: a person is held at MCP with the confirmation member and without it, and runs with or without it at REST', async () => {
+        for (const input of [{}, { confirm: true }]) {
+            const mcp = makeRig([confirmed]);
+            const refused: any = await mcp.viaMcp(MEMBER_EC, 'confirmed', input);
+            expect({ status: refused.status, code: refused.code, reason: refused.details?.reason }, JSON.stringify(input))
+                .toEqual({ status: 428, code: CODE, reason: 'no_confirmation_service' });
+            expect(String(refused.message)).not.toMatch(/retry/i);
+            expect(mcp.ran()).toBe(0);
+        }
         for (const body of [{}, { confirm: true }]) {
             const rest = makeRig([confirmed]);
             expect((await rest.viaRest(MEMBER_EC, 'confirmed', { body })).status).toBe(200);
@@ -876,15 +880,17 @@ describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action 
         expect(read.reads()).toBeGreaterThan(0);
     });
 
-    it('CONTROL: a delegated agent behaves as before at both doors', async () => {
+    it('CONTROL: a delegated agent runs at REST and is held for its person at MCP, the confirmation member or not', async () => {
         const rest = makeRig([confirmed]);
         expect((await rest.viaRest(DELEGATED_EC, 'confirmed')).status).toBe(200);
         expect(rest.ran()).toBe(1);
-        const refused: any = await makeRig([confirmed]).viaMcp(DELEGATED_EC, 'confirmed');
-        expect({ status: refused.status, code: refused.code }).toEqual({ status: 428, code: CODE });
-        const mcp = makeRig([confirmed]);
-        expect((await mcp.viaMcp(DELEGATED_EC, 'confirmed', { confirm: true })).status).toBe(200);
-        expect(mcp.ran()).toBe(1);
+        for (const input of [{}, { confirm: true }]) {
+            const mcp = makeRig([confirmed]);
+            const refused: any = await mcp.viaMcp(DELEGATED_EC, 'confirmed', input);
+            expect({ status: refused.status, code: refused.code, reason: refused.details?.reason }, JSON.stringify(input))
+                .toEqual({ status: 428, code: CODE, reason: 'no_confirmation_service' });
+            expect(mcp.ran()).toBe(0);
+        }
     });
 
     it('CONTROL: an account runs an action that declares no confirmation, or `false`, at REST, MCP and a host door', async () => {

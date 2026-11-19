@@ -100,6 +100,7 @@ import {
 import { applyUserManagerLink, type SetUserManagerEngine } from './admin-set-user-manager.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { readNameList } from './name-list-cell.js';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import {
   isPendingSsoSource,
@@ -157,6 +158,64 @@ const fail = (status: number, code: string, message: string): EndpointResult => 
 
 const badRequest = (message: string): EndpointResult => fail(400, 'INVALID_REQUEST', message);
 
+/**
+ * The one body key every door admits beyond its own: `organizationId`.
+ *
+ * A `type: 'api'` action forwarded to the auth mount carries the caller's
+ * active organization as `body.organizationId` (`buildApiActionRequest`,
+ * `@objectstack/runtime` `action-execution.ts`), so the console's Import
+ * Users, Add User and any other action that reaches these doors arrives with
+ * it. A door that refused the key refused every console call.
+ *
+ * The key is admitted only as a statement the session already makes: it must
+ * equal the organization the caller is working in, read from the caller's
+ * own session (`getCallerActiveOrganizationId`). Any other value, a value of
+ * any other type, or a value sent by a caller working in no organization is
+ * refused before anything is read or written. The value never feeds scope:
+ * no door reads `body.organizationId` past this check, and the organization a
+ * person joins is the session's, as it was before (seat ruling A on the card
+ * that admitted the key).
+ */
+const STAMPED_ORGANIZATION_KEY = 'organizationId';
+
+/** Body keys a door does not take: its own set, plus the stamped organization. */
+const unknownBodyKeys = (body: Record<string, unknown>, keys: ReadonlySet<string>): string[] =>
+  Object.keys(body).filter((key) => key !== STAMPED_ORGANIZATION_KEY && !keys.has(key));
+
+/**
+ * Refuse a `body.organizationId` that is not the caller's session
+ * organization. `undefined` when the key is absent or equal; the refusal
+ * otherwise, naming what was sent and what the session holds. `outcome` ends
+ * the sentence ("no one was added", "no one was removed").
+ */
+async function refuseForeignOrganization(
+  deps: PendingSsoUserDeps,
+  body: Record<string, unknown>,
+  outcome: string,
+): Promise<EndpointResult | undefined> {
+  if (!Object.prototype.hasOwnProperty.call(body, STAMPED_ORGANIZATION_KEY)) return undefined;
+  const sent = body[STAMPED_ORGANIZATION_KEY];
+  if (typeof sent !== 'string' || sent.length === 0) {
+    return badRequest(`organizationId must be the id of the organization you are working in, so ${outcome}.`);
+  }
+  const current = deps.getCallerActiveOrganizationId ? await deps.getCallerActiveOrganizationId() : null;
+  if (typeof current !== 'string' || current.length === 0) {
+    return fail(
+      400,
+      'NO_ACTIVE_ORGANIZATION',
+      `The request names organization ${sent}, but you are not working in an organization, so ${outcome}. `
+        + 'Switch to that organization, then try again.',
+    );
+  }
+  if (sent !== current) {
+    return badRequest(
+      `The request names organization ${sent}, but you are working in organization ${current}, so ${outcome}. `
+        + 'Switch to that organization, or send the request from the one you are in.',
+    );
+  }
+  return undefined;
+}
+
 /** One person, as either door reads them. */
 interface PendingPersonInput {
   email: string;
@@ -187,20 +246,6 @@ const ADD_KEYS = new Set(['email', 'name', 'positions', 'permissionSets', 'manag
 const ADD_FIELD_NAMES = { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' } as const;
 const IMPORT_FIELD_NAMES = { positions: 'positions', permissionSets: 'permission_sets', manager: 'manager_id' } as const;
 
-/** A list cell: an array of names, or one `;`-separated string. Empty entries are dropped. */
-function readNameList(raw: unknown, label: string): string[] | string {
-  if (raw === undefined || raw === null || raw === '') return [];
-  const parts = typeof raw === 'string' ? raw.split(';') : Array.isArray(raw) ? raw : undefined;
-  if (!parts) return `${label} must be a list of machine names`;
-  const out: string[] = [];
-  for (const part of parts) {
-    if (typeof part !== 'string') return `${label} must be a list of machine names`;
-    const name = part.trim();
-    if (name && !out.includes(name)) out.push(name);
-  }
-  return out;
-}
-
 /** Read one person from the add body or an import row. A string answer is the refusal sentence. */
 function readPerson(
   raw: Record<string, unknown>,
@@ -227,18 +272,32 @@ function readPerson(
 async function findUserByEmail(
   engine: PendingSsoUserEngine,
   email: string,
-): Promise<{ id: string; name?: string; source?: string | null } | undefined> {
+): Promise<{ id: string; name?: string; source?: string | null; deactivated: boolean } | undefined> {
   const rows = await engine.find('sys_user', {
     where: { email },
-    fields: ['id', 'name', 'source'],
+    fields: ['id', 'name', 'source', 'banned'],
     limit: 1,
     context: SYSTEM_CTX,
   });
-  const row = Array.isArray(rows) ? (rows[0] as { id?: unknown; name?: unknown; source?: unknown } | undefined) : undefined;
+  const row = Array.isArray(rows)
+    ? (rows[0] as { id?: unknown; name?: unknown; source?: unknown; banned?: unknown } | undefined)
+    : undefined;
   return row && typeof row.id === 'string'
-    ? { id: row.id, name: typeof row.name === 'string' ? row.name : undefined, source: typeof row.source === 'string' ? row.source : null }
+    ? {
+        id: row.id,
+        name: typeof row.name === 'string' ? row.name : undefined,
+        source: typeof row.source === 'string' ? row.source : null,
+        deactivated: isDeactivated(row),
+      }
     : undefined;
 }
+
+/**
+ * Whether a `sys_user` row is deactivated. A boolean column reads back as
+ * `true`, `1`, or a string form (`'1'`, `'true'`) depending on the driver.
+ */
+const isDeactivated = (user: { banned?: unknown }): boolean =>
+  user.banned === true || user.banned === 1 || user.banned === '1' || user.banned === 'true';
 
 /** The answer for a grant the security service refused: its own status and code, and that no one was added. */
 function grantRefused(what: string, error: unknown): EndpointResult {
@@ -338,6 +397,11 @@ async function addOnePendingPerson(
   if (existing) {
     if (!isPendingSsoSource(existing.source)) {
       return { ok: false, result: fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.alreadyExists) };
+    }
+    // A deactivated person is never sent an invitation: reactivating them
+    // (`admin/unban-user`) is what sends it again.
+    if (existing.deactivated) {
+      return { ok: true, userId: existing.id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } };
     }
     const host = await notifyEnvironmentUserHost(
       deps.host,
@@ -457,28 +521,45 @@ const hostRefusal = ({ refused }: EnvironmentUserHostRefused): EndpointResult =>
 const TAKE_BACK_OBJECTS = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
 
 /**
- * Take a person the host refused back out: their grants, their membership
- * and their row, as the system, in one unit of work. The person was never
- * told anything and never signed in, so nothing else points at them. A
- * failure here is thrown: the person would stay without the host's consent,
- * and the caller must hear that rather than a clean refusal.
+ * Take a pending person back out: their grants, their membership and their
+ * row, as the system, in one unit of work, through the engine's delete, so a
+ * record that points at the person follows its lookup's `deleteBehavior`.
+ * Two callers: an add the host refused (the person was just written and
+ * never told anything), and `admin/remove-sso-user`, which passes
+ * `pendingOnly`. Then the person is re-checked inside the unit of work
+ * before anything is deleted, and the row's delete carries
+ * `source: 'idp_pending'` in its `where`: when it removes no row,
+ * {@link NoLongerPending} is thrown and the unit of work rolls the child
+ * deletes back. One window stays open: `sys_user` has cascading lookups, so
+ * the engine reads the matching ids, walks the cascade and then deletes by
+ * id alone, with no row lock, and a first sign-in committing between that
+ * read and that delete is not yet refused (#34373, an engine defect). A
+ * failure here is thrown: the caller must hear it rather than a clean
+ * answer.
  */
 async function takeBackPerson(
   deps: PendingSsoUserDeps,
   engine: PendingSsoUserEngine,
   userId: string,
   settlement: RequestSettlement,
+  opts: { pendingOnly?: boolean } = {},
 ): Promise<void> {
   if (typeof engine.delete !== 'function') {
-    throw new Error(`The host refused user ${userId}, and this data engine cannot take the row back out`);
+    throw new Error(`This data engine cannot delete, so user ${userId} could not be taken back out`);
   }
   const remove = engine.delete.bind(engine);
   const work = async (): Promise<void> => {
+    if (opts.pendingOnly) await assertStillPending(engine, userId);
     const context = await authSystemWriteContext();
     for (const object of TAKE_BACK_OBJECTS) {
       await remove(object, { where: { user_id: userId }, multi: true, context });
     }
-    await remove('sys_user', { where: { id: userId }, context });
+    if (!opts.pendingOnly) {
+      await remove('sys_user', { where: { id: userId }, context });
+      return;
+    }
+    const removed = await remove('sys_user', { where: { id: userId, source: PENDING_SSO_SOURCE }, multi: true, context });
+    if (removed === 0 || removed === false || removed == null) throw new NoLongerPending();
   };
   const unit = settlement.grant?.seam ?? deps.createGrant;
   await (unit ? unit.runAtomically(work) : work());
@@ -516,10 +597,12 @@ export async function runAddSsoUser(
   const reading = await readJsonRequestBody(request);
   if (!reading.ok) return badRequest(reading.message);
   const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
-  const unknown = Object.keys(body).filter((key) => !ADD_KEYS.has(key));
+  const unknown = unknownBodyKeys(body, ADD_KEYS);
   if (unknown.length > 0) {
     return badRequest(`Unknown field(s): ${unknown.join(', ')}. This door takes email, name, positions, permissionSets and manager; it sets no password.`);
   }
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was added');
+  if (foreign) return foreign;
   const person = readPerson(body, { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' });
   if (typeof person === 'string') return badRequest(person);
 
@@ -538,6 +621,12 @@ export async function runAddSsoUser(
         email: person.email,
         source: PENDING_SSO_SOURCE,
         alreadyPending: outcome.alreadyPending,
+        // Present only on a re-add of a person still pending, so a reader
+        // (the `add_sso_user` result dialog, which skips a field whose path
+        // resolves to nothing) shows the fact exactly when it is true and
+        // draws no `false` row on a fresh add. `alreadyPending` stays on
+        // every answer for API readers.
+        ...(outcome.alreadyPending ? { pendingAgain: true } : {}),
         ...(outcome.alreadyPending ? {} : { positions: person.positions, permissionSets: person.permissionSets }),
         ...(outcome.alreadyPending && notAppliedOn(person, ADD_FIELD_NAMES).length > 0
           ? { notApplied: notAppliedOn(person, ADD_FIELD_NAMES) }
@@ -587,8 +676,10 @@ export async function runImportSsoUsers(
   const reading = await readJsonRequestBody(request);
   if (!reading.ok) return badRequest(reading.message);
   const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
-  const unknownKeys = Object.keys(body).filter((key) => !IMPORT_BODY_KEYS.has(key));
+  const unknownKeys = unknownBodyKeys(body, IMPORT_BODY_KEYS);
   if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. Send { csv } or { rows }.`);
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was imported');
+  if (foreign) return foreign;
 
   let rows: Array<Record<string, unknown>>;
   if (typeof body.csv === 'string' && body.rows === undefined) {
@@ -683,4 +774,205 @@ export async function runImportSsoUsers(
       } as Record<string, unknown>,
     },
   };
+}
+
+const REMOVE_KEYS = new Set(['userId']);
+
+/**
+ * `POST /api/v1/auth/admin/remove-sso-user` — `{ userId }`. Removes a person
+ * who is still pending (the email-typo case) and cancels their invitation:
+ * the hosting rulings' "a pending row that never accepts … can be deleted,
+ * which cancels the invitation". The caller already passed the platform-admin
+ * gate.
+ *
+ * Refused for any row that is not pending (`409`): a person who has signed in
+ * is deactivated instead. The host is asked first, outside any transaction
+ * (`userRemoved`, or `userDeactivated` on a host without it), so its typed
+ * refusal leaves the person where they are. Then the person's positions,
+ * permission sets, membership and row are removed as the system, in one unit
+ * of work, through the engine's delete, so a record that points at the person
+ * follows its lookup's `deleteBehavior`: a `restrict` refuses the removal with
+ * the engine's own answer and nothing is removed. "Pending only" is held at
+ * the removal too: the person is re-checked inside the unit of work and the
+ * row's delete carries `source: 'idp_pending'`, so a person who signs in
+ * while the host is asked is answered `409` and kept (the narrow window the
+ * engine's delete leaves is in {@link takeBackPerson}). A host that could not be reached refuses the
+ * removal (`503`, nothing removed), as it refuses a deactivation: the door
+ * calls the host once and keeps no record to ask again from, so removing the
+ * person would leave an invitation nothing can cancel. With no host wired
+ * nothing is called.
+ */
+export async function runRemoveSsoUser(
+  deps: PendingSsoUserDeps,
+  actor: AdminActor & EnvironmentUserActor,
+  request: Request,
+): Promise<EndpointResult> {
+  if (!deps.isCloudManaged()) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.notManagedRemove);
+  }
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return badRequest(reading.message);
+  const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
+  const unknownKeys = unknownBodyKeys(body, REMOVE_KEYS);
+  if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. This door takes userId.`);
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was removed');
+  if (foreign) return foreign;
+  const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  if (!userId) return badRequest('userId is required');
+
+  const engine = deps.getDataEngine();
+  if (!engine) return fail(503, 'SERVICE_UNAVAILABLE', 'Data engine unavailable, so no one was removed.');
+  const rows = await engine.find('sys_user', {
+    where: { id: userId },
+    fields: ['id', 'email', 'name', 'source'],
+    limit: 1,
+    context: SYSTEM_CTX,
+  });
+  const target = (Array.isArray(rows) ? rows[0] : undefined) as
+    | { id?: unknown; email?: unknown; name?: unknown; source?: unknown }
+    | undefined;
+  if (!target) return fail(404, 'RESOURCE_NOT_FOUND', 'User not found');
+  if (!isPendingSsoSource(target.source)) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.removeNotPending);
+  }
+  const email = typeof target.email === 'string' ? target.email : '';
+  const name = typeof target.name === 'string' ? target.name : '';
+
+  // The host first, outside any transaction: a refusal leaves the person as they are.
+  let host: EnvironmentUserHostOutcome;
+  let event: EnvironmentUserEvent | undefined;
+  if (deps.host) {
+    event = {
+      userId,
+      email,
+      name,
+      source: PENDING_SSO_SOURCE,
+      ...(await environmentUserAttribution(engine, actor, deps.logger)),
+      occurredAt: new Date().toISOString(),
+    };
+    const answer = await notifyEnvironmentUserHost(deps.host, 'removed', event, deps.logger);
+    if ('refused' in answer) return hostRefusal(answer);
+    if (!answer.notified && answer.reason === 'host_failed') {
+      return fail(503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable);
+    }
+    host = answer;
+  } else {
+    host = { notified: false, reason: 'no_host' };
+  }
+
+  // Pending only, held at the write: the person may have signed in while the
+  // host was asked, and then they are not removed.
+  try {
+    await takeBackPerson(deps, engine, userId, {}, { pendingOnly: true });
+  } catch (error) {
+    return removalNotDone(deps, engine, error, { userId, host, event });
+  }
+
+  return { status: 200, body: { success: true, data: { userId, email, removed: true, host } } };
+}
+
+/** Throws {@link NoLongerPending} unless the person is still pending, read now. */
+async function assertStillPending(engine: PendingSsoUserEngine, userId: string): Promise<void> {
+  const now = await engine.find('sys_user', { where: { id: userId }, fields: ['id', 'source'], limit: 1, context: SYSTEM_CTX });
+  const row = (Array.isArray(now) ? now[0] : undefined) as { source?: unknown } | undefined;
+  if (!row || !isPendingSsoSource(row.source)) throw new NoLongerPending();
+}
+
+/** Thrown inside the removal's unit of work when the person is no longer pending there. */
+class NoLongerPending extends Error {
+  constructor() {
+    super('The person is no longer pending');
+  }
+}
+
+/**
+ * The answer when the removal's unit of work did not commit: no one was
+ * removed. What the host was told is said as it happened. When the host had
+ * taken the cancellation and the person is still pending and not
+ * deactivated, their invitation is sent again here, once, through
+ * `userAdded`, and the answer says whether that worked; nothing is retried
+ * later.
+ */
+async function removalNotDone(
+  deps: PendingSsoUserDeps,
+  engine: PendingSsoUserEngine,
+  error: unknown,
+  call: { userId: string; host: EnvironmentUserHostOutcome; event: EnvironmentUserEvent | undefined },
+): Promise<EndpointResult> {
+  const { userId, host, event } = call;
+  // A host that could not be reached refused the removal before this, so the
+  // host was either told (and took the cancellation) or not called at all.
+  const told = event !== undefined && host.notified;
+  const hostSentence = told ? PENDING_SSO_MESSAGES.removeHostCancelled : '';
+
+  if (error instanceof NoLongerPending) {
+    return fail(
+      PENDING_SSO_REFUSAL_STATUS,
+      PENDING_SSO_REFUSAL_CODE,
+      [PENDING_SSO_MESSAGES.removeNotPending, hostSentence].filter(Boolean).join(' '),
+    );
+  }
+
+  const thrown = resolveThrownHttpError(error, 500);
+  const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+  if (thrown.status >= 500) {
+    const line = `[AuthPlugin] removing pending user ${userId} failed, so no one was removed`;
+    if (deps.logger?.error) deps.logger.error(line, error instanceof Error ? error : undefined);
+    else deps.logger?.warn(`${line}. Cause: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let after = hostSentence;
+  if (told) {
+    const person = await readPersonState(engine, userId);
+    if (person.pending && !person.deactivated) {
+      after = (await reinvite(deps, event!))
+        ? PENDING_SSO_MESSAGES.removeRefusedReinvited
+        : PENDING_SSO_MESSAGES.removeRefusedNotReinvited;
+    }
+  }
+  return fail(thrown.status, thrown.code, [PENDING_SSO_MESSAGES.removeRefused, cause, after].filter(Boolean).join(' '));
+}
+
+/** Whether the person is pending and whether they are deactivated, read now; unreadable reads as neither safe. */
+async function readPersonState(
+  engine: PendingSsoUserEngine,
+  userId: string,
+): Promise<{ pending: boolean; deactivated: boolean }> {
+  try {
+    const rows = await engine.find('sys_user', {
+      where: { id: userId },
+      fields: ['id', 'source', 'banned'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = (Array.isArray(rows) ? rows[0] : undefined) as { source?: unknown; banned?: unknown } | undefined;
+    if (!row) return { pending: false, deactivated: false };
+    return { pending: isPendingSsoSource(row.source), deactivated: isDeactivated(row) };
+  } catch {
+    return { pending: false, deactivated: true };
+  }
+}
+
+/**
+ * Send the invitation again, once, to a pending person whose removal failed
+ * after the host took the cancellation of theirs (`userAdded`). Answers
+ * whether the host took it; a refusal or failure is logged at `error`: the
+ * person stays pending with no invitation until they are added again.
+ */
+async function reinvite(deps: PendingSsoUserDeps, event: EnvironmentUserEvent): Promise<boolean> {
+  const answer = await notifyEnvironmentUserHost(
+    deps.host,
+    'added',
+    { ...event, occurredAt: new Date().toISOString() },
+    deps.logger,
+  );
+  if (!('refused' in answer) && answer.notified) return true;
+  const cause = 'refused' in answer ? `${answer.refused.code}: ${answer.refused.message}` : answer.reason;
+  const message =
+    `[AuthPlugin] removing pending user ${event.userId} failed after the hosting organisation was told to cancel `
+    + 'their invitation, and sending it again did not succeed, so they stay pending with no invitation. '
+    + `Add them again to send one. Cause: ${cause}`;
+  const logger = deps.logger as { warn(msg: string): void; error?(msg: string): void } | undefined;
+  if (logger?.error) logger.error(message);
+  else logger?.warn(message);
+  return false;
 }

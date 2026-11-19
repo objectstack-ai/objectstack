@@ -222,9 +222,13 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
             .toEqual(['nav_connect_agent']);
         expect(groupChildren(account.body?.item, 'grp_account_developer'))
             .toEqual(['nav_account_api_keys', 'nav_account_oauth_apps']);
-        // The whole served tree, counted: 12 authored ids (the AI Assistant
-        // slot among them) + the one contributed.
-        expect(navIds(account.body?.item)).toHaveLength(13);
+        // The whole served tree, counted: 14 authored ids (the AI Assistant
+        // slot among them) + the one contributed. (12 authored until the
+        // Mobile App entry, `nav_account_mobile_app`, joined after Profile;
+        // 13 until the Notification Settings entry,
+        // `nav_account_notification_settings`, joined the Inbox group
+        // (#34728).)
+        expect(navIds(account.body?.item)).toHaveLength(15);
         // …and the entry's TARGET rode along, so the menu item resolves.
         expect(JSON.stringify(account.body)).toContain('connect_agent');
 
@@ -258,22 +262,26 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(groupChildren(setupAllowed.body?.item, 'group_overview'))
             .toEqual(['nav_system_overview', 'nav_connect_agent']);
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
-        // authored groups less `group_approvals` and `group_integrations`,
-        // which nothing in it contributes into and the filter collapses, plus
-        // the 25 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
+        // authored groups less `group_approvals`, `group_integrations` and
+        // `group_apps`, which nothing in it contributes into and the filter
+        // collapses, plus the 24 entries `SETUP_NAV_CONTRIBUTIONS` carries,
+        // plus the MCP one.
         // (25 until #25098 moved the unfiltered Packages entry to Studio; 24
         // until #30204 removed the Feature Flags entry with its namespace; 32
         // until #30895 moved the MCP entry out of `group_integrations`, the
         // one entry this composition put there; 31 until the organization
         // Access policy entry, `nav_settings_access_policy`, joined
         // Configuration; 32 until the recycle bin entry, `nav_recycle_bin`,
-        // joined Configuration (#30239).)
+        // joined Configuration (#30239); 33 until objectstack#34724 retired
+        // the Packaged Actions entry, `nav_packaged_actions`, the one entry
+        // `group_apps` held here, so that group collapses too.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(33);
+        expect(allowedIds).toHaveLength(31);
+        expect(allowedIds).not.toContain('nav_packaged_actions');
         expect(allowedIds).toContain('nav_settings_access_policy');
         expect(allowedIds).toContain('nav_recycle_bin');
         expect(allowedIds).not.toContain('nav_settings_branding');
@@ -298,8 +306,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 33: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(33);
+        // 31: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(31);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

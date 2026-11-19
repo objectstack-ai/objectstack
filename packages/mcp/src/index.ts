@@ -38,6 +38,9 @@ export type {
   McpPrincipalKind,
 } from './types.js';
 export type { McpCallerExecutionContext } from './tool-call-interceptor.js';
+// The capped-list truncation flag the read tools share, and `query_records`'
+// one-row-per-group form a bridge receives.
+export type { McpLatestPer } from './types.js';
 export {
   registerObjectTools,
   registerActionTools,
@@ -46,6 +49,7 @@ export {
 } from './mcp-http-tools.js';
 export type {
   McpDataBridge,
+  McpFieldVisibility,
   McpObjectSummary,
   RegisterObjectToolsOptions,
   McpActionBridge,
@@ -55,6 +59,21 @@ export type {
   RegisterActionToolsOptions,
   McpFederationBridge,
 } from './mcp-http-tools.js';
+// [#33712] Step 1 of the amended confirmation contract: the person asked in their client.
+export {
+  ACTION_CONFIRMATION_ELICITATION_TIMEOUT_MS,
+  ACTION_CONFIRMATION_QUESTION_ID_MAX,
+  ACTION_CONFIRMATION_QUESTION_TEXT_MAX,
+  actionConfirmationElicitorFor,
+  actionConfirmationQuestion,
+  confirmationQuestionText,
+} from './action-confirmation-elicitation.js';
+export type {
+  McpActionCallDoor,
+  McpActionConfirmationAnswer,
+  McpActionConfirmationElicitor,
+  McpActionConfirmationSubject,
+} from './action-confirmation-elicitation.js';
 // The portable `SKILL.md` distributable (ADR-0036 Amendment C) — NOT the
 // `skill` metadata type; that one is projected onto MCP prompts just below.
 export {

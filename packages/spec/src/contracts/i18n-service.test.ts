@@ -87,6 +87,37 @@ describe('I18n Service Contract', () => {
     expect(service.getDefaultLocale!()).toBe('zh-CN');
   });
 
+  // #33634 — the optional source-locale pair, beside the fallback pair.
+  it('should allow the optional source-locale pair, undefined until declared', () => {
+    let sourceLocale: string | undefined;
+
+    const service: II18nService = {
+      t: () => '',
+      getTranslations: () => ({}),
+      loadTranslations: () => {},
+      getLocales: () => ['en', 'zh-CN'],
+      getDefaultLocale: () => 'zh-CN',
+      getSourceLocale: () => sourceLocale,
+      setSourceLocale: (locale) => { sourceLocale = locale; },
+    };
+
+    expect(service.getSourceLocale!()).toBeUndefined();
+    service.setSourceLocale!('en');
+    expect(service.getSourceLocale!()).toBe('en');
+    expect(service.getDefaultLocale!()).toBe('zh-CN');
+  });
+
+  it('should allow a provider that implements neither half of the source-locale pair', () => {
+    const service: II18nService = {
+      t: () => '',
+      getTranslations: () => ({}),
+      loadTranslations: () => {},
+      getLocales: () => [],
+    };
+    expect(service.getSourceLocale).toBeUndefined();
+    expect(service.setSourceLocale).toBeUndefined();
+  });
+
   it('should allow implementation with getCoverage', () => {
     const service: II18nService = {
       t: () => '',

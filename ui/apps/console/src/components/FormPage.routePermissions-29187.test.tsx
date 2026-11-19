@@ -62,6 +62,7 @@ function permissionsAnswer(): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     systemPermissions: [],
     objects: { qar8_fsb: { allowRead: true } },

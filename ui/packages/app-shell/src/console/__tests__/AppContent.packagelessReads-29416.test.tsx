@@ -24,7 +24,13 @@
  *       another package cannot be the pick, so the `/meta/page` list is read
  *       and the app's own page is drawn; the app's own answer is taken as is;
  *       in a package-less app the by-name answer is the first match, as the
- *       list's pick is.
+ *       list's pick is;
+ *   (e) objectstack#34244 — an entry's `requiresObject` naming an object the
+ *       host does not register (`gone_obj`) is asked only in the one `?names=`
+ *       presence read, never by name, in a package-less app and a packaged
+ *       one, and the sidebar's gate still hides its entry on that answer.
+ *       CONTROL: a registered one outside the package (`sys_user`) is shown,
+ *       and asked by name.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -50,6 +56,7 @@ vi.mock('../../layout/ConsoleLayout', async () => {
       return (
         <div data-testid="console-layout">
           <span data-testid="gone-entry">{String(gates.checkCapability('object', 'gone_obj'))}</span>
+          <span data-testid="user-entry">{String(gates.checkCapability('object', 'sys_user'))}</span>
           {children}
         </div>
       );
@@ -101,6 +108,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   };
 });
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
 
@@ -135,7 +146,12 @@ const NOTES_APP = {
   navigation: [objectEntry('note'), { id: 'nav_home', type: 'page', label: 'Home', pageName: 'notes_home' }, objectEntry('gone_obj', 'gone_obj')],
 };
 /** Another app the list carries: it requires an object outside the notes bundle. */
-const CRM_APP = { name: 'crm', label: 'CRM', _packageId: 'app.crm', navigation: [objectEntry('crm_account', 'crm_account')] };
+const CRM_APP = {
+  name: 'crm',
+  label: 'CRM',
+  _packageId: 'app.crm',
+  navigation: [objectEntry('crm_account', 'crm_account'), objectEntry('sys_user', 'sys_user'), objectEntry('gone_obj', 'gone_obj')],
+};
 
 /** The notes app's bundle, keyed as the adapter's `AppBundleItems` keys it. */
 function bundleItems() {
@@ -169,7 +185,14 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34188 — the `?names=` read answers the asked names it
+          // holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? OBJECTS.filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all: Doc[] =
             type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'page' ? PAGES : type === 'app' ? [NOTES_APP, CRM_APP] : [];
@@ -253,7 +276,10 @@ describe('a package-less app reads what its routes name, by name (objectstack#29
 
     expect(screen.getByTestId('object-view')).toHaveTextContent('note');
     expect(screen.getByTestId('object-view').getAttribute('data-views')).toContain('note.all');
-    expect(byNameCalls()).toEqual(expect.arrayContaining(['object/note', 'object/sys_user', 'object/crm_account', 'object/gone_obj']));
+    expect(byNameCalls()).toEqual(expect.arrayContaining(['object/note', 'object/sys_user']));
+    // objectstack#34244 — the entries' required objects are asked in the presence read, never by name.
+    expect(byNameCalls()).not.toContain('object/gone_obj');
+    expect(byNameCalls()).not.toContain('object/crm_account');
     expect(listCalls()).toEqual([]);
   });
 
@@ -311,5 +337,32 @@ describe('prefer-local holds for a page read by name (ADR-0048, objectstack#2941
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toHaveTextContent('Other home'));
 
     expect(listCalls()).not.toContain('page');
+  });
+});
+
+describe('objectstack#34244 — a requiresObject the host does not register is never asked by name', () => {
+  const goneObjCalls = () => server.calls.filter((c) => c.includes('gone_obj'));
+
+  it.each([
+    ['a package-less app', '/apps/notes/note'],
+    ['a packaged app', '/apps/app.crm/crm_account'],
+  ])('(e) in %s it is asked only in the presence read, and its entry is hidden', async (_arm, url) => {
+    boot(url);
+    await waitFor(() => expect(screen.getByTestId('object-view')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(goneObjCalls().length).toBeGreaterThan(0);
+    expect(goneObjCalls().every((c) => c.startsWith('object?names='))).toBe(true);
+    expect(byNameCalls()).not.toContain('object/gone_obj');
+  });
+
+  it('(e) CONTROL: in a packaged app a registered requiresObject outside the package is shown, and asked by name', async () => {
+    boot('/apps/app.crm/crm_account');
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
+    await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
+
+    expect(screen.getByTestId('user-entry')).toHaveTextContent('true');
+    expect(byNameCalls()).toContain('object/sys_user');
   });
 });

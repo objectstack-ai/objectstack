@@ -1167,6 +1167,42 @@ export const FlowSchema = lazySchema(() => strictObject(
   /** Metadata & Versioning */
   version: z.number().int().default(1).describe('Version number'),
   status: z.enum(['draft', 'active', 'obsolete', 'invalid']).default('draft').describe('Deployment status'),
+  /**
+   * [#34655, ADR-0126 §4] Whether a flow a PACKAGE ships starts switched on
+   * where it is installed. `false` ships it switched OFF: on an installation
+   * whose administrator has never switched it, it is not armed and does not
+   * run, and an administrator turns it on with the packaged-flow switch
+   * (`POST /api/v1/automation/:name/toggle`, Studio's Enabled switch on a
+   * read-only package's flow). Absent or `true`: on, as every packaged flow
+   * has always been.
+   *
+   * This is the default of the installation's switch, not a second switch.
+   * The switch's state is the activation ledger (`sys_metadata_activation`):
+   * a row there is an administrator's choice and wins over this key, so a
+   * flow an administrator turned on stays on across a restart, an upgrade
+   * and a reinstall, and one turned off stays off. (An "on" row counts only
+   * when it names the package that holds the flow now; a legacy row naming no
+   * package, or one naming a package that no longer holds it, leaves a flow
+   * shipped off switched off.) With no row the flow follows this key, so a
+   * later version of the package that changes it moves an installation
+   * nobody switched.
+   *
+   * The default is the PACKAGE's: the key is read off the package's own body.
+   * A declared `.custom` override armed in the package's place does not
+   * change it in either direction, whatever the override declares; it is
+   * switched by the same switch.
+   *
+   * `status` stays the AUTHOR's: `obsolete` / `invalid` disarm the flow for
+   * every installation, and no switch overrides that. Ship a flow an
+   * administrator may turn on as `status: 'active', defaultActive: false`.
+   *
+   * Only a flow a package ships has that switch. A flow authored in the
+   * environment is switched by its `status`: registering one that declares
+   * `defaultActive` is refused, a dry run of one is refused, and the stored
+   * pass lists a stored one. A clone of a packaged flow drops the key, and an
+   * unmanaged install copies `defaultActive: false` as `status: 'obsolete'`.
+   */
+  defaultActive: z.boolean().optional().describe('Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator\'s choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author\'s switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key.'),
 
   /** Trigger Type */
   type: z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api']).describe('Flow type'),

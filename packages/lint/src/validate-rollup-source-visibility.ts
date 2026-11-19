@@ -7,6 +7,7 @@
  * | Rule                                         | Severity | Arm                                   |
  * |----------------------------------------------|----------|---------------------------------------|
  * | security-rollup-source-unreadable            | warning  | the set cannot read the child object, the aggregated child field, or a child field the roll-up's `filter` tests |
+ * | security-rollup-source-unreadable            | info     | the same, acknowledged by the set's `rollupSourceUnreadableReason` on its entry for the summary column |
  * | security-rollup-source-row-scoped            | info     | the set reads all of those, but a row-level policy narrows WHICH child rows it reads |
  *
  * ## The rule it tells the author about
@@ -32,6 +33,21 @@
  * vote, so that entry hides the column from every holder of the set, and a
  * co-held set with no entry for it casts no vote that would restore it.
  *
+ * ## Acknowledging a meant pair (#34664)
+ *
+ * When the pair IS meant, the set says so where the finding points: its entry
+ * for the summary column carries `rollupSourceUnreadableReason`, a non-blank
+ * reason (`fields["invoice.total"]: { readable: true,
+ * rollupSourceUnreadableReason: '…' }`). That one finding — this set, this
+ * column — is then reported at `info`, under the same id, with the reason
+ * quoted, so `--strict` (which promotes warnings, never an `info`) passes and a
+ * reviewer still reads the pair and why it stands. Nothing else moves: another
+ * set reading the same column, another column of the same set, and the
+ * `row-scoped` note are judged as before. The key is the spec's
+ * (`FieldPermissionSchema`), which refuses a blank reason and a reason beside
+ * `readable: false`; the runtime does not read it, but the entry carrying it
+ * votes `readable: true` in the field merge like any declaring entry.
+ *
  * ## "Can read", as the runtime decides it
  *
  * Three gates decide whether a set reads an object or a field, and the rule
@@ -41,9 +57,10 @@
  *    entry, which covers a `private` object only when it carries View All /
  *    Modify All ({@link grantFor}, `resolveObjectPermission`);
  *  - the field entry: `readable: false` hides the field, unless the set's
- *    View All / Modify All on the object votes every field readable
- *    (ADR-0066 D2 ⑧ as amended). No entry ⇒ readable, as the merge does with an
- *    absent key ({@link fieldHidden});
+ *    Modify All on the object votes every field readable (ADR-0066 D2 ⑧ as
+ *    amended). Beside View All alone the set's own entry binds (note of
+ *    2026-11-15). No entry ⇒ readable, as the merge does with an absent key
+ *    ({@link fieldHidden});
  *  - the capability gate (ADR-0066 D3): an object's `requiredPermissions` —
  *    the `string[]` form, or the `read` bucket of the per-operation map
  *    (`requiredCapsForOperation(…, 'find')`) — refuses the read
@@ -207,14 +224,16 @@ function grantFor(set: AnyRec, objectName: string, isPrivate: boolean): Effectiv
 
 /**
  * Does the set's own field entry hide `objectName.fieldName`? `readable: false`
- * hides it unless the set's super-user bypass on the object votes every field
- * readable (ADR-0066 D2 ⑧ as amended). No entry ⇒ not hidden.
+ * hides it unless the set's Modify All on the object votes every field
+ * readable (ADR-0066 D2 ⑧ as amended). The set's View All alone casts no vote
+ * on a field its own entry hides (note of 2026-11-15), so the entry binds
+ * there. No entry ⇒ not hidden.
  */
 function fieldHidden(set: AnyRec, objectName: string, fieldName: string): boolean {
   const fields = isRec(set.fields) ? set.fields : undefined;
   const entry = fields?.[`${objectName}.${fieldName}`];
   if (!isRec(entry) || entry.readable !== false) return false;
-  return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'view');
+  return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'modify');
 }
 
 /**
@@ -366,6 +385,19 @@ function rollupPhrase(d: SummaryDescriptor, opts: { everyRow?: boolean; filtered
 }
 
 /**
+ * [#34664] The reason the set's own entry for `column` declares for reading it
+ * over unreadable child data, or `undefined`. Read from the set's entry only: a
+ * co-held set's acknowledgement does not speak for this one.
+ */
+function acknowledgedReason(set: AnyRec, column: string): string | undefined {
+  const fields = isRec(set.fields) ? set.fields : undefined;
+  const entry = fields?.[column];
+  if (!isRec(entry)) return undefined;
+  const reason = entry.rollupSourceUnreadableReason;
+  return nonBlank(reason) ? reason.trim() : undefined;
+}
+
+/**
  * The remedy, with its reach: in the field merge only DECLARING sets vote, so
  * `readable: false` on this set hides the column from every holder of the set,
  * and only an entry with `readable: true` (or View All / Modify All on the
@@ -378,10 +410,10 @@ function hintFor(set: AnyRec, d: SummaryDescriptor): string {
     `That hides "${column}" from every holder of the set, and a co-held set with no entry for it does not ` +
     `restore it (View All or Modify All on "${d.parent.name}" does); to keep it for some holders, declare ` +
     `fields["${column}"]: { readable: true } in the sets they hold`;
-  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'view')) {
+  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'modify')) {
     return (
-      `If its value should not be visible to this set, first remove View All and Modify All on ` +
-      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding either, then set ` +
+      `If its value should not be visible to this set, first remove Modify All on ` +
+      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding it, then set ` +
       `${entry} on it. ${reach}`
     );
   }
@@ -401,14 +433,27 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
       if (objectUnreadable(set, d.parent) || fieldUnreadable(set, d.parent, d.field)) continue;
 
       const column = `${d.parent.name}.${d.field}`;
-      const unreadable = (message: string): RollupSourceVisibilityFinding => ({
-        severity: 'warning',
-        rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
-        where: `permission set "${setName}" · summary field "${column}"`,
-        path: `permissions[${i}].fields["${column}"]`,
-        message: `${message}; ${ROLLUP_SEMANTICS}`,
-        hint: hintFor(set, d),
-      });
+      const acknowledged = acknowledgedReason(set, column);
+      const unreadable = (message: string): RollupSourceVisibilityFinding =>
+        acknowledged === undefined
+          ? {
+              severity: 'warning',
+              rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
+              where: `permission set "${setName}" · summary field "${column}"`,
+              path: `permissions[${i}].fields["${column}"]`,
+              message: `${message}; ${ROLLUP_SEMANTICS}`,
+              hint: hintFor(set, d),
+            }
+          : {
+              severity: 'info',
+              rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
+              where: `permission set "${setName}" · summary field "${column}"`,
+              path: `permissions[${i}].fields["${column}"].rollupSourceUnreadableReason`,
+              message: `${message}; ${ROLLUP_SEMANTICS}. Acknowledged on the set: ${JSON.stringify(acknowledged)}`,
+              hint:
+                `Nothing to change while the reason holds. If holders of permission set "${setName}" should no ` +
+                `longer read "${column}", remove rollupSourceUnreadableReason and the warning returns with its remedy`,
+            };
 
       const objectGate = objectUnreadable(set, d.child);
       if (objectGate) {

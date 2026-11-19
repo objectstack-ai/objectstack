@@ -20,7 +20,10 @@
  *   3. W1 watermark: read the highest value already written to the target
  *      field `fieldMapping` maps `watermark.field` onto, and send it as the
  *      action's `query[watermark.param]`;
- *   4. make ONE action call and read the records at `recordsPath`;
+ *   4. judge the input the call sends, the watermark included, against the
+ *      action's declared `inputSchema` as the `connector_action` node does
+ *      (an undeclared key included), then make ONE action call and read the
+ *      records at `recordsPath`;
  *   5. project them through the mapping (`applyMappingToRows`) and write them
  *      with `runImport` — the runner, coercion and row verdicts the import
  *      door uses, so a synced row and an uploaded row speak one vocabulary.
@@ -786,8 +789,21 @@ async function pullOnce(
     // hint is the pull door's own: `connectorSource.input` is JSON spread as
     // written and the watermark is the stored value, so no CEL envelope runs
     // here and the node's `int()` / `double()` / `bool()` advice cannot apply.
-    const verdict = judgeConnectorInput(findConnectorActionInputSchema(registry, connector, action, instancePackage), input);
+    //
+    // [#33894] Every door that dispatches a connector action judges its input
+    // alike (maintainer ruling 6896271476), so a key the action's schema does
+    // not declare is refused here too, as at the `connector_action` node,
+    // instead of being sent to the provider. That includes the key this door
+    // adds itself: the watermark parameter, sent as `query[watermark.param]`
+    // once the target holds a value. Whether THAT key is the undeclared one is
+    // asked by judging it alone, so the refusal names it and its fix.
+    const inputSchema = findConnectorActionInputSchema(registry, connector, action, instancePackage);
+    const verdict = judgeConnectorInput(inputSchema, input, { refuseUndeclaredKeys: true });
     if (verdict) {
+        const addedParam = watermark && watermark.from !== undefined ? watermark.param : undefined;
+        const addedUndeclared = verdict.undeclaredKey && addedParam !== undefined
+            && judgeConnectorInput(inputSchema, { query: { [addedParam]: watermark?.from } }, { refuseUndeclaredKeys: true })
+                ?.undeclaredKey === true;
         return refuse(
             'VALIDATION_ERROR', 400, 'input_schema_mismatch',
             `Mapping "${mappingName}": input for '${connector}.${action}' does not match the action's inputSchema — `
@@ -797,6 +813,16 @@ async function pullOnce(
                 ? ' A text value for an integer, number or boolean parameter is not converted: write it in '
                     + "connectorSource.input as a JSON number or boolean (50, not '50'); a watermark parameter "
                     + "carries the stored target field's value, so its declared type must be that field's."
+                : '')
+            + (verdict.undeclaredKey
+                ? ' A key the action does not declare is not sent to the provider: remove it from '
+                    + 'connectorSource.input, or declare it in the action (for an openapi connector, as a '
+                    + 'parameter of the operation in its OpenAPI document).'
+                : '')
+            + (addedUndeclared
+                ? ` The pull adds the watermark parameter '${addedParam}' to input.query itself, so the action `
+                    + `must declare it: for an openapi connector, declare '${addedParam}' as an in: query `
+                    + 'parameter of the operation in the OpenAPI document.'
                 : ''),
         );
     }

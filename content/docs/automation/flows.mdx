@@ -567,6 +567,48 @@ check.
 
 [#22110]: https://github.com/objectstack-ai/objectstack/issues/22110
 
+### Text a record keeps — a field value marked as text
+
+A `create_record` / `update_record` field value is a literal or a CEL value
+envelope, and a literal string is written exactly as spelled. A field that
+stores a **sentence people read** — an escalation reason, a status note — is
+marked as text instead, with the text envelope `{ dialect: 'template', source }`.
+Only the `fields` map of these two nodes takes it; every other value slot
+refuses it.
+
+```typescript
+{
+  id: 'set_reason', type: 'update_record', label: 'Set reason',
+  config: {
+    objectName: 'crm_case',
+    filter: { id: { dialect: 'cel', source: 'record.id' } },
+    fields: {
+      escalation_reason: { dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' },
+      status: 'escalated',          // a literal: written as spelled, never translated
+    },
+  },
+}
+```
+
+- `source` is a text slot like the ones above: `{{ }}` holes over the flow's
+  variables, and a single-brace `{…}` token is refused with its `{{ }}` spelling.
+- The text is written in the **organization's** language, because everyone in
+  the organization reads the record: the Localization setting
+  (`localization.locale`) when somebody set it, else the app's declared
+  `i18n.defaultLocale`. It is never the language of the person who started the
+  run — a button-started run writes the same text a record-change run does.
+- The translated template is picked first, then its holes are filled. Its key is
+  `flows.<flow>.records.<node_id>.fields.<field>`; `os i18n extract` scaffolds
+  it and `os lint` reports it missing against `supportedLocales`, like every
+  other `flows.*` key.
+- A missing translation, or no language to pick, writes the authored text and
+  the run goes on. A Localization setting that cannot be **read** fails the
+  node and writes nothing: the organization's choice may exist, and writing
+  another language over it would look like success. A `fault` edge routes it.
+- The text is picked once, when it is written. Records written before a
+  translation existed keep what they hold, and changing the Localization setting
+  does not rewrite them.
+
 **Create Record:**
 
 ```typescript
@@ -620,6 +662,18 @@ where an envelope nested inside the literal is data. `method`, `durable`,
 or for a literal with the value itself; the request is rendered once, before
 the call, so a `durable` callout enqueues exactly the request the inline call
 would send.
+
+An `http` node's request, inline or `durable: true`, reaches only public
+addresses: loopback, private, link-local and every other address that is not
+globally reachable, and cloud metadata endpoints, are refused by default,
+judged on the address the connection is actually made to and on every
+redirect hop. A deployment that needs an
+internal target lists it in `OS_EGRESS_ALLOWED_TARGETS`; a link-local or
+metadata address can never be listed. A refused inline call fails the node
+with an error starting `http: EGRESS_REFUSED` and sends nothing; a refused
+`durable` callout dead-letters in the outbox as `EGRESS_REFUSED`, as a webhook
+delivery does. See [Webhooks](/docs/automation/webhooks#7-egress-safety) and
+[Environment variables](/docs/deployment/environment-variables#outbound-requests).
 
 <Callout type="warn" title="Do not put a secret in an http node's url or headers">
 A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A flow that ships in a package names its inbound hook secret instead of carrying it: the start node's `config.secretRef` holds the name the deployment fills (an environment variable of that name in the open tier, resolved through the same credential resolver as a connector's `auth.credentialRef`), and the engine reads it at every post, so no credential is published with the package. A post that arrives while the name has no value is answered `503`, never verified. The reference is a name, not a credential: it is served as written, it may not sit beside a literal `secret`, and it may not name a variable in the platform's `OS_` namespace. A packaged flow that carries a literal keeps it in its package source; the literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
@@ -2602,6 +2656,11 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    while the write that fired it still lands. A bare `budget` is `record.budget`,
    and `os validate` judges it too; a start guard holds at every edge and branch — spell
    it `record.budget != null`, which both doors accept, and `has()` is no guard.
+   The columns the platform adds count too: `owner_id`, `created_by`,
+   `updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are
+   `null` on a row a system write, a seed or a guest left them empty in, so they
+   need the same guard; `created_at` and `updated_at` are stamped on every
+   stored row and need none.
 </Callout>
 
 <Callout type="info">

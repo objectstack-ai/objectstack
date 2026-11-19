@@ -272,6 +272,23 @@ function refusal(
 }
 
 /**
+ * [ruling 6917064203 on #34398, ADR-0150 D5] The refusal of an address naming
+ * a package that holds no item of the name, for a type outside the exact
+ * qualifier ({@link admitExactQualifier} judges the covered set): the same
+ * `not-held-by-qualifier` refusal, naming each package that holds the name.
+ * Asked only where another package holds it; a name nothing holds is the
+ * read's own miss.
+ */
+export function notHeldByQualifierRefusal(
+    type: string,
+    name: string,
+    packageId: string,
+    holders: readonly string[],
+): PackageScopedNameRefusedError {
+    return refusal(type, name, packageId, 'not-held-by-qualifier', holders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
+}
+
+/**
  * Judge a by-name read that names package `packageId` as its exact qualifier.
  *
  * @returns `undefined` when the rule does not apply (no package named, a type
@@ -946,6 +963,8 @@ export function resolveMetaItemAddress(
  * environment does not hold and a package does is refused
  * (`not-held-by-qualifier`, `callerPackageId: null`); otherwise the read is a
  * caller with no package, which E8's resolver answers environment-first.
+ * [#33385] A name only disabled packages hold is refused with a mark the
+ * doors read ({@link DISABLED_HOLDERS_ONLY_REFUSAL}).
  * Types outside the covered set keep the bare read, as `?package=` does for
  * them.
  *
@@ -972,8 +991,10 @@ export function admitEnvironmentQualifier(
     }
     // [#32183, epic ruling R4-B2] The served holders, or every holder when no
     // package serves the name: a name only disabled packages hold is refused
-    // naming them, as before, never read as a caller with no package (that
-    // read can reach a disabled holder's customization pair row).
+    // naming them here, never admitted on the registry's word alone. The
+    // registry does not see a package holding the name only through a stored
+    // row it has not hydrated, so a read admitted here could serve that
+    // package's row at the environment's address.
     const served = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
     const holders = served.length > 0
         ? served
@@ -982,6 +1003,11 @@ export function admitEnvironmentQualifier(
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
     }
+    // [#33385, #32183 row 17] …but marked ({@link DISABLED_HOLDERS_ONLY_REFUSAL}),
+    // once the read it would admit is judgeable: each door then asks the read
+    // naming no package, which judges the stored rows too, and answers the
+    // name as no package's (its 404) when that read withholds it.
+    if (served.length === 0) refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
     const candidates: PackageScopedHolder[] = holders.map((holder) => ({ kind: 'package' as const, packageId: holder }));
     const base = {
         status: 'refused' as const,
@@ -991,5 +1017,28 @@ export function admitEnvironmentQualifier(
         callerPackageId: null,
         candidates,
     };
-    throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    const error = new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    if (served.length === 0) Object.defineProperty(error, DISABLED_HOLDERS_ONLY_REFUSAL, { value: true });
+    throw error;
 }
+
+/**
+ * [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] The marker
+ * {@link admitEnvironmentQualifier} sets on its refusal of a name only
+ * disabled packages hold, a registered symbol (so every copy of this package
+ * reads the same key, and no envelope serializes it). The `_env` doors of
+ * `RestServer` and the runtime dispatcher read it by the same `Symbol.for`
+ * key (`RestServer` reaches the protocol only as a service, as with the item
+ * face's `storedRowHoldersRefusal` marker), and answer it in two steps,
+ * because only an asynchronous read sees a package that holds the name
+ * through a stored row alone:
+ *
+ *  - the read naming no package (`getMetaItem`) withholds the name (no item):
+ *    no package serves it, a disabled package holds no name, and the item face
+ *    withholds every customization of its holders (the pair's row, #32814; a
+ *    package-less row of their key, #33401). The door admits `_env` and its
+ *    read answers 404, naming no package;
+ *  - that read serves an item, or refuses: a package holds the name through
+ *    its stored row, so the refusal stands, as before.
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL: unique symbol = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal') as never;

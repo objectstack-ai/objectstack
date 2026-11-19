@@ -92,8 +92,11 @@ const chipAround = (el: Element) => el.closest('div.group') as HTMLElement;
 const chipsOf = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('section > div > div.group')) as HTMLElement[];
 
-/** Below `sm`, every chip is one full-width line with no separator. */
-const PHONE_LAYOUT = ['max-sm:basis-full', 'max-sm:max-w-full', 'max-sm:border-l-0', 'max-sm:px-0'];
+/**
+ * Below `sm`, every chip is one cell of a two-column grid with no separator
+ * (objectstack#34595 — this pinned a full-width line per chip before).
+ */
+const PHONE_LAYOUT = ['max-sm:min-w-0', 'max-sm:max-w-full', 'max-sm:border-l-0', 'max-sm:px-0'];
 
 describe('a phone drawn from a format gets the phone basis (objectui#12523)', () => {
   it('gives the `text` + `format: phone` chip the 16rem floor objectui#11659 gave phones', () => {
@@ -176,7 +179,7 @@ describe('a wrapped line starts flush, like the first (objectui#12523)', () => {
 });
 
 describe('below `sm` the strip is one layout (objectui#12523)', () => {
-  it('gives all six chips of the measured lead the same full-width line', () => {
+  it('gives all six chips of the measured lead the same grid cell (objectstack#34595)', () => {
     const { container } = renderLead();
 
     const chips = chipsOf(container);

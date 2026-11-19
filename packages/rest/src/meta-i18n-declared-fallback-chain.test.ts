@@ -33,6 +33,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: the routes reach this
+// package through a dynamic import (`check:test-source-alias`).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 // ---------------------------------------------------------------------------
@@ -93,6 +96,8 @@ function i18nFor(opts: {
     bundles: Record<string, any>;
     defaultLocale: string;
     fallbackLocale: string | undefined | null;
+    /** [#33634] `getSourceLocale()`'s answer; omitted, the accessor is not implemented. */
+    sourceLocale?: string | undefined;
 }) {
     const svc: any = {
         getLocales: () => Object.keys(opts.bundles),
@@ -100,6 +105,7 @@ function i18nFor(opts: {
         getDefaultLocale: () => opts.defaultLocale,
     };
     if (opts.fallbackLocale !== null) svc.getFallbackLocale = () => opts.fallbackLocale;
+    if ('sourceLocale' in opts) svc.getSourceLocale = () => opts.sourceLocale;
     return svc;
 }
 
@@ -120,7 +126,7 @@ function mockRes() {
 const singular = (type: string) => (type.endsWith('s') ? type.slice(0, -1) : type);
 const DOCUMENTS: Record<string, any> = { object: SHEET, app: KPI_APP };
 
-function protocol() {
+function protocol(docs: Record<string, any> = DOCUMENTS) {
     return {
         getDiscovery: vi.fn().mockResolvedValue({
             version: 'v0',
@@ -131,11 +137,11 @@ function protocol() {
             types: ['object', 'app'],
             registered: ['object', 'app'],
         })),
-        getMetaItems: vi.fn(async ({ type }: any) => (DOCUMENTS[singular(type)] ? [DOCUMENTS[singular(type)]] : [])),
+        getMetaItems: vi.fn(async ({ type }: any) => (docs[singular(type)] ? [docs[singular(type)]] : [])),
         getMetaItem: vi.fn(async ({ type, name }: any) => ({
             type: singular(type),
             name,
-            item: DOCUMENTS[singular(type)],
+            item: docs[singular(type)],
             lock: 'none',
             editable: true,
         })),
@@ -143,14 +149,14 @@ function protocol() {
         // [#8284] The packaged base equals the served document: nothing was
         // authored on top of it, so the catalog applies — the path the card
         // measured, where the wrong CATALOG locale answered.
-        getPackagedObjectBase: vi.fn((name: string) => (name === SHEET.name ? SHEET : undefined)),
+        getPackagedObjectBase: vi.fn((name: string) => (name === docs.object?.name ? docs.object : undefined)),
         findData: vi.fn().mockResolvedValue([]),
     };
 }
 
-function makeRest(i18n: any) {
+function makeRest(i18n: any, docs?: Record<string, any>) {
     const rest = new RestServer(
-        mockServer() as any, protocol() as any, { api: { requireAuth: false } } as any,
+        mockServer() as any, protocol(docs) as any, { api: { requireAuth: false } } as any,
         undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, undefined, undefined, undefined,
         // i18nServiceProvider — the 14th constructor argument.
@@ -370,5 +376,65 @@ describe('#15711 §5 — a declared en fallback never outranks the authored labe
         const item = await readItem(makeRest(withZh), 'object', 'kpi_entry_sheet', 'zh-CN');
         expect(item.label).toBe('填报单（bundle）');
         expect(item.fields.name.label).toBe('填报单名称');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §6 — an app authored in English that defaults its users to zh-CN (#33634)
+// ---------------------------------------------------------------------------
+
+describe('#33634 §6 — the declared sourceLocale, not defaultLocale, is the authored label\'s language', () => {
+    // `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, no `fallbackLocale` —
+    // which both boot paths collapse to `defaultLocale`, so the service's
+    // `getFallbackLocale()` answers `zh-CN`. English inline labels, a zh-CN
+    // pack, no en pack. Before the serving layer read `getSourceLocale()`, an
+    // `en` request was not the "authored" one, walked the chain to `zh-CN`,
+    // and was served `客户`.
+    const ACCOUNT = {
+        name: 'account',
+        label: 'Account',
+        pluralLabel: 'Accounts',
+        fields: { name: { name: 'name', type: 'text', label: 'Account Name' } },
+    };
+    const ACCOUNT_DOCS = { object: ACCOUNT, app: KPI_APP };
+    const ZH_PACK = { objects: { account: { label: '客户', pluralLabel: '客户', fields: { name: { label: '客户名称' } } } } };
+    const stack = (sourceLocale?: string) =>
+        i18nFor({
+            bundles: { 'zh-CN': ZH_PACK, en: {} },
+            defaultLocale: 'zh-CN',
+            fallbackLocale: 'zh-CN',
+            ...(sourceLocale !== undefined ? { sourceLocale } : {}),
+        });
+    const read = (i18n: any, locale: string | undefined) => readItem(makeRest(i18n, ACCOUNT_DOCS), 'object', 'account', locale);
+    const labels = (doc: any) => ({ label: doc.label, pluralLabel: doc.pluralLabel, name: doc.fields.name.label });
+    const ENGLISH_INLINE = { label: 'Account', pluralLabel: 'Accounts', name: 'Account Name' };
+    const CHINESE = { label: '客户', pluralLabel: '客户', name: '客户名称' };
+
+    it('an en request answers the inline English label', async () => {
+        expect(labels(await read(stack('en'), 'en'))).toEqual(ENGLISH_INLINE);
+    });
+
+    it('a zh-CN request answers the zh-CN pack', async () => {
+        expect(labels(await read(stack('en'), 'zh-CN'))).toEqual(CHINESE);
+    });
+
+    it('a header-less request falls to the users\' default (zh-CN), not to the source locale', async () => {
+        expect(labels(await read(stack('en'), undefined))).toEqual(CHINESE);
+    });
+
+    it('a third locale still walks the declared chain (zh-CN): the fallback chain is untouched', async () => {
+        expect(labels(await read(stack('en'), 'ja-JP'))).toEqual(CHINESE);
+    });
+
+    it('the list read agrees with the single read', async () => {
+        const [item] = await readList(makeRest(stack('en'), ACCOUNT_DOCS), 'object', 'en');
+        expect(labels(item)).toEqual(ENGLISH_INLINE);
+    });
+
+    it('CONTROL — no sourceLocale declared (accessor absent, or answering undefined): today\'s answer is unchanged', async () => {
+        expect(labels(await read(stack(), 'en'))).toEqual(CHINESE);
+        const undeclared = i18nFor({ bundles: { 'zh-CN': ZH_PACK, en: {} }, defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN', sourceLocale: undefined });
+        expect(labels(await read(undeclared, 'en'))).toEqual(CHINESE);
+        expect(labels(await read(undeclared, 'zh-CN'))).toEqual(CHINESE);
     });
 });

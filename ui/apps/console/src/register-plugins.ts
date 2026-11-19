@@ -26,11 +26,9 @@
 import { ComponentRegistry } from '@object-ui/core';
 
 // Eager imports — core views the console shell itself imports by name today
-// (the shell's own helpers and record surfaces reach these four packages'
+// (the shell's own helpers and record surfaces reach these two packages'
 // entries), so a lazy stub here would move nothing out of the first load.
 import '@object-ui/plugin-grid';
-import '@object-ui/plugin-form';
-import '@object-ui/plugin-view';
 import '@object-ui/plugin-detail';
 
 // Lazy plugins — registered as deferred loaders.  The first time the
@@ -59,6 +57,41 @@ ComponentRegistry.registerLazy('object-gallery', () => import('@object-ui/plugin
   category: 'view',
 });
 
+// The form and the object view: the shell takes their pure helpers from the
+// side-effect-free `/core` subpaths and draws their components behind
+// `lazy()`, so nothing on the first load imports either entry. Each tag the
+// entry registers is a stub with the namespace, `skipFallback` and category
+// that registration declares; the first schema naming one loads the package,
+// whose own registrations then replace every stub of it, once.
+for (const variant of ['object-form', 'embeddable-form', 'object-master-detail-form']) {
+  ComponentRegistry.registerLazy(variant, () => import('@object-ui/plugin-form'), {
+    namespace: 'plugin-form',
+    category: 'plugin',
+  });
+}
+ComponentRegistry.registerLazy('form', () => import('@object-ui/plugin-form'), {
+  namespace: 'view',
+  skipFallback: true,
+  category: 'view',
+});
+ComponentRegistry.registerLazy('line_items', () => import('@object-ui/plugin-form'), {
+  namespace: 'record',
+  skipFallback: true,
+  category: 'record',
+});
+for (const variant of ['object-view', 'view:simple']) {
+  ComponentRegistry.registerLazy(variant, () => import('@object-ui/plugin-view'), {
+    namespace: 'plugin-view',
+    category: 'view',
+  });
+}
+for (const variant of ['view-switcher', 'filter-ui', 'sort-ui']) {
+  ComponentRegistry.registerLazy(variant, () => import('@object-ui/plugin-view'), {
+    namespace: 'view',
+    category: 'view',
+  });
+}
+
 ComponentRegistry.registerLazy('object-map', () => import('@object-ui/plugin-map'), {
   namespace: 'plugin-map',
   category: 'view',
@@ -71,6 +104,14 @@ ComponentRegistry.registerLazy('object-map', () => import('@object-ui/plugin-map
 
 ComponentRegistry.registerLazy('object-tree', () => import('@object-ui/plugin-tree'), {
   namespace: 'plugin-tree',
+  category: 'view',
+});
+
+// objectstack#34382 — the editable row × weekday grid a `type: 'timesheet'`
+// list view draws (`ListView` composes the `object-timesheet` node). Lazy like
+// every view plugin, and its strings ride their own lazy locale namespace.
+ComponentRegistry.registerLazy('object-timesheet', () => import('@object-ui/plugin-timesheet'), {
+  namespace: 'plugin-timesheet',
   category: 'view',
 });
 // ⛔ The bare `tree` node type key is RETIRED (objectui#10859 batch 8, the

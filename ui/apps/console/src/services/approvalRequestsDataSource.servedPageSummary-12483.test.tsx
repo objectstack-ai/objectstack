@@ -2,12 +2,20 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectui#12483 (face 2 of ruling C on objectui#12438): the page objectstack
- * serves for an approval request shows the request's declared amount and a
- * summary of its record snapshot, under the target object's declared labels,
- * each value through the record page's own cell, with the object's
- * `hidden: true` fields trimmed and a field the reader may not read never
- * drawn, as the approvals inbox's request sheet shows them.
+ * The page objectstack serves for an approval request draws the business
+ * record WHOLE (objectstack#34588; maintainer 2026-11-17: 「审批页应该直接显示
+ * 完整的记录」): every field of the request's snapshot the reader may read,
+ * under the target object's declared labels, each value through the record
+ * page's own cell, with the object's `hidden: true` fields trimmed and a field
+ * the reader may not read never drawn. A field changed after submission is
+ * marked, with its current value.
+ *
+ * This file pinned the summary that came before it (objectui#12483, face 2 of
+ * ruling C on objectui#12438): the declared amount as a lead, then at most six
+ * rows, with no read of the record. #34588 retires the lead, the six-row cut
+ * and the no-read rule; the faces it keeps (declared labels, the record page's
+ * cell, the hidden trim, field permissions, an undeclared key takes no row,
+ * labels told apart) are pinned here against the full record.
  *
  * Mounted as `approvalRequestsDataSource.servedPageApprovers-12482.test.tsx`
  * mounts it: the REAL `RecordDetailView`, opened by the generic record route
@@ -16,17 +24,6 @@
  * is objectstack `plugin-approvals`' `sys_approval_request_detail` copied
  * whole. Only the HTTP transport, the console adapter and the metadata store
  * are doubled.
- *
- * The sheet's pins were the spec of the face, matched by assertion and not by
- * markup, and the first two retired with the sheet (objectui#12484), against
- * this file: `ApprovalsInboxPage.summaryFaces-11677.test.tsx` (declared labels,
- * the record page's cell, an undeclared key takes no row, labels told apart),
- * `ApprovalsInboxPage.hiddenFieldTrim.test.tsx` (a hidden field is dropped
- * before the row cut and never leads) and
- * `ApprovalsInboxPage.queueHiddenAmount.test.tsx` (a hidden amount is not
- * shown). The amount here is the DECLARED one, a `currency` field: the sheet's
- * key-name guess is deliberately not ported, and the last describe block pins
- * that boundary.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
@@ -194,7 +191,7 @@ const DEFS: Record<string, unknown> = {
   invoice: INVOICE_DEF,
 };
 
-/** objectstack `plugin-approvals`' `SysApprovalRequestDetailPage`, whole (as of objectstack `09dd537193`). */
+/** objectstack `plugin-approvals`' `SysApprovalRequestDetailPage`, whole (as of objectstack#34588). */
 const SERVED_PAGE = {
   name: 'sys_approval_request_detail',
   label: 'Approval Request',
@@ -208,46 +205,14 @@ const SERVED_PAGE = {
       name: 'main',
       width: 'full',
       components: [
-        { type: 'page:header' },
-        { type: 'record:approval_decision' },
+        { type: 'page:header', properties: { placedActions: true } },
         {
           type: 'record:highlights',
           properties: {
             fields: ['process_label', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
           },
         },
-        {
-          type: 'page:tabs',
-          properties: {
-            tabStyle: 'line',
-            position: 'top',
-            items: [
-              {
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
-                icon: 'file-text',
-                children: [{ type: 'record:details' }],
-              },
-              {
-                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-                icon: 'history',
-                children: [
-                  {
-                    type: 'record:related_list',
-                    properties: {
-                      objectName: 'sys_approval_action',
-                      relationshipField: 'request_id',
-                      columns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],
-                      sort: [{ field: 'created_at', order: 'desc' }],
-                      limit: 50,
-                      showViewAll: true,
-                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        },
+        { type: 'record:approval_decision' },
       ],
     },
   ],
@@ -259,6 +224,9 @@ function json(status: number, body: unknown): Response {
 
 /** The row the approvals get serves for this case. */
 let served: Record<string, unknown> = BASE_ROW;
+
+/** The target record as it reads now; null reads as not found. */
+let current: Record<string, unknown> | null = null;
 
 const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -272,7 +240,7 @@ vi.stubGlobal('fetch', transport);
 
 const host = {
   find: vi.fn(async (_resource: string, _params?: unknown) => ({ data: [], total: 0 })),
-  findOne: vi.fn(async (_resource: string, _id: string) => null),
+  findOne: vi.fn(async (resource: string, id: string) => (resource === 'invoice' && id === 'inv_1' ? current : null)),
   create: vi.fn(), update: vi.fn(), delete: vi.fn(),
   getObjectSchema: vi.fn(async (name: string) => DEFS[name] ?? null),
 };
@@ -304,6 +272,7 @@ function readerWithout(...denied: string[]): MePermissionsResponse {
     tenantId: 't1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: { '*': all } as never,
     fields: Object.fromEntries(denied.map((f) => [`invoice.${f}`, { readable: false, editable: false }])),
@@ -340,32 +309,26 @@ async function openServedPage(
   return panel;
 }
 
-/** The summary once the target's definition answered. */
-async function summaryOf(panel: HTMLElement): Promise<HTMLElement> {
-  return within(panel).findByTestId('record-snapshot-summary', undefined, { timeout: 8000 });
+/** The record card once the target's definition answered. */
+async function recordOf(panel: HTMLElement): Promise<HTMLElement> {
+  return within(panel).findByTestId('submitted-record', undefined, { timeout: 8000 });
 }
 
-/** The summary's rows, as `{ field key -> { label, value } }`. */
-function summaryRows(panel: HTMLElement): Map<string, { label: string; value: string }> {
+/** The card's fields, in drawn order, as `{ field key -> { label, value } }`. */
+function recordFields(panel: HTMLElement): Map<string, { label: string; value: string }> {
   const out = new Map<string, { label: string; value: string }>();
-  for (const row of panel.querySelectorAll('[data-summary-field]')) {
-    const [label, value] = Array.from(row.children);
-    out.set(row.getAttribute('data-summary-field') as string, {
+  for (const row of panel.querySelectorAll('[data-submitted-field]')) {
+    const label = row.querySelector('dt');
+    const value = row.querySelector('dd');
+    // The value as submitted; a "Changed" note under it is read separately.
+    const note = value?.querySelector('[data-submitted-current]');
+    const text = (value?.textContent ?? '').replace(note?.textContent ?? '\u0000', '');
+    out.set(row.getAttribute('data-submitted-field') as string, {
       label: (label?.textContent ?? '').trim(),
-      value: (value?.textContent ?? '').trim(),
+      value: text.trim(),
     });
   }
   return out;
-}
-
-function lead(panel: HTMLElement): { key: string | null; label: string; value: string } | null {
-  const el = panel.querySelector('[data-summary-lead]');
-  if (!el) return null;
-  return {
-    key: el.getAttribute('data-summary-lead'),
-    label: (el.children[0]?.textContent ?? '').trim(),
-    value: (el.children[1]?.textContent ?? '').trim(),
-  };
 }
 
 /** What the record page draws for this declaration and stored value, standalone. */
@@ -383,22 +346,29 @@ const pageText = () => document.body.textContent ?? '';
 afterEach(() => {
   cleanup();
   served = BASE_ROW;
+  current = null;
   defs = DEFS;
+  host.findOne.mockClear();
   getItem.mockClear();
   transport.mockClear();
 });
 
-describe('the served request page shows the declared amount and a summary of the snapshot (objectui#12483)', () => {
-  it('the served page parses as a spec page, with no node or prop added for the summary', () => {
+/** Every declared, visible, non-bookkeeping field of `PAYLOAD`, in the object's declared order. */
+const ALL_DRAWN = ['name', 'account', 'contact', 'cost_center', 'region', 'status', 'issued_on', 'amount', 'total_amount', 'tax_rate'];
+
+describe('the served request page draws the submitted record whole (objectstack#34588, was objectui#12483)', () => {
+  it('the served page parses as a spec page, and the decision panel is its last node, with no prop', () => {
     const parsed = PageSchema.safeParse(SERVED_PAGE);
     expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
-    expect(SERVED_PAGE.regions[0].components[1]).toEqual({ type: 'record:approval_decision' });
+    const components = SERVED_PAGE.regions[0].components;
+    expect(components[components.length - 1]).toEqual({ type: 'record:approval_decision' });
+    expect(JSON.stringify(SERVED_PAGE)).not.toContain('page:tabs');
   });
 
   it('declared labels and the record page\'s faces: option labels, the date face, a resolved reference by its name', async () => {
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    const rows = summaryRows(panel);
+    await recordOf(panel);
+    const rows = recordFields(panel);
 
     expect(rows.get('region')).toEqual({ label: 'Region', value: recordPageFace('region', 'emea') });
     expect(rows.get('region')?.value).toBe('EMEA');
@@ -410,92 +380,118 @@ describe('the served request page shows the declared amount and a summary of the
 
     const labels = [...rows.values()].map((r) => r.label);
     expect(new Set(labels).size).toBe(labels.length);
-    // Bookkeeping columns and the unresolved reference take no row, and no id is printed.
-    for (const key of ['id', 'owner_id', 'created_at', 'contact']) expect(rows.has(key)).toBe(false);
-    for (const raw of ['con_x8Pq2LmN4pR7tZk3', 'acc_7Hq2LmN4pR7tZk91', '2026-07-23']) {
-      expect(within(panel).queryByText(raw)).toBeNull();
-    }
+    // Bookkeeping columns take no row.
+    for (const key of ['id', 'owner_id', 'created_at']) expect(rows.has(key)).toBe(false);
+    // A reference the service did not resolve for this reader is drawn as the
+    // record page draws it: the lookup cell's unresolved-reference face. The
+    // summary dropped it to fit six rows; the whole record keeps it.
+    expect(rows.get('contact')).toEqual({ label: 'Contact', value: recordPageFace('contact', 'con_x8Pq2LmN4pR7tZk3') });
+    for (const raw of ['acc_7Hq2LmN4pR7tZk91', '2026-07-23']) expect(within(panel).queryByText(raw)).toBeNull();
   });
 
-  it('the declared amount leads, under its declared label, through the currency face, and is not repeated as a row', async () => {
+  it('the amount is an ordinary field in its place, through the currency face, drawn once', async () => {
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    expect(lead(panel)).toEqual({ key: 'amount', label: 'Invoice Amount', value: recordPageFace('amount', 12500) });
-    expect(lead(panel)?.value).toContain('12,500');
-    expect(summaryRows(panel).has('amount')).toBe(false);
+    await recordOf(panel);
+    expect(panel.querySelector('[data-summary-lead]')).toBeNull();
+    expect(recordFields(panel).get('amount')).toEqual({ label: 'Invoice Amount', value: recordPageFace('amount', 12500) });
+    expect(panel.querySelectorAll('[data-submitted-field="amount"]')).toHaveLength(1);
   });
 
-  it('a hidden field takes no row and the next field takes its slot', async () => {
+  it('a hidden field takes no row, and every other field is drawn: no row cut', async () => {
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    const rows = summaryRows(panel);
-    expect([...rows.keys()]).toEqual(['name', 'account', 'cost_center', 'region', 'status', 'issued_on']);
+    await recordOf(panel);
+    const rows = recordFields(panel);
+    expect([...rows.keys()]).toEqual(ALL_DRAWN);
     expect(rows.has('internal_score')).toBe(false);
     expect(pageText()).not.toContain('87,654');
     expect(pageText()).not.toContain('87654');
   });
 
-  it('COUNTER-PROBE: the same snapshot with nothing declared hidden draws that field, and the last row is cut', async () => {
+  it('COUNTER-PROBE: the same snapshot with nothing declared hidden draws that field, and nothing is cut', async () => {
     const shown = { ...INVOICE_FIELDS, internal_score: { type: 'number', label: 'Internal Score' } };
     defs = { ...DEFS, invoice: { ...INVOICE_DEF, fields: shown } };
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    const rows = summaryRows(panel);
-    expect([...rows.keys()]).toEqual(['name', 'account', 'cost_center', 'internal_score', 'region', 'status']);
+    await recordOf(panel);
+    const rows = recordFields(panel);
     expect(rows.get('internal_score')?.label).toBe('Internal Score');
+    expect(rows.size).toBe(ALL_DRAWN.length + 1);
+    expect(rows.has('tax_rate')).toBe(true);
   });
 
-  it('a hidden amount never leads, and is shown nowhere', async () => {
+  it('a hidden amount is shown nowhere', async () => {
     const hiddenAmount = { ...INVOICE_FIELDS, amount: { ...INVOICE_FIELDS.amount, hidden: true } };
     defs = { ...DEFS, invoice: { ...INVOICE_DEF, fields: hiddenAmount } };
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    expect(lead(panel)).toBeNull();
-    expect(summaryRows(panel).has('amount')).toBe(false);
+    await recordOf(panel);
+    expect(recordFields(panel).has('amount')).toBe(false);
     expect(pageText()).not.toContain('12,500');
   });
 
-  it('a field the reader may not read is never drawn, and its slot goes to the next field', async () => {
+  it('a field the reader may not read is never drawn', async () => {
     const panel = await openServedPage(BASE_ROW, readerWithout('cost_center', 'amount'));
-    await summaryOf(panel);
-    const rows = summaryRows(panel);
-    expect(rows.has('cost_center')).toBe(false);
-    expect(lead(panel)).toBeNull();
+    await recordOf(panel);
+    const rows = recordFields(panel);
     expect(pageText()).not.toContain('CC-LEDGER-SECRET');
     expect(pageText()).not.toContain('12,500');
-    expect([...rows.keys()]).toEqual(['name', 'account', 'region', 'status', 'issued_on', 'total_amount']);
+    expect([...rows.keys()]).toEqual(ALL_DRAWN.filter((k) => k !== 'cost_center' && k !== 'amount'));
   });
 
-  it('COUNTER-PROBE: the same reader allowed every field sees the cost center', async () => {
+  it('COUNTER-PROBE: the same reader allowed every field sees the cost center and the amount', async () => {
     const panel = await openServedPage(BASE_ROW, readerWithout());
-    await summaryOf(panel);
-    expect(summaryRows(panel).get('cost_center')).toEqual({ label: 'Cost Center', value: 'CC-LEDGER-SECRET' });
-    expect(lead(panel)?.key).toBe('amount');
+    await recordOf(panel);
+    expect(recordFields(panel).get('cost_center')).toEqual({ label: 'Cost Center', value: 'CC-LEDGER-SECRET' });
+    expect(recordFields(panel).has('amount')).toBe(true);
   });
 
-  it('the summary costs no read beyond the approvals get: the snapshot is in the row, the definition in the metadata store', async () => {
+  it('the record is read once, through the console adapter, to mark what changed after submission', async () => {
+    current = { ...PAYLOAD, amount: 13250, account: { id: 'acc_7Hq2LmN4pR7tZk91', name: 'Fabrikam' } };
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    expect(getItem).toHaveBeenCalledWith('object', 'invoice');
+    await recordOf(panel);
+    await waitFor(() => expect(panel.querySelector('[data-submitted-field="amount"][data-changed="true"]')).not.toBeNull(), { timeout: 8000 });
+    const invoiceReads = host.findOne.mock.calls.filter(([resource]) => resource === 'invoice');
+    expect(invoiceReads.map(([resource, id]) => [resource, id])).toEqual([['invoice', 'inv_1']]);
+    // No params: the read the record page sends, not a narrowed one.
+    expect((invoiceReads[0] as unknown[])[2]).toBeUndefined();
+    // The submitted value stays the value; the current one is beside it.
+    expect(recordFields(panel).get('amount')?.value).toBe(recordPageFace('amount', 12500));
+    const amount = panel.querySelector('[data-submitted-field="amount"]') as HTMLElement;
+    expect(within(amount).getByTestId('submitted-field-changed').textContent).toBe('Changed');
+    expect(amount.querySelector('[data-submitted-current]')?.textContent).toContain(recordPageFace('amount', 13250));
+    // The same account, served expanded, is not a change.
+    expect(panel.querySelector('[data-submitted-field="account"]')?.getAttribute('data-changed')).not.toBe('true');
+    expect(panel.querySelectorAll('[data-changed="true"]')).toHaveLength(1);
+    // The approvals get stays the only read of the request; no invoice path reaches the transport.
     const paths = transport.mock.calls.map(([input]) =>
       new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://test.local').pathname);
     expect(paths.filter((p) => p.includes('invoice'))).toEqual([]);
   });
+
+  it('CONTROL: a record that does not read marks nothing, says so, and still draws the snapshot', async () => {
+    current = null;
+    const panel = await openServedPage(BASE_ROW);
+    await recordOf(panel);
+    expect(await within(panel).findByTestId('submitted-record-current-unreadable', undefined, { timeout: 8000 })).toBeTruthy();
+    expect(panel.querySelectorAll('[data-changed="true"]')).toHaveLength(0);
+    expect([...recordFields(panel).keys()]).toEqual(ALL_DRAWN);
+  });
 });
 
-describe('controls (objectui#12483)', () => {
-  it('CONTROL: a request with no payload draws no summary, and still its decisions', async () => {
+describe('controls (objectui#12483, kept by objectstack#34588)', () => {
+  it('CONTROL: a request with no payload draws no record card, asks for neither its definition nor its record, and still decides', async () => {
     const { payload: _p, payload_display: _d, ...bare } = BASE_ROW;
     const panel = await openServedPage(bare);
-    await waitFor(() => expect(getItem).toHaveBeenCalledWith('object', 'invoice'));
-    expect(within(panel).queryByTestId('record-snapshot-summary')).toBeNull();
+    // The panel has settled on the request: its rail is drawn.
+    await within(panel).findByTestId('approval-decision-progress', undefined, { timeout: 8000 });
+    expect(within(panel).queryByTestId('submitted-record')).toBeNull();
+    expect(getItem).not.toHaveBeenCalledWith('object', 'invoice');
+    expect(host.findOne.mock.calls.filter(([resource]) => resource === 'invoice')).toEqual([]);
     expect(within(panel).getByTestId('declared-action-approval_reject')).toBeTruthy();
   });
 
-  it('CONTROL: a payload key the object does not declare takes no row, as the sheet drops it', async () => {
+  it('CONTROL: a payload key the object does not declare takes no row', async () => {
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    expect(summaryRows(panel).has('legacy_note')).toBe(false);
+    await recordOf(panel);
+    expect(recordFields(panel).has('legacy_note')).toBe(false);
     expect(pageText()).not.toContain('snapshot-era column');
   });
 
@@ -503,40 +499,38 @@ describe('controls (objectui#12483)', () => {
     const clash = { ...INVOICE_FIELDS, region: { ...INVOICE_FIELDS.region, label: 'Status' } };
     defs = { ...DEFS, invoice: { ...INVOICE_DEF, fields: clash } };
     const panel = await openServedPage(BASE_ROW);
-    await summaryOf(panel);
-    const rows = summaryRows(panel);
+    await recordOf(panel);
+    const rows = recordFields(panel);
     expect(rows.get('region')?.label).not.toBe(rows.get('status')?.label);
     expect(rows.get('region')?.label).toContain('Status');
     expect(rows.get('status')?.label).toContain('Status');
   });
 
-  it('CONTROL: without the target object\'s definition nothing is summarized, and the panel still decides', async () => {
+  it('CONTROL: without the target object\'s definition nothing is drawn of the record, and the panel still decides', async () => {
     defs = { ...DEFS, invoice: null };
     const panel = await openServedPage(BASE_ROW);
     await waitFor(() => expect(getItem).toHaveBeenCalledWith('object', 'invoice'));
-    expect(within(panel).queryByTestId('record-snapshot-summary')).toBeNull();
+    expect(within(panel).queryByTestId('submitted-record')).toBeNull();
     expect(pageText()).not.toContain('CC-LEDGER-SECRET');
     expect(within(panel).getByTestId('declared-action-approval_approve')).toBeTruthy();
   });
 });
 
-describe('the amount is the declared one; a key name is not read (objectui#12483)', () => {
-  it('a roll-up the sheet\'s name guess would match is an ordinary row, not the amount', async () => {
-    // No currency field in the snapshot; `cost_center` is left out too, so the
-    // roll-up falls inside the six rows rather than being cut.
-    const { amount: _a, cost_center: _c, ...noCurrency } = PAYLOAD;
+describe('a key name is not read as the amount (objectui#12483, kept by objectstack#34588)', () => {
+  it('a roll-up the sheet\'s name guess would match is an ordinary row, through its own cell', async () => {
+    const { amount: _a, ...noCurrency } = PAYLOAD;
     const panel = await openServedPage({ ...BASE_ROW, payload: noCurrency });
-    await summaryOf(panel);
-    expect(lead(panel)).toBeNull();
-    expect(summaryRows(panel).get('total_amount')).toEqual({
+    await recordOf(panel);
+    expect(panel.querySelector('[data-summary-lead]')).toBeNull();
+    expect(recordFields(panel).get('total_amount')).toEqual({
       label: 'Line Total',
       value: recordPageFace('total_amount', 4321),
     });
   });
 
-  it('a declared amount of zero still leads: it is the record\'s amount', async () => {
+  it('a declared amount of zero is drawn: zero is a value, not an empty field', async () => {
     const panel = await openServedPage({ ...BASE_ROW, payload: { ...PAYLOAD, amount: 0 } });
-    await summaryOf(panel);
-    expect(lead(panel)).toEqual({ key: 'amount', label: 'Invoice Amount', value: recordPageFace('amount', 0) });
+    await recordOf(panel);
+    expect(recordFields(panel).get('amount')).toEqual({ label: 'Invoice Amount', value: recordPageFace('amount', 0) });
   });
 });

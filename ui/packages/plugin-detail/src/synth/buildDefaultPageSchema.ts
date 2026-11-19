@@ -897,12 +897,12 @@ export function bodyTablePlacement(
 
 /**
  * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
- * then the Timeline tab (the one stream, objectstack#27055: field changes
- * join it under its Changes filter, so there is no History tab), the Related
- * tab and the Approvals tab, each of those three only when the options give
- * it content. The order is stable: Timeline sits second for every object —
- * the 动态 panel is the first panel of the record page's right column
- * (objectstack#27524, Target 5).
+ * then the Related tab, the Approvals tab and the Timeline tab (the one
+ * stream, objectstack#27055: field changes join it under its Changes filter,
+ * so there is no History tab), each of those three only when the options give
+ * it content. The order is stable: Timeline sits last for every object — the
+ * 动态 panel is the last panel of the record page's right column
+ * (objectstack#34590, superseding objectstack#27524 Target 5's 动态-first).
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -980,15 +980,16 @@ function synthTabs(
       children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
     },
   ];
-  // objectstack#27055, Target 3 — the tab strip is 详情 / 动态 / 关联 /
-  // （审批）: the timeline stream is ONE tab, second for every object
-  // (objectstack#27524, Target 5: 动态 is a panel, the first of the right
-  // column, for every object — no object-derived default places it);
-  // attachments close the Related tab, as they close the right column. The
-  // stream tab's token is `Activity stream`, which the strip reads as
-  // `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
+  // objectstack#27055, Target 3 — the timeline stream is ONE tab for every
+  // object (objectstack#27524, Target 5: 动态 is a panel, for every object —
+  // no object-derived default places it). objectstack#34590 — the strip is
+  // 详情 / 关联 / （审批） / 动态: the stream comes LAST, as the laid-out page
+  // draws it last in its right column, its stack and its tab row
+  // (「「动态」在最后」, superseding objectstack#27524 Targets 5 and 8's
+  // 动态-second). Attachments close the Related tab, as they close the related
+  // panels. The stream tab's token is `Activity stream`, which the strip reads
+  // as `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
   const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
-  if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
   const relatedChildren = [
@@ -1015,6 +1016,8 @@ function synthTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
+  // objectstack#34590 — the 动态 tab closes the strip (see above).
+  if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   return componentNode('page:tabs', { items });
 }
 

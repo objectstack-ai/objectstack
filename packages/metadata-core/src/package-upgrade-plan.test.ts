@@ -14,6 +14,7 @@ import {
   typeChangeCategory,
   upgradePlanSeedDatasets,
 } from './package-upgrade-plan.js';
+import { schemaUpgradeVerdict } from './package-upgrade-verdict.js';
 
 type Fields = Record<string, Record<string, unknown>>;
 
@@ -197,5 +198,87 @@ describe('seed datasets', () => {
       side({}, { data: [{ object: 'acme_deal', records: [{ label: 'A', name: 'a' }] }] }),
     );
     expect(plan.seeds.changed).toEqual([]);
+  });
+});
+
+describe('objectExtensions: an extension field counts like an owned one (#34095)', () => {
+  // HotCRM's shape: one package owns `crm_account`, another of the same
+  // artifact adds receivables figures to it through `objectExtensions`.
+  const ACCOUNT = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } };
+  const extending = (fields: Fields, extra: Record<string, unknown> = {}) => ({ extend: 'crm_account', fields, ...extra });
+  const SUMMARY = { type: 'summary', summaryOperations: { object: 'crm_invoice', field: 'amount', function: 'sum' } };
+
+  it('an extension field the incoming version adds is listed in fields.added, as an owned one is', () => {
+    const plan = comparePackageVersions(
+      { objects: [ACCOUNT] },
+      { objects: [ACCOUNT], objectExtensions: [extending({ invoiced_amount: SUMMARY, received_amount: SUMMARY })] },
+    );
+    expect(plan.fields.added).toEqual([
+      { object: 'crm_account', field: 'invoiced_amount', type: 'summary', required: false, stored: true },
+      { object: 'crm_account', field: 'received_amount', type: 'summary', required: false, stored: true },
+    ]);
+    expect(plan.objects).toEqual({ added: [], removed: [] });
+  });
+
+  it('the rollback lists the same fields in fields.removed', () => {
+    const plan = comparePackageVersions(
+      { objects: [ACCOUNT], objectExtensions: [extending({ invoiced_amount: SUMMARY })] },
+      { objects: [ACCOUNT] },
+    );
+    expect(plan.fields.removed).toEqual([{ object: 'crm_account', field: 'invoiced_amount', type: 'summary', required: false, stored: true }]);
+  });
+
+  it('an object reached only through an extension (another package owns it) is compared by the fields added, never listed as an object', () => {
+    const added = comparePackageVersions({}, { objectExtensions: [extending({ tier: { type: 'text' } })] });
+    expect(added.fields.added).toEqual([{ object: 'crm_account', field: 'tier', type: 'text', required: false, stored: true }]);
+    expect(added.objects).toEqual({ added: [], removed: [] });
+
+    const removed = comparePackageVersions({ objectExtensions: [extending({ tier: { type: 'text' } })] }, {});
+    expect(removed.fields.removed).toEqual([{ object: 'crm_account', field: 'tier', type: 'text', required: false, stored: true }]);
+    expect(removed.objects).toEqual({ added: [], removed: [] });
+  });
+
+  it('a retyped extension field is a type change, and the verdict asks its confirmation', () => {
+    const plan = comparePackageVersions(
+      { objectExtensions: [extending({ tier: { type: 'text' }, score: { type: 'number' } })] },
+      { objectExtensions: [extending({ tier: { type: 'number' }, score: { type: 'formula' } })] },
+    );
+    expect(plan.typeChanges).toEqual([
+      { object: 'crm_account', field: 'tier', from: 'text', to: 'number', category: 'needs_confirm' },
+      { object: 'crm_account', field: 'score', from: 'number', to: 'formula', category: 'destructive' },
+    ]);
+    expect(schemaUpgradeVerdict('com.acme.o2c', plan).findings.map((f) => f.kind === 'type_change' && `${f.field}:${f.category}`))
+      .toEqual(['tier:needs_confirm', 'score:destructive']);
+  });
+
+  it('a dropped extension field is listed removed and judged as an owned drop: alone it is refused by nothing, beside an added one it is a suspected rename', () => {
+    const before = { objects: [ACCOUNT], objectExtensions: [extending({ tier: { type: 'text' } })] };
+    const dropped = comparePackageVersions(before, { objects: [ACCOUNT] });
+    expect(dropped.fields.removed).toEqual([{ object: 'crm_account', field: 'tier', type: 'text', required: false, stored: true }]);
+    // The verdict's rule for a removed field (ruling record 6709061297): reported by a dry run, refused by nothing.
+    expect(schemaUpgradeVerdict('com.acme.o2c', dropped).findings).toEqual([]);
+
+    const replaced = comparePackageVersions(before, { objects: [ACCOUNT], objectExtensions: [extending({ segment: { type: 'text' } })] });
+    expect(replaced.suspectedRenames).toEqual([{ object: 'crm_account', field: 'tier', type: 'text', candidates: [{ field: 'segment', type: 'text' }] }]);
+    expect(schemaUpgradeVerdict('com.acme.o2c', replaced).findings).toEqual([expect.objectContaining({ kind: 'suspected_rename', field: 'tier' })]);
+  });
+
+  it('the fields compared are the served ones: the extension with the higher priority writes last', () => {
+    const ext = (type: string, priority?: number) => extending({ tier: { type } }, priority === undefined ? {} : { priority });
+    // Listed low → high, and high → low: the 300 extension's `number` is served either way.
+    for (const extensions of [[ext('text'), ext('number', 300)], [ext('number', 300), ext('text')]]) {
+      const plan = comparePackageVersions({ objects: [ACCOUNT], objectExtensions: [ext('text')] }, { objects: [ACCOUNT], objectExtensions: extensions });
+      expect(plan.typeChanges).toEqual([{ object: 'crm_account', field: 'tier', from: 'text', to: 'number', category: 'needs_confirm' }]);
+    }
+  });
+
+  it('CONTROL: an owned-field plan is unchanged by the fold', () => {
+    const before = side({ title: { type: 'text' }, legacy: { type: 'text' } });
+    const after = side({ title: { type: 'number' }, fresh: { type: 'text' } });
+    const owned = comparePackageVersions(before, after);
+    // The same pair with empty extension lists, and with an unchanged extension of another object.
+    const unchanged = { objectExtensions: [{ extend: 'crm_account', fields: { tier: { type: 'text' } } }] };
+    expect(JSON.stringify(comparePackageVersions({ ...before, objectExtensions: [] }, { ...after, objectExtensions: [] }))).toBe(JSON.stringify(owned));
+    expect(JSON.stringify(comparePackageVersions({ ...before, ...unchanged }, { ...after, ...unchanged }))).toBe(JSON.stringify(owned));
   });
 });

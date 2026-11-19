@@ -111,6 +111,14 @@
  * to `null`, `undefined` or the literal: a count written as "about this
  * record" would otherwise come back as "about nobody", or, with the condition
  * gone, "about everybody".
+ *
+ * # A `{ $record }` comparand refuses here by name
+ *
+ * [#34199] The `lookupFilters` comparand `{ $record: 'path' }` reads the record
+ * a form is editing, which only that form's record picker knows. Where it IS a
+ * field's comparand it is refused here, `INVALID_FILTER` / 400 naming the field,
+ * the `$record` path and where it sits; deeper inside a comparand it is data
+ * and is left alone — see {@link findRecordReferenceComparand}.
  */
 
 import {
@@ -572,6 +580,162 @@ class MalformedNowAnchorError extends Error {
   }
 }
 
+/**
+ * [#34199] `{ $record: 'path' }` — the `lookupFilters` comparand that reads the
+ * RECORD BEING EDITED (`LookupFilterRecordReferenceSchema`,
+ * `@objectstack/spec/data`): a field of that record, or one lookup hop from it
+ * (`account.cb_market`). Only the record picker of the form editing that
+ * record can resolve it — it sends the referenced value in its place before
+ * the query leaves the browser — and no server path knows which record a form
+ * is editing. The KEY decides, not the shape: a malformed reference
+ * (`{ $record: 1 }`, a key beside `$record`) is no more resolvable.
+ */
+function isRecordReference(node: unknown): node is Record<string, unknown> {
+  return !!node && typeof node === 'object' && !Array.isArray(node)
+    && Object.prototype.hasOwnProperty.call(node, '$record');
+}
+
+/** A plain filter object (not a `Date`, not a branded `ReadableIds` leaf). */
+function isFilterObject(node: unknown): node is Record<string, unknown> {
+  return !!node && typeof node === 'object' && !Array.isArray(node)
+    && !(node instanceof Date) && !isReadableIds(node);
+}
+
+/** An operator object: a field's value carrying at least one `$` key. */
+function isOperatorObject(node: unknown): node is Record<string, unknown> {
+  return isFilterObject(node) && Object.keys(node).some((k) => k.startsWith('$'));
+}
+
+/** [#34199] A `{ $record }` met where it is a field's comparand. */
+interface RecordReferenceComparand {
+  readonly reference: Record<string, unknown>;
+  readonly field: string;
+  readonly at: string;
+}
+
+/**
+ * [#34199] The first `{ $record }` that IS a field's comparand, walking the
+ * filter's node grammar (`FilterCondition`): the field's own value (the eq
+ * shorthand `{ f: { $record } }`, which is what the picker's flat lowering of
+ * `eq` sends) or the value of an operator on that field (`{ f: { $gt: {
+ * $record } } }`), under any `$and` / `$or` / `$not` nesting. `at` is spelled
+ * from the filter's root: `filter.$or[1].cb_market`.
+ *
+ * Deliberately NOT judged — each left exactly as it was before this pass
+ * learned the reference:
+ *
+ * - **Inside a no-`$` object beneath a field** (`{ attachment: { meta: {
+ *   $record: 'x' } } }`). That object is a deep-equality comparand or a
+ *   nested-relation condition, and only the field's declaration tells the two
+ *   apart, which this field-agnostic resolver never reads. As a deep-equality
+ *   comparand the `$record` key is part of a literal a driver may compare
+ *   whole (driver-memory does), so refusing it here would refuse a filter that
+ *   answers today.
+ * - **A member of an operator's list** (`$in: ['NA', { $record }]`) and
+ *   anything deeper inside an operator's value: the comparand-type door
+ *   refuses a plain-object list member on the engine's path first.
+ * - **A `$` key in a node position that is not `$and` / `$or` / `$not`**
+ *   (`{ $record: 'x' }` at the root): it is not a field's comparand, and the
+ *   drivers already refuse an undeclared node key.
+ * - **A legacy `[field, op, value]` tuple** (an array whose first member is a
+ *   string other than `and` / `or`, the split `parseFilterAST` lowers by):
+ *   it is a comparison, not a list of nodes, and its third member is a
+ *   comparand — `['attachment', '=', { meta: { $record: 'x' } }]` is the same
+ *   deep-equality literal as the object spelling above, and comes back by
+ *   reference like it. An `['and' | 'or', …]` array is walked from its second
+ *   member, and any other array as a list of nodes.
+ *
+ * Allocation-free and shallow (it never enters a comparand), so it costs a
+ * read whose filter holds no reference one walk of its node keys.
+ */
+function findRecordReferenceComparand(node: unknown, at = 'filter'): RecordReferenceComparand | undefined {
+  if (Array.isArray(node)) {
+    let start = 0;
+    if (typeof node[0] === 'string') {
+      const head = node[0].toLowerCase();
+      // A `[field, op, value]` tuple: a comparison whose value is a comparand — not judged.
+      if (head !== 'and' && head !== 'or') return undefined;
+      start = 1;
+    }
+    for (let i = start; i < node.length; i++) {
+      const hit = findRecordReferenceComparand(node[i], `${at}[${i}]`);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (!isFilterObject(node)) return undefined;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '$and' || key === '$or' || key === '$not') {
+      const hit = findRecordReferenceComparand(value, `${at}.${key}`);
+      if (hit) return hit;
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (isRecordReference(value)) return { reference: value, field: key, at: `${at}.${key}` };
+    // A no-`$` object: a deep-equality comparand or a nested-relation condition — not judged.
+    if (!isOperatorObject(value)) continue;
+    for (const [op, comparand] of Object.entries(value)) {
+      if (op.startsWith('$') && isRecordReference(comparand)) {
+        return { reference: comparand, field: key, at: `${at}.${key}.${op}` };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * [#34199] An unresolved `{ $record }` met where it is a field's comparand —
+ * see {@link findRecordReferenceComparand}. `INVALID_FILTER` / 400, the code
+ * every comparand door answers with and the one the drivers answered this
+ * input with before; the message names the field, the `$record` path and
+ * where it sits. ⛔ Not `FILTER_TOKEN_UNRESOLVED`: that code's declared meaning
+ * is a vocabulary placeholder STRING the request carries no context for, and
+ * the reference is a comparand object.
+ *
+ * On the engine's object path the doors in front of this pass meet most
+ * operator forms first: the comparand-type door refuses any plain object
+ * under an operator (`{ f: { $gt: { $record } } }`), and the temporal door the
+ * eq shorthand on a temporal column — each in its own words. What reaches
+ * this pass there is the eq shorthand on any other column, and every shape
+ * from a caller with no such door in front.
+ *
+ * Not exported, like the module's other `INVALID_FILTER` refusals: a caller
+ * reads `code` and `status`.
+ */
+class UnresolvedRecordReferenceError extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
+
+  constructor({ reference, field, at }: RecordReferenceComparand) {
+    super(
+      `A { "$record": ${previewReferencePath(reference.$record)} } comparand on field "${field}" at ${at} ` +
+      'reached the server unresolved, and is refused rather than compared. { $record } reads the record ' +
+      'being edited (a field of it, or one lookup hop such as "account.cb_market"), and only the record ' +
+      'picker of the form editing that record can resolve it: the picker sends the referenced value in ' +
+      'its place. No server path knows which record a form is editing, so reading the reference as null, ' +
+      'or comparing the object as a literal, would answer rows the filter was written to exclude. Send ' +
+      'the referenced value itself, or write { $record } only in a lookup field\'s lookupFilters, where ' +
+      'the picker resolves it.',
+    );
+    this.name = 'UnresolvedRecordReferenceError';
+  }
+}
+
+/**
+ * [#34199] The `$record` value as the refusal echoes it: JSON, bounded to 60
+ * characters like the sibling comparand doors' previews — a malformed
+ * reference came off the wire and can carry any JSON value.
+ */
+function previewReferencePath(path: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(path) ?? String(path);
+  } catch {
+    text = String(path);
+  }
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+}
+
 /** [#25808] The anchor with its instant pinned — see {@link isUnresolvedNowAnchor}. */
 function resolveNowAnchor(node: { $now: true; addDays?: unknown }, now: Date): Record<string, unknown> {
   const offset = node.addDays;
@@ -607,6 +771,10 @@ export function resolveFilterTokens<T>(
   ctx: FilterTokenResolutionContext = {},
 ): T {
   if (filter == null) return filter;
+  // [#34199] Before the fast path: the refusal must not depend on a string
+  // token being in the same tree, and it reads only comparand positions.
+  const reference = findRecordReferenceComparand(filter);
+  if (reference) throw new UnresolvedRecordReferenceError(reference);
   if (!hasFilterToken(filter)) return filter;
 
   // One instant for the whole tree (see FilterTokenResolutionContext.now).

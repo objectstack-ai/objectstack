@@ -150,6 +150,11 @@
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+  --color-chart-9: hsl(var(--chart-9));
+  --color-chart-10: hsl(var(--chart-10));
 
   /* Semantic status tokens (KPI deltas, tags, alerts) */
   --color-success: hsl(var(--success));
@@ -211,6 +216,11 @@
     --chart-3: 262 83% 58%;   /* violet */
     --chart-4: 27 96% 61%;    /* orange */
     --chart-5: 340 75% 55%;   /* rose   */
+    --chart-6: 135 60% 36%;   /* green  */
+    --chart-7: 315 70% 34%;   /* plum   */
+    --chart-8: 192 80% 42%;   /* cyan   */
+    --chart-9: 0 70% 36%;     /* red    */
+    --chart-10: 215 14% 58%;  /* slate  */
 
     /* Semantic status colors */
     --success: 142 71% 45%;
@@ -294,6 +304,11 @@
     --chart-3: 262 83% 68%;
     --chart-4: 27 96% 65%;
     --chart-5: 340 82% 65%;
+    --chart-6: 135 60% 46%;
+    --chart-7: 315 55% 48%;
+    --chart-8: 192 80% 52%;
+    --chart-9: 0 70% 48%;
+    --chart-10: 210 12% 68%;
 
     /* Semantic status colors (dark mode) */
     --success: 142 65% 50%;

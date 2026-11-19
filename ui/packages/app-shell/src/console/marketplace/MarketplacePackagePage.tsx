@@ -110,7 +110,7 @@ import {
   takeClearConfirmRequest,
 } from './sampleDataNotice.js';
 import { SampleDataLeaveBanner } from './SampleDataLeaveBanner.js';
-import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
+import { getCloudBase, getCloudHomeUrl, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
@@ -1989,11 +1989,13 @@ function MarketplacePackagePageBody() {
                 <AlertCircle className="h-4 w-4 mt-0.5 text-amber-600" aria-hidden="true" />
                 <div className="flex-1">{envsError}</div>
               </div>
-              {/* Only when the runtime named an upstream cloud. An empty base
-                  used to fall back to a composed vendor URL that 404'd
+              {/* The control plane's declared console home page when the
+                  runtime serves one (objectstack#34622), else the upstream
+                  cloud's origin, and only when the runtime named one. An empty
+                  base used to fall back to a composed vendor URL that 404'd
                   (objectui#7253); an `href=""` would reload this page. */}
-              {cloudConsoleUrl() ? (
-                <a href={cloudConsoleUrl()} target="_blank" rel="noopener noreferrer">
+              {(getCloudHomeUrl() ?? cloudConsoleUrl()) ? (
+                <a href={getCloudHomeUrl() ?? cloudConsoleUrl()} target="_blank" rel="noopener noreferrer">
                   <Button variant="outline" size="sm" className="w-full">
                     <ExternalLink className="h-4 w-4 mr-1.5" aria-hidden="true" />
                     {t('marketplace.action.openOnCloud')}

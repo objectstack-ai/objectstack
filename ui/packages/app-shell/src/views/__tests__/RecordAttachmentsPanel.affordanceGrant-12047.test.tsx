@@ -82,6 +82,7 @@ function payload(grant: Grant): MePermissionsAuthenticatedResponse {
     tenantId: 'org-1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: {
       sys_attachment: {

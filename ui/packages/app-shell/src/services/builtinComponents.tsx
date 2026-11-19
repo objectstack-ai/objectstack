@@ -107,8 +107,7 @@ const MetadataResourceRouter = lazy(() =>
  * the `PackageFormDialog` and `PositionHoldersSection` chunks leave the closure.
  *
  * ⛔ It only defers anything while nothing else in the package's eager graph
- * names the page module statically; the barrel's `PackagedActionsPage`
- * re-export is tree-shaken today because the console imports no such name.
+ * names the page module statically.
  */
 const PackagesPage = lazyPage('packages', () =>
   import('../views/metadata-admin/PackagesPage.js').then((m) => m.PackagesPage),
@@ -116,8 +115,11 @@ const PackagesPage = lazyPage('packages', () =>
 const PermissionMatrixEditPage = lazyPage('permission set', () =>
   import('../views/metadata-admin/PermissionMatrixEditor.js').then((m) => m.PermissionMatrixEditPage),
 );
-const PackagedActionsPage = lazyPage('packaged actions', () =>
-  import('../views/setup/PackagedActionsPage.js').then((m) => m.PackagedActionsPage),
+const MobileAppPage = lazyPage('mobile app', () =>
+  import('../console/mobile-app/MobileAppPage.js').then((m) => m.MobileAppPage),
+);
+const NotificationSettingsPage = lazyPage('notification settings', () =>
+  import('../console/notification-settings/NotificationSettingsPage.js').then((m) => m.NotificationSettingsPage),
 );
 const ConnectorCredentialsPage = lazyPage('connector credentials', () =>
   import('../views/setup/ConnectorCredentialsPage.js').then((m) => m.ConnectorCredentialsPage),
@@ -187,19 +189,28 @@ registerAppComponent({
 });
 
 /**
- * ADR-0126 §7.4 — the Setup page for the actions installed packages ship:
- * on/off for this deployment. Contributed the way every other framework-owned
- * Setup surface is, by ref rather than by route, so the Setup app's navigation
- * names `automation:packaged-actions` and `ComponentNavView` resolves it.
- * objectstack ADR-0146 D4 keeps the action switch in Setup; the packaged
- * FLOWS' page (`automation:packaged`) retired with D11, its switch and its
- * clone being Studio's.
+ * The account app's Mobile App page: the QR code and link that connect the
+ * ObjectOS mobile app to this server. The account app's navigation names
+ * `account:mobile_app`, and `ComponentNavView` resolves it.
  */
 registerAppComponent({
-  ref: 'automation:packaged-actions',
-  label: 'Packaged Actions',
+  ref: 'account:mobile_app',
+  label: 'Mobile App',
   source: '@object-ui/app-shell',
-  component: PackagedActionsPage,
+  component: MobileAppPage,
+});
+
+/**
+ * The account app's Notification Settings page: the signed-in person's own
+ * topic × channel preferences, digest and quiet hours, read from
+ * `GET /api/v1/messaging/me/preferences`. The account app's navigation names
+ * `account:notification_settings` (behind `requiresService: 'messaging'`).
+ */
+registerAppComponent({
+  ref: 'account:notification_settings',
+  label: 'Notification Settings',
+  source: '@object-ui/app-shell',
+  component: NotificationSettingsPage,
 });
 
 /**

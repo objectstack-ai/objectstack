@@ -53,7 +53,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "HTTP Method",
         help: "HTTP method used for the callback request",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

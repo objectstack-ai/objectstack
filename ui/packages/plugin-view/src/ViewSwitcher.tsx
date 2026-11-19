@@ -37,6 +37,7 @@ import {
   Map,
   ListTree,
   LayoutTemplate,
+  CalendarClock,
   Plus,
   Share2,
   Settings,
@@ -105,6 +106,7 @@ const DEFAULT_VIEW_LABELS = {
   chart: 'Chart',
   tree: 'Tree',
   page: 'Page',
+  timesheet: 'Timesheet',
 } satisfies Record<string, string>;
 
 /** Every {@link ViewType} has a label — see {@link _AssertNever}. */
@@ -136,6 +138,7 @@ const DEFAULT_VIEW_ICONS = {
   chart: ChartColumn,
   tree: ListTree,
   page: LayoutTemplate,
+  timesheet: CalendarClock,
 } satisfies Record<string, LucideIcon>;
 
 /** Every {@link ViewType} has an icon — see {@link _AssertNever}. */

@@ -12,7 +12,7 @@
  * Since objectstack#27594 the list title is the view switcher, and the app bar
  * draws no object crumb (objectui#12461: the page header is the one place a
  * page is named). The maintainer's ruling B puts the object's plural ahead of
- * the switcher: 「OBJECT / VIEW ▾ · COUNT」, the plural linking to the object's
+ * the switcher: 「OBJECT / VIEW ▾」, the plural linking to the object's
  * default list; where the row is short the object label stays whole and the
  * view label gives way.
  *
@@ -83,6 +83,9 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';

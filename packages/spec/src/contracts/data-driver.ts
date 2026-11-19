@@ -54,6 +54,33 @@ import type { IntrospectedSchema } from './schema-diff-service.js';
 export type DriverQuery = Omit<QueryAST, 'object'>;
 
 /**
+ * DriverAggregateQuery — what {@link IDataDriver.aggregate} receives: a
+ * {@link DriverQuery} plus the one key only that verb reads.
+ *
+ * `timezone` is the reference zone a date `groupBy` item is bucketed on
+ * (ADR-0053 Phase 2 D2 as amended for #33697). The engine sets it only on a
+ * driver that declares `supports.zonedDateBucketing` (`DriverCapabilities`),
+ * and only to the zone's RESOLVED IANA area/location name (the
+ * `resolvedOptions().timeZone` of an `Intl.DateTimeFormat`, e.g.
+ * `America/Chicago` for `CST`) — never the raw request string, never `UTC`,
+ * which is the bucket a driver answers when the key is absent. A driver that
+ * reads it buckets an instant column on that zone's calendar, DST-correct,
+ * keeps a `Field.date` on its own calendar day, and refuses a zone it cannot
+ * bucket rather than reading it as UTC. A driver that does NOT declare the bit
+ * is never sent the key by the engine; handed one by a direct caller, it
+ * refuses the zone the same way (driver-sql: `NOT_IMPLEMENTED` / 501) rather
+ * than answering the UTC bucket.
+ *
+ * Kept off {@link DriverQuery} on purpose: `find()` / `count()` take that type
+ * and no zone means anything to them, so a key they would silently drop is not
+ * declared where they read.
+ */
+export type DriverAggregateQuery = DriverQuery & {
+  /** Resolved IANA area/location zone to bucket dates on; absent = UTC. */
+  timezone?: string;
+};
+
+/**
  * IDataDriver - Comprehensive Database Driver Interface
  * 
  * Pure TypeScript interface for all storage adapters (Postgres, Mongo, Excel, Salesforce).
@@ -228,8 +255,11 @@ export interface IDataDriver {
    * `find()` plus in-memory grouping. Two things the engine keeps for itself
    * even when it dispatches here: `having` is applied AFTER this call, over the
    * returned rows (#4286); and a non-UTC `timezone` with date bucketing
-   * (ADR-0053) forces the in-memory path, so a driver never sees it on this
-   * road. `aggregations[].filter` (#10576) reaches this method only on a driver
+   * (ADR-0053 Phase 2 D2 as amended) reaches this method only on a driver that
+   * declares `supports.zonedDateBucketing`, as the resolved zone name in
+   * {@link DriverAggregateQuery.timezone}; on every other driver it forces the
+   * in-memory path, so such a driver never sees a zone here.
+   * `aggregations[].filter` (#10576) reaches this method only on a driver
    * that declares `supports.aggregationFilter` (#33698, `DriverCapabilities`),
    * which then evaluates each measure's filter with the in-memory path's
    * answers except where `DriverCapabilities.aggregationFilter` states a
@@ -252,7 +282,7 @@ export interface IDataDriver {
    * pipeline) or a looser return type stays assignable; what is refused is a
    * wrong argument order or a non-array result.
    */
-  aggregate?(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
+  aggregate?(object: string, query: DriverAggregateQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
 
   // ===========================================================================
   // Bulk Operations

@@ -1,21 +1,26 @@
 /**
  * Live data of the Console `ObjectView` (`./ObjectView.tsx`): the realtime
- * subscription that refreshes the list when the server reports a change, the
- * reconnection conflict resolution, and the footer's record-count fetch, moved
- * out of `ObjectViewInner` verbatim (objectstack#25992, slice 4). The record
- * count state stays in the component; it and every other input are passed in.
+ * subscription that refreshes the list when the server reports a change and the
+ * reconnection conflict resolution, moved out of `ObjectViewInner` verbatim
+ * (objectstack#25992, slice 4); every input is passed in.
+ *
+ * objectstack#34207 — this hook used to also send a `$top: 0` count probe on
+ * every mount and every `refreshKey` bump, beside the list's own read, for a
+ * page-level `recordCount`. Nothing drew that number any more: the split
+ * pane's footer it fed was retired (objectstack#28915), and the one prop it
+ * still reached, `ViewConfigPanel`'s `recordCount`, is never read there. The
+ * counts the page does draw — `ListView`'s record-count bar and the title's
+ * view count — come from the list's own answer (`total`), the query that
+ * carries the view's filters and search. So the probe is gone rather than
+ * repointed: a list page load sends one `data/OBJECT` read.
  */
 
 import { useEffect } from 'react';
-import type { DataSource } from '@object-ui/types';
 import { useRealtimeSubscription, useConflictResolution } from '@object-ui/collaboration';
 
-export function useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount }: {
-    dataSource: DataSource;
+export function useObjectViewLiveData({ objectDef, refreshData }: {
     objectDef: { name: string };
     refreshData: () => void;
-    refreshKey: number;
-    setRecordCount: (count: number) => void;
 }) {
     // Real-time: auto-refresh when server reports data changes
     const { lastMessage: realtimeMessage } = useRealtimeSubscription({
@@ -35,37 +40,4 @@ export function useObjectViewLiveData({ dataSource, objectDef, refreshData, refr
             refreshData();
         }
     }, [realtimeMessage, hasConflicts, resolveAllConflicts, refreshData]);
-    
-    // Fetch record count for footer display.
-    //
-    // `$top: 0` IS the request: give me the total, send no rows. It was written
-    // `limit: 0`, which is not a `QueryParams` key — `convertQueryParams` copies
-    // exactly the `$`-prefixed keys the type declares — so the cap reached no
-    // branch and was dropped, and the platform's GET list route has no default
-    // page size. The effect therefore did the opposite of what it says: it
-    // downloaded EVERY row of the object, on every mount and every refresh of
-    // every list view, to read one integer off the envelope. The dead spelling
-    // type-checked because `QueryParams` then carried `[key: string]: any` for
-    // adapter-specific params; `object-ui/no-unprefixed-query-params` rejects it
-    // at write time now (objectui#5458), and the index signature itself is gone
-    // (objectui#7497), so `tsc` refuses it as well.
-    //
-    // `total` is the only field that can still answer the question, so the
-    // row-counting fallbacks are gone rather than repointed. Once we ask for
-    // zero rows an empty `data` means "you asked for none", not "the object is
-    // empty" — counting the response would report a confident `0` for any
-    // adapter that does not send a total. Leaving `recordCount` `undefined`
-    // omits the footer line instead of asserting a wrong number; the render is
-    // already guarded by `typeof recordCount === 'number'`.
-    useEffect(() => {
-        if (dataSource?.find && objectDef.name) {
-            dataSource.find(objectDef.name, { $top: 0 }).then((result: any) => {
-                if (typeof result?.total === 'number') {
-                    setRecordCount(result.total);
-                }
-            }).catch(() => {
-                // Silently ignore — record count is non-critical
-            });
-        }
-    }, [dataSource, objectDef.name, refreshKey]);
 }

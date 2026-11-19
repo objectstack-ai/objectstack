@@ -14,7 +14,7 @@ function makeFetch(responses: Array<{ ok: boolean; status: number; body?: string
     const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: string }> = [];
     let i = 0;
     const impl: FetchImpl = async (url, init) => {
-        calls.push({ url, method: init.method, headers: init.headers, body: init.body });
+        calls.push({ url, method: init.method, headers: init.headers, body: init.body ?? '' });
         const r = responses[Math.min(i, responses.length - 1)];
         i++;
         if (r === 'throw') throw new Error('network down');

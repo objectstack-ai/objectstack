@@ -12,10 +12,13 @@ Dataset AI tools — the inputs and outputs of `list_datasets` and
 The two tools give an AI the business semantic layer a person already reads
 through dashboards and reports: `list_datasets` returns the catalogue (the
 datasets the caller may query, their dimensions and measures, each member's
-business vocabulary, and which of the caller's words matched which member),
+business vocabulary, which of the caller's words matched which member, and,
+for a word that matched nothing, the members offered as `candidates`; with
+them `nextStep`, which case of the selection rule those words are in),
 and `query_dataset` runs a `DatasetSelection` against one saved dataset and
 answers rows plus a `provenance` block naming the dataset and the measures
-used. The shapes are declared here once and projected to the JSON Schema an
+used, with `sourceLine`, that source as one finished line. The shapes are
+declared here once and projected to the JSON Schema an
 `AIToolDefinition` carries (`getDatasetToolJsonSchemas`), so the MCP
 registration and the product AI's registration read one definition.
 
@@ -27,12 +30,16 @@ inline `dataset` and no `previewDrafts` on this tool, because an AI that could
 author a dataset inline could author its own 口径.
 
 Only the shapes are spec. The executor, the catalogue builder with its
-admission and member withholding, the term matcher and the row cap
+admission and member withholding, the term matcher, the rule that finds a
+zero-match term's candidates and the row cap
 (`selection.limit` held to the bridge's `maxQueryLimit`) belong to
 `@objectstack/service-analytics` (card #31589); the MCP registration under
 `data:read` to `@objectstack/mcp` (card #31590). The tool descriptions, which
 carry the ADR-0149 D3 selection rule to the model, are written by the
 executor: AI guidance text does not enter the spec (ADR-0149 M1, ruled A).
+The two sentences an answer carries, `nextStep.note` and `sourceLine`, are
+the executor's in the same way (card #34919): the spec declares a string
+slot for each and fixes no wording (the amendment note under M1).
 
 <Callout type="info">
 **Source:** `packages/spec/src/ai/dataset-tools.zod.ts`
@@ -41,12 +48,37 @@ executor: AI guidance text does not enter the spec (ADR-0149 M1, ruled A).
 ## TypeScript Usage
 
 ```typescript
-import { DatasetProvenanceSchema, DatasetTermMatchSchema, DatasetTermMatchedOn, DatasetToolCatalogDimensionSchema, DatasetToolCatalogEntrySchema, DatasetToolCatalogMeasureSchema, ListDatasetsInputSchema, ListDatasetsOutputSchema, QueryDatasetInputSchema, QueryDatasetOutputSchema } from '@objectstack/spec/ai';
-import type { DatasetProvenance, DatasetTermMatch, DatasetTermMatchedOn, DatasetToolCatalogDimension, DatasetToolCatalogEntry, DatasetToolCatalogMeasure, ListDatasetsInput, ListDatasetsOutput, QueryDatasetInput, QueryDatasetOutput } from '@objectstack/spec/ai';
+import { DatasetNextStepSchema, DatasetNextStepDecision, DatasetProvenanceSchema, DatasetTermCandidateSchema, DatasetTermMatchSchema, DatasetTermMatchedOn, DatasetToolCatalogDimensionSchema, DatasetToolCatalogEntrySchema, DatasetToolCatalogMeasureSchema, ListDatasetsInputSchema, ListDatasetsOutputSchema, QueryDatasetInputSchema, QueryDatasetOutputSchema } from '@objectstack/spec/ai';
+import type { DatasetNextStep, DatasetNextStepDecision, DatasetProvenance, DatasetTermCandidate, DatasetTermMatch, DatasetTermMatchedOn, DatasetToolCatalogDimension, DatasetToolCatalogEntry, DatasetToolCatalogMeasure, ListDatasetsInput, ListDatasetsOutput, QueryDatasetInput, QueryDatasetOutput } from '@objectstack/spec/ai';
 
 // Validate data
-const result = DatasetProvenanceSchema.parse(data);
+const result = DatasetNextStepSchema.parse(data);
 ```
+
+---
+
+## DatasetNextStep
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **decision** | `Enum<'one_measure' \| 'several_measures' \| 'candidates_only' \| 'no_measure'>` | ✅ | Which case of the ADR-0149 D3 selection rule each term in `terms` is in, computed by the platform from this answer's `matches` and `candidates`. `one_measure`: the term equals exactly one measure. `several_measures`: it equals more than one measure, in one dataset or in several. `candidates_only`: it matched no member and has entries in `candidates`. `no_measure`: it equals no measure and has no entry in `candidates`. A dimension the term equals is not counted |
+| **terms** | `string[]` | ✅ | The caller's terms the decision is about, each as sent in the tool's `terms` input. This is the reference to the members the decision rests on, which `nextStep` does not list: they are the entries carrying one of these terms in the same answer, in a dataset's `matches` (those whose `member` is a measure) for `one_measure` and `several_measures`, and in `candidates` for `candidates_only`. `no_measure` rests on no member |
+| **note** | `string` | ✅ | The decision in words: finished text in the caller's locale, composed by the tool from this answer and never typed by the model. The wording is the executor's; the schema declares the slot and fixes no text (ADR-0149 M1) |
+
+
+---
+
+## DatasetNextStepDecision
+
+### Allowed Values
+
+* `one_measure`
+* `several_measures`
+* `candidates_only`
+* `no_measure`
+
 
 ---
 
@@ -83,6 +115,19 @@ const result = DatasetProvenanceSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Dimension name |
 | **label** | `string` | ✅ | Dimension label at the caller's locale |
+
+
+---
+
+## DatasetTermCandidate
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The caller's term, as sent in `terms`: one that matched no member of any listed dataset |
+| **dataset** | `string` | ✅ | The dataset the offered member belongs to, by name: an entry of `datasets` in the same answer, and what `query_dataset` takes as `datasetName` |
+| **member** | `string` | ✅ | The member offered, as `measures.<name>` or `dimensions.<name>`: a member that dataset's entry lists. The term does not equal any of its words after normalization |
 
 
 ---
@@ -211,6 +256,8 @@ const result = DatasetProvenanceSchema.parse(data);
 | **datasets** | `{ name: string; label: string; description?: string; object: string; … }[]` | ✅ | The datasets this caller may query. A dataset the caller may not query is absent, the same answer as one that does not exist |
 | **partial** | `true` | optional | Present, and `true`, when the dataset read was degraded and `datasets` may be incomplete; `warning` says why. Absent on a complete answer |
 | **warning** | `string` | optional | Why the answer is partial; present exactly when `partial` is |
+| **candidates** | `{ term: string; dataset: string; member: string }[]` | optional | Members offered as possible readings of a term that matched no member of any listed dataset, for a clarifying question. A candidate is not a match: its term has no entry in any dataset's `matches`. The platform selects none: the list carries no score, and its order is the listing order stated here, not a ranking. Every candidate is a member this caller may read, listed in `datasets`. Terms in the order sent; for one term, datasets in the order listed, and each dataset's measures before its dimensions, as its entry lists them; at most 5 per term, the first in that order. Present only when `terms` were sent and a term that matched nothing has a candidate; absent otherwise, never an empty list. A term with a match has no candidate |
+| **nextStep** | `{ decision: Enum<'one_measure' \| 'several_measures' \| 'candidates_only' \| 'no_measure'>; terms: string[]; note: string }` | optional | Which case of the ADR-0149 D3 selection rule the caller's `terms` are in, as the platform computed it from this answer's own `matches` and `candidates`: the case, the terms it is about and the case in words. It adds no match and no candidate and lists no member: the members it rests on are read from `matches` and `candidates` under its `terms`. Present only when `terms` were sent |
 
 ### Nested Shape: `ListDatasetsOutput.datasets[number]`
 
@@ -224,6 +271,22 @@ const result = DatasetProvenanceSchema.parse(data);
 | **dimensions** | `{ name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }[]` | ✅ | The dimensions this caller may group by |
 | **measures** | `{ name: string; label: string; description?: string; aggregate?: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; … }[]` | ✅ | The measures this caller may read |
 | **matches** | `{ term: string; member: string; matchedOn: Enum<'name' \| 'label' \| 'synonym'> }[]` | optional | Each of the caller's `terms` that matched a member of this dataset, computed by the platform under the same normalization the dataset's own validation uses. Absent when no `terms` were sent |
+
+### Nested Shape: `ListDatasetsOutput.candidates[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **term** | `string` | ✅ | The caller's term, as sent in `terms`: one that matched no member of any listed dataset |
+| **dataset** | `string` | ✅ | The dataset the offered member belongs to, by name: an entry of `datasets` in the same answer, and what `query_dataset` takes as `datasetName` |
+| **member** | `string` | ✅ | The member offered, as `measures.<name>` or `dimensions.<name>`: a member that dataset's entry lists. The term does not equal any of its words after normalization |
+
+### Nested Shape: `ListDatasetsOutput.nextStep`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **decision** | `Enum<'one_measure' \| 'several_measures' \| 'candidates_only' \| 'no_measure'>` | ✅ | Which case of the ADR-0149 D3 selection rule each term in `terms` is in, computed by the platform from this answer's `matches` and `candidates`. `one_measure`: the term equals exactly one measure. `several_measures`: it equals more than one measure, in one dataset or in several. `candidates_only`: it matched no member and has entries in `candidates`. `no_measure`: it equals no measure and has no entry in `candidates`. A dimension the term equals is not counted |
+| **terms** | `string[]` | ✅ | The caller's terms the decision is about, each as sent in the tool's `terms` input. This is the reference to the members the decision rests on, which `nextStep` does not list: they are the entries carrying one of these terms in the same answer, in a dataset's `matches` (those whose `member` is a measure) for `one_measure` and `several_measures`, and in `candidates` for `candidates_only`. `no_measure` rests on no member |
+| **note** | `string` | ✅ | The decision in words: finished text in the caller's locale, composed by the tool from this answer and never typed by the model. The wording is the executor's; the schema declares the slot and fixes no text (ADR-0149 M1) |
 
 
 ---
@@ -272,8 +335,10 @@ const result = DatasetProvenanceSchema.parse(data);
 | **drillRanges** | `Record<string, { field: string; gte: string; lt: string }>[]` | optional | Drill-through sidecar for date ranges, aligned to `rows` by index: date dimension name to the half-open range `[gte, lt)` that row's records fall in on that dimension's field. A time bucket gets the span it covers; a `timeDimensions[].dateRange` window gets the window the query filtered by on every row, or narrows the bucket entry on the same field to the part inside the window. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants when the source field is `datetime` (a bucket's at midnight in the reference timezone); a row whose bucket value is null gets no bucket entry, and a window whose end is an instant or the last supported day gets none. Set only on a dataset answer that has rows and groups by at least one `type: 'date'` dimension with a `field` and a granularity, or carries a `dateRange` on a dimension with a `field`; independent of `dimensionFields`. Absent on a cube query answer. |
 | **drillScopes** | `Record<string, any>` | optional | Drill-through sidecar per measure: each selected measure name to the list filter, on the answer's `object`, that selects the records that measure aggregates: the dataset's own `filter`, AND the measure's own `filter`, AND, for a measure over a `field`, that field holding a value (`{ "$null": false }`; both instants for a duration measure), with each `{token}` resolved as the query resolved it; `{}` when none of these applies. A drill lists the clicked bucket (`dimensionFields` / `drillRawRows` / `drillRawTotals`, `drillRanges`) AND the widget's own filter AND this scope. A measure is left out when no list filter on `object` selects its records (a derived measure; a scope that names a relationship path such as `account.region`, as a key or as a `$field` reference), and a measure left out offers no drill. Keyed by measure name: a `__compare` column has no entry. Set on every dataset answer (`POST /analytics/dataset/query`) that has rows; absent on a cube query answer and on a draft-preview answer. |
 | **provenance** | `{ kind: 'dataset'; dataset: object; measures: object[]; dimensions: object[]; … }` | ✅ | The dataset and members the answer was computed from |
+| **sourceLine** | `string` | optional | The answer's source as one finished line, in the caller's locale: composed by the tool from `provenance` after the query ran, never typed by the model. `provenance` stays the structured source and this is the same source in words. The wording is the executor's; the schema declares the slot and fixes no text (ADR-0149 M1). Absent when the tool composed none, never an empty string |
 | **rowCount** | `integer` | ✅ | How many rows `rows` holds |
 | **truncated** | `boolean` | ✅ | `true` when more rows existed past the row cap the tool applied and were not returned |
+| **totalGroups** | `integer` | optional | How many groups the selection formed before `offset` and `limit` cut them: the rows the same selection answers with no window. The same name and meaning as `aggregate_records`' `totalGroups`. Never paid for with a read. Where the window is pushed into the one SQL statement that grouped the answer, the database counts the groups with a window count in that statement. Where the window is applied in memory, it is the length of the grid before the window: an order by a display label (the tool's own order when none is sent sorts every selected dimension, so any select or reference dimension brings it in; an order by measures alone does not), a grid assembled from several queries (a measure with its own filter, a derived measure, `compareTo`), and a query the engine's aggregate serves, such as a date bucket, a field-to-field filter, an external object or a driver with no raw SQL. That grid is counted only when every read that built it came back whole: a grid that any cap or row guard cut before the window answers no count. Equals `rowCount` when the answer was not cut. Absent otherwise, which is when: the window was pushed down and the SQL dialect is not one the tool knows, or a selected member is itself named `__os_group_count`, or the page came back empty after an `offset`; a read was served by a strategy that does not vouch for its grid, such as one a host adds, or was cut by a cap under it; or the dataset's object is missing and the answer is the empty one served for it |
 | **delegationNarrowed** | `true` | optional | Present, and `true`, when the caller acts as an agent whose authority narrows what it may read on the dataset's object; `warning` states the narrowing (ADR-0090 D10) |
 | **warning** | `string` | optional | The narrowing statement; present exactly when `delegationNarrowed` is |
 

@@ -18,7 +18,12 @@
  *   administrator setting one for the user;
  * - `POST /reset-password` (the emailed link) and
  *   `POST /phone-number/reset-password` (the texted code), each of which
- *   creates the local password when the user holds none.
+ *   creates the local password when the user holds none;
+ * - `POST /organization/accept-invitation-one-step` with the invitation
+ *   mail's proof (`invitation-mailbox-proof.ts`). Under SSO-only mode it sets
+ *   no local password for anyone, an environment-native user included: an
+ *   existing account answers `sign_in` and a new address is refused, because
+ *   SSO-only mode forces email sign-up off.
  *
  * One exception, the break-glass one ADR-0135 D5.2 keeps and the
  * cloud-managed narrowing already makes (`cloud-managed.ts`): a platform

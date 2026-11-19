@@ -78,25 +78,34 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
     'Enable RFC 8628 Device Authorization Grant (CLI / TV-style login)',
   ),
   /**
-   * Enable better-auth's `admin` plugin so platform admins can ban / unban
-   * users, set their password (out-of-band recovery), impersonate them for
-   * support sessions, and assign global platform roles.
+   * Enable better-auth's `admin` plugin so platform admins can create users,
+   * impersonate them for support sessions, and reach better-auth's own admin
+   * routes (`set-role`, `list-users`, …).
    *
-   * Endpoints exposed under the auth route:
-   *   - `POST /admin/ban-user` / `POST /admin/unban-user`
-   *   - `POST /admin/set-user-password`
+   * Endpoints under the auth route that need it:
+   *   - `POST /admin/create-user` (answers `501 NOT_IMPLEMENTED` without it)
    *   - `POST /admin/impersonate-user` / `POST /admin/stop-impersonating`
    *   - `POST /admin/set-role`
-   *   - `POST /admin/create-user` / `POST /admin/remove-user`
-   *   - `POST /admin/list-users` / `POST /admin/list-user-sessions`
+   *   - `POST /admin/remove-user`
+   *   - `GET /admin/list-users` / `POST /admin/list-user-sessions`
    *   - `POST /admin/revoke-user-session(s)`
+   *
+   * Served with the plugin off as well as on, as ObjectStack mounts rather
+   * than the plugin's own routes: `POST /admin/ban-user` /
+   * `POST /admin/unban-user`, `POST /admin/unlock-user` and
+   * `POST /admin/set-user-password`.
    *
    * The plugin augments `sys_user` with `role`, `banned`, `ban_reason`,
    * `ban_expires` and `sys_session` with `impersonated_by`. These columns
    * are mapped to snake_case by `buildAdminPluginSchema()`.
    *
-   * Only callers whose user has a platform admin role (default: `admin`)
-   * can hit these endpoints; better-auth enforces this internally.
+   * The ObjectStack mounts, `create-user`, `remove-user` and the rebuilt
+   * `impersonate-user` run the ADR-0068 platform-admin gate; the vendor routes
+   * left as better-auth ships them (`set-role`, `list-users`, …) keep
+   * better-auth's own check of the legacy `user.role` scalar. The exception is
+   * `stop-impersonating`, which is neither: better-auth admits it on the
+   * impersonated session together with the signed `admin_session` cookie
+   * that `impersonate-user` set.
    *
    * Tri-state on purpose (#13816, maintainer ruling 2026-09-01): when left
    * UNSET, effective SCIM decides — SCIM provisioning forces the admin
@@ -110,7 +119,8 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
    * admin plugin, or disable SCIM.
    */
   admin: z.boolean().optional().describe(
-    'Enable platform admin operations (ban/unban, set-password, impersonate, set-role). ' +
+    'Enable the better-auth admin plugin: create-user, impersonation and the vendor admin routes (set-role, list-users, …). ' +
+    'Ban/unban, unlock and set-password are served without it. ' +
     'Unset: forced on by effective SCIM (ADR-0134), otherwise off. An explicit false beside ' +
     'effective SCIM is a conflict refused at construction time.',
   ),

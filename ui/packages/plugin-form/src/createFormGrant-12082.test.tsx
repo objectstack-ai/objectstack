@@ -71,6 +71,7 @@ const createOnly = (fields: MePermissionsAuthenticatedResponse['fields'] = {}): 
   userId: 'u-requester',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['clm_requester'],
   permissionSets: ['clm_requester'],
   objects: {

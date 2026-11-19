@@ -22,6 +22,7 @@ import { createI18n, I18nProvider } from '@object-ui/i18n';
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ appName: 'setup' }),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 vi.mock('../../context/NavigationContext', () => ({
@@ -39,9 +40,10 @@ vi.mock('@object-ui/components', async (importOriginal) => ({
       {children}
     </button>
   ),
-  Popover: ({ children }: Slot) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: Slot) => <div>{children}</div>,
-  PopoverContent: ({ children }: Slot) => <div>{children}</div>,
+  Sheet: ({ children }: Slot) => <div>{children}</div>,
+  SheetTrigger: ({ children }: Slot) => <div>{children}</div>,
+  SheetContent: ({ children }: Slot) => <div>{children}</div>,
+  SheetTitle: ({ children }: Slot) => <div>{children}</div>,
   Tabs: ({ children }: Slot) => <div>{children}</div>,
   TabsList: ({ children }: Slot) => <div>{children}</div>,
   TabsTrigger: ({ children }: Slot) => <button type="button">{children}</button>,

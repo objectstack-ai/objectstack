@@ -135,6 +135,84 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings).toEqual([]);
   });
 
+  // #34616 — the CLI's per-package pass hands each package's stack the
+  // artifact's `packages[]` as resolution context. A name a package the
+  // manifest declares in `dependencies` provides is inside the publish gate's
+  // closure, so it is defined here too; a sibling it did not declare is not.
+  describe('[#34616] a declared dependency carried in packages[] provides the object', () => {
+    const expenseObject = { name: 'exp_report', label: 'Expense report', fields: {} };
+    const flowOn = (objectName: string) => {
+      const flow = recordFlow({ status: 'active' });
+      (flow.nodes[0] as { config: Record<string, unknown> }).config.objectName = objectName;
+      return flow;
+    };
+    /** Package B's stack as `packageBodyAsStack` builds it, with A in `packages[]`. */
+    const packageBStack = (
+      bManifest: Record<string, unknown>,
+      packages: Array<Record<string, unknown>>,
+      flows: unknown[] = [flowOn('exp_report')],
+    ) => ({ objects: [candidateObject], flows, manifest: bManifest, packages });
+    const pkgA = { manifest: { id: 'pkg_expense', objects: [expenseObject] } };
+    const pkgB = (dependencies?: Record<string, string>) => ({
+      id: 'pkg_psa',
+      ...(dependencies ? { dependencies } : {}),
+    });
+
+    it('a flow on a declared dependency\'s object is not flagged', () => {
+      const b = pkgB({ pkg_expense: '^1.0.0' });
+      expect(validateFlowTriggerReadiness(packageBStack(b, [pkgA, { manifest: b }]))).toEqual([]);
+    });
+
+    it('the same flow still warns when the manifest does not declare the dependency', () => {
+      const b = pkgB();
+      const findings = validateFlowTriggerReadiness(packageBStack(b, [pkgA, { manifest: b }]));
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [FLOW_TRIGGER_UNKNOWN_OBJECT, 'warning', 'flows[0].nodes[0].config.objectName'],
+      ]);
+    });
+
+    it('the closure is transitive: a dependency of a dependency provides the object', () => {
+      const mid = { manifest: { id: 'pkg_finance', dependencies: { pkg_expense: '^1.0.0' }, objects: [] } };
+      const b = pkgB({ pkg_finance: '^1.0.0' });
+      expect(validateFlowTriggerReadiness(packageBStack(b, [pkgA, mid, { manifest: b }]))).toEqual([]);
+    });
+
+    it('a declared dependency the artifact does not carry provides nothing', () => {
+      const b = pkgB({ pkg_expense: '^1.0.0' });
+      const findings = validateFlowTriggerReadiness(packageBStack(b, [{ manifest: b }]));
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_OBJECT]);
+    });
+
+    it('a name outside the dependency\'s objects keeps its finding', () => {
+      const b = pkgB({ pkg_expense: '^1.0.0' });
+      const findings = validateFlowTriggerReadiness(
+        packageBStack(b, [pkgA, { manifest: b }], [flowOn('exp_reprot')]),
+      );
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_OBJECT]);
+      expect(findings[0].message).toContain("'exp_reprot'");
+    });
+
+    it('a start input declared a record of a declared dependency\'s object is not flagged', () => {
+      const b = pkgB({ pkg_expense: '^1.0.0' });
+      const inputFlow = recordFlow({
+        name: 'close_report', type: 'screen', status: 'active',
+        variables: [{ name: 'reportId', type: 'text', isInput: true, objectName: 'exp_report' }],
+        nodes: [{ id: 'start', type: 'start' }, { id: 'end', type: 'end' }],
+      });
+      expect(validateFlowTriggerReadiness(packageBStack(b, [pkgA, { manifest: b }], [inputFlow]))).toEqual([]);
+      const undeclared = validateFlowTriggerReadiness(packageBStack(pkgB(), [pkgA, { manifest: pkgB() }], [inputFlow]));
+      expect(undeclared.map((f) => f.rule)).toEqual([FLOW_INPUT_UNKNOWN_OBJECT]);
+    });
+
+    it('under a stated closure nothing is added: the stack is the closure', () => {
+      const b = pkgB({ pkg_expense: '^1.0.0' });
+      const findings = validateFlowTriggerReadiness(packageBStack(b, [pkgA, { manifest: b }]), {
+        packageScope: { packageId: 'pkg_psa', dependencies: ['pkg_expense'] },
+      });
+      expect(findings.map((f) => [f.rule, f.severity])).toEqual([[FLOW_TRIGGER_UNKNOWN_OBJECT, 'error']]);
+    });
+  });
+
   // #29442 (#29425 ruling A) — a start input declared a record reference
   // names the object every start door loads it from.
   describe('a start input declared a record reference (variables[].objectName)', () => {

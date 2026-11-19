@@ -21,8 +21,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * was removed while focus is on body" as "the focused element was removed",
  * so it focuses the dialog container and the browser abandons the move. The
  * next Tab lands on the first stop again: the cycle was template select,
- * reason span, dialog container. The reason tooltip is now portalled out of
- * the dialog, so its unmount happens outside the trap.
+ * reason span, dialog container. The trap now refocuses its container only
+ * when the last focused element is no longer inside it
+ * (`patches/@radix-ui__react-focus-scope.patch` at the repository root), so
+ * the tooltip may unmount inline, under the trap, with Tab still moving on.
  *
  * ## Why a Playwright spec and not a vitest test
  *

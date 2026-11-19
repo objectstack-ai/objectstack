@@ -69,6 +69,7 @@ function me(userId: string): MePermissionsAuthenticatedResponse {
     userId,
     tenantId: 't1',
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: [],
     objects: { note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

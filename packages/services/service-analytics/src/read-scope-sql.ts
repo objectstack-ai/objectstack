@@ -587,7 +587,9 @@ import {
  * Ruling C gave the engine a judge-only admission member,
  * `IObjectQLEngine.judgeFilter` (#20157). It runs the engine's own `where`
  * admission, the same stage functions in the same order every verb runs, and
- * stops before any driver. {@link assertReadScopeAdmittedByEngine} asks it about
+ * calls no driver (the one verdict that depends on the object's driver, a
+ * nested-relation condition it does not declare it can run, is taken from its
+ * declared capabilities, #33876). {@link assertReadScopeAdmittedByEngine} asks it about
  * the scope ALONE, at every engine-bound merge: `ObjectQLStrategy.withReadScope`
  * and `resolveFkAttr`, and the plugin's record-label fetch (the #14329 door).
  * A refusal is raised in this module's one envelope. The engine's sentence
@@ -1475,7 +1477,7 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
       `which a read scope compiled to SQL cannot serve (fail-closed): the condition is answered by ` +
       `reading the related object, and this compile reads no other object. The engine serves the ` +
       `form in a query's where — it reads the related object as the caller, with that object's row ` +
-      `scope and field permissions, and refuses a match past its cap. In a read scope compiled to SQL, ` +
+      `scope and field permissions, and keeps the rows whose relation is a record that read admits. In a read scope compiled to SQL, ` +
       `name the related ids on a single-valued relation: { "${field}": { "$in": [ID, …] } }.`,
     );
   }

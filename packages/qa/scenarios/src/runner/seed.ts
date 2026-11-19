@@ -25,6 +25,8 @@
  * them.
  */
 
+import { COMPUTED_VALUE_TYPES } from '@objectstack/spec/data';
+
 import type { ScenarioCard } from '../schema.js';
 import { artifactToEvalGraph } from '../score/index.js';
 
@@ -225,4 +227,93 @@ function requiredCycle(remaining: readonly string[], inside: readonly SeedLookup
 /** A cycle as the record and the prompt name it: `` `a.x` → `b`, `b.y` → `a` ``. */
 export function cycleText(cycle: readonly SeedLookup[]): string {
   return cycle.map((l) => `\`${lookupKey(l)}\` → \`${l.to}\``).join(', ');
+}
+
+// ── The seeded state, and how far the rows have moved from it ───────────────
+
+/** A row as the data API returns it. */
+export type HeldRow = Readonly<Record<string, unknown>>;
+
+/**
+ * The columns a restore never compares: the clock and the last writer, which
+ * every write stamps anew — a restore's own write included — so they can never
+ * be set back. `created_by` is compared: the seed and a restore both write as
+ * the admin.
+ */
+export const RESTORE_UNCOMPARED: ReadonlySet<string> = new Set(['created_at', 'updated_at', 'updated_by']);
+
+/**
+ * The columns a restore never writes: the row's id (it names the row), and
+ * the audit stamps the platform sets on every insert and update.
+ */
+export const RESTORE_UNWRITTEN: ReadonlySet<string> = new Set(['id', 'created_at', 'updated_at', 'created_by', 'updated_by']);
+
+/**
+ * The fields a built artifact declares server-computed (`COMPUTED_VALUE_TYPES`:
+ * formula, summary, autonumber), per object, read through the scorer's one
+ * artifact reader; empty when the artifact cannot be read. A restore neither
+ * compares nor writes them: a formula and a summary follow from the stored
+ * values and child rows it does restore, and an autonumber is the platform's
+ * own count, which a row inserted again takes anew.
+ */
+export function derivedFields(artifact: unknown): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (artifact === undefined) return out;
+  try {
+    for (const o of artifactToEvalGraph(artifact).objects) {
+      const fields = o.fields.filter((f) => COMPUTED_VALUE_TYPES.has(f.type)).map((f) => f.name);
+      if (fields.length) out.set(o.name, new Set(fields));
+    }
+  } catch {
+    /* unreadable: the score half reports it; nothing is known to be derived */
+  }
+  return out;
+}
+
+/** How one object's rows have moved from the seeded state ({@link rowDrift}). */
+export interface RowDrift {
+  object: string;
+  /** Ids the app holds now that the seeded state does not: rows a turn added. */
+  added: string[];
+  /** Ids of the seeded state the app no longer holds: rows a turn removed. */
+  missing: string[];
+  /** Rows of the seeded state whose compared columns differ now, with those columns. */
+  changed: Array<{ id: string; fields: string[] }>;
+}
+
+/** One value as a restore compares it: an absent column and a `null` are the same nothing. */
+const valueKey = (v: unknown): string => JSON.stringify(v ?? null);
+
+/**
+ * How `now` differs from `seeded`, the same object's rows read right after the
+ * seed loaded, keyed by `id`, over every column but `uncompared`
+ * ({@link RESTORE_UNCOMPARED} and the object's {@link derivedFields}).
+ * `undefined` when nothing moved. Ids and columns in the order the reads
+ * returned them.
+ */
+export function rowDrift(object: string, seeded: readonly HeldRow[], now: readonly HeldRow[], uncompared: ReadonlySet<string>): RowDrift | undefined {
+  const was = new Map(seeded.map((r) => [String(r.id), r]));
+  const is = new Map(now.map((r) => [String(r.id), r]));
+  const added = [...is.keys()].filter((id) => !was.has(id));
+  const missing = [...was.keys()].filter((id) => !is.has(id));
+  const changed: RowDrift['changed'] = [];
+  for (const [id, before] of was) {
+    const after = is.get(id);
+    if (!after) continue;
+    const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((k) => !uncompared.has(k) && valueKey(before[k]) !== valueKey(after[k]));
+    if (fields.length) changed.push({ id, fields });
+  }
+  return added.length || missing.length || changed.length ? { object, added, missing, changed } : undefined;
+}
+
+/** A drift as a restore's refusal names it: `contact: 1 added (new-1), 1 changed (ct5: account)`. */
+export function driftText(d: RowDrift): string {
+  const list = (ids: readonly string[]) => (ids.length > 3 ? `${ids.slice(0, 3).join(', ')}, …` : ids.join(', '));
+  return `${d.object}: ${[
+    d.added.length ? `${d.added.length} added (${list(d.added)})` : '',
+    d.missing.length ? `${d.missing.length} missing (${list(d.missing)})` : '',
+    d.changed.length ? `${d.changed.length} changed (${list(d.changed.map((c) => `${c.id}: ${c.fields.join(', ')}`))})` : '',
+  ]
+    .filter(Boolean)
+    .join(', ')}`;
 }

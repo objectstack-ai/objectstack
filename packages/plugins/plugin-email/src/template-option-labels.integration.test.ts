@@ -50,6 +50,8 @@ class AppFixture implements Plugin {
   name = 'test.mail-option-labels.app';
   type = 'standard' as const;
   version = '1.0.0';
+  /** [#33634] Accessor overrides laid over the English-default service. */
+  constructor(private readonly i18nOverrides: Record<string, unknown> = {}) {}
   async init(ctx: PluginContext) {
     ctx.registerService('driver.mail-option-labels', emptyDriver);
     ctx.registerService('i18n', {
@@ -58,6 +60,7 @@ class AppFixture implements Plugin {
       getTranslations: (locale: string) => translations[locale] ?? {},
       getFallbackLocale: () => 'en',
       getDefaultLocale: () => 'en',
+      ...this.i18nOverrides,
     });
     const manifest = { id: PACKAGE_ID, name: 'mail_option_labels', type: 'app', version: '1.0.0' };
     ctx.getService<{ register(m: unknown): void }>('manifest').register({
@@ -98,11 +101,11 @@ describe('the booted email service labels an option hole in each recipient\'s la
     kernel = undefined;
   });
 
-  async function boot() {
+  async function boot(i18nOverrides: Record<string, unknown> = {}) {
     kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     const transport = new CaptureTransport();
     await kernel.use(new ObjectQLPlugin());
-    await kernel.use(new AppFixture());
+    await kernel.use(new AppFixture(i18nOverrides));
     await kernel.use(new EmailServicePlugin({ persist: false, transport, defaultFrom: { address: 'no-reply@example.com' } }));
     await kernel.bootstrap();
     return { email: kernel.getService<IEmailService>('email'), transport };
@@ -124,5 +127,27 @@ describe('the booted email service labels an option hole in each recipient\'s la
       template: 'mol_stalled_unknown', to: 'ann@example.com', locale: 'zh-CN', data: { name: 'Acme', stage: 'needs_analysis' },
     })).rejects.toThrow(/^TEMPLATE_INVALID: email template mol_stalled_unknown \(locale=en-US\): the hole \{\{ stage \| option:mol_deal\.stage \}\} names the object `mol_deal`/);
     expect(transport.subjects).toEqual([]);
+  });
+
+  // [#33634] An app authored in English that defaults its users to zh-CN:
+  // `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, no `fallbackLocale`
+  // (collapsed to zh-CN by both boot paths).
+  const EN_SOURCE = { getDefaultLocale: () => 'zh-CN', getFallbackLocale: () => 'zh-CN', getSourceLocale: () => 'en' };
+
+  it('#33634 — with sourceLocale en declared, an en recipient reads the inline label and a zh-CN one the pack', async () => {
+    const { email, transport } = await boot(EN_SOURCE);
+    const data = { name: 'Acme', stage: 'needs_analysis' };
+    for (const [to, locale] of [['ann@example.com', 'en'], ['li@example.com', 'zh-CN']] as const) {
+      const res = await email.sendTemplate({ template: 'mol_stalled', to, locale, data });
+      expect(res.status).toBe('sent');
+    }
+    expect(transport.subjects).toEqual(['Acme is stalled at Needs Analysis', 'Acme is stalled at 需求分析']);
+  });
+
+  it('#33634 CONTROL — no sourceLocale declared: an en recipient walks the chain to zh-CN, as before', async () => {
+    const { email, transport } = await boot({ ...EN_SOURCE, getSourceLocale: () => undefined });
+    const res = await email.sendTemplate({ template: 'mol_stalled', to: 'ann@example.com', locale: 'en', data: { name: 'Acme', stage: 'needs_analysis' } });
+    expect(res.status).toBe('sent');
+    expect(transport.subjects).toEqual(['Acme is stalled at 需求分析']);
   });
 });

@@ -4,7 +4,7 @@
  * [#29520 codemod] The "CRUD — IDataDriver core" section of `SqlDriver`: the
  * bodies of `find`, `findRows`, `findOne`, `create`, `readBackInsertedRows`,
  * `ensureSequencesTable`, `sequenceKeyHash` moved out of `sql-driver.ts` whole
- * by `scripts/codemod-split-sql-driver.mjs`.
+ * (split by #29598 and #30139).
  *
  * A MOVE, not a redesign. {@link CrudFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -40,6 +40,39 @@ import {
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
+import { StandardErrorCode } from '@objectstack/spec/api';
+import { latestPerDirectiveOf, latestPerIdSubquery } from './sql-driver-latest-per.js';
+
+/**
+ * [`DriverOptions.lockRows`] Lock the rows a `find()` returns until its
+ * transaction ends, the promise `supports.lockRows` makes for this driver.
+ *
+ * knex compiles `forUpdate()` per dialect: `FOR UPDATE` on PostgreSQL, MySQL
+ * and Oracle, the `UPDLOCK` table hint on SQL Server, and nothing at all on
+ * SQLite, whose single-connection pool and database lock already keep another
+ * writer from changing a returned row behind the transaction: it waits, or one
+ * side fails busy (the capability's TSDoc in `data/driver.zod.ts`).
+ *
+ * A request with no `transaction` is refused, PRECONDITION_REQUIRED / 428: a
+ * read outside a transaction has nothing to hold the lock to (on PostgreSQL a
+ * bare `FOR UPDATE` releases at the statement's own implicit commit), and
+ * answering it as if the rows were locked is the one wrong answer. The engine
+ * refuses the same request before it reaches a driver; this is the answer a
+ * direct caller gets.
+ */
+function lockRowsIfAsked(builder: Knex.QueryBuilder, object: string, options?: DriverOptions): Knex.QueryBuilder {
+  if (options?.lockRows !== true) return builder;
+  if (!options.transaction) {
+    const err = new Error(
+      `Cannot lock the rows of "${object}" outside a transaction: a row lock is held until the transaction ` +
+        'ends, and this read runs in none. Pass the open transaction with lockRows, or drop lockRows.',
+    ) as Error & { code?: string; status?: number };
+    err.code = StandardErrorCode.enum.PRECONDITION_REQUIRED;
+    err.status = 428;
+    throw err;
+  }
+  return builder.forUpdate();
+}
 
 /**
  * The `SqlDriver` members the bodies of {@link CrudFacet} read — every one of
@@ -122,7 +155,7 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -137,6 +170,10 @@ export class CrudFacet {
     // whether the statement HAS a sort to drop, instead of asking whether the
     // caller supplied one — since #4363 those are different questions.
     const orderKeys = this.orderKeysFor(object, query, { singleRowLookup });
+    // [latest per group] One row per group, when the engine handed the window
+    // directive (`sql-driver-latest-per.ts`): one more predicate on the same
+    // statement, so every clause below holds for it unchanged.
+    const latestPer = latestPerDirectiveOf(query);
 
     // Build everything EXCEPT the SELECT list, so the unknown-column retry
     // below can rebuild without re-deriving where/order/pagination.
@@ -148,6 +185,12 @@ export class CrudFacet {
       // WHERE
       if (query.where) {
         this.applyFilters(b, query.where, options);
+      }
+      if (latestPer !== undefined) {
+        b.whereIn(
+          this.remoteColumn(object, 'id', 'id'),
+          latestPerIdSubquery.call(this, object, query.where, latestPer, options),
+        );
       }
 
       // ORDER BY
@@ -169,12 +212,12 @@ export class CrudFacet {
         if (window.offset !== null) b.offset(window.offset);
         const rows = window.top ?? window.fetch;
         if (rows !== null) b.limit(rows);
-        return b;
+        return lockRowsIfAsked(b, object, options);
       }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 
-      return b;
+      return lockRowsIfAsked(b, object, options);
     };
 
     const builder = buildBase();

@@ -509,7 +509,7 @@ export const REQUIRED_CONTEXTS = [
  * ── Instruction surfaces (#9491) ─────────────────────────────────────────────
  *
  * The same context literals are OPERATIVE PROSE outside the workflows: the
- * instruction files that tell a review seat which check-runs to confirm before
+ * instruction files that tell an L1 reviewer which check-runs to confirm before
  * flipping a PR ready / arming auto-merge / enqueuing it. #9325's rename moved
  * lint.yml and this registry in one PR (the pin above forces that), while
  * AGENTS.md was carried along BY HAND and the pm-dispatch review checklist was
@@ -528,7 +528,7 @@ export const REQUIRED_CONTEXTS = [
  * between the rename PR and the instruction-fix PR(s), `main` legitimately
  * holds stale names, and a gate that reds on them blocks the very sitting it
  * protects. Not hypothetical: this scan landed WHILE the repo sat in that
- * window — registry renamed, `review-checklist.md` still naming `ESLint`, the
+ * window — registry renamed, `review-checklist.md` (since renamed `l1-review-checklist.md`) still naming `ESLint`, the
  * fix PR open. Hence:
  *
  *   - RETIRED_CONTEXT_NAMES is a permanent, append-only rename ledger. The
@@ -640,14 +640,14 @@ export const INSTRUCTION_SURFACES = [
     ],
   },
   {
-    // The review seat's gate-clearance step: confirm both jobs' `conclusion`
+    // The L1 reviewer's gate-clearance step: confirm both jobs' `conclusion`
     // before flipping ready / arming / enqueuing. It names these two as the
     // required FLOOR a reviewer confirms by hand — its own next line sends the
     // seat to `true-green.md` for the rest — so it does NOT state the set and
     // carries no `statesTheSet`. The two literals stay a floor: a rename in
     // either still reddens here, while the set growing does not falsify a
     // sentence that never claimed to enumerate it.
-    file: '.claude/skills/pm-dispatch/references/review-checklist.md',
+    file: '.claude/skills/pm-dispatch/references/l1-review-checklist.md',
     mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
   },
   {
@@ -2287,7 +2287,7 @@ async function selfTest() {
   // have let THIS self-test eject that PR from the merge queue — the exact
   // block-the-sitting failure the budget design exists to avoid.
   battery('instruction surfaces (#9491): the stale-name scan');
-  const CHECKLIST_SURFACE = '.claude/skills/pm-dispatch/references/review-checklist.md';
+  const CHECKLIST_SURFACE = '.claude/skills/pm-dispatch/references/l1-review-checklist.md';
   const surfaceSources = Object.fromEntries(
     INSTRUCTION_SURFACES.map((s) => [s.file, readFileSync(join(root, s.file), 'utf8')]),
   );

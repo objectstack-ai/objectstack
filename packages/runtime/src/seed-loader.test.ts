@@ -265,9 +265,13 @@ describe('SeedLoaderService', () => {
 
       // dependsOn should be empty (account not in graph)
       expect(graph.nodes[0].dependsOn).toEqual([]);
-      // But references should still be tracked (for DB resolution)
-      expect(graph.nodes[0].references).toHaveLength(1);
-      expect(graph.nodes[0].references[0].targetObject).toBe('account');
+      // But references should still be tracked (for DB resolution): the
+      // declared lookup, and [#33791] the `owner_id` the platform injects on a
+      // user-owned object (`sys_user` is not in the graph either).
+      expect(graph.nodes[0].references.map((r) => [r.field, r.targetObject])).toEqual([
+        ['account_id', 'account'],
+        ['owner_id', 'sys_user'],
+      ]);
       expect(graph.insertOrder).toEqual(['contact']);
     });
 
@@ -1113,7 +1117,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1146,7 +1150,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1181,7 +1185,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', org_label: cel('os.org.id') }],
           },
@@ -1190,7 +1194,7 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.success).toBe(true);
-      // One record, mode 'insert' ⇒ exactly ONE engine write. Seed application is
+      // One record ⇒ exactly ONE engine write. Seed application is
       // the very path where a doubled collect writes twice and stays green under
       // `toHaveBeenCalledWith` (#15607).
       expect(engine.insert).toHaveBeenCalledTimes(1);
@@ -1216,12 +1220,12 @@ describe('SeedLoaderService', () => {
           {
             object: 'account',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'Acme' }],
           },
         ],
-        config: baseConfig({ defaultMode: 'insert' }),
+        config: baseConfig({ defaultMode: 'ignore' }),
       });
 
       expect(result.success).toBe(false);

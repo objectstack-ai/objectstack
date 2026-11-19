@@ -59,7 +59,8 @@
  * The roll-up's own recompute asks the aggregate through the engine, and this
  * door would refuse it as ungrouped. It carries the module-private
  * {@link ROLLUP_AGGREGATE_OPTION}, naming the `master_detail` it totals one
- * parent's rows through (`aggregateSummaryValue`, `summary-aggregate.ts`); an
+ * parent's rows through (`aggregateSummaryValue`, `summary-aggregate.ts`; or
+ * several parents' rows grouped by that field, `aggregateSummaryValues`); an
  * amount following its parent through that field is then one currency. No
  * door a caller reaches can set it.
  *
@@ -93,7 +94,9 @@ import { recordCurrencyFieldOf, recordCurrencyPathOf, type RecordCurrencyPath } 
  * [ADR-0144 D6, amended] The engine's own channel for a roll-up's aggregate:
  * the `master_detail` field it totals one parent's child rows through. A
  * module-private symbol on the aggregate's options, so no options object a
- * door builds can carry it. Set only by `aggregateSummaryValue`.
+ * door builds can carry it. Set only by `aggregateSummaryValue` (one parent's
+ * rows) and `aggregateSummaryValues` (grouped by that same field, one parent
+ * per group), both in `summary-aggregate.ts`.
  */
 export const ROLLUP_AGGREGATE_OPTION: unique symbol = Symbol('objectstack.objectql.rollupAggregateVia');
 

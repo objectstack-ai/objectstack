@@ -121,6 +121,8 @@ const WALK_PUSHES: Record<string, string> = {
   bulkConfirmTextIssues: "a list view's bulk `confirmText` template slots: no rule or field expression",
   actionCopyTemplateIssues: "an action's copy template slots: no rule or field expression",
   hookRefusalTemplateIssues: "a hook refusal's template sentences over its declared params: no rule or field expression",
+  // [#34273] The same judge over an action's refusal catalogue.
+  actionRefusalTemplateIssues: "an action refusal's template sentences over its declared params: no rule or field expression",
 };
 
 /** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */
@@ -718,6 +720,19 @@ describe('judgeAuthoredSiteExpression at a flow condition — every gate pass is
       fields: { ...FLOW_OBJ.fields, own_formula: { type: 'formula', label: 'Own', expression: 'record.balance.nope' } },
     };
     expect(flowEntryOn([withOwn, BAL], "record.title == 'x'")).toEqual([]);
+  });
+
+  // [#33435] The entry strips the injected columns and runs the walk as a flow
+  // write, so the build's injected-column null guard reaches it: an unguarded
+  // ordering over `owner_id` comes back with the publish gate's finding (it
+  // answered clean before), and the guarded spelling stays clean.
+  it('an unguarded ordering over an injected column returns the publish gate\'s null-guard finding (#33435)', () => {
+    const served = applyInjectedSystemColumns(FLOW_OBJ);
+    const entry = flowEntryOn([served], "record.owner_id > 'a'");
+    expect(entry).toHaveLength(1);
+    expect(entry[0]![1]).toContain('`record.owner_id`');
+    expect(entry).toEqual(flowGateOn([served], "record.owner_id > 'a'"));
+    expect(flowEntryOn([served], "record.owner_id != null && record.owner_id > 'a'")).toEqual([]);
   });
 
   it('answers nothing when the object is not among the definitions', () => {

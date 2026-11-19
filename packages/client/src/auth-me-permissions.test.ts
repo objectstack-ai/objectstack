@@ -110,6 +110,8 @@ describe('[#28709] client.auth.mePermissions over the real /auth/me/permissions 
         expect(answer.userId).toBe(USER);
         expect(answer.tenantId).toBe(ACTIVE_ORG);
         expect(answer.hasAnyQueue).toBe(true);
+        // [#34602] Typed on the client too; this service names no object.
+        expect(answer.objectsUsingQueues).toEqual([]);
         expect(answer.permissionSets).toContain('member_default');
     });
 

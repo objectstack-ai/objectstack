@@ -428,6 +428,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'top-level',
     why: 'as in compile.ts.',
   },
+  'commands/verify.ts :: config.requires': {
+    reads: 'top-level',
+    why: 'as in compile.ts: handed to `judgeDeclaredCapabilities` beside `artifactPackages(config)`, which applies the same top-level-else-bodies rule for the capability advisories.',
+  },
   // ── os diff / os doctor / os generate / os migrate meta (#22288) ───────
   'commands/diff.ts :: beforeConfig': {
     reads: 'resolved',
@@ -505,6 +509,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'resolved',
     evidence: [{ code: 'const stack: any = authoringRuleUnionStack(config);' }],
     why: '`collectMetadataStats` folds on entry.',
+  },
+  'utils/graft-runtime-hooks.ts :: bundle.functions': {
+    reads: 'top-level',
+    why: 're-points the callables `mergeRuntimeModule` wrote onto the artifact bundle\'s top-level `functions` (packages/runtime/src/load-artifact-bundle.ts), the slot `collectBundleFunctions` resolves handlers from; a package body carries no callable.',
   },
   'utils/i18n-coverage.ts :: config': {
     reads: 'resolved',

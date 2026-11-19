@@ -1472,10 +1472,11 @@ jobs:
   #   * a CLEAN week — the sweep exits 0 and no low-risk arm landing reads
   #     ⛔ BREACH — writes NOTHING. The run summary and the uploaded JSON are the
   #     record that it ran; the Actions run list is the heartbeat.
-  #   * a BREACH (an arm landing without a same-head at-tier PASS record) or a
-  #     NOT MEASURED week (exit 2: a repo, a window edge, an attribution or an arm
-  #     read the sweep could not make; exit 1 or no JSON: it could not sweep at
-  #     all) opens or refreshes ONE card for the maintainer.
+  #   * a BREACH (an arm landing without a same-head at-tier PASS record, or on
+  #     a record stage reading Tier H) or a NOT MEASURED week (exit 2: a repo, a
+  #     window edge, an attribution or an arm read the sweep could not make;
+  #     exit 1 or no JSON: it could not sweep at all) opens or refreshes ONE
+  #     card for the maintainer.
   #
   # The card enters `pm:awaiting-maintainer` with a `Maintainer-action:` line:
   # AGENTS.md Prime Directive 14 already decides what a seat landing without its

@@ -33,7 +33,7 @@ const result = WebhookSchema.parse(data);
 | **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
 | **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |
 | **url** | `string` | ✅ | External webhook endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
+| **method** | `Enum<'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"POST"`) | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
 | **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |

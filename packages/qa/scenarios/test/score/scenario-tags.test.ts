@@ -820,32 +820,35 @@ describe('persona grants — what the card has each persona read and write, agai
   it("a write the card has wait on confirmation, withheld and routed through the build's confirm-gated card action: not measured, named, never a pass", () => {
     // The rich build declares the card's set_task_status (not confirm-gated)
     // and delete_task (confirm-gated). `start_qa` is applied: it stays measured
-    // against the grant whatever actions the build adds. `drop_packing` waits
-    // on confirmation: the card designs delete_task as its route.
+    // against the grant whatever actions the build adds. The card's only
+    // waiting delete is the ambiguous `drop_relaunch_task`, so this case reads
+    // the card without `drop_packing` (a named single delete, applied): the
+    // card designs delete_task as the waiting delete's route.
+    const WAITING: ScenarioArtifactCard = { ...PROJECT, run: { ...PROJECT.run, operations: PROJECT.run.operations!.filter((o) => o.id !== 'drop_packing') } };
     const facts = built(READ_ONLY);
-    expect(verdicts(facts).slice(1, 4)).toEqual([
+    // The waiting delete is the card's last operation, so its grant reads after the client viewer's.
+    expect(verdicts(facts, WAITING).slice(1)).toEqual([
       ['persona-grant:contractor:task:create', false],
       ['persona-grant:contractor:task:update', false],
+      ['persona-grant:client_viewer:task:update', true],
       ['persona-grant:contractor:task:delete', 'not-measured'],
     ]);
-    expect(gradePersonaGrants(facts, PROJECT)[3]!.notMeasured).toBe(
-      'contractor grants no delete on task, and the build declares the card\'s confirm-gated agent action delete_task there, a door that writes as the platform: whether operation drop_packing goes through it is the run\'s to observe',
+    expect(gradePersonaGrants(facts, WAITING).find((c) => c.check === 'persona-grant:contractor:task:delete')!.notMeasured).toBe(
+      'contractor grants no delete on task, and the build declares the card\'s confirm-gated agent action delete_task there, a door that writes as the platform: whether operation drop_relaunch_task goes through it is the run\'s to observe',
     );
-    const s = scoreScenarioArtifact(artifact(READ_ONLY), PROJECT);
-    const g = scoreScenarioArtifact(artifact(GRANTED), PROJECT);
+    const s = scoreScenarioArtifact(artifact(READ_ONLY), WAITING);
+    const g = scoreScenarioArtifact(artifact(GRANTED), WAITING);
     expect([s.total, s.passed]).toEqual([g.total - 1, g.passed - 3]);
     // The card's action without `confirm` is no designed route: the check is measured.
     const unconfirmed: ScenarioArtifactCard = {
-      ...PROJECT,
-      run: { ...PROJECT.run, agentActions: PROJECT.run.agentActions!.map((a) => ({ ...a, confirm: false })) },
+      ...WAITING,
+      run: { ...WAITING.run, agentActions: WAITING.run.agentActions!.map((a) => ({ ...a, confirm: false })) },
     };
-    expect(verdicts(facts, unconfirmed)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
-    // A delete the card applies outright is measured, even beside the confirm-gated action.
-    const appliedDelete: ScenarioArtifactCard = {
-      ...PROJECT,
-      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'drop_packing' ? { ...o, outcome: { kind: 'applied' as const, state: [] } } : o)) },
-    };
-    expect(verdicts(facts, appliedDelete)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+    expect(verdicts(facts, unconfirmed)[4]).toEqual(['persona-grant:contractor:task:delete', false]);
+    // A delete the card applies outright is measured, even beside the confirm-gated action: the card as it
+    // ships applies `drop_packing` (the maintainer's 2026-11-16 ruling), so its contractor must hold the grant.
+    expect(PROJECT.run.operations!.find((o) => o.id === 'drop_packing')!.outcome.kind).toBe('applied');
+    expect(verdicts(facts)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
   });
 
   it('edit and delete are read ∧ grant, as the enforcement door folds them', () => {

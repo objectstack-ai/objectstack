@@ -132,11 +132,15 @@ describe('[#30526] the dataset answer carries each measure\'s drill scope', () =
     expect(JSON.stringify(seen)).not.toContain('current_user_id');
   });
 
-  it('keys by the selection\'s spelling: a cube-qualified measure carries its own filter', async () => {
-    const answer = await mockedService([{ region: 'emea', 'showcase_invoice_metrics.paid_count': 2 }]).queryDataset(
-      invoiceDataset(), { dimensions: ['region'], measures: ['showcase_invoice_metrics.paid_count'] }, CTX,
-    );
-    expect(answer.drillScopes).toEqual({ 'showcase_invoice_metrics.paid_count': { status: 'paid' } });
+  it('a cube-qualified spelling is not a declared name: refused before any read, no scope keyed by it', async () => {
+    // The dataset is a closed surface (ADR-0149 D1): `<dataset>.paid_count` is
+    // not the declared `paid_count`, so the door refuses it rather than
+    // keying a drill scope by that spelling.
+    await expect(
+      mockedService([{ region: 'emea', 'showcase_invoice_metrics.paid_count': 2 }]).queryDataset(
+        invoiceDataset(), { dimensions: ['region'], measures: ['showcase_invoice_metrics.paid_count'] }, CTX,
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'showcase_invoice_metrics.paid_count', param: 'measures' });
   });
 
   it('a dimensionless KPI answer carries it; an answer with no rows does not', async () => {

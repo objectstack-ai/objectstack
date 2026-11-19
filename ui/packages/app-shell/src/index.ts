@@ -98,6 +98,12 @@ export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './util
 // the record, or to a page about it, opens under), as opposed to which app
 // hosts an app-independent page. `./utils/objectHostApp` is the contract.
 export { objectHostAppSegment } from './utils/objectHostApp.js';
+// objectstack#34586 — the history state the approvals inbox opens a request
+// with, so its page steps the reader's pending queue and moves on after a decision.
+export { approvalQueueState } from './views/approval-decision/approvalQueueAdvance.js';
+// Which apps are the platform's own code-loaded built-ins (`com.objectstack.*`),
+// one criterion for the AI switcher and the console's first-run checklist.
+export { isPlatformBuiltinApp } from './utils/platformApp.js';
 // objectstack#29750 — the inbox's notification-link resolver, and the table of
 // console routes served outside an app. The console's native-shell navigate
 // listener and its unmatched-route guard host an app-relative push route
@@ -358,6 +364,16 @@ export {
   hydratedMessagesToChatMessages,
 } from './console/ai/AiChatPage.js';
 export { ConversationsSidebar } from './console/ai/ConversationsSidebar.js';
+// objectstack#34608 — the AI assistant is one right-side drawer: the old
+// `/ai…` addresses route here to open it, and pages open it through the handle.
+export { AiAddressRedirect } from './console/ai/AiAddressRedirect.js';
+export {
+  ChatDockControlProvider,
+  useChatDockControl,
+  useOpenAssistant,
+  type ChatDockControl,
+} from './layout/chatDockControl.js';
+export type { ChatDockTarget } from './layout/chatDockTarget.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.
@@ -583,12 +599,6 @@ export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js'
 // onto Setup's metadata routes lands them in one hop through this.
 export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
 
-// Setup › Packaged actions (ADR-0126 §7.4) — on/off for the actions installed
-// packages ship. Reached through the `automation:packaged-actions` component
-// ref registered in `services/builtinComponents`; exported so a host app can
-// compose the page directly. (Setup › Packaged automation retired with
-// objectstack ADR-0146 D11: a packaged flow's switch and its copy are Studio's.)
-export { PackagedActionsPage } from './views/setup/PackagedActionsPage.js';
 
 // AI assistant bus — connects the metadata designers to the global chat.
 export {

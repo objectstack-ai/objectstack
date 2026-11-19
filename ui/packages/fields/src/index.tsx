@@ -1935,6 +1935,10 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
         className={cn('max-w-full min-w-0', colorClasses)}
         style={hexBadge?.style}
         title={label}
+        // A print page's stylesheet prints this badge as plain text
+        // (`PRINT_PLAIN_BADGE_ATTRIBUTE` in `@object-ui/components`'s
+        // `page-print.ts`, objectstack#34228). Nothing reads it on screen.
+        data-select-badge=""
       >
         <span className="truncate">{label}</span>
       </Badge>
@@ -5382,6 +5386,10 @@ export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js'
 // `permission-ref` field's definition, so the widget recognises the grant's
 // name column by its object and its column, not by its column name alone.
 export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
+// A record form stamps any lookup whose `lookupFilters` read `{ $record }`: one record is being edited here,
+// with the object each hop points at. Only a field carrying a stamp `withRecordBeingEdited` issued resolves a
+// `{ $record }`; the key written as data is no stamp.
+export { RECORD_BEING_EDITED_KEY, withRecordBeingEdited } from './widgets/lookupRecordReference.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';

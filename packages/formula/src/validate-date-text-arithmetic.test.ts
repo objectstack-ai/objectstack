@@ -356,3 +356,138 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     expect(validateExpression('value', 'isoDate(record.start_time)', { scope: 'record' }).errors).toEqual([]);
   });
 });
+
+describe('timestamp() handed a date-only field\'s text (#34363)', () => {
+  /** A loan's borrow day (date-only) and its pick-up instant (date-time), as a formula site types them. */
+  const LOAN: ExprSchemaHint = {
+    scope: 'record',
+    objectName: 'library_loan',
+    fields: ['title', 'borrow_date', 'picked_up_at'],
+    fieldTypes: { title: 'text', borrow_date: 'date', picked_up_at: 'datetime' },
+  };
+  /** The row a read door serves: the date as `YYYY-MM-DD`, the date-time as its ISO instant. */
+  const ROW = { title: 'Dune', borrow_date: '2026-11-16', picked_up_at: '2026-11-16T09:30:00.000Z' };
+  const evaluate = (source: string) => celEngine.evaluate({ dialect: 'cel', source }, { record: ROW });
+  /** The expression the card measured on staging: a due date one week after the borrow day. */
+  const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
+
+  it('refuses the measured expression, which faults at run time on the date-only text', () => {
+    const r = validateExpression('value', MEASURED, LOAN);
+    expect(r.ok).toBe(false);
+    expect(r.warnings).toEqual([]);
+    expect(r.errors.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-call',
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+    }]);
+    expect(r.errors[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+    expect(evaluate(MEASURED)).toMatchObject({ ok: false, error: { kind: 'runtime' } });
+  });
+
+  it('refuses the bare call too, null included: it faults on every row', () => {
+    expect(validateExpression('value', 'timestamp(record.borrow_date)', LOAN).errors.map((e) => e.code)).toEqual(['date-text-call']);
+    expect(celEngine.evaluate({ dialect: 'cel', source: 'timestamp(record.borrow_date)' }, { record: { borrow_date: null } }))
+      .toMatchObject({ ok: false });
+  });
+
+  it('the taught shape is clean, and evaluates to the date plus N days over the date-only text', () => {
+    for (const [source, expected] of [
+      ['isoDate(addDays(record.borrow_date, 7))', '2026-11-23'],
+      ['isoDate(addDays(record.borrow_date, 30))', '2026-12-16'],
+      ['isoDate(addDays(record.borrow_date, -16))', '2026-10-31'],
+    ] as const) {
+      expect(validateExpression('value', source, LOAN), source).toEqual({ ok: true, errors: [], warnings: [] });
+      expect(evaluate(source), source).toEqual({ ok: true, value: expected });
+    }
+    // The prescribed parse, in place of the call, is clean and answers the same day.
+    const parsed = "isoDate(date(record.borrow_date) + duration('168h'))";
+    expect(validateExpression('value', parsed, LOAN).errors).toEqual([]);
+    expect(evaluate(parsed)).toEqual({ ok: true, value: '2026-11-23' });
+  });
+
+  it('CONTROL: a date-time field under timestamp() stays clean, and evaluates', () => {
+    const source = "isoDate(timestamp(record.picked_up_at) + duration('168h'))";
+    expect(validateExpression('value', source, LOAN)).toEqual({ ok: true, errors: [], warnings: [] });
+    expect(evaluate(source)).toEqual({ ok: true, value: '2026-11-23' });
+    expect(validateExpression('value', "timestamp('2026-11-16T00:00:00Z')", LOAN).errors).toEqual([]);
+  });
+
+  it('takes the site\'s outcome codes, like every date-text call', () => {
+    const flattened: ExprSchemaHint = { fields: ['borrow_date'], fieldTypes: { borrow_date: 'date' } };
+    const source = "timestamp(borrow_date) < now()";
+    expect(validateExpression('predicate', source, flattened).errors.map((e) => e.code)).toEqual(['date-text-call-run-may-fail']);
+    expect(validateExpression('predicate', source, { ...flattened, faultOutcome: 'run-fails' }).errors.map((e) => e.code))
+      .toEqual(['date-text-call-run-fails']);
+    expect(validateExpression('predicate', 'timestamp(record.borrow_date) < now()', { ...LOAN, faultOutcome: 'fail-closed' })
+      .errors.map((e) => e.code)).toEqual(['date-text-call-fail-closed']);
+    // A flow variable that shadows the name is not the field.
+    expect(validateExpression('predicate', source, { ...flattened, flowVariables: ['borrow_date'] }).errors).toEqual([]);
+  });
+
+  it('without field types the check does not run, as before', () => {
+    expect(validateExpression('value', MEASURED, { scope: 'record' }).errors).toEqual([]);
+  });
+});
+
+describe('a flow value envelope typed for the date-text family alone (#34451)', () => {
+  /** The object a record-triggered flow binds as `record`: a loan's borrow day, pick-up instant and title. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const ENVELOPE: ExprSchemaHint = { fieldTypes, flowValueEnvelope: true };
+  const codes = (source: string, hint: ExprSchemaHint | undefined = ENVELOPE) =>
+    validateExpression('value', { dialect: 'cel', source }, hint).errors.map((e) => e.code);
+  /** The expression cloud measured in an `update_record` node's `fields.due_date`. */
+  const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
+
+  it('refuses the measured expression under the run-may-fail arm, with the addDays shift', () => {
+    const r = validateExpression('value', { dialect: 'cel', source: MEASURED }, ENVELOPE);
+    expect(r.warnings).toEqual([]);
+    expect(r.errors.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-call-run-may-fail',
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+    }]);
+    expect(r.errors[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+  });
+
+  it('refuses the bare call, a previous.<field> read, and date-text arithmetic over record.<field>', () => {
+    expect(codes('timestamp(record.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(previous.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
+    expect(codes("record.borrow_date - duration('24h')")).toEqual(['date-text-arithmetic-run-may-fail']);
+  });
+
+  it('CONTROL: a datetime field under timestamp(), and the taught shift, stay clean', () => {
+    expect(codes("isoDate(timestamp(record.picked_up_at) + duration('168h'))")).toEqual([]);
+    expect(codes('isoDate(addDays(record.borrow_date, 7))')).toEqual([]);
+  });
+
+  it('CONTROL: no verdict outside the date-text family reaches the envelope', () => {
+    // type-mismatch, date-arithmetic, date-duration-value, field existence: all stand down.
+    expect(codes('record.title * 2')).toEqual([]);
+    expect(codes('record.due_date + 1')).toEqual([]);
+    expect(codes('today() - record.borrow_date')).toEqual([]);
+    expect(codes('record.no_such_field')).toEqual([]);
+    // The same sources are refused or warned where a formula site types them.
+    const formula: ExprSchemaHint = { scope: 'record', fields: Object.keys(fieldTypes), fieldTypes };
+    const r = validateExpression('value', 'record.title * 2', formula);
+    expect([...r.errors, ...r.warnings].map((e) => e.code)).toEqual(['type-mismatch']);
+  });
+
+  it('a bare name, and a source reading `input`, take no verdict: the envelope cannot prove either is the field', () => {
+    expect(codes("isoDate(timestamp(borrow_date) + duration('168h'))")).toEqual([]);
+    expect(codes('timestamp(input.borrow_date)')).toEqual([]);
+  });
+
+  it('a malformed envelope is refused as before, and without field types nothing new runs', () => {
+    expect(codes('{record.borrow_date}')).toEqual(['cel-template-brace']);
+    expect(validateExpression('value', { dialect: 'cel', source: MEASURED }).errors).toEqual([]);
+    expect(codes(MEASURED, { flowValueEnvelope: true })).toEqual([]);
+  });
+});

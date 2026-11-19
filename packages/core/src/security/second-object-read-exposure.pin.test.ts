@@ -97,7 +97,7 @@ type Classification =
       /** The read, in words. */
       read: string;
       /** The operation the target is judged as. */
-      operation: 'get' | 'list';
+      operation: 'get' | 'list' | 'aggregate';
       /** The function that asks the decision, and the file it lives in. */
       decision: { file: string; fn: string };
       /** Where the read takes its answer from that function: a call site that must exist. */
@@ -195,6 +195,50 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
     pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
   },
+  'packages/plugins/plugin-audit/src/activity-field-redaction.ts': {
+    kind: 'executes',
+    read:
+      "the activity timeline's read redaction, serving per reader the referenced records' titles the mirror's " +
+      '`resolveLookupTitles` wrote (`referenceTitlesPerRead` judges each reader against the title field and the object ' +
+      'of every reference a text names)',
+    decidedIn: 'packages/plugins/plugin-audit/src/audit-writers.ts',
+    also:
+      'reads no record of the target and no title: `referenceTargetOf` names the object whose title field and read ' +
+      'admission a reader is judged against; the title was read at write time, only from a target whose exposure ' +
+      'serves `get` (`servesSummaryTitleTarget`). Pinned in `activity-field-redaction.test.ts`',
+  },
+  // The engine's relation group join: an analytics cross-object dimension as one `LEFT JOIN … GROUP BY`.
+  'packages/objectql/src/relation-group-join.ts': {
+    kind: 'decided',
+    read:
+      "the engine's relation group join (an analytics dimension through a lookup grouped by the related record's " +
+      'attribute in one statement; `referenceTargetOf` checks that the relation points at the object the request names)',
+    operation: 'aggregate',
+    decision: { file: 'packages/services/service-analytics/src/api-exposure-door.ts', fn: 'assertObjectsExposed' },
+    wiring: { file: 'packages/services/service-analytics/src/analytics-service.ts', call: 'assertObjectsExposed(objects, provider' },
+    pin: 'packages/services/service-analytics/src/__tests__/cross-object-relation-group-join.test.ts',
+  },
+  // [#35145] The MCP stdio bridge's `expand` (`query_records`), built as the data door builds it.
+  'packages/mcp/src/stdio-data-bridge.ts': {
+    kind: 'decided',
+    read: "the MCP stdio bridge's `expand` on `query_records` (the engine's expansion sub-read, entered from an engine-only bridge)",
+    operation: 'get',
+    decision: { file: 'packages/mcp/src/stdio-data-bridge.ts', fn: 'stdioExpandMap' },
+    wiring: { file: 'packages/mcp/src/stdio-data-bridge.ts', call: 'stdioExpandMap(reads, object' },
+    pin: 'packages/mcp/src/mcp-relation-reads.test.ts',
+  },
+  // [#35145] The MCP tools' relation judging for `expand` and `related`.
+  'packages/mcp/src/mcp-relation-reads.ts': {
+    kind: 'executes',
+    read:
+      "the MCP tools' `expand` (`query_records`) and `related` (`get_record`): the targets are judged here by the MCP " +
+      "read guard, then read through the data door, whose `servedExpand` decides each expansion target",
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
+    also:
+      'reads no record: `referenceTargetOf` names the object an `expand` field points at (asked of the MCP read guard, ' +
+      'then expanded by `findData`, which asks its exposure) and checks that a `related` link field points at the parent ' +
+      'record; each related list is a `findData` read of the child it names, judged by that door as any list.',
+  },
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
@@ -242,6 +286,14 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
   },
+  // [#33795] The batch scope's rule-read test (ruling 6928862195 B).
+  'packages/objectql/src/summary-rule-reads.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a validation rule's or a computed field's one hop reaches, from the declarations in the " +
+      'registry, only to decide whether a roll-up recompute inside a bulk update runs at once or at the end of the ' +
+      'batch; it reads no record and serves nothing of the target to any caller',
+  },
   // ADR-0100: the credential-column guard's filter / sort half.
   'packages/objectql/src/credential-evaluation-guard.ts': {
     kind: 'not-a-served-read',
@@ -260,6 +312,16 @@ const CALLERS: Record<string, Classification> = {
       "serves nothing of the target. A door's own exposure question runs first at each hop, through the gate's " +
       '`beforeRelationTarget` hook (the data door hands it `refuseUnservedRelationTarget`). Pinned by ' +
       '`packages/objectql/src/internal-field-evaluation-guard.test.ts` (the refusals assert the driver was never asked)',
+  },
+  // Field-level security over a computed field that reads through a reference.
+  'packages/plugins/plugin-security/src/field-masker.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a computed field's reference points at (`computedHopTargetsOf`), only so the security posture " +
+      "can ask the caller's own read projection of that object which fields it may read there, and WITHHOLD the " +
+      'computed field when one it reads is not among them; it reads no record and serves nothing of the target — the ' +
+      "hop itself is the engine's `resolveFormulaRelated` (its row). Pinned by " +
+      '`packages/plugins/plugin-security/src/formula-reads-hidden-field-masking.test.ts`',
   },
   // [#29986] The codemod split of engine.ts moved two arbiter callers out of it.
   'packages/objectql/src/engine-security-resolvers.ts': {
@@ -479,12 +541,14 @@ describe('[#22661] every read that reaches a second object asks that object its 
         (c): c is Extract<Classification, { kind: 'decided' }> => c.kind === 'decided',
       );
       expect(decided.map((d) => d.decision.fn).sort()).toEqual([
+        'assertObjectsExposed',
         'refuseUnservedRelationTarget',
         'servesExpansionTarget',
         'servesLabelTarget',
         'servesPayloadDisplayTarget',
         'servesReferenceTarget',
         'servesSummaryTitleTarget',
+        'stdioExpandMap',
       ]);
 
       for (const d of decided) {

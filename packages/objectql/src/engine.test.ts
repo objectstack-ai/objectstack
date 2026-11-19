@@ -736,6 +736,58 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    /**
+     * ADR-0090 D10 rule 4, second producer: the in-product AI path writes AS the
+     * signed-in person and names the AI that performed it on `performedBy`. The
+     * engine copies each key onto `HookContext.provenance` exactly as it copies
+     * the OAuth door's `clientId`, and never onto `session`.
+     */
+    describe('the in-product AI performer reaches hooks as provenance, never as the caller', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked((SchemaRegistry as any).getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+        });
+
+        const capture = () => {
+            const seen: { session?: any; provenance?: any } = {};
+            engine.registerHook('beforeInsert', async (ctx: any) => {
+                seen.session = ctx.session;
+                seen.provenance = ctx.provenance;
+            }, { object: 'task' });
+            return seen;
+        };
+
+        it('copies agentId, conversationId and confirmationId onto provenance; the session stays the person', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'ai wrote this' }, {
+                context: {
+                    userId: 'u1',
+                    performedBy: { agentId: 'data_chat', conversationId: 'conv_1', confirmationId: 'pa_1' },
+                },
+            });
+
+            expect(seen.provenance).toEqual({
+                performedByAgentId: 'data_chat',
+                performedByConversationId: 'conv_1',
+                performedByConfirmationId: 'pa_1',
+            });
+            expect(seen.session).toMatchObject({ userId: 'u1' });
+            expect(seen.session).not.toHaveProperty('performedBy');
+        });
+
+        it('CONTROL: the OAuth door\'s clientId alone still reaches provenance unchanged', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'agent wrote this' }, {
+                context: { userId: 'u1', performedBy: { clientId: 'app_1' } },
+            });
+
+            expect(seen.provenance).toEqual({ performedByClientId: 'app_1' });
+        });
+    });
+
     describe('execution context via the trailing options arg (read methods)', () => {
         // Regression: reads took context inside the query while writes took it in
         // a trailing options arg — so `find(obj, q, { context })` silently dropped

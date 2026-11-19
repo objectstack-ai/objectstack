@@ -347,7 +347,8 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
 
     // PRAGMA proves a non-PK unique index was actually created.
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_unique_obj)');
-    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    // [#33695] Neither the PK autoindex nor the implicit `(created_at, id)` default-order index is declared.
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex') && !String(i.name).endsWith('_created_at_id'));
     expect(declared.length).toBe(1);
     expect(declared[0].unique).toBe(1);
 
@@ -373,7 +374,8 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_multi_obj)');
-    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    // [#33695] Neither the PK autoindex nor the implicit `(created_at, id)` default-order index is declared.
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex') && !String(i.name).endsWith('_created_at_id'));
     expect(declared.length).toBe(1);
     expect(declared[0].unique).toBe(1);
 
@@ -423,7 +425,8 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_plain_obj)');
-    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    // [#33695] Neither the PK autoindex nor the implicit `(created_at, id)` default-order index is declared.
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex') && !String(i.name).endsWith('_created_at_id'));
     expect(declared.length).toBe(1);
     expect(declared[0].unique).toBe(0);
   });
@@ -442,7 +445,8 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_idem_obj)');
-    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    // [#33695] Neither the PK autoindex nor the implicit `(created_at, id)` default-order index is declared.
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex') && !String(i.name).endsWith('_created_at_id'));
     expect(declared.length).toBe(1);
   });
 
@@ -465,7 +469,8 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     await driver.initObjects(objects);
 
     const list: any = await knexInstance.raw('PRAGMA index_list(idx_virtual_obj)');
-    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex'));
+    // [#33695] Neither the PK autoindex nor the implicit `(created_at, id)` default-order index is declared.
+    const declared = list.filter((i: any) => !String(i.name).startsWith('sqlite_autoindex') && !String(i.name).endsWith('_created_at_id'));
     expect(declared.length).toBe(0);
     expect(warnings.some((w) => w.includes('total'))).toBe(true);
   });

@@ -58,6 +58,7 @@
  */
 
 import React from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import type { RecordPathComponentProps } from '@object-ui/types';
@@ -110,21 +111,39 @@ const TERMINAL_LABEL_CLASS = 'text-center [overflow-wrap:anywhere]';
 // wraps instead of being cut, so it stays legible on a narrow rail too.
 const shareOf = (stageCount: number): React.CSSProperties => ({ flexGrow: stageCount, flexShrink: 1, flexBasis: '0%' });
 
-// ── The phone row FITS its stages, and a label that does not fit ellipsises
-// (objectstack#26897) ─────────────────────────────────────────────────────
+// ── Below `sm` the path is COMPACT (objectstack#34595) ───────────────────
 //
-// The row below `sm` used to hold content-width, `whitespace-nowrap` stages
-// in a sideways scroller with its scrollbar hidden, so at 390px the stage at
-// the right edge was cut mid-word ("Resolu") with nothing to say the row
-// scrolled. Now every stage starts from zero and takes an equal share, as on
-// the desktop rail; an ordinary label truncates with an ellipsis and keeps
-// its full text in `title`, and a terminal label wraps, as on desktop
-// (#25895). The `min-w-10` floor keeps a stage from collapsing to a bare
-// ellipsis: a path too long for every stage to keep 2.5rem still scrolls
-// rather than drawing unreadable cells. Geometry pinned in Chromium by
-// `e2e/record-path-phone-row.spec.ts`, which reads these two constants.
-const PHONE_STAGE_CLASS = 'flex-1 min-w-10';
-const PHONE_LABEL_CLASS = 'text-center truncate';
+// A phone row has no room for every stage's name: seven equal shares of a
+// 375px row cut each label to its first letters. So below `sm` the path draws
+// one rail segment per stage and no stage names, then ONE summary line: the
+// step the record stands on ("Step N of M", the form's existing `stepOf`
+// copy, counted over the forward stages) and the current stage's FULL name,
+// which wraps rather than being cut. The line is a disclosure button: pressed,
+// it lists every stage by its full name, and on a path that admits stage
+// changes each reachable stage there is the same press, behind the same gates,
+// as on the desktop rail. Nothing about the mode is authored: the viewport
+// and the path's own width pick it (below). Geometry pinned in Chromium by
+// `e2e/record-path-phone-row.spec.ts`, which reads these constants.
+//
+// ── Which row draws: the viewport AND the path's width (objectstack#34696) ─
+//
+// The root is a Tailwind `@container`, the pattern `HeaderHighlight` and
+// `DetailSection` use for the same decision, and each row stacks a viewport
+// variant on a container one: the desktop row is `hidden sm:@sm:flex`, the
+// compact path `sm:@sm:hidden`. So the desktop row draws only when the
+// viewport is at least `sm` AND the path itself is at least `@sm` (24rem)
+// wide. Below `sm` nothing changes: the compact path, as above. At or above
+// `sm`, a full-width record page gives the path more than 24rem, so the wide
+// page keeps its desktop row; a narrow record drawer gives it less, so seven
+// stages are not cut to a letter each there. Pure CSS, so it is right on the
+// first paint with no measurement. Geometry pinned in Chromium by
+// `e2e/record-path-narrow-drawer-34696.spec.ts`, which reads both classes.
+const PHONE_RAIL_ROW_CLASS = 'flex w-full items-start gap-1';
+const PHONE_RAIL_SEGMENT_CLASS = 'flex-1 min-w-0';
+const PHONE_SUMMARY_CLASS =
+  'mt-1.5 flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-sm text-left text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const PHONE_SUMMARY_STAGE_CLASS = 'min-w-0 font-semibold [overflow-wrap:anywhere]';
+const PHONE_LIST_LABEL_CLASS = 'text-left [overflow-wrap:anywhere]';
 
 type StageState = 'completed' | 'current' | 'upcoming';
 
@@ -300,6 +319,12 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
   // Click-to-advance (objectstack#28061) — `pressable` is false unless the
   // author opted in AND this reader may edit `statusField` on this record.
   const stageChange = useStageChange(schema.allowStageChange === true, statusField);
+  // The compact phone path's disclosure (objectstack#34595): whether its full
+  // stage list is open. Ephemeral by ADR-0054 C3 — nobody expects it back.
+  // No generated id ties the summary to the list: the list follows the
+  // button directly, `aria-expanded` says it is open, and a render must stay
+  // byte-identical for the same record (`record-block-record-reach.test.tsx`).
+  const [phoneListOpen, setPhoneListOpen] = React.useState(false);
   /**
    * WHERE the stages come from: the author, else the status field's picklist
    * (objectui#11106).
@@ -595,14 +620,21 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
     labelClassName?: string;
     /** The label's full text as a `title`, for a row whose labels can be cut. */
     labelTitle?: string;
+    /** A line of the compact phone path's stage list: a short rail beside the name. */
+    listLine?: boolean;
   }) => {
+    const listLine = o.listLine === true;
     // A stage is a press only behind the opt-in, never the stage the record
     // already stands on (there is nowhere to move to), and never a stage the
     // field's blocking state machine cannot reach from the stored value.
     const press = stageChange.pressable && o.state !== 'current' && stageChange.admits(o.stage.value);
     const face = (
       <>
-        <span aria-hidden="true" data-stage-rail="" className={railClass(o.state, o.terminal)} />
+        <span
+          aria-hidden="true"
+          data-stage-rail=""
+          className={cn(railClass(o.state, o.terminal), listLine && 'w-6 shrink-0')}
+        />
         <span
           className={cn(
             labelClass(o.state, o.terminal),
@@ -627,7 +659,7 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         data-stage-terminal={o.terminal}
         aria-current={o.state === 'current' ? 'step' : undefined}
         aria-label={stageAriaLabel(o.stage.label, o.state, o.terminal)}
-        className={cn('flex flex-col gap-1.5', o.className)}
+        className={cn('flex flex-col gap-1.5', listLine && 'flex-row items-center gap-2', o.className)}
       >
         {press ? (
           <button
@@ -635,7 +667,10 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
             aria-label={t('detail.pathStageChangeAction', { stage: o.stage.label })}
             disabled={stageChange.busy}
             onClick={() => stageChange.request(o.stage)}
-            className="group flex min-w-0 w-full flex-col gap-1.5 rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+            className={cn(
+              'group flex min-w-0 w-full flex-col gap-1.5 rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
+              listLine && 'min-h-11 flex-row items-center gap-2 text-left',
+            )}
           >
             {face}
           </button>
@@ -646,11 +681,31 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
     );
   };
 
+  // The compact phone path's reading (objectstack#34595). A stage's state is
+  // the one the phone row has always given it; the step counts the forward
+  // stages, and a record standing on a lost stage, or on no stage, shows no
+  // step: neither is a step along the path.
+  const phoneStateOf = (idx: number): StageState => {
+    const isLost = stageTerminals[idx] === 'lost';
+    if (idx === currentIdx) return 'current';
+    return !isLost && !currentInLost && currentIdx >= 0 && idx < currentIdx ? 'completed' : 'upcoming';
+  };
+  const currentStage: PathStage | undefined = currentIdx >= 0 ? pathStages[currentIdx] : undefined;
+  const currentTerminal = currentIdx >= 0 ? stageTerminals[currentIdx] : undefined;
+  const phoneStep: string | null =
+    currentIdx >= 0 && !currentInLost
+      ? t('form.stepOf', {
+          current: currentIdx + 1,
+          total: forwardStages.length,
+          defaultValue: 'Step {{current}} of {{total}}',
+        })
+      : null;
+
   return (
-    <div className={cn('w-full', className)} {...designer}>
-      {/* Desktop: forward rail → optional lost-alt group */}
+    <div className={cn('@container w-full', className)} {...designer}>
+      {/* Desktop, at `sm` and a path of `@sm` or wider: forward rail → optional lost-alt group */}
       <div
-        className="hidden sm:flex w-full items-start gap-2"
+        className="hidden sm:@sm:flex w-full items-start gap-2"
         {...railAria}
       >
         <div className="flex min-w-0 items-start gap-1.5" style={shareOf(forwardStages.length)}>
@@ -718,26 +773,73 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         )}
       </div>
 
-      {/* Mobile: one row of equal shares (PHONE_STAGE_CLASS above), scrolling only past the floor */}
-      <div
-        className="flex sm:hidden w-full items-start gap-2 overflow-x-auto pb-1 -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        {...railAria}
-      >
-        {pathStages.map((stage, idx) => {
-          const terminal = stageTerminals[idx];
-          const isLost = terminal === 'lost';
-          const isCompleted = !isLost && !currentInLost && currentIdx >= 0 && idx < currentIdx;
-          const isCurrent = idx === currentIdx;
-          return renderStage({
-            key: `${stage.value}-${idx}-m`,
-            stage,
-            state: isCurrent ? 'current' : isCompleted ? 'completed' : 'upcoming',
-            terminal,
-            className: PHONE_STAGE_CLASS,
-            labelClassName: terminal ? TERMINAL_LABEL_CLASS : PHONE_LABEL_CLASS,
-            labelTitle: stage.label,
-          });
-        })}
+      {/* Mobile: compact path, also for any path narrower than `@sm` — rail segments, the summary line, then the stage list (PHONE_* constants above) */}
+      <div className="sm:@sm:hidden w-full" data-record-path-compact="">
+        {/* The progress bar is decoration: the summary line and the stage
+            list below carry every stage's name and state. */}
+        <div aria-hidden="true" className={PHONE_RAIL_ROW_CLASS} data-record-path-rails="">
+          {pathStages.map((stage, idx) => (
+            <span
+              key={`${stage.value}-${idx}-r`}
+              data-stage-rail=""
+              data-stage-state={phoneStateOf(idx)}
+              data-stage-terminal={stageTerminals[idx]}
+              // The lost group stands apart from the forward stages, as on
+              // the desktop rail, so "Step N of M" counts what it reads as.
+              className={cn(
+                railClass(phoneStateOf(idx), stageTerminals[idx]),
+                PHONE_RAIL_SEGMENT_CLASS,
+                idx === firstLostIdx && idx > 0 && 'ml-1',
+              )}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          aria-expanded={phoneListOpen}
+          onClick={() => setPhoneListOpen((open) => !open)}
+          className={PHONE_SUMMARY_CLASS}
+          data-record-path-summary=""
+        >
+          {phoneStep !== null && <span className="shrink-0">{phoneStep}</span>}
+          {phoneStep !== null && currentStage && <span aria-hidden="true">·</span>}
+          {currentStage ? (
+            <span
+              className={cn(
+                PHONE_SUMMARY_STAGE_CLASS,
+                currentTerminal === 'lost' ? 'text-destructive' : 'text-foreground',
+              )}
+            >
+              {currentTerminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
+              {currentStage.label}
+            </span>
+          ) : (
+            <span className="min-w-0">{t('detail.pathLabel')}</span>
+          )}
+          <ChevronDown
+            aria-hidden="true"
+            className={cn('ml-auto h-4 w-4 shrink-0 transition-transform', phoneListOpen && 'rotate-180')}
+          />
+        </button>
+        {/* Collapsed by CSS, not unmounted: closed, the list is out of the
+            layout and the accessibility tree alike. */}
+        <div
+          className={cn('mt-1 flex-col gap-1', phoneListOpen ? 'flex' : 'hidden')}
+          data-record-path-stage-list=""
+          {...railAria}
+        >
+          {pathStages.map((stage, idx) =>
+            renderStage({
+              key: `${stage.value}-${idx}-m`,
+              stage,
+              state: phoneStateOf(idx),
+              terminal: stageTerminals[idx],
+              className: 'w-full min-w-0',
+              labelClassName: PHONE_LIST_LABEL_CLASS,
+              listLine: true,
+            }),
+          )}
+        </div>
       </div>
 
       {/* A refused move, in place under the rails — the server's own reason

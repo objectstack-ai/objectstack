@@ -17,32 +17,30 @@ import type { Page } from '@objectstack/spec/ui';
  *
  * Strategy
  * --------
- *  - `kind: 'full'` + `isDefault: true`: the page owns its tab strip, so it is
- *    drawn as authored at every width. It was a `kind: 'slotted'` page until
- *    the `tabs` slot retired (#27053); the rebuild renders the same nodes in
- *    the same order. Its `page:header` is the one the synthesizer supplied:
+ *  - `kind: 'full'` + `isDefault: true`: the page is drawn as authored at
+ *    every width. It was a `kind: 'slotted'` page until the `tabs` slot
+ *    retired (#27053). Its `page:header` is the one the synthesizer supplied:
  *    the request's title, and the object's placed header actions read live
  *    (`placedActions: true`, #29951). The object places none of its own (its
  *    decision actions are `record_section` ones, drawn by the panel below), so
  *    the header draws only what an installed package places on
  *    `sys_approval_request` at `record_header` / `record_more`.
- *  - After the header, ONE `record:approval_decision` node: the request's
- *    decision progress and its declared decision actions, the reply
- *    (`approval_comment`) included, in one panel. The type is declared with an
- *    empty strict props row, so the node carries no `properties` at all; the
- *    panel reads the bound request and the object's own actions.
- *  - The highlight strip is the object's `highlightFields` WITHOUT `record_id`. The
- *    details grid hides every field a mounted highlights strip shows, and
- *    `record_id` / `object_name` is a declared `referenceVia` pointer pair that
- *    the console draws as a card of the target record IN THE DETAILS GRID — a
- *    strip carrying `record_id` would take the card off the page. The object's
- *    own `highlightFields` keeps `record_id`: other surfaces read it, and only
- *    this page has a grid the pair must stay in.
- *  - The strip and the object's list change together, never the strip alone.
- *    The Details tab's `record:details` node authors neither `sections` nor
- *    `fields`, so it draws the object's `highlightFields` (the spec's declared
- *    fallback) minus the strip: a field the object lists and the strip drops
- *    moves into that tab.
+ *  - Then the highlight strip: the object's `highlightFields` WITHOUT
+ *    `record_id`. `record_id` / `object_name` is a declared `referenceVia`
+ *    pointer pair, and the page reaches the record it points at through the
+ *    panel below, which draws that record whole and links to it. The object's
+ *    own `highlightFields` keeps `record_id`: other surfaces read it. The
+ *    strip and the object's list change together, never the strip alone.
+ *  - Then ONE `record:approval_decision` node, the rest of the page
+ *    (#34588; maintainer 2026-11-17: 「审批页应该直接显示完整的记录；「动态」在
+ *    最后」): the request's declared decision actions, the reply
+ *    (`approval_comment`) included; the business record as submitted, whole,
+ *    in its default record page's sections, with what changed since
+ *    submission marked, and its child tables; and a right rail of approval
+ *    progress, attachments and activity, the activity last. The type is
+ *    declared with an empty strict props row, so the node carries no
+ *    `properties` at all; the panel reads the bound request, its record and
+ *    the object's own actions.
  *  - The flow chip is `process_label` (the flow's label), not `process_name`
  *    (the machine source, `flow:NAME`). The console reads a request through
  *    the approvals get, which serves `process_label` by the one display-label
@@ -57,30 +55,21 @@ import type { Page } from '@objectstack/spec/ui';
  *    no step at all serves neither field, and the strip draws no step chip.
  *  - There is no Object chip. `object_name` is the target object's API name
  *    as stored (`showcase_announcement`), and the object declares no field
- *    that holds that object's label. The page names the target object in the
- *    Details tab instead: the `record_id` / `object_name` pair's card heads the
- *    target record with its object's label, translated and read from the
- *    object's definition when the page draws, so a relabelled object reads its
- *    new label. Where the card cannot read the target (the reader may not
- *    read it, or the platform deleted it), the page names no object at all.
- *    `object_name` leaves the object's `highlightFields` too, by the rule
- *    above, so the Details tab does not draw it as a row.
- *  - The tab strip is authored: Details (`record:details`, a bare node: see
- *    the strip above) and Timeline — `sys_approval_action` as a
- *    related list keyed on `request_id`, newest first. Its step column is
- *    `step_label` (the step's label, stored on every row), not `step_name`
- *    (the node's machine id, such as `dual_signoff`), as the strip's step
- *    chip is `current_step_label`.
+ *    that holds that object's label. The panel names the target object
+ *    beside the submitted record's heading, translated and read from the
+ *    object's definition when the page draws.
+ *  - There are no tabs. The page had two: Details (the pointer pair's card)
+ *    and Timeline (`sys_approval_action` as a related list). The panel now
+ *    draws the record itself and, last in its rail, the request's thread.
  *  - There is no `record:discussion` node: the generic discussion thread has
- *    no place here. A request's thread is its timeline, and its reply is the
+ *    no place here. A request's thread is its activity, and its reply is the
  *    declared `approval_comment` action, which the service stores as a
- *    `sys_approval_action` row the Timeline tab lists.
- *  - There is no aside: the page places only its `main` region.
+ *    `sys_approval_action` row the activity lists.
+ *  - There is no aside region: the panel lays out its own rail, so the rail
+ *    and the record stack in one order on a narrow screen.
  *
- * Copy inside the components is authored as inline locale maps, the ruled route for
- * page prose; the page-level `label` is the one key a translation bundle
- * reaches (`pages.sys_approval_request_detail.label`, in
- * `translations/pages.ts`).
+ * The page-level `label` is the one key a translation bundle reaches
+ * (`pages.sys_approval_request_detail.label`, in `translations/pages.ts`).
  */
 export const SysApprovalRequestDetailPage: Page = {
   name: 'sys_approval_request_detail',
@@ -103,10 +92,7 @@ export const SysApprovalRequestDetailPage: Page = {
         // dropped it, #29951); the host appends its system actions.
         { type: 'page:header', properties: { placedActions: true } },
 
-        // ── The decision panel ────────────────────────────────────────
-        { type: 'record:approval_decision' },
-
-        // ── Highlight chips, `record_id` left to the details grid ─────
+        // ── Highlight chips, `record_id` left out (see the header) ─────
         {
           type: 'record:highlights',
           properties: {
@@ -114,39 +100,9 @@ export const SysApprovalRequestDetailPage: Page = {
           },
         },
 
-        // ── Tabs: the request's fields, then its timeline ─────────────
-        {
-          type: 'page:tabs',
-          properties: {
-            tabStyle: 'line',
-            position: 'top',
-            items: [
-              {
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles', 'zh-Hant': '詳細資料', 'ar': 'التفاصيل', 'fr': 'Détails', 'pt-BR': 'Detalhes', 'ru': 'Подробности', 'de': 'Details', 'ko': '세부 정보' },
-                icon: 'file-text',
-                children: [{ type: 'record:details' }],
-              },
-              {
-                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
-                icon: 'history',
-                children: [
-                  {
-                    type: 'record:related_list',
-                    properties: {
-                      objectName: 'sys_approval_action',
-                      relationshipField: 'request_id',
-                      columns: ['created_at', 'action', 'actor_id', 'step_label', 'comment', 'attachments'],
-                      sort: [{ field: 'created_at', order: 'desc' }],
-                      limit: 50,
-                      showViewAll: true,
-                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        },
+        // ── The request, whole: decisions, the record as submitted, and the
+        // rail of progress, attachments and activity (objectstack#34588) ──
+        { type: 'record:approval_decision' },
 
         // No `record:discussion` node: the reply is `approval_comment`.
       ],

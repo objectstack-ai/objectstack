@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { installEgressGuard, type EgressPolicy } from '@objectstack/core/egress';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, readOrganizationTextLocale, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -306,6 +307,15 @@ export interface AutomationServicePluginOptions {
      * {@link createPackageFileLoader} and {@link createPackagePathResolver}).
      */
     packageRoot?: string;
+    /**
+     * The outbound-request guard's policy for the flow `http` node's inline
+     * arm. Omitted, the open-core default applies: only public addresses,
+     * plus the targets the operator lists in `OS_EGRESS_ALLOWED_TARGETS`;
+     * link-local and cloud metadata addresses are never reachable. A
+     * multi-tenant host binds a stricter policy here (it is asked per
+     * organization and source). A malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -1456,6 +1466,32 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
 }
 
 /**
+ * [#34655, ADR-0126 §4] The engine's reader over the BODIES the loader's set
+ * holds: the `defaultActive` package `packageId`'s own flow `name` declares,
+ * through the protocol's `shippedArtifactsOf` (the every-shipper read
+ * `packagedFlowReader` judges a package's own question by, and reached the
+ * same way, by duck type at question time). `undefined` when the package's
+ * body declares none, when the protocol cannot be asked, and when the set
+ * holds no body of that package: the flow then ships on, as every packaged
+ * flow did before the key.
+ */
+export function packagedFlowDefaultReader(ctx: Pick<PluginContext, 'getService'>): (name: string, packageId: string) => boolean | undefined {
+    return (name, packageId) => {
+        let protocol: { shippedArtifactsOf?: (type: string, name: string) => unknown[] } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return undefined;
+        }
+        if (typeof protocol?.shippedArtifactsOf !== 'function') return undefined;
+        const own = protocol.shippedArtifactsOf('flow', name)
+            .find((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === packageId);
+        const declared = (own as { defaultActive?: unknown } | undefined)?.defaultActive;
+        return typeof declared === 'boolean' ? declared : undefined;
+    };
+}
+
+/**
  * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
  * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
  * registry ObjectQL serves, for the `flow` type. See
@@ -1562,6 +1598,25 @@ export function i18nServiceReader(ctx: Pick<PluginContext, 'getService'>): () =>
         }
         return typeof service?.t === 'function' ? service : undefined;
     };
+}
+
+/**
+ * [ruling 6913660232] The engine's reader of the run organization's language —
+ * the language a record write's field value MARKED as text is written in:
+ * `@objectstack/core`'s `resolveOrganizationLocale`, the one reader of the
+ * deployment-default ladder (the Localization setting when somebody set it,
+ * else the app's declared `i18n.defaultLocale`).
+ *
+ * Both services are resolved at QUESTION time, for {@link i18nServiceReader}'s
+ * reason, by core's `readOrganizationTextLocale` — the reading a hook's or
+ * action's declared text shares (#34374). A composition with neither answers
+ * `undefined`, and the text is written as authored; an unregistered
+ * Localization setting is not set; any other settings read that throws rejects.
+ */
+export function organizationLocaleReader(
+    ctx: Pick<PluginContext, 'getService'>,
+): (tenantId: string | undefined) => Promise<string | undefined> {
+    return (tenantId) => readOrganizationTextLocale((name) => ctx.getService(name), tenantId);
 }
 
 /**
@@ -2236,6 +2291,13 @@ export class AutomationServicePlugin implements Plugin {
         // node renders, never at boot (see `i18nServiceReader`).
         this.engine.setI18nServiceSource(i18nServiceReader(ctx));
 
+        // [ruling 6913660232] The organization's language, for a record field
+        // value marked as text: its Localization setting when somebody set it,
+        // else the app's declared `i18n.defaultLocale` — the one reader of that
+        // ladder. Both services are probed when a record node asks, never at
+        // boot, for `i18nServiceReader`'s reason.
+        this.engine.setOrganizationLocaleResolver(organizationLocaleReader(ctx));
+
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
 
@@ -2244,6 +2306,10 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+        // [#34655, ADR-0126 §4] The default a package's own flow declares,
+        // read off the loader's body, so a `.custom` override armed in its
+        // place does not move it. See `packagedFlowDefaultReader`.
+        this.engine.setPackagedFlowDefaultSource(packagedFlowDefaultReader(ctx));
 
         // [ADR-0150 D3] Which item a bare flow name means, for a caller of a
         // package or of none, is the one package-scoped resolver's answer over
@@ -2281,7 +2347,11 @@ export class AutomationServicePlugin implements Plugin {
         // Seed the platform's built-in node executors. A bare
         // `new AutomationServicePlugin()` is thus a self-contained automation
         // capability — no companion node-pack plugins required (ADR-0018).
-        installBuiltinNodes(this.engine, ctx);
+        // The outbound-request guard the `http` node sends through, installed
+        // here so a malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which
+        // the guard cannot prove it judges every connection, fails the boot.
+        const egress = await installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger });
+        installBuiltinNodes(this.engine, ctx, { egress });
 
         if (this.options.debug) {
             ctx.hook('automation:beforeExecute', async (flowName: string) => {
@@ -2521,10 +2591,17 @@ export class AutomationServicePlugin implements Plugin {
         // #1928 — bridge the object registry so `registerFlow` runs the same
         // schema-aware condition checks as `objectstack build`: unknown-field
         // refs, likely bare-field typos, and text/boolean fields misused in
-        // arithmetic. Everything it surfaces is advisory (logged, never thrown),
-        // so a dynamically-registered flow (which bypasses the build lint) still
-        // gets the guardrail. Wired BEFORE the flow pull below so pulled flows
-        // are covered too. Best-effort: without ObjectQL, registration falls back
+        // arithmetic. What it surfaces on a flow CONDITION is advisory (logged,
+        // never thrown), so a dynamically-registered flow (which bypasses the
+        // build lint) still gets the guardrail. One verdict is thrown (#34451):
+        // on a flow VALUE envelope (`assignment` values, `create_record` /
+        // `update_record` `fields.*`) of a record-triggered flow or a
+        // time-relative sweep of the typed object that rebinds neither
+        // `record` nor `previous` itself, the date-text family refuses
+        // registration — so with this resolver wired a stored flow carrying
+        // `timestamp(record.<date field>)` there stops registering until
+        // rewritten. Wired BEFORE the flow pull below so pulled flows are
+        // covered too. Best-effort: without ObjectQL, registration falls back
         // to syntax + bare-ref validation only.
         try {
             const ql = ctx.getService<{
@@ -2535,7 +2612,8 @@ export class AutomationServicePlugin implements Plugin {
                     parseObjectFieldSchema((ql.registry!.getObject!(objectName) as { fields?: unknown } | undefined)?.fields));
                 ctx.logger.debug(
                     '[Automation] object-schema resolver bridged to objectql.registry ' +
-                    '(flow conditions are checked against object fields at registration)',
+                    '(flow conditions are checked against object fields at registration, advisory; ' +
+                    'flow value envelopes are refused on the date-text family)',
                 );
             }
         } catch {
@@ -2594,6 +2672,10 @@ export class AutomationServicePlugin implements Plugin {
                         ...(grants.posture ? { posture: grants.posture } : {}),
                         // [ADR-0151 D3] An AI service account runs as an agent.
                         ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
+                        // [#33661] The capabilities the user holds, read by a
+                        // dry run's admission (`requiredPermissions`) alone;
+                        // run setup does not seed them on a run.
+                        systemPermissions: grants.systemPermissions,
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
@@ -6134,6 +6216,14 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         this.syncedFlowNames = freshNames;
+        // [#34655, L2 S4] A reload may have changed the loader's set (a hot
+        // upgrade of a base package), and the loop above keeps some bodies it
+        // did not re-register: a winner the mutation sync armed from this same
+        // stored row, and one whose re-registration threw. A declared
+        // override's stored body does not change with its base, so the
+        // package default the engine read for it must be read again here, not
+        // only when a body is registered.
+        this.engine.refreshPackagedFlowDefaults();
         // [#21725] Every mark is spent: from here on this re-sync's
         // registrations are the ones the engine holds.
         this.mutationArmedFlows.clear();

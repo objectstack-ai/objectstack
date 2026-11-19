@@ -22,8 +22,9 @@
  * `handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx)`).
  *
  * Anything the resolver declines to map (an `array` with no `items`, a bare
- * `{type:'object'}`, a union) is simply not claimed here either — it stays
- * editable in the repeater, so no descriptor can make a stored key unreachable.
+ * `{type:'object'}`, a union, a schemaless `{}`) is simply not claimed here
+ * either — it stays editable in the repeater, so no descriptor can make a
+ * declared or stored key unreachable.
  *
  * ## The measured schema language
  *
@@ -42,21 +43,34 @@
  * — a per-key `required: true` map, not JSON Schema. They are different contracts
  * that share a name; only the descriptor one is read here.
  *
- * ## additionalProperties — measured, then followed
+ * ## Open or closed — the run's rule, mirrored
  *
- * No shipped connector emits `additionalProperties` at all, and JSON Schema's
- * default for an absent one is OPEN. The runtime agrees: the executor passes the
- * whole input map to the handler unvalidated, so undeclared keys really are
- * accepted. So the rule is the JSON-Schema rule — CLOSED iff
- * `additionalProperties === false`, OPEN otherwise (absent, `true`, or a value
- * schema) — and an open schema keeps the repeater alongside the typed fields for
- * exactly the keys the typed fields don't own.
+ * Since objectstack#33614 the `connector_action` node REFUSES, at run time, an
+ * input key the action's schema does not declare (`service-automation`
+ * `connector-input-schema.ts`, `declaredKeysOf` and the `refuseUndeclaredKeys`
+ * walk; the node door passes `{ refuseUndeclaredKeys: true }` in
+ * `builtin/connector-nodes.ts`). Not JSON Schema's open default: no shipped
+ * connector writes `additionalProperties`, so under that default every key
+ * would pass. {@link connectorInputContractKeys} mirrors that judgment for the
+ * top level of the input map:
+ *   • DECLARED = the names in `properties` plus those in `required`;
+ *   • OPEN (every key accepted) when `additionalProperties` or
+ *     `unevaluatedProperties` is anything but `false`, when a key-admitting
+ *     keyword is present (`$ref`, `allOf` / `anyOf` / `oneOf`,
+ *     `patternProperties`, …), or when the schema lists no `properties` and
+ *     does not say `additionalProperties: false`;
+ *   • CLOSED otherwise.
  *
- * A closed schema drops the repeater, EXCEPT when the stored map already holds
- * undeclared keys: this package's standing rule is that a field is shown when it
- * holds a stored value "so existing config is never hidden"
- * ({@link isFieldVisible}), and silently hiding a key an older flow committed
- * would be worse than offering an editor the new schema no longer invites.
+ * The extras repeater follows it. An open schema keeps the repeater for every
+ * key the typed fields don't own. A closed schema keeps it only for a key it
+ * DECLARES that the resolver cannot type — an openapi operation's `$ref` or
+ * schemaless request `body` (declared `body: {}`), slack's item-less `blocks`
+ * — and the repeater then marks every key the schema does not declare as one
+ * the run refuses ({@link FlowConfigField.acceptedKeys}). A stored undeclared
+ * key on a closed schema keeps the repeater too, flagged rather than hidden or
+ * dropped: this package's standing rule is that a field holding a stored value
+ * is shown "so existing config is never hidden" ({@link isFieldVisible}), and
+ * the author is the one to remove it.
  *
  * NOT represented: JSON Schema `required`. `FlowConfigField` has no requiredness
  * concept, so the typed fields cannot mark it — a descriptor's `required: [...]`
@@ -87,7 +101,14 @@ export interface ConnectorInputForm {
    * property the resolver declined is absent here and stays repeater-editable.
    */
   declaredKeys: string[];
-  /** Whether undeclared keys are accepted (`additionalProperties !== false`). */
+  /**
+   * The top-level keys the action DECLARES, as the run judges them
+   * ({@link connectorInputContractKeys}), or `null` when its input is open.
+   * A superset of {@link declaredKeys}: it also holds the declared keys the
+   * resolver could not type, which the repeater still offers.
+   */
+  contractKeys: string[] | null;
+  /** Whether the run accepts undeclared keys: `contractKeys === null`. */
   open: boolean;
 }
 
@@ -118,6 +139,39 @@ export function connectorActionInputSchema(
   return isPlainObject(schema) ? schema : undefined;
 }
 
+/**
+ * Keywords that can admit a key not listed in `properties` / `required`:
+ * pattern-matched keys, and every way a schema pulls in another schema's keys.
+ * A schema carrying one reads as OPEN. The run's list, verbatim
+ * (`service-automation` `connector-input-schema.ts` `KEY_ADMITTING_KEYWORDS`).
+ */
+const KEY_ADMITTING_KEYWORDS = [
+  'patternProperties', '$ref', '$dynamicRef', '$recursiveRef', 'allOf', 'anyOf', 'oneOf',
+  'if', 'then', 'else', 'dependentSchemas', 'dependencies',
+];
+
+/**
+ * The keys an action's input schema DECLARES at the top level, or `null` when
+ * the run reads its input as OPEN and accepts any key — the mirror of the
+ * run's `declaredKeysOf` (`service-automation` `connector-input-schema.ts`),
+ * which the `connector_action` node refuses undeclared keys by. A non-object
+ * schema declares nothing judgeable: `null`.
+ */
+export function connectorInputContractKeys(schema: unknown): string[] | null {
+  if (!isPlainObject(schema)) return null;
+  if (KEY_ADMITTING_KEYWORDS.some((k) => Object.prototype.hasOwnProperty.call(schema, k))) return null;
+  const additional = schema.additionalProperties;
+  if (additional !== undefined && additional !== false) return null;
+  const unevaluated = schema.unevaluatedProperties;
+  if (unevaluated !== undefined && unevaluated !== false) return null;
+  const properties = isPlainObject(schema.properties) ? schema.properties : undefined;
+  if (!properties && additional !== false) return null;
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((k): k is string => typeof k === 'string')
+    : [];
+  return [...new Set([...Object.keys(properties ?? {}), ...required])];
+}
+
 /** Re-root one resolver field from `config.*` onto `connectorConfig.input.*`. */
 function reroot(field: FlowConfigField): FlowConfigField {
   const out: FlowConfigField = {
@@ -137,12 +191,17 @@ function reroot(field: FlowConfigField): FlowConfigField {
 
 /**
  * Resolve a descriptor `inputSchema` into the Input section's typed fields, or
- * `null` when it is not a usable object schema (so the caller keeps the generic
- * repeater unchanged).
+ * `null` when there is nothing to change: no object schema, or an OPEN one the
+ * resolver types no field of (so the caller keeps the generic repeater
+ * unchanged). A CLOSED schema always resolves — even with no typed field (an
+ * openapi operation whose only input is a schemaless `body`), the run refuses
+ * every key it does not declare, and the repeater has to say so.
  */
 export function connectorInputFields(schema: unknown): ConnectorInputForm | null {
-  const raw = jsonSchemaToFlowFields(schema);
-  if (!raw || raw.length === 0) return null;
+  if (!isPlainObject(schema)) return null;
+  const contractKeys = connectorInputContractKeys(schema);
+  const raw = jsonSchemaToFlowFields(schema) ?? [];
+  if (raw.length === 0 && contractKeys === null) return null;
   const fields = raw.map(reroot);
   // The owned key is the first segment after `connectorConfig.input` — so a
   // flattened group (`…input.retry.attempts`) is claimed by `retry`, once.
@@ -151,8 +210,7 @@ export function connectorInputFields(schema: unknown): ConnectorInputForm | null
     const key = f.path[CONNECTOR_INPUT_PATH.length];
     if (key && !declaredKeys.includes(key)) declaredKeys.push(key);
   }
-  const additional = isPlainObject(schema) ? (schema as { additionalProperties?: unknown }).additionalProperties : undefined;
-  return { fields, declaredKeys, open: additional !== false };
+  return { fields, declaredKeys, contractKeys, open: contractKeys === null };
 }
 
 /**
@@ -205,9 +263,12 @@ export function mergeConnectorInputExtras(
  * repeater IN PLACE (so the connector / action pickers above it and `timeoutMs`
  * below it keep their positions).
  *
- * The repeater is kept after the typed fields when the schema is open, or when
- * the stored map still holds undeclared keys (never hide existing config); it
- * then carries `omitKeys` so it edits only what the typed fields don't own.
+ * The repeater is kept after the typed fields when the schema is open, when it
+ * declares a key the typed fields don't own, or when the stored map still holds
+ * a key no typed field owns (never hide existing config); it then carries
+ * `omitKeys` so it edits only what the typed fields don't own. On a closed
+ * schema it also carries `acceptedKeys` — the declared keys — so a key the run
+ * refuses is marked as such, stored or newly typed.
  * Returns the input array unchanged (same reference) when there is nothing to do.
  */
 export function applyConnectorInputForm(
@@ -223,11 +284,17 @@ export function applyConnectorInputForm(
   if (at === -1) return fields;
   const repeater = fields[at];
   const hasExtras = Object.keys(connectorInputExtras(storedInput, form.declaredKeys)).length > 0;
-  const keepRepeater = form.open || hasExtras;
+  const untyped = form.contractKeys?.filter((k) => !form.declaredKeys.includes(k)) ?? [];
+  const keepRepeater = form.open || untyped.length > 0 || hasExtras;
+  const kept: FlowConfigField = {
+    ...repeater,
+    omitKeys: form.declaredKeys,
+    ...(form.contractKeys ? { acceptedKeys: form.contractKeys } : {}),
+  };
   return [
     ...fields.slice(0, at),
     ...form.fields,
-    ...(keepRepeater ? [{ ...repeater, omitKeys: form.declaredKeys }] : []),
+    ...(keepRepeater ? [kept] : []),
     ...fields.slice(at + 1),
   ];
 }

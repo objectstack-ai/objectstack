@@ -18,7 +18,7 @@
 import type { MetadataConversion } from './types.js';
 
 // [#29987 codemod] Every conversion below moved to a module of its own under
-// `./entries/` (`scripts/codemod-split-conversions-registry.mjs`). Imported in
+// `./entries/` (split by #29993). Imported in
 // the order the definitions stood in this file, and listed in the tables below
 // exactly as before.
 import { flowNodeHttpRename } from './entries/11/flow-node-http-callout-rename.js';

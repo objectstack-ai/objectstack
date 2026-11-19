@@ -50,6 +50,7 @@
     "automation/FlowFunctionLoweredDeclaration",
     "automation/FlowNode",
     "automation/FlowNodeAction",
+    "automation/FlowRecordFieldValue",
     "automation/FlowRegion",
     "automation/FlowRunGateSummary",
     "automation/FlowRunNodeSummary",

@@ -288,22 +288,22 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
     (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
     `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
-    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
-    objectstack workflow edits (`readWorkflowDiff`), skills-only wording and add-only ADR notes (`lowRiskArmVerdict`;
-    the seat labels unnamed security teaching) read as S): those four lift once the PR thread or its card carries a
-    `## Contract review` record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict
-    and every check is green — the owning seat lands it through the queue. A PR whose only governed paths are register
-    rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a
-    hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR,
-    under any account** — an authorized account is agent-operated too; "CI is green" says nothing about a governance
-    change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
+    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档 L2 审核落地: `.claude/**`,
+    objectstack workflow edits (`readWorkflowDiff`), skills-only wording and add-only ADR notes (`lowRiskArmVerdict`, on
+    a `Security-touching: no` record, no named card ever labelled `security`; the seat labels unnamed security teaching)
+    read as S): those four lift once the PR thread or its card carries a PASS `## Contract review` record for the PR's
+    current head with `Served-tier: CONTRACT_REVIEW_TIER` and every check is green — the owning seat queues it. A PR
+    whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving
+    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
+    says nothing about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
-    an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue
-    membership), so ask the maintainer at once to remove a queued PR by hand — then confirm from the remote that it is
+    an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue` (measured live, comment 6902190812); any
+    other seat, or a stroke that does not land, asks the maintainer at once — then confirm from the remote that it is
     in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
     spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
-    governed diff without its tier's record; CODEOWNERS routes every Tier H surface but the low-risk catalogs to the
+    governed diff without its tier's record; CODEOWNERS routes every Tier H surface but the low-risk arm's rows to the
     approvers, the relay asks per pull on drafts (no barrier); the post-merge audit (`check-governed-merges.mjs`) lists
     every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
     approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.

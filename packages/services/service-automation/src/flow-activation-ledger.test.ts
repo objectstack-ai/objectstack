@@ -792,11 +792,13 @@ describe('ADR-0126 §7.3 (enable direction) — re-enabling a packaged caller is
 
         expect(thrown.message).toContain("'shared_step' (its definition's status is 'obsolete')");
         expect(thrown.message).toContain("Publish 'shared_step' with status 'active'");
-        // ⛔ Never the toggle for this child: `toggleFlow('shared_step', true)`
-        // lands and leaves it exactly as disabled as it was, so prescribing it
-        // would be a remedy the administrator can follow and still be refused.
+        // ⛔ Never the toggle for this child: the switch never moves a status,
+        // so `toggleFlow('shared_step', true)` is itself refused and the child
+        // stays exactly as disabled as it was — prescribing it would be a
+        // remedy the administrator can follow and still be refused.
         expect(thrown.message).not.toContain("Enable 'shared_step'");
-        expect((await engine.toggleFlow('shared_step', true).then(() => engine.execute('shared_step'))).code).toBe('FLOW_DISABLED');
+        await expect(engine.toggleFlow('shared_step', true)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect((await engine.execute('shared_step')).code).toBe('FLOW_DISABLED');
         await expect(engine.toggleFlow('vendor_process', true)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
 
         // The remedy, followed: the definition republished active.

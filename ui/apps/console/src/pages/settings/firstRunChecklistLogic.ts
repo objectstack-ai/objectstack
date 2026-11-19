@@ -148,10 +148,15 @@ export interface ChecklistCompletion {
 /**
  * The checklist's completion, counted over the rows it shows that are not
  * optional. An optional row neither holds the checklist open nor counts toward
- * the progress line.
+ * the progress line. `isOptional` defaults to the platform's own optional rows;
+ * the checklist passes its profile's answer (`isProfileOptionalRow`), which a
+ * host can widen.
  */
-export function checklistCompletion(rows: ReadonlyArray<{ id: string; done: boolean }>): ChecklistCompletion {
-  const required = rows.filter((row) => !isOptionalRow(row.id));
+export function checklistCompletion(
+  rows: ReadonlyArray<{ id: string; done: boolean }>,
+  isOptional: (id: string) => boolean = isOptionalRow,
+): ChecklistCompletion {
+  const required = rows.filter((row) => !isOptional(row.id));
   const done = required.filter((row) => row.done).length;
   return { done, total: required.length, complete: done === required.length };
 }
@@ -494,26 +499,39 @@ export function isMailConfigured(values: Record<string, ResolvedSettingValue>): 
 }
 
 /**
+ * Is the stated live value one in use? Read from `source`, never from a `null`
+ * value ({@link SettingsLiveValue}): `'none'` is nothing in use; `'settings'`
+ * is in use and always names an option; `'environment'` is in use, naming an
+ * option or, with `value: null`, a provider the host hands over that no option
+ * names (a hosting platform's own mail transport). `undefined` when the entry
+ * is no statement the server serves, so the caller decides as if unstated.
+ */
+function liveValueInUse(stated: SettingsLiveValue | undefined): boolean | undefined {
+  if (!stated || typeof stated !== 'object') return undefined;
+  const { value, source } = stated;
+  if (source === 'none') return false;
+  if (source === 'environment' && value === null) return true;
+  if (source === 'settings' || source === 'environment') return typeof value === 'string' && value !== '';
+  return undefined;
+}
+
+/**
  * The mail row from the `mail` namespace's payload: done when the running
  * system delivers mail.
  *
  * The server's statement (`live.provider` of `GET /api/settings/mail`) decides
- * first: a provider in use, taken from the settings or from the deployment's
- * own boot environment, is done; `source: 'none'` (the development log, which
- * delivers nothing) is not done, whatever was saved. Mail set up through the
- * environment saves nothing, so the saved values alone would keep that row not
- * done for good. A payload without the statement (a server older than it, or
- * one that cannot state the provider) falls back to the saved values
- * ({@link isMailConfigured}), never to "not set".
+ * first, read from its `source` ({@link liveValueInUse}): a provider in use,
+ * taken from the settings or from the deployment's own boot environment or
+ * host (a host's own transport is stated with a `null` value), is done;
+ * `source: 'none'` (the development log, which delivers nothing) is not done,
+ * whatever was saved. Mail set up through the environment saves nothing, so
+ * the saved values alone would keep that row not done for good. A payload
+ * without the statement (a server older than it, or one that cannot state the
+ * provider) falls back to the saved values ({@link isMailConfigured}), never
+ * to "not set".
  */
 export function isMailDelivering(payload: Pick<SettingsNamespacePayload, 'values' | 'live'>): boolean {
-  const stated = payload.live?.[MAIL_PROVIDER_KEY];
-  if (stated && typeof stated === 'object') {
-    const { value, source } = stated;
-    if (source === 'none') return false;
-    if (source === 'settings' || source === 'environment') return typeof value === 'string' && value !== '';
-  }
-  return isMailConfigured(payload.values);
+  return liveValueInUse(payload.live?.[MAIL_PROVIDER_KEY]) ?? isMailConfigured(payload.values);
 }
 
 /** Has the organization been given a name of its own? */
@@ -540,9 +558,12 @@ export function hasInvitedColleagues(
  * names it.
  */
 export interface AiProviderState {
-  /** A provider is in use: the stated value is one, from the settings or the boot environment. */
+  /** A provider is in use, read from the stated `source`: from the settings, or from the boot environment or host. */
   done: boolean;
-  /** The stated value, or `null` when none is in use. */
+  /**
+   * The stated value: `null` when none is in use, or when the provider in use
+   * comes from the environment and no option names it.
+   */
   value: string | null;
   /** Where the running system took it from. */
   source: SettingsLiveValue['source'];
@@ -563,10 +584,13 @@ export interface AiProviderState {
 export function aiProviderState(payload: Pick<SettingsNamespacePayload, 'manifest' | 'live'>): AiProviderState | undefined {
   const stated = payload.live?.[AI_PROVIDER_KEY];
   if (!stated || typeof stated !== 'object') return undefined;
-  const { value, source } = stated;
-  if (source !== 'settings' && source !== 'environment' && source !== 'none') return undefined;
-  const inUse = source !== 'none' && typeof value === 'string' && value !== '';
+  const inUse = liveValueInUse(stated);
+  if (inUse === undefined) return undefined;
   if (!inUse) return { done: false, value: null, source: 'none' };
+  const { value, source } = stated;
+  // In use from the environment, named by no option: done, the stated source
+  // kept, and no option to name it by.
+  if (value === null) return { done: true, value: null, source };
   const spec = payload.manifest.specifiers.find((s) => s.key === AI_PROVIDER_KEY);
   const option = (spec?.options ?? []).find((o) => String(o.value) === value);
   const label = option ? resolveLabel(option.label) : undefined;

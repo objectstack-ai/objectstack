@@ -315,6 +315,13 @@ export class AppPlugin implements Plugin {
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
     /** [#31382] The host's per-kernel scheduled-work policy for this app's jobs; absent ⇒ the deployment switch. */
     private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
+    /**
+     * [#34458] The inline boot seed's loader while it holds person references
+     * its pass 2 left NULL because no `sys_user` row answered yet — the first
+     * admin of a single-tenant install signs up after the boot seed ran. Read
+     * by {@link registerSeedPersonReferenceHandoff}; released once it holds none.
+     */
+    private heldSeedPersonReferences?: SeedLoaderService;
 
     /**
      * `this.bundle` with every package-owned collection resolved across BOTH
@@ -957,6 +964,8 @@ export class AppPlugin implements Plugin {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
+            // [#34273] An action's declared refusal is translated as a hook's is.
+            i18n: hookRefusalI18nReader(ctx),
             getService: (name) => ctx.getService(name),
         }));
         if (installed !== false) {
@@ -1952,8 +1961,8 @@ export class AppPlugin implements Plugin {
         // just contributed and every dataset lands twice. `mergeSeedDatasets`
         // is a plain `push` with no de-duplication, so both copies reach the
         // shared registry, the inline loader and every later per-org replay:
-        // for a `mode: 'insert'` dataset that is the row applied twice per
-        // boot, not merely doubled work.
+        // for a dataset whose key matches no row yet, that is the row applied
+        // twice per boot, not merely doubled work.
         const manifest = this.bundle.manifest || this.bundle;
         if (manifest && Array.isArray(manifest.data) && manifest.data !== this.collections.data) {
             seedDatasets.push(...manifest.data);
@@ -2054,8 +2063,9 @@ export class AppPlugin implements Plugin {
                      const seedLoader = new SeedLoaderService(
                          ql, md, loggerRef, seedLoaderOptionsFor(ctx, options?.reseed === true ? 'reseed' : 'honour'),
                      );
-                     const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-                     const request = SeedLoaderRequestSchema.parse({
+                     // [#34613] `loadStored`: a stored dataset declaring a
+                     // retired `mode` is refused alone; the rest load.
+                     const result = await seedLoader.loadStored({
                          seeds: datasetsNow,
                          config: {
                              // [#30081] No mode of its own: each dataset's
@@ -2077,7 +2087,6 @@ export class AppPlugin implements Plugin {
                              ...(seedLocale ? { locale: seedLocale.locale } : {}),
                          },
                      });
-                     const result = await seedLoader.load(request);
                      // [#23354] The rows this replay landed on, for the
                      // organization's owner-bind claim (`seededRecordIds` with
                      // this organization): it hands over these rows and no
@@ -2155,11 +2164,12 @@ export class AppPlugin implements Plugin {
                   const metadata = ctx.getService('metadata') as IMetadataService | undefined;
                   if (metadata) {
                       const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
-                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       // [#16595] `Seed.locale`'s producer on the DEFAULT boot
                       // path — see {@link resolveSeedLocale}.
                       const seedLocale = this.resolveSeedLocale();
-                      const request = SeedLoaderRequestSchema.parse({
+                      // [#34613] `loadStored`: a stored dataset declaring a
+                      // retired `mode` is refused alone; the rest load.
+                      const result = await seedLoader.loadStored({
                           seeds: normalizedDatasets,
                           config: {
                               // [#30081] No mode of its own: a replay on a
@@ -2172,7 +2182,11 @@ export class AppPlugin implements Plugin {
                               ...(seedLocale ? { locale: seedLocale } : {}),
                           },
                       });
-                      const result = await seedLoader.load(request);
+                      // [#34458] A person the seed names who does not exist yet
+                      // (the first admin) left a NULL; the handoff below
+                      // resolves it once a `sys_user` row is inserted.
+                      this.heldSeedPersonReferences =
+                          seedLoader.heldPersonReferenceCount() > 0 ? seedLoader : undefined;
                       // [#23354] Publish the rows this seed landed on BEFORE the
                       // source settles, so the seed-ownership claim that runs on
                       // `app:seeded` reads them: it hands over these rows and no
@@ -2194,12 +2208,21 @@ export class AppPlugin implements Plugin {
                       // that, at every level; framework#4012 fixed that half, but
                       // the level gate below is what still hides these.) One
                       // labelled entry per config app.
+                      //
+                      // A load the loader REFUSED before any dataset ran (a
+                      // `Seed.dependsOn` it cannot honour) wrote no row, so
+                      // every row counter is zero and the refusal lives only in
+                      // `errors[]`. Counted as rejected, one per error — the
+                      // shape the marketplace sample-data heal records
+                      // (`rejected: summary.errors`) — so the banner's `Seeds:`
+                      // row and the settled message say the seed failed.
+                      const refusedLoad = !result.success && result.results.length === 0 ? result.errors.length : 0;
                       recordSeedOutcome(ctx, {
                           source: String(appId),
                           inserted: totalInserted,
                           updated: totalUpdated,
                           skipped: totalSkipped,
-                          rejected: totalErrored,
+                          rejected: totalErrored + refusedLoad,
                           droppedRefs: totalRefsDropped,
                       });
                       if (result.success) {
@@ -2359,6 +2382,52 @@ export class AppPlugin implements Plugin {
 
         this.registerHotReloadSeeder(ctx, ql);
         this.registerSeedTenancyHandoff(ctx, ql);
+        this.registerSeedPersonReferenceHandoff(ctx, ql);
+    }
+
+    /**
+     * [#34458] Resolve the inline boot seed's person references the moment a
+     * person exists to resolve them to.
+     *
+     * An un-walled boot seed loads before the first admin's `sys_user` row
+     * exists, so a `Field.user()` / `Field.lookup('sys_user')` value naming
+     * that admin lands NULL and pass 2 reports it unresolved. The first-admin
+     * handoff (`claimSeedOwnership`, plugin-security) writes `owner_id` and no
+     * other column, and a later boot's replay of a create-only dataset leaves
+     * an existing row as it is, so nothing else ever filled those columns.
+     *
+     * After every `sys_user` insert while the loader holds such references,
+     * the loader retries them by its own resolution rule and writes each one
+     * that now resolves onto the row the seed landed on, only while that column
+     * is still NULL (`SeedLoaderService#resolveHeldPersonReferences`): a row
+     * the seed did not write is never touched (ADR-0138 D1), and a value set
+     * since is kept. The walled boot writes no inline seed (its per-organization
+     * replay waits for the owner's membership instead), so this never holds
+     * anything there.
+     */
+    private registerSeedPersonReferenceHandoff(ctx: PluginContext, ql: any): void {
+        if (!ql || typeof ql.registerMiddleware !== 'function') return;
+        ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            await next();
+            const loader = this.heldSeedPersonReferences;
+            if (!loader) return;
+            const isUserCreate =
+                opCtx?.object === 'sys_user' &&
+                (opCtx?.operation === 'create' || opCtx?.operation === 'insert');
+            if (!isUserCreate) return;
+            try {
+                const { held } = await loader.resolveHeldPersonReferences();
+                if (held === 0 && this.heldSeedPersonReferences === loader) this.heldSeedPersonReferences = undefined;
+            } catch (e: any) {
+                // Best-effort, like the tenancy handoff beside it: the person
+                // was just created and that must stand. The references stay
+                // held and the next `sys_user` insert retries them; a failed
+                // write was already logged at `error` by the loader.
+                ctx.logger.warn('[AppPlugin] seed person-reference handoff failed; the next user insert retries it', {
+                    error: e?.message ?? String(e),
+                });
+            }
+        });
     }
 
     /**
@@ -2583,13 +2652,14 @@ export class AppPlugin implements Plugin {
                     return;
                 }
                 const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
-                const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                 // [#16595] `Seed.locale`'s producer on the dev hot-reload
                 // path. Resolved from the BOOT bundle, not from `payload`: a
                 // reload re-parses the artifact's metadata collections, and
                 // `i18n` is an envelope key that does not travel in it.
                 const seedLocale = this.resolveSeedLocale();
-                const request = SeedLoaderRequestSchema.parse({
+                // [#34613] `loadStored`: a stored dataset declaring a retired
+                // `mode` is refused alone; the rest load.
+                const result = await seedLoader.loadStored({
                     seeds,
                     config: {
                         // [#30081] No mode of its own — the spec default applies.
@@ -2597,7 +2667,6 @@ export class AppPlugin implements Plugin {
                         ...(seedLocale ? { locale: seedLocale } : {}),
                     },
                 });
-                const result = await seedLoader.load(request);
                 const { totalInserted, totalUpdated, totalErrored } = result.summary;
                 ctx.logger.info(
                     `[Seeder] Hot-reload seeded new object(s) ${fresh.join(', ')}: ` +
@@ -2801,6 +2870,22 @@ export class AppPlugin implements Plugin {
         if (i18nConfig?.fallbackLocale && typeof i18nService.setFallbackLocale === 'function') {
             i18nService.setFallbackLocale(i18nConfig.fallbackLocale);
             ctx.logger.debug('[i18n] Set fallback locale', { appId, locale: i18nConfig.fallbackLocale });
+        }
+
+        // [#33634] Thread the declared `i18n.sourceLocale` — the language the
+        // inline labels are written in — the same way and for the same reason:
+        // only this layer sees the stack artifact, and every document-translator
+        // caller (the REST metadata reads, formula `label()`, email option
+        // holes, analytics, upload-link pages) holds only the i18n service. They
+        // pass `getSourceLocale()`, else `getDefaultLocale()`, as the authored
+        // language, so an `en` request on an English-authored stack that
+        // defaults its users to `zh-CN` answers the inline label instead of
+        // walking the fallback chain to the `zh-CN` row. Guarded on "declared
+        // something" like the two above: an app that declares no `sourceLocale`
+        // must not clear one another app on the same kernel declared.
+        if (i18nConfig?.sourceLocale && typeof i18nService.setSourceLocale === 'function') {
+            i18nService.setSourceLocale(i18nConfig.sourceLocale);
+            ctx.logger.debug('[i18n] Set source locale', { appId, locale: i18nConfig.sourceLocale });
         }
 
         // [#7679] Narrow what `getLocales()` REPORTS to the locales the app

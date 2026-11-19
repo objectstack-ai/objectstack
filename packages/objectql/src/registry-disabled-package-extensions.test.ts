@@ -217,3 +217,79 @@ describe('[#30756] the asEnabled fold', () => {
     expect(fieldsOf(served({ asEnabled: OTHER_PKG }))).toEqual(['name', 'qa_score']);
   });
 });
+
+/**
+ * [#34901] The two reads the withheld-field marker and the view save door are
+ * built on: `getWithheldExtensionFields` names what a disable withholds from
+ * the served object (and which package withholds it), and the fold option
+ * `includeDisabledExtensions` folds EVERY disabled package's extension in,
+ * the storage view of the object, without moving any state.
+ */
+describe('[#34901] the withheld-field reader and includeDisabledExtensions', () => {
+  const APP_PKG = 'com.qa.wh.app';
+  const MODULE_PKG = 'com.qa.wh.projects';
+  const OTHER_PKG = 'com.qa.wh.scoring';
+  const OBJECT = 'qw_expense';
+  const manifest = (id: string, type: string) =>
+    ({ id, name: id, version: '1.0.0', type, namespace: 'qw', ...(type === 'module' ? { dependencies: { [APP_PKG]: '^1.0.0' } } : {}) }) as any;
+
+  let registry: SchemaRegistry;
+  beforeEach(() => {
+    registry = new SchemaRegistry({ multiTenant: false });
+    (registry as any).logLevel = 'silent';
+    registry.installPackage(manifest(APP_PKG, 'app'), 'code');
+    registry.installPackage(manifest(MODULE_PKG, 'module'), 'code');
+    registry.installPackage(manifest(OTHER_PKG, 'module'), 'code');
+    registry.registerObject({
+      name: OBJECT, label: 'Expense', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+    } as any, APP_PKG, 'qw', 'own');
+    registry.registerObject({
+      name: OBJECT,
+      fields: {
+        qw_project: { name: 'qw_project', type: 'text', label: 'Project' },
+        qw_shared: { name: 'qw_shared', type: 'text', label: 'Shared' },
+      },
+    } as any, MODULE_PKG, 'qw', 'extend');
+    registry.registerObject({
+      name: OBJECT,
+      fields: {
+        qw_score: { name: 'qw_score', type: 'number', label: 'Score' },
+        qw_shared: { name: 'qw_shared', type: 'text', label: 'Shared' },
+      },
+    } as any, OTHER_PKG, 'qw', 'extend');
+  });
+  const fieldsOf = (body: any): string[] => Object.keys(body?.fields ?? {}).filter((f) => f.startsWith('qw_') || f === 'name').sort();
+
+  it('names each withheld field with the disabled package that adds it, and nothing a kept contributor also declares', () => {
+    expect(registry.getWithheldExtensionFields(OBJECT), 'nothing disabled ⇒ nothing withheld').toEqual({});
+    registry.disablePackage(MODULE_PKG);
+    expect(registry.getWithheldExtensionFields(OBJECT)).toEqual({ qw_project: { packageId: MODULE_PKG } });
+    expect(fieldsOf(registry.getObject(OBJECT)), 'the reader agrees with the served fold').toEqual(['name', 'qw_score', 'qw_shared']);
+    registry.disablePackage(OTHER_PKG);
+    expect(registry.getWithheldExtensionFields(OBJECT)).toEqual({
+      qw_project: { packageId: MODULE_PKG },
+      qw_shared: { packageId: MODULE_PKG },
+      qw_score: { packageId: OTHER_PKG },
+    });
+    expect(registry.getWithheldExtensionFields('qw_unknown'), 'an unknown object withholds nothing').toEqual({});
+  });
+
+  it('re-enabling the package clears the reader with no other write', () => {
+    registry.disablePackage(MODULE_PKG);
+    expect(Object.keys(registry.getWithheldExtensionFields(OBJECT))).toEqual(['qw_project']);
+    registry.enablePackage(MODULE_PKG);
+    expect(registry.getWithheldExtensionFields(OBJECT)).toEqual({});
+    expect(fieldsOf(registry.getObject(OBJECT))).toEqual(['name', 'qw_project', 'qw_score', 'qw_shared']);
+  });
+
+  it('includeDisabledExtensions folds every disabled extension in, and leaves the served fold and the disable state alone', () => {
+    registry.disablePackage(MODULE_PKG);
+    registry.disablePackage(OTHER_PKG);
+    const owner = { name: OBJECT, label: 'Expense', fields: { name: { name: 'name', type: 'text', label: 'Name' } } };
+    const storage = registry.foldObjectExtendersOnto(OBJECT, owner, { includeDisabledExtensions: true });
+    expect(fieldsOf(storage)).toEqual(['name', 'qw_project', 'qw_score', 'qw_shared']);
+    expect(fieldsOf(registry.foldObjectExtendersOnto(OBJECT, owner)), 'control: unset, the served fold').toEqual(['name']);
+    expect(fieldsOf(registry.getObject(OBJECT))).toEqual(['name']);
+    expect(registry.isPackageDisabled(MODULE_PKG) && registry.isPackageDisabled(OTHER_PKG)).toBe(true);
+  });
+});

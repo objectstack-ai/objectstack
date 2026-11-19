@@ -18,6 +18,7 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams, useLocation, Link, Navigate } from 'react-router-dom';
 import { useAdapter, SchemaRendererProvider, useMetadata } from '@object-ui/react';
+import { leadWithNameField } from '@object-ui/core';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
 // copy that did the unwrap and skipped the strip.
@@ -37,6 +38,8 @@ import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { customizationNamespace } from '@objectstack/spec/kernel';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
+import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
+import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
   StudioRightSlotContext,
   isSlotEscapeExempt,
@@ -58,12 +61,15 @@ import {
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
+  STUDIO_HEADER_PILLAR_NAME,
+  STUDIO_HEADER_WIDE_WORD,
   STUDIO_HEADER_PILLAR,
   STUDIO_HEADER_PILLAR_NAV,
   STUDIO_KIND_CHIP,
+  STUDIO_PILLARS_HOST,
 } from './studio-tokens.js';
 import { StudioInspector } from './StudioInspector.js';
-import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
+import { agentDraftMarkOf, DraftChip, DraftSourceLine, isAgentDraftSurface } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
   StudioItemHeaderFoldedItems,
@@ -82,6 +88,7 @@ import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
+import { RECORDS_SCROLLBAR_VISIBLE, revealColumn } from './recordsGridChrome.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
 import {
@@ -93,6 +100,7 @@ import {
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
 import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { StudioOpenApp, type StudioOpenAppTarget } from './StudioOpenApp.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -216,6 +224,7 @@ import {
   FileQuestion,
   PackageX,
   Library,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -348,6 +357,7 @@ import {
   useSurfaceDeepLink,
   useSurfaceDeepLinkCapture,
   useSurfaceDeepLinkMirror,
+  useSurfaceActionDeepLink,
   resolveSurfaceDeepLink,
   type SurfaceTarget,
 } from './useSurfaceDeepLink.js';
@@ -380,11 +390,13 @@ import {
 import {
   FlowMetaPills,
   FlowPreviewChromeProvider,
+  FlowSelectionTitle,
   flowSelectionHeading,
   type FlowPreviewSection,
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
+import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import {
   navEntryLabelText,
@@ -412,6 +424,7 @@ import {
 import { readAuthoredDraft } from './authoredDraft.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
+import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAddFieldValue } from './StudioGridAddField.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
@@ -1256,8 +1269,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
   // Builder → running-app bridge (Airtable's Launch): the builder edits the
   // package (the design surface), the app is its published front-end. If this
-  // package ships an app, offer Open app — opened in a new tab so the builder
-  // context survives. (App → builder is the reverse bridge, tracked separately.)
+  // package ships a published app, the header offers Open app (`StudioOpenApp`,
+  // objectstack#34593), in the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
@@ -1274,6 +1287,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // order: the Automations rail orders its groups by it. Read off the same
   // app row as `packageApp`, so the pillar adds no read of its own.
   const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
+  // objectstack#34593 — the package's PUBLISHED apps, the header's Open app
+  // targets: a draft app has no running front-end to open. Read off the same
+  // list as `packageApp`.
+  const [publishedApps, setPublishedApps] = React.useState<readonly StudioOpenAppTarget[]>([]);
   // Create app (package has no app yet): create a draft `app` item — the
   // published front-end's on-ramp. The button flips to Open app after the
   // package publish.
@@ -1374,11 +1391,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     if (packageId === null) {
       setPackageApp(null);
       setPackageAppObjectOrder([]);
+      setPublishedApps([]);
       return;
     }
     try {
       const apps = (await shellClient.list('app', { packageId })) as Array<Record<string, unknown>>;
       setPackageAppObjectOrder(navigationObjectOrder((apps || []).find((a) => a?.name)?.navigation));
+      setPublishedApps(
+        (apps || [])
+          .filter((a) => a?.name)
+          .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as I18nLabel })),
+      );
       let first = (apps || [])
         .map((a) => ({
           name: String(a.name ?? ''),
@@ -1399,6 +1422,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     } catch {
       setPackageApp(null);
       setPackageAppObjectOrder([]);
+      setPublishedApps([]);
     }
   }, [shellClient, packageId]);
   React.useEffect(() => {
@@ -1463,7 +1487,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     available: false,
     planPendingCount: 0,
   });
-  const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
+  // objectstack#34610 — the copilot's expand control widens the slot in place
+  // (it used to navigate to `/ai/build`, losing this page).
+  const [copilotWide, setCopilotWide] = React.useState(false);
+  // objectstack#34725 — the copilot's history list, behind the slot header's History button.
+  const [copilotHistoryOpen, setCopilotHistoryOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
   const copilotAvailable = copilotStatus.available;
   // What the slot SHOWS: a missing half never shows.
@@ -1508,6 +1536,21 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [slotHost, slotOpen, setSlotOpen, slotHasProps, copilotAvailable, shownSlotMode]);
+  // objectstack#34725 — the top-bar robot's handle on the slot: pressed while
+  // the slot shows; a press hides it, or shows it on the AI assistant.
+  const openSlotOnCopilot = React.useCallback(() => {
+    setSlotMode('copilot');
+    setSlotOpen(true);
+  }, [setSlotOpen]);
+  const slotRobotControl = React.useMemo<ChatDockControl>(
+    () => ({
+      expanded: slotOpen,
+      fullWindow: copilotWide,
+      toggle: () => (slotOpen ? setSlotOpen(false) : openSlotOnCopilot()),
+      open: openSlotOnCopilot,
+    }),
+    [slotOpen, copilotWide, setSlotOpen, openSlotOnCopilot],
+  );
 
   /**
    * Host side of the live `?surface=` channel. Producers below the provider —
@@ -1651,8 +1694,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                       pillars read as icons, the name kept in the accessible
                       name and the tooltip. objectstack#28561 — the "All
                       metadata" area is named from 1280 px: the top bar's
-                      1024 px row was sized for the four pillar names. */}
-                  <span className={p.key === STUDIO_METADATA_AREA ? 'sr-only xl:not-sr-only' : 'sr-only lg:not-sr-only'}>
+                      1024 px row was sized for the four pillar names.
+                      objectstack#34725 — both now answer the bar's own width
+                      (see STUDIO_HEADER_PILLAR_NAME). */}
+                  <span className={p.key === STUDIO_METADATA_AREA ? STUDIO_HEADER_WIDE_WORD : STUDIO_HEADER_PILLAR_NAME}>
                     {t(`engine.studio.pillar.${p.key}`, locale)}
                   </span>
                 </Link>
@@ -1664,10 +1709,21 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#26708 — nothing to create, review or publish in a
                   package that is not there. */}
               {!pkgMissing && (<>
-              {/* objectui#5800 — the Open app teleport is retired: the canvas's
-                  Run mode IS the way to try the app without leaving the
-                  workbench. The published-app state needs no chrome at all.
-                  objectui#11553 — the package-less scope has no app to create. */}
+              {/* objectstack#34593 — the way back to the running app, the
+                  mirror of the app bar's Edit app: it lands on the object (or
+                  interface) in focus, in the same tab. The canvas's Run mode
+                  stays the way to try the app without leaving the workbench.
+                  objectui#11553 — the package-less scope has no app. */}
+              {packageId !== null && (
+                <StudioOpenApp
+                  packageId={packageId}
+                  apps={publishedApps}
+                  locale={locale}
+                  beforeNavigate={confirmLeavePillar}
+                  navigate={shellNavigate}
+                />
+              )}
+              {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span
                   title={t('engine.studio.app.willOpenAfterPublish', locale)}
@@ -1684,7 +1740,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  <span className="sr-only xl:not-sr-only">{t('engine.studio.app.create', locale)}</span>
+                  <span className={STUDIO_HEADER_WIDE_WORD}>{t('engine.studio.app.create', locale)}</span>
                 </button>
               )}
               {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
@@ -1747,8 +1803,20 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               )}
               </>)}
               {/* objectui#12725 — the top bar's right-most icon shows or hides
-                  the right slot; `⌘.` switches what it shows. */}
-              {slotHost && slotHasContent && (
+                  the right slot; `⌘.` switches what it shows.
+                  objectstack#34725 — with a copilot served, that icon is the
+                  console top bar's robot (the same component, in the same
+                  place), and it opens the slot on the AI assistant. Without
+                  one, the panel icon stays for the properties. */}
+              {slotHost && slotHasContent && copilotAvailable && (
+                <>
+                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+                  <ChatDockControlProvider value={slotRobotControl}>
+                    <AssistantTopBarButton />
+                  </ChatDockControlProvider>
+                </>
+              )}
+              {slotHost && slotHasContent && !copilotAvailable && (
                 <>
                   <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
                   <button
@@ -1777,7 +1845,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             </p>
           )}
 
-          <div className="min-h-0 flex-1">
+          {/* objectstack#35061 — the pillars' host is what the rails' narrow
+              form measures, and it says whether the right slot squeezes it
+              (`STUDIO_PILLARS_HOST` in `studio-tokens.ts`): the slot shown
+              beside it, not overlaying the page under `md`. */}
+          <div
+            className={cn('min-h-0 flex-1', STUDIO_PILLARS_HOST)}
+            data-testid="studio-pillars-host"
+            data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
+          >
             {/* objectui#12725 — the pillars' item headers read the ledger the
                 badge counts (`studioItemDraftStatus.ts`). */}
             <StudioPendingDraftsContext.Provider value={pillarPendingDrafts}>
@@ -1845,6 +1921,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onHeldEditChange={setHeldEdit}
+                onSurfaceLabelChange={setSurfaceLabel}
+                onReviewChanges={() => {
+                  setChangesPosture('review');
+                  setChangesOpen(true);
+                }}
               />
             ) : tab === 'automations' ? (
               <AutomationsPillar
@@ -1856,6 +1937,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onHeldEditChange={setHeldEdit}
+                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : tab === 'access' ? (
               // objectstack#28573 — keyed by package like its siblings: "New
@@ -1871,6 +1953,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onDirtyChange={setPillarDirty}
+                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : (
               // objectui#11203 / objectui#11232 — keyed by package. A package
@@ -1923,17 +2006,22 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             copilotAvailable={copilotAvailable}
             planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
-            wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
+            wideWidth={copilotWide && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
+            wide={copilotWide}
+            onWideChange={setCopilotWide}
+            historyOpen={copilotHistoryOpen}
+            onHistoryOpenChange={setCopilotHistoryOpen}
+            onClose={() => setSlotOpen(false)}
             overlay={isMobile}
             onOverlayDismiss={() => setSlotOpen(false)}
             locale={locale}
             copilot={
               <StudioChatDock
                 packageId={packageId}
-                locale={locale}
                 surfaceLabel={surfaceLabel}
                 onStatusChange={setCopilotStatus}
-                onCanvasOpenChange={setCopilotCanvasOpen}
+                historyOpen={copilotHistoryOpen}
+                onHistoryOpenChange={setCopilotHistoryOpen}
               />
             }
           />
@@ -5266,6 +5354,8 @@ export function InterfacesPillar({
                 selection={navSel}
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
                 onRenamePendingChange={setNavRenamePending}
+                // objectstack#34796 — each entry's kind in the words the navigation list uses.
+                kindLabel={(item) => navKindName({ type: item.type, viewName: typeof item.viewName === 'string' ? item.viewName : undefined }, locale)}
               />
             ) : navTree.length === 0 && !(appStatus === 'ready' && placesAnyNav(navPlacement)) ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">
@@ -5396,6 +5486,10 @@ export function renderStudioGridList(props: {
       onEdit={onEdit}
       onAddRecord={onAddRecord}
       className={className}
+      // objectstack#34794 — the Records tab's always-visible Add field, at the
+      // start of this toolbar row; it draws only where the grid's "+" column
+      // does (see `StudioGridAddFieldButton`).
+      toolbarLeading={<StudioGridAddFieldButton />}
     />
   );
 }
@@ -5409,10 +5503,16 @@ export function DataPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
+  onSurfaceLabelChange,
+  onReviewChanges,
 }: {
   packageId: string;
   publishNonce?: number;
   onDraftSaved?: (saved?: StudioSavedDraft) => void;
+  /** objectstack#34725 — the open object's display label and tab, for the copilot's chip (see the Interfaces pillar's prop). */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** objectstack#34725 — the copilot-changes line's 查看: open the package's pending changes. */
+  onReviewChanges?: () => void;
   /** Courtesy gate: hide/disable metadata-authoring affordances (records stay usable). */
   readOnly?: boolean;
   /** objectstack#28572 — on a read-only base, its pair: the rail lists the pair's objects too, and New lands there. */
@@ -5623,6 +5723,30 @@ export function DataPillar({
   // Validations edits `validations` rules; Settings edits object basics +
   // the ADR-0085 semantic roles. All patch the one `objDraft`.
   const [viewMode, setViewMode] = React.useState<'grid' | 'form' | 'rules' | 'settings' | 'hooks' | 'actions' | 'api'>('grid');
+  // objectstack#34725 — lift the open object's label to the copilot's chip,
+  // with the tab in view: 「正在看：会议 · 记录」, never the machine name. The
+  // Interfaces pillar's report (objectui#8219) is the same seam; keyed on
+  // primitives, the callback read through a ref.
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const currentObjectName = current?.type === 'object' ? current.name : undefined;
+  const currentObjectLabel = current?.type === 'object' ? current.label : undefined;
+  const viewModeLabel = t(`engine.studio.data.tab.${viewMode === 'grid' ? 'records' : viewMode}`, locale);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      currentObjectName && currentObjectLabel
+        ? { type: 'object', name: currentObjectName, label: `${currentObjectLabel} · ${viewModeLabel}` }
+        : null,
+    );
+  }, [currentObjectName, currentObjectLabel, viewModeLabel]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   // objectui#11781 — the field inspector belongs to the view that opened it,
   // so a view switch closes it, the same act as its own Close: the selection
   // goes, and its blocking count expires with it (see `blockingReport`). Left
@@ -5651,6 +5775,10 @@ export function DataPillar({
     }
     setFieldSel({ kind: target.kind, id: target.id });
   };
+  // objectstack#34724 — `?surface=object:<name>&action=<action>` opens the
+  // deep-linked object's Actions view on that action (Studio's landing links a
+  // switched-off action that lives in its object's `actions[]` here).
+  useSurfaceActionDeepLink(initialSurface, current, (name) => showObjTarget({ kind: 'action', id: name }));
   // objectstack#26730 — a refusal's "Show me" also ends on the input it names:
   // in the field inspector, or in the actions panel for an action.
   const fieldInspectorBodyRef = React.useRef<HTMLDivElement>(null);
@@ -6231,13 +6359,28 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
+  const draftNameField = shownDraft.nameField;
+  const draftDisplayNameField = shownDraft.displayNameField;
   const gridColumnsComputed = React.useMemo(() => {
-    // objectstack#29793 — the served object's columns the buffer does not
-    // declare (`owner_id` and the other injected ones) lead, as they lead the
-    // served object: the grid shows the records as the server has them.
+    // objectstack#29793 — the grid also shows the served object's columns the
+    // buffer does not declare (`owner_id` and the other injected ones).
+    // objectstack#34794 — they follow the author's fields, and the object's
+    // name field leads: the design grid opens on the column that tells its
+    // rows apart. The lead is the ADR-0079 D4 order through the shared
+    // `leadWithNameField`, over the fields this memo already holds. This is
+    // the design grid's default only; runtime list views keep their order.
     const held = readFields(shownDraft.fields).entries;
     const heldNames = new Set(held.map((e) => e.name));
-    return [...servedOnly.filter((e) => !heldNames.has(e.name)), ...held]
+    const all = [...held, ...servedOnly.filter((e) => !heldNames.has(e.name))];
+    // Only the declared pointer keys and the fields reach the helper, so the
+    // memo stays keyed on them rather than on the whole draft (see above).
+    const ordered = leadWithNameField(
+      { nameField: draftNameField, displayNameField: draftDisplayNameField, fields: Object.fromEntries(all.map((e) => [e.name, e.def])) },
+      all.map((e) => e.name),
+    );
+    const byName = new Map(all.map((e) => [e.name, e]));
+    return ordered
+        .map((n) => byName.get(n)!)
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
@@ -6258,7 +6401,7 @@ export function DataPillar({
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
         .filter((n) => publishedFieldNames.has(n));
-  }, [shownDraft.fields, publishedFieldNames, servedOnly]);
+  }, [shownDraft.fields, draftNameField, draftDisplayNameField, publishedFieldNames, servedOnly]);
   // objectstack#28575 — with a base object's extension open, the folded object
   // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
   // extension field would hand the grid a fresh columns array per keystroke:
@@ -6640,6 +6783,62 @@ export function DataPillar({
   // or, objectstack#27176, an `mcp` one: an agent through the MCP build door.
   const fieldAgentMark =
     objLoaded && fieldSel?.kind === 'field' ? agentDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
+  // objectstack#34725 — the same marks on the canvas: the records grid's
+  // column header and the Form canvas's field card of every field an AI tool
+  // changed in the pending draft, read off the same `draftChanges` (no other
+  // read), and the line over the canvas counting the draft's AI entries.
+  const agentDraftChanges = objLoaded ? objDraftChanges : null;
+  const agentDraftCount = React.useMemo(
+    () => (agentDraftChanges ?? []).filter((change) => isAgentDraftSurface(change.by)).length,
+    [agentDraftChanges],
+  );
+  const shownFieldNamesKey = readFields(shownDraft.fields).entries.map((e) => e.name).join('\n');
+  const agentMarkedFields = React.useMemo<ReadonlySet<string>>(() => {
+    const marked = new Set<string>();
+    if (!agentDraftChanges || !shownFieldNamesKey) return marked;
+    for (const name of shownFieldNamesKey.split('\n')) {
+      if (agentDraftMarkOf(agentDraftChanges, ['fields', name])) marked.add(name);
+    }
+    return marked;
+  }, [agentDraftChanges, shownFieldNamesKey]);
+  const agentColumnMarks = React.useMemo(() => {
+    if (agentMarkedFields.size === 0) return undefined;
+    const marks: Record<string, React.ReactNode> = {};
+    for (const name of agentMarkedFields) {
+      marks[name] = <DraftChip locale={locale} of={name} testId="studio-grid-column-draft-chip" />;
+    }
+    return marks;
+  }, [agentMarkedFields, locale]);
+  // 放弃全部未发布改动 — the package's discard door (`packages.discardDrafts`),
+  // which drops every pending draft of the package, the author's own too; the
+  // confirm says so. There is no per-turn undo.
+  const [discardingDrafts, setDiscardingDrafts] = React.useState(false);
+  const discardAllDrafts = React.useCallback(async () => {
+    if (!adapter || !window.confirm(t('engine.studio.copilotChanges.discardConfirm', locale))) return;
+    setDiscardingDrafts(true);
+    try {
+      const result = await adapter.getClient().packages.discardDrafts(packageId);
+      if (!result.success || result.failedCount > 0) {
+        // The sentence names each item as the rail does (its label, else its
+        // name); the server's own words stay behind Details, never in it.
+        const labelOf = (f: { type: string; name: string }) =>
+          (f.type === 'object' && objects.find((o) => o.type === 'object' && o.name === f.name)?.label) || f.name;
+        const items = [...new Set(result.failed.map(labelOf))].join(
+          t('engine.studio.copilotChanges.itemSeparator', locale),
+        );
+        setError({
+          message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { items }),
+          detail: result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('\n') || undefined,
+        });
+      }
+    } catch (e) {
+      setError(plainRefusal(e));
+    } finally {
+      setDiscardingDrafts(false);
+      reloadObjDraft();
+      emitMetadataRefresh();
+    }
+  }, [adapter, locale, objects, packageId, reloadObjDraft]);
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
   // objectstack#27511 — opening another object replaces the one buffer the
   // open object's edits live in, and the autosave's timer sends nothing once
@@ -6765,6 +6964,25 @@ export function DataPillar({
   // take focus back when the popover closes.
   const [gridAddFieldOpen, setGridAddFieldOpen] = React.useState(false);
   const gridAddFieldButton = React.useRef<HTMLElement | null>(null);
+  // Scopes the selected-header outline rule to this records body.
+  const recordsColumnsScope = React.useId();
+  // objectstack#35061 — a field selected while the Records grid is open (by
+  // its header, or from the field list) has its column scrolled into view:
+  // not under the frozen name column, not past the right edge.
+  const recordsBodyRef = React.useRef<HTMLDivElement | null>(null);
+  const selectedFieldId = fieldSel?.kind === 'field' ? fieldSel.id : null;
+  React.useEffect(() => {
+    if (viewMode !== 'grid' || selectedFieldId === null) return;
+    const header = Array.from(recordsBodyRef.current?.querySelectorAll('thead th[data-column-key]') ?? []).find(
+      (th) => th.getAttribute('data-column-key') === selectedFieldId,
+    );
+    if (header) revealColumn(header);
+  }, [viewMode, selectedFieldId]);
+  // objectstack#34794 — what the Records toolbar's Add field creates with.
+  const gridAddFieldCreate = React.useMemo<StudioGridAddFieldValue>(
+    () => ({ onCreate: addField, takenNames: addFieldTakenNames, extensionField: extendsBase }),
+    [addField, addFieldTakenNames, extendsBase],
+  );
 
   // Drag-reorder columns → reorder the object's `fields` metadata (field display
   // order follows metadata order), saved as a DRAFT. Published later via the
@@ -6836,6 +7054,19 @@ export function DataPillar({
     baseOwnedFields !== null &&
     baseOwnedFields.has(String(fieldSel.id));
   const addFieldWalledId = React.useId();
+  // objectstack#35018 — the field rail draws ONE header: the aside's names the
+  // field (its label, one close) and the shared field inspector below draws
+  // none of its own (`InspectorShellHostProvider`, the flow inspector's
+  // objectui#12488 seam); its actions sit in this header's slot. The field's
+  // machine name is not in the header: it is the inspector's 开发者信息.
+  const [fieldHeaderSlot, setFieldHeaderSlot] = React.useState<HTMLElement | null>(null);
+  const fieldRailHosted = fieldSel?.kind === 'field' && Boolean(inspector);
+  const fieldRailTitle = React.useMemo(() => {
+    if (fieldSel?.kind !== 'field') return undefined;
+    const entry = readFields(shownDraft.fields).entries.find((e) => e.name === fieldSel.id);
+    const label = entry?.def.label;
+    return typeof label === 'string' && label ? label : String(fieldSel.id);
+  }, [fieldSel, shownDraft.fields]);
 
   // objectui#12725 — the field rail is up exactly when the render below draws
   // it; that is when the pillar holds the slot's properties half. A selection
@@ -7165,8 +7396,10 @@ export function DataPillar({
             }
             icon={current ? HeaderIcon : undefined}
             title={current ? current.label : t('engine.studio.data.objects', locale)}
-            titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
-            apiName={current?.name}
+            // objectstack#34794 — the object's machine name is the title's
+            // tooltip, not a chip beside it: the header reads as the label
+            // the app shows, and the name stays one hover away.
+            titleProps={current ? { title: current.name } : { className: 'text-[13px] font-normal text-muted-foreground' }}
             chips={current?.addedIn ? <StudioPairItemChip pairId={current.addedIn} locale={locale} /> : undefined}
             meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
@@ -7210,9 +7443,10 @@ export function DataPillar({
                 {/* objectui#12511 — the header holds no actions of its own, so
                     it reads the same on every tab. Object settings retired: the
                     Settings tab is that control. Add field is a field action,
-                    offered where fields are laid out: the Form toolbar and the
-                    Records grid's own "+" column, both opening the Add field
-                    popover that runs `addField` (objectui#12516). The
+                    offered where fields are laid out: the Form toolbar, the
+                    Records toolbar (objectstack#34794) and the Records grid's
+                    own "+" column, all opening the Add field popover that
+                    runs `addField` (objectui#12516). The
                     More menu went with it, since the header has no object-level
                     action left to put in one. */}
                 {/* objectui#12453 — on the Form tab it carries the layout's
@@ -7318,6 +7552,51 @@ export function DataPillar({
                   <ExternalObjectNotice binding={objExternal} state={objExternalWriteState} locale={locale} />
                 </div>
               )}
+              {/* objectstack#34725 — the AI assistant's drafts are on this
+                  canvas: say how many, where to review them, and the one undo
+                  there is (the package's discard). */}
+              {agentDraftCount > 0 && (
+                <div
+                  role="status"
+                  data-testid="studio-copilot-changes"
+                  className={cn(
+                    'mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-1.5 text-xs dark:border-amber-500/30 dark:bg-amber-500/10',
+                    bodyFlush && 'mx-6 mt-3',
+                  )}
+                >
+                  <span className="inline-flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-200">
+                    <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {tFormat(
+                      agentDraftCount === 1 ? 'engine.studio.copilotChanges.lineOne' : 'engine.studio.copilotChanges.line',
+                      locale,
+                      { count: agentDraftCount },
+                    )}
+                  </span>
+                  <span className="ml-auto inline-flex items-center gap-3">
+                    {!readOnly && adapter && (
+                      <button
+                        type="button"
+                        data-testid="studio-copilot-changes-discard"
+                        onClick={() => void discardAllDrafts()}
+                        disabled={discardingDrafts}
+                        className="text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                      >
+                        {t('engine.studio.copilotChanges.discardAll', locale)}
+                      </button>
+                    )}
+                    {onReviewChanges && (
+                      <button
+                        type="button"
+                        data-testid="studio-copilot-changes-view"
+                        onClick={onReviewChanges}
+                        className="font-medium text-amber-700 hover:underline dark:text-amber-300"
+                      >
+                        {t('engine.studio.copilotChanges.view', locale)}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
               {!objLoaded ? (
                 // objectui#11272 — no view of another object's buffer under
                 // this one; after a failed load, the error above says why.
@@ -7408,16 +7687,44 @@ export function DataPillar({
                 * per-column edit affordance opens the field editor, and dragging a
                 * column header reorders the object's fields (all via the context). */}
               <div
-                className="relative min-h-0 flex-1 overflow-auto bg-background"
+                ref={recordsBodyRef}
+                // objectstack#35061 — the grid's sideways scrollbar is drawn at
+                // rest (`recordsGridChrome.ts`), so a pane the right slot
+                // narrows still shows there are columns to the right.
+                className={cn('relative min-h-0 flex-1 overflow-auto bg-background', RECORDS_SCROLLBAR_VISIBLE)}
                 data-testid="data-records-body"
+                data-records-columns={recordsColumnsScope}
                 onClickCapture={(e) => {
                   // React carries a click inside the (portalled) popover here
                   // too; only a click in the body's own DOM is the grid's.
-                  if (e.target instanceof Element && e.currentTarget.contains(e.target)) {
-                    gridAddFieldButton.current = e.target.closest('button');
-                  }
+                  if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
+                  gridAddFieldButton.current = e.target.closest('button');
+                  // objectstack#34794 — a click on a field's column header
+                  // selects that field and opens its properties, as the
+                  // Interfaces canvas does (objectui#12725's
+                  // `ColumnHeaderSelect`): taken in the capture phase, before
+                  // the header's own sort handler. Sort and hide stay in the
+                  // header's column menu (`columnMenuLabel` below). A control
+                  // inside the header (the menu caret, the edit button) keeps
+                  // its job, and a column the buffer does not declare (an
+                  // injected one) keeps the grid's own click.
+                  const header = e.target.closest('thead th[data-column-key]');
+                  if (!header || !e.currentTarget.contains(header)) return;
+                  const control = e.target.closest('button, input, a, [role="checkbox"]');
+                  if (control && header.contains(control)) return;
+                  const field = header.getAttribute('data-column-key');
+                  if (!field || !readFields(shownDraft.fields).entries.some((en) => en.name === field)) return;
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setFieldSel({ kind: 'field', id: field });
                 }}
               >
+                {fieldSel?.kind === 'field' ? (
+                  // The selected field's header is outlined, as the Interfaces
+                  // canvas outlines its selected column: a style rule, since
+                  // the grid owns its cells and redraws them.
+                  <style>{`[data-records-columns="${recordsColumnsScope}"] thead th[data-column-key=${JSON.stringify(fieldSel.id)}]{box-shadow:inset 0 0 0 2px hsl(var(--primary));}`}</style>
+                ) : null}
                 {canAddFields && (
                   <AddFieldPopover
                     open={gridAddFieldOpen}
@@ -7443,6 +7750,7 @@ export function DataPillar({
                           addColumnLabel: t('engine.studio.data.addField', locale),
                         }
                       : {}),
+                    columnMenuLabel: t('engine.studio.data.columnMenu', locale),
                     onEditColumn: (fieldName) => {
                       // ignore non-field columns (e.g. the row-actions column)
                       if (readFields(shownDraft.fields).entries.some((e) => e.name === fieldName)) {
@@ -7450,8 +7758,11 @@ export function DataPillar({
                       }
                     },
                     editColumnLabel: t('engine.studio.data.editFieldProps', locale),
+                    // objectstack#34725 — the AI assistant's draft marks on the column headers.
+                    ...(agentColumnMarks ? { columnMarks: agentColumnMarks } : {}),
                   }}
                 >
+                  <StudioGridAddFieldProvider value={canAddFields ? gridAddFieldCreate : null}>
                   {/* Provide the adapter as the dataSource context so the object-grid's
                     * inline-edit save can write back: the ListView only fetches and
                     * passes data inline, leaving the grid itself without a write dataSource. */}
@@ -7484,6 +7795,7 @@ export function DataPillar({
                       renderListView={renderStudioGridList}
                     />
                   </SchemaRendererProvider>
+                  </StudioGridAddFieldProvider>
                 </GridFieldAuthoringProvider>
               </div>
               </>
@@ -7520,6 +7832,7 @@ export function DataPillar({
                   readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
+                  draftMarkedFields={agentMarkedFields}
                   formView={formViewLayout}
                 />
                 </>
@@ -7669,11 +7982,21 @@ export function DataPillar({
             className={inSlot ? 'w-full flex-1 border-l-0' : undefined}
             eyebrow={t(fieldSel.kind === 'group' ? 'engine.studio.data.groupProps' : 'engine.studio.data.fieldProps', locale)}
             eyebrowId={fieldRailTitleId}
-            id={fieldSel.id}
+            title={fieldRailHosted ? fieldRailTitle : undefined}
+            id={fieldRailHosted ? undefined : fieldSel.id}
             onClose={() => setFieldSel(null)}
             closeLabel={t('engine.studio.close', locale)}
             // objectui#12725 — the copilot's 草稿 chip on a field it changed.
-            actions={fieldAgentMark ? <DraftChip locale={locale} className="mr-1" /> : undefined}
+            actions={
+              fieldAgentMark || fieldRailHosted ? (
+                <>
+                  {fieldAgentMark && <DraftChip locale={locale} className="mr-1" />}
+                  {fieldRailHosted && (
+                    <span ref={setFieldHeaderSlot} data-testid="data-field-header-actions" className="flex shrink-0 items-center" />
+                  )}
+                </>
+              ) : undefined
+            }
             // objectui#12453 — a read-only package saves no draft: no footer.
             footer={fieldRailReadOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
             bodyClassName="flex min-h-0 flex-1 flex-col"
@@ -7695,6 +8018,7 @@ export function DataPillar({
                   // the pair's extension: its own fields whole, a base field
                   // within the display-property whitelist only.
                   <BaseFieldDisplayPatchContext.Provider value={selectedBaseField}>
+                    <InspectorShellHostProvider value={{ onSelectionChange: setFieldSel, headerActionsTarget: fieldHeaderSlot }}>
                     {React.createElement(inspector, {
                       type: 'object',
                       name: current.name,
@@ -7708,6 +8032,7 @@ export function DataPillar({
                       readOnly: fieldRailReadOnly,
                       locale,
                     })}
+                    </InspectorShellHostProvider>
                   </BaseFieldDisplayPatchContext.Provider>
                 ) : (
                   /* No field inspector registered. ⛔ Not "loading…": the read
@@ -7842,6 +8167,32 @@ export function DataPillar({
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
 export { FlowStatusDot, type NewFlowTrigger };
 
+/**
+ * objectstack#34818 — the names of the flows that have a published version in
+ * these scopes: the published list (`list()` serves no drafts). Any failed read
+ * answers `null`, "unknown", so the Runs tab keeps its sentence that names both
+ * causes rather than claim the flow was never published.
+ */
+async function readPublishedFlowNames(
+  client: Pick<MetadataClient, 'listResponse'>,
+  scopes: ReadonlyArray<string | null>,
+): Promise<ReadonlySet<string> | null> {
+  try {
+    const answers = await Promise.all(
+      scopes.map((packageId) => client.listResponse<Record<string, unknown>>('flow', packageId === null ? {} : { packageId })),
+    );
+    const names = new Set<string>();
+    for (const answer of answers) {
+      for (const item of answer?.items ?? []) {
+        if (item && typeof item.name === 'string' && item.name) names.add(item.name);
+      }
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 /** Automations pillar — flows: list → FlowPreview (default OFF / review-then-enable). */
 export function AutomationsPillar({
   packageId: railPackageId,
@@ -7851,6 +8202,7 @@ export function AutomationsPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
+  onSurfaceLabelChange,
 }: {
   /**
    * The package whose flows the rail lists, or `null` for the package-less
@@ -7873,6 +8225,11 @@ export function AutomationsPillar({
   customization?: StudioBaseCustomization | null;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
   onHeldEditChange?: (clause: string | null) => void;
+  /**
+   * objectstack#35018 — the open flow's label for the copilot's chip:
+   * 「正在看：流程 · 新会议提醒」, never the type word and machine name.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -8025,9 +8382,38 @@ export function AutomationsPillar({
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
+  // The package's translations of the flow label and its approval-step labels (flow-label-translations.tsx).
+  const flowLabels = useFlowLabelTranslations(current?.name ?? '');
+  // objectstack#35018 — lift the open flow's label to the copilot's chip, the
+  // pillar's word first: 「正在看：流程 · 新会议提醒」 — the label the canvas
+  // header reads. Keyed on primitives, the callback read through a ref.
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const currentFlowType = current?.type;
+  const currentFlowName = current?.name;
+  const currentFlowLabel = current ? flowLabels?.flowLabel || current.label : undefined;
+  const flowSubject = t('engine.studio.copilot.subject.flow', locale);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      currentFlowType && currentFlowName && currentFlowLabel
+        ? { type: currentFlowType, name: currentFlowName, label: `${flowSubject} · ${currentFlowLabel}` }
+        : null,
+    );
+  }, [currentFlowType, currentFlowName, currentFlowLabel, flowSubject]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
+  // The aside header's slot for the hosted inspector's header actions (the
+  // flow node's "···" menu), so they sit in the title bar (`InspectorShellHost`).
+  const [configHeaderSlot, setConfigHeaderSlot] = React.useState<HTMLElement | null>(null);
   // objectstack#26858 — the server's verdict on the flow on screen: the pending
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
@@ -8125,6 +8511,10 @@ export function AutomationsPillar({
   // list's `registrations` (served beside the items, keyed by name). A flow
   // with no entry is one no engine judged, which reads as before.
   const [flowRegistrations, setFlowRegistrations] = React.useState<Record<string, FlowRegistration>>({});
+  // objectstack#34818 — the flows of the rail's scope that have a published
+  // version, so the Runs tab can tell "not published yet" from "the engine is
+  // not answering". `null` until read, and after a failed read: unknown.
+  const [publishedFlowNames, setPublishedFlowNames] = React.useState<ReadonlySet<string> | null>(null);
   // objectui#12454 — the rail groups flows by the object each is about and
   // marks each with its trigger kind, both read off the flow's definition as
   // served (`flowGrouping.ts`), with the scope's objects naming the groups.
@@ -8193,7 +8583,7 @@ export function AutomationsPillar({
                 readFlowDefinitions(client, pairId),
                 readObjectLabels(client, pairId, locale),
               ]);
-        const [baseItems, registrations, definitions, objects, pair] = await Promise.all([
+        const [baseItems, registrations, definitions, objects, pair, publishedNames] = await Promise.all([
           packageId === null
             ? loadPackageLessSurfaces(client, 'flow', locale)
             : loadPackageSurfaces(client, 'flow', packageId, locale),
@@ -8201,10 +8591,12 @@ export function AutomationsPillar({
           readFlowDefinitions(client, packageId),
           readObjectLabels(client, packageId, locale),
           readPair().catch(() => null),
+          readPublishedFlowNames(client, [packageId, ...(pairId === null ? [] : [pairId])]),
         ]);
         if (cancelled) return;
         const items: Surface[] = withPairItems<Surface>(baseItems, pair?.[0] ?? [], pairId);
         setFlows(items);
+        setPublishedFlowNames(publishedNames);
         setFlowRegistrations(pair ? { ...pair[1], ...registrations } : registrations);
         setFlowDefinitions(pair ? new Map([...pair[2], ...definitions]) : definitions);
         setObjectLabels(pair ? new Map([...pair[3], ...objects]) : objects);
@@ -8398,10 +8790,14 @@ export function AutomationsPillar({
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
+  // objectstack#34818 — the flow whose last autosave landed with nothing edited
+  // since: its header row says 已保存 in place of a toast. The next edit clears it.
+  const [flowSavedFor, setFlowSavedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
       setAutoDirty(true);
+      setFlowSavedFor(null);
     },
     [],
   );
@@ -8409,6 +8805,12 @@ export function AutomationsPillar({
     if (!current) return;
     setSaving('draft');
     setError(null);
+    // objectstack#34818 — a landed autosave raises no toast (the header says
+    // 已保存); a failed one does, once per flow, beside its refusal strip.
+    const announceFailed = () =>
+      toast.error(tFormat('engine.studio.flowSaveFailed', locale, { item: current.label || current.name }), {
+        id: `studio-draft-failed:flow:${current.name}`,
+      });
     try {
       // objectstack#28570 — a read-only base's flow is saved into the pair the
       // ensure door answers, under its own name, declaring the override. A
@@ -8422,11 +8824,13 @@ export function AutomationsPillar({
           pair = await pairForFlow(custom, current.name);
         } catch (e) {
           setError(plainRefusal(e));
+          announceFailed();
           return;
         }
         const declared = overrideDraftBody(draft, custom.base, custom.basedOn);
         if (declared === null) {
           setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          announceFailed();
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -8454,13 +8858,19 @@ export function AutomationsPillar({
       // objectstack#26858 — the stored draft carries its own verdict now.
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
-      if (sent.unmoved()) setAutoDirty(false);
-      // objectstack#28984 — named as the rail names the flow.
-      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
+      // objectstack#34818 — and only then does the header say 已保存: an edit
+      // made in flight is not saved yet. The header row names the flow, which
+      // is what ruling 6545938831 ② on #28345 asks of write feedback, so the
+      // flow pillar raises no "Draft of X saved" toast (seat ruling 6954475081).
+      if (sent.unmoved()) {
+        setAutoDirty(false);
+        setFlowSavedFor(current.name);
+      }
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.
       setError(flowSaveRefusal(e, draft, locale));
+      announceFailed();
     } finally {
       setSaving(false);
     }
@@ -8746,6 +9156,12 @@ export function AutomationsPillar({
   React.useEffect(() => {
     if (flowSelectionKey && showSlotProps) showSlotProps();
   }, [flowSelectionKey, showSlotProps]);
+  // objectstack#34818 — Debug takes the Configuration's place in the slot, so
+  // opening it shows the properties half, where the simulator is drawn.
+  const flowDebugOpen = flowSection === 'debug';
+  React.useEffect(() => {
+    if (flowDebugOpen && showSlotProps) showSlotProps();
+  }, [flowDebugOpen, showSlotProps]);
   React.useEffect(() => {
     if (!inSlot || !flowSelectionKey) return;
     const onKey = (e: KeyboardEvent) => {
@@ -9221,7 +9637,7 @@ export function AutomationsPillar({
               </button>
             }
             icon={current ? Workflow : undefined}
-            title={current ? current.label || current.name : t('engine.studio.auto.heading', locale)}
+            title={current ? flowLabels?.flowLabel || current.label || current.name : t('engine.studio.auto.heading', locale)}
             titleProps={
               current
                 ? { 'data-testid': 'auto-canvas-caption', title: `${t('designer.field.apiName', locale)}: ${current.name}` }
@@ -9272,6 +9688,21 @@ export function AutomationsPillar({
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="auto-autosaving">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
+                  </span>
+                )}
+                {/* objectstack#34818 — the landed autosave, said in the flow's own
+                    title row instead of a toast; read aloud with the flow's name. */}
+                {saving !== 'draft' && current && flowSavedFor === current.name && (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+                    data-testid="auto-autosaved"
+                  >
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span aria-hidden="true">{t('engine.studio.autoSaved', locale)}</span>
+                    <span className="sr-only">
+                      {tFormat('engine.studio.flowSavedNamed', locale, { item: current.label || current.name })}
+                    </span>
                   </span>
                 )}
                 {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
@@ -9456,7 +9887,14 @@ export function AutomationsPillar({
                     {/* objectui#12454 — the header holds the meta and the tabs, so the
                         preview shows the open tab's section and draws no bar of its own. */}
                     <FlowPreviewChromeProvider
-                      value={{ section, onSectionChange: setFlowSection, onProblemsChange: setProblemTally }}
+                      value={{
+                        section,
+                        onSectionChange: setFlowSection,
+                        onProblemsChange: setProblemTally,
+                        published: current && publishedFlowNames ? publishedFlowNames.has(current.name) : undefined,
+                        // objectstack#34818 — in the right slot, Debug draws the simulator there.
+                        debugTarget: inSlot && section === 'debug' ? slot.propsTarget : null,
+                      }}
                     >
                       {React.createElement(Preview, {
                         type: current.type,
@@ -9486,7 +9924,12 @@ export function AutomationsPillar({
           </main>
         </div>
 
-        {flowsEmpty ? null : configFolded && !inSlot ? (
+        {/* #34818 — Debug takes the Configuration's place, and the aside is
+            not drawn: in the classic row the simulator column widens to the
+            aside's width; in the right slot the simulator is drawn in the
+            slot itself (the chrome's `debugTarget`). The selection is kept,
+            so leaving Debug brings the aside back as it was. */}
+        {flowsEmpty || section === 'debug' ? null : configFolded && !inSlot ? (
           // objectui#11795 — the folded row: no aside reserving width beside
           // the canvas; the selection's configuration opens over it, and
           // closing the drawer clears the selection, as the aside's ✕ does.
@@ -9517,15 +9960,16 @@ export function AutomationsPillar({
           // draws none of its own (`InspectorShellHostProvider`). With nothing
           // selected the aside keeps its "Configuration" eyebrow.
           const heading =
-            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale) : null;
+            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale, flowLabels) : null;
           const aside = (
             <StudioInspector
               testId="auto-config-aside"
               className={inSlot ? 'w-full flex-1 border-l-0' : undefined}
               eyebrow={heading?.eyebrow ?? t('engine.studio.auto.config', locale)}
-              title={heading?.title}
+              title={heading && <FlowSelectionTitle heading={heading} locale={locale} />}
               onClose={selection ? () => setSelection(null) : undefined}
               closeLabel={t('engine.studio.deselect', locale)}
+              actions={heading ? <span ref={setConfigHeaderSlot} data-testid="auto-config-header-actions" className="flex shrink-0 items-center" /> : undefined}
               // objectui#12453 — a read-only package saves no draft: no footer.
               // objectstack#28570 — a customized flow saves into the pair.
               footer={
@@ -9540,7 +9984,9 @@ export function AutomationsPillar({
               bodyClassName={heading ? 'p-0' : undefined}
             >
               {heading ? (
-                <InspectorShellHostProvider value={{ onSelectionChange: setSelection }}>{configBodyEl}</InspectorShellHostProvider>
+                <InspectorShellHostProvider value={{ onSelectionChange: setSelection, headerActionsTarget: configHeaderSlot }}>
+                  {configBodyEl}
+                </InspectorShellHostProvider>
               ) : (
                 configBodyEl
               )}
@@ -9767,6 +10213,7 @@ export function AccessPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onDirtyChange,
+  onSurfaceLabelChange,
 }: {
   packageId: string;
   publishNonce?: number;
@@ -9781,6 +10228,13 @@ export function AccessPillar({
    * beforeunload). Reports `false` when the pillar unmounts, same contract as
    * PermissionMatrixEditPage's own onDirtyChange. */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * objectstack#35018 — the open set's label (or the record-visibility
+   * overview's title) for the copilot's chip: 「正在看：权限 · 组织成员」,
+   * never the type word and machine name. Same seam as the Data and
+   * Interfaces pillars' reports.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -9831,6 +10285,35 @@ export function AccessPillar({
   const initialSurface = useSurfaceDeepLink(currentSurface);
   // objectstack#28572 — see `useDeepLinkFallback`.
   const deepLinkUpgrade = useDeepLinkFallback();
+  // objectstack#35018 — lift the open set's label to the copilot's chip, the
+  // pillar's word first: 「正在看：权限 · 组织成员」. Keyed on primitives, the
+  // callback read through a ref (the Data pillar's report).
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const accessSubject = t('engine.studio.copilot.subject.access', locale);
+  const currentSetLabel = current ? perms.find((p) => p.name === current)?.label : undefined;
+  const surfaceReportLabel = owdOpen
+    ? `${accessSubject} · ${t('engine.studio.owd.title', locale)}`
+    : current && currentSetLabel
+      ? `${accessSubject} · ${currentSetLabel}`
+      : undefined;
+  const surfaceReportType = currentSurface?.type;
+  const surfaceReportName = currentSurface?.name;
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      surfaceReportType && surfaceReportName && surfaceReportLabel
+        ? { type: surfaceReportType, name: surfaceReportName, label: surfaceReportLabel }
+        : null,
+    );
+  }, [surfaceReportType, surfaceReportName, surfaceReportLabel]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   const currentRef = React.useRef(current);
   React.useLayoutEffect(() => {
     currentRef.current = current;
@@ -10512,23 +10995,28 @@ export function AccessPillar({
                 if (isMobile) setRailOpen(false);
               }}
               icon={<Shield className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              // objectui#12456 — two-line rows (label, then the api name in
-              // mono) at 36 px: the one height the shared rail lets differ.
-              className="h-9"
+              name={p.label.trim() ? p.label : p.name}
               trailing={
                 <>
                   <RailCustomizationMark row={{ type: 'permission', ...p }} marks={railMarks} locale={locale} />
                   {p.isDefault ? (
-                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">default</span>
+                    <span className="text-[10px] text-muted-foreground/70">{t('perm.badge.default', locale)}</span>
                   ) : null}
                 </>
               }
             >
-              {/* objectui#11862 — the set's label first, its machine name as
-                  secondary text. A set listed from its draft header alone
-                  has no label in hand (the header carries none), so its
-                  name is the text, as before. */}
-              <StudioNameLabel label={p.label} name={p.name} />
+              {/* objectui#11862 — the set's label. objectstack#34795: the
+                  machine name is no longer drawn as secondary text; it is the
+                  row's tooltip. A set listed from its draft header alone has
+                  no label in hand (the header carries none), so its name is
+                  the text, as before. */}
+              <span
+                className="flex min-w-0 flex-1"
+                title={p.label.trim() && p.label !== p.name ? p.name : undefined}
+                data-testid={`access-rail-set-${p.name}`}
+              >
+                <StudioNameLabel label={p.label.trim() ? p.label : p.name} />
+              </span>
             </StudioRailRow>
           ))}
         </StudioRail>

@@ -41,11 +41,12 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "平台管理員權限變更",
           action_invocation: "動作呼叫",
           package_uninstall: "解除安裝套件",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "匯入非受管套件",
+          credential_use: "憑證使用",
+          scim_refused: "SCIM 請求遭拒",
+          audit_signing_key_change: "稽核簽章金鑰變更",
+          dataset_query: "資料集查詢",
+          scim_manager_unresolved: "SCIM 上級無法解析"
         }
       },
       user_id: {

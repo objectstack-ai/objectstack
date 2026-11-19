@@ -54,8 +54,8 @@ async function seedLoad(): Promise<{ written: string[]; refused: Map<number, str
   const metadata = { getObject: async () => PROJECT, listObjects: async () => [PROJECT] };
   const loader = new SeedLoaderService(engine as never, metadata as never, silent as never);
   const result = await loader.load({
-    seeds: [{ object: 'proj_project', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: structuredClone(RECORDS) }],
-    config: { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'insert', batchSize: 1, transaction: false, organizationId: 'org_parity' },
+    seeds: [{ object: 'proj_project', externalId: 'name', mode: 'ignore', env: ['prod', 'dev', 'test'], records: structuredClone(RECORDS) }],
+    config: { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'ignore', batchSize: 1, transaction: false, organizationId: 'org_parity' },
   } as never);
   const refused = new Map<number, string>();
   for (const e of result.errors as Array<{ recordIndex?: number; message: string }>) {

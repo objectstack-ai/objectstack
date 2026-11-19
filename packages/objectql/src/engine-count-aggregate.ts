@@ -50,7 +50,7 @@
  * exist.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30415),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -154,7 +154,7 @@ export async function count(
          // `find()` fallback below composes at its own boundary.
          return driver.count(
            object,
-           await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
+           await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context, countOpts),
            countOpts,
          );
      }

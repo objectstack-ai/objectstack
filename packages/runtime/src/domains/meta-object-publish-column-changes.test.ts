@@ -27,13 +27,17 @@
  * the change the table does not promise (`number` → `text`, the representative
  * `field_type_change`).
  *
- * The last describe owns the other half of the answer: a change the
- * datasource cannot perform. On the Turso REMOTE face (`libsql://`) the relax
- * needs the SQLite table rebuild that transport does not run, so the driver
- * reports it `skipped`, and the publish must say so on its answer as the
+ * The last describe owns the Turso REMOTE face (`libsql://`), whose transport
+ * talks to a SQLite file through `@libsql/client`, the double the driver's own
+ * remote-face pins use. [#33724] That face relaxes a column in place with
+ * libSQL's `ALTER TABLE … ALTER COLUMN … TO …` (ruling 6915086281), so the
+ * publish relaxes it there too, with no advisory. The other half of the
+ * answer, a change the datasource cannot perform, is pinned on the same face
+ * with a column the statement refuses: one whose stored definition holds a
+ * comma, where libSQL's splice of the old definition ends. The driver reports
+ * that relax `skipped`, and the publish must say so on its answer as the
  * `object-column-changes-not-applied` advisory while the table keeps its
- * NOT NULL. The remote transport talks to a SQLite file through
- * `@libsql/client`, the double the driver's own remote-face pins use.
+ * NOT NULL.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -200,9 +204,10 @@ describe('[#32590] publishing a field change on a live object — the table foll
     }, 60_000);
 });
 
-describe('[#32590] publishing a column change the datasource cannot perform — the answer says so', () => {
-    it('Turso REMOTE: the relax needs a table rebuild, so the publish succeeds with the not-applied advisory and the column keeps NOT NULL', async () => {
-        const file = join(home, `turso-remote-${Date.now()}.db`);
+describe('[#32590] publishing a column change on the Turso REMOTE face — applied in place, or the answer says why not', () => {
+    /** A remote-face rig over its own SQLite file, and the reads of that file through a connection of their own. */
+    const remoteRig = async () => {
+        const file = join(home, `turso-remote-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
         const client = createClient({ url: `file:${file}` });
         liveClients.push(client);
         const rig = await boot(() => new TursoDriver({ url: 'libsql://publish-column-changes.example.turso.io', client }));
@@ -216,11 +221,34 @@ describe('[#32590] publishing a column change the datasource cannot perform — 
                 db.close();
             }
         };
+        return { ...rig, client, notNull };
+    };
 
+    it('[#33724] Turso REMOTE: the relax is applied in place, so the publish answers no advisory and a create omitting the field succeeds', async () => {
+        const rig = await remoteRig();
         const first = await rig.saveAndPublish(v1());
         expect(first.published?.success, JSON.stringify(first.published)).toBe(true);
         await rig.engine.insert(OBJECT, { title: 'before', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
-        expect(notNull('title')).toBe(1);
+        expect(rig.notNull('title')).toBe(1);
+
+        const second = await rig.saveAndPublish(v2());
+
+        expect(second.published?.success, JSON.stringify(second.published)).toBe(true);
+        expect(advisoryRules(second), JSON.stringify(second.published)).not.toContain(COLUMN_CHANGES_NOT_APPLIED);
+        expect(rig.notNull('title')).toBe(0);
+        const created: any = await rig.engine.insert(OBJECT, { start_date: LATER, organization_id: ORG }, { context: SYSTEM });
+        expect((await rig.read(created.id)).title ?? null).toBeNull();
+    }, 60_000);
+
+    it('Turso REMOTE: a relax the database refuses leaves the publish a success with the not-applied advisory, and the column keeps NOT NULL', async () => {
+        const rig = await remoteRig();
+        const first = await rig.saveAndPublish(v1());
+        expect(first.published?.success, JSON.stringify(first.published)).toBe(true);
+        await rig.engine.insert(OBJECT, { title: 'before', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
+        // A stored definition holding a comma, here in a CHECK every row satisfies:
+        // libSQL ends the old definition at that comma, so its in-place relax is refused.
+        await rig.client.execute(`ALTER TABLE "${OBJECT}" ALTER COLUMN "title" TO "title" TEXT NOT NULL CHECK (instr("title", ',') >= 0)`);
+        expect(rig.notNull('title')).toBe(1);
 
         const second = await rig.saveAndPublish(v2());
 
@@ -228,6 +256,6 @@ describe('[#32590] publishing a column change the datasource cannot perform — 
         const notApplied = (second.published?.advisories ?? []).filter((a: any) => a?.rule === COLUMN_CHANGES_NOT_APPLIED);
         expect(notApplied.map((a: any) => a.severity), JSON.stringify(second.published)).toEqual(['warning']);
         expect(notApplied[0].message).toContain("'title' (relax_not_null)");
-        expect(notNull('title')).toBe(1);
+        expect(rig.notNull('title')).toBe(1);
     }, 60_000);
 });

@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -27,7 +27,7 @@ Also vendor-integration callbacks and **assignment rules**.
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
 > string, or the `P\`...\`` / `cel\`...\`` tag (author-time validation); pick one
-> per file. Contract, stdlib, legacy → CEL table: **objectstack-formula**.
+> per file.
 
 ---
 
@@ -55,6 +55,12 @@ A flow *beside* it is "new similar": `POST /api/v1/automation/:name/clone`
 `{ name, label, package? }` lands the copy switched off in the pair, never
 package-less; a flow holding a `secret` / `signingSecret` is refused (`409`): author
 it anew.
+
+A package ships a flow **switched off** with `defaultActive: false` (beside
+`status: 'active'`): unarmed (`_status` `enabled: false`) until an administrator
+turns that switch on, which then outlives restart, upgrade and reinstall.
+`status: 'obsolete'` disarms past the switch; a flow authored in the deployment
+is refused the key (its switch is `status`).
 
 ### Flow Node Types
 
@@ -105,25 +111,34 @@ Built-in (plugins register more):
 ### `notify`
 
 An undeclared key is a named parse error. **RAW** keys are read as written:
-a `{token}` in one is refused.
+a `{token}` in one is refused. The node as JSON (TypeScript: the same
+literal, a `FlowNode`):
 
-<!-- os:check -->
-```ts
-import type { FlowNode } from '@objectstack/spec/automation';
-const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.owner_id' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
-    // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
-    // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
-    title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
-    message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
-    topic: 'task',                     // RAW; default 'notify'
-    severity: 'warning',               // RAW; CLOSED enum info|warning|critical
-    channels: ['inbox'],               // RAW; default inbox
-    sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
-    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
-    actionUrl: '/tasks/{{ record.id }}', // overrides the pair
-} };
+```json
+{ "id": "tell_owner", "type": "notify", "label": "Notify Owner", "config": {
+    "recipients": { "dialect": "cel", "source": "record.owner_id" },
+    "title": "Done: {{ record.title }}",
+    "message": "Closed {{ record.closed_at | date:long }}",
+    "topic": "task",
+    "severity": "warning",
+    "channels": ["inbox"],
+    "sourceObject": "task",
+    "sourceId": { "dialect": "cel", "source": "record.id" },
+    "actionUrl": "/tasks/{{ record.id }}"
+} }
 ```
+
+- `recipients` — REQUIRED: id, list, or envelope; a CSV is ONE id. 4th form
+  `{ "emailField": "applicant_email" }`: an `email` field of the trigger record,
+  for a non-user — then `channels: 'email'` alone. An envelope must yield USER
+  ids: an address no user holds fails the node.
+- `title` — inline; XOR `template` (RAW, localizable). `message` — body; only
+  with inline `title`.
+- RAW: `topic` (default `'notify'`), `severity` (CLOSED enum
+  `info` | `warning` | `critical`), `channels` (default inbox).
+- `sourceObject` + `sourceId` — the link: a PAIR, else dropped; none of the 3 ⇒
+  the trigger record (not on delete/before-create), if any. `actionUrl`
+  overrides the pair.
 
 A recipient string, written or evaluated, may be an audience selector:
 
@@ -251,6 +266,12 @@ Most are caught by `objectstack build`:
    is refused with its `{{ }}` spelling. A date or the run user has no hole:
    assign it first (`assignments: { v: { dialect: 'cel', source:
    'current_user.id' } }`), then write `{{ v }}`.
+   `create_record` / `update_record` `fields` also take a text slot, marked
+   `{ dialect: 'template', source }`, for a sentence people read. It is written
+   in the organization's language (Localization setting if set, else
+   `i18n.defaultLocale`; key: **objectstack-i18n**), never the run starter's;
+   untranslated, the authored text; an unreadable setting fails the node. A
+   bare string stays a literal, never translated.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }`
@@ -276,25 +297,25 @@ Most are caught by `objectstack build`:
    database.** It receives `ctx.input` and **returns** a value; a later
    **declarative** node persists its `outputVariable`:
 
-   ```ts
-   { id: 'ai', type: 'script', config: {
-       function: 'helpdesk.aiTriageStub',
-       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } },
-       outputVariable: 'ai',
-   } },
-   { id: 'apply', type: 'update_record', config: {
-       objectName: 'helpdesk_ticket',
-       filter: { id: { dialect: 'cel', source: 'record.id' } },
-       fields: { ai_category: { dialect: 'cel', source: 'ai.ai_category' } },
-   } },
+   ```json
+   [
+     { "id": "ai", "type": "script", "label": "AI Triage", "config": {
+         "function": "helpdesk.aiTriageStub",
+         "inputs": { "ticketId": { "dialect": "cel", "source": "record.id" } },
+         "outputVariable": "ai" } },
+     { "id": "apply", "type": "update_record", "label": "Apply Category", "config": {
+         "objectName": "helpdesk_ticket",
+         "filter": { "id": { "dialect": "cel", "source": "record.id" } },
+         "fields": { "ai_category": { "dialect": "cel", "source": "ai.ai_category" } } } }
+   ]
    ```
 
    A function that writes where the platform cannot see **declares** it, so the
-   run reports "cannot say" rather than `acted: 0`:
+   run reports "cannot say" rather than `acted: 0` (project code — a function
+   has no JSON form):
 
    ```ts
    defineStack({ functions: {
-     'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
      'billing.sync': { handler: syncBilling, effect: 'writes' },
    } });
    ```
@@ -405,9 +426,6 @@ the **start node `config`**:
 | `record-before-write` / `record-after-write` — one flow, both events | insert + update hooks |
 
 ### Trigger Configuration — on the `start` node
-
-A flow around it also owns `label`, `type`, `nodes` and the `edges`
-`FlowSchema` requires:
 
 ```typescript
 {

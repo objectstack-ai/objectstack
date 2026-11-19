@@ -51,7 +51,7 @@
  * exist.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30341),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  *
@@ -71,7 +71,7 @@ import { collectPredicateRelationships, referentialClearBinding } from './valida
 // [#19911] The settlement's question "does judging the FK's own lock need the
 // header it names?" — asked of the same root reader the strips use.
 import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { isFederatedObject } from './federated-object.js';
 import { masterIdOf, servedAsStored, staticReadonlyStoredView, undeclaredRelatedFields } from './engine.js';
@@ -138,6 +138,8 @@ function staticReadonlyStripTakes(
     hookWrittenKeys: ReadonlySet<string> | undefined;
     /** [#24822] The wall's flag, read once by `update()` — see {@link staticReadonlyStoredView}. */
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, read once by `update()` — see {@link staticReadonlyStoredView}. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): boolean {
   if (!strip.runs) return false;

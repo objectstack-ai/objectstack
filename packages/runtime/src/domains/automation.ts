@@ -12,7 +12,7 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
-    matchInboundHookRoute,
+    matchInboundHookRoute, PackageScopedNameRefusedError,
 } from '@objectstack/core';
 // [#22773] The inbound-hook door, handed the one route the floor admits.
 import { handleInboundHookRequest } from './automation-hooks.js';
@@ -2103,6 +2103,71 @@ function servedFlowDefinition<T>(flow: T): T {
     return redactMetadataItem(FLOW_METADATA_TYPE, flow);
 }
 
+/** The engine-local read over every holder (service-automation's `AutomationEngine.getHeldFlow`). */
+interface HeldFlowSource {
+    getHeldFlow?(name: string): unknown;
+}
+
+/**
+ * [ADR-0150 D3, #34145; seat ruling 6884403301, amendment 7; seat ruling
+ * 6911640332, M1 = B] The reader for a DURABLE question this domain's write
+ * doors ask of a flow name — is it taken (the clone's target), what did the
+ * engine hold before this write (the put-back copy), which credential does it
+ * keep (the carried-forward secret), does the engine hold it at all
+ * (`DELETE`'s existence probe). A name ONE package holds is judged over every
+ * holder (`getHeldFlow`): a flow whose one holder's package is disabled is
+ * still held, so these answers do not move with that package's enable state.
+ * A name two packages hold is read on its served holder (`getFlow`), as the
+ * bare read, the bare metadata save (#32605) and amendment 9's doors read it:
+ * the engine's read over every holder refuses such a name, and that refusal
+ * is not the doors' answer. `getFlow` keeps its own refusal for a name two
+ * served holders hold.
+ *
+ * The engine's `getHeldFlow` is engine-local, not on the service contract; a
+ * service without it (a host composing another engine, which has no package
+ * to disable) is asked its `getFlow`. `undefined` when the service offers
+ * neither read.
+ */
+function heldFlowReader(
+    automationService: Pick<IAutomationService, 'getFlow'>,
+): ((name: string) => Promise<unknown>) | undefined {
+    const source = automationService as HeldFlowSource;
+    const getHeldFlow = source.getHeldFlow;
+    const getFlow = automationService.getFlow;
+    const served = typeof getFlow === 'function'
+        ? (name: string): Promise<unknown> => getFlow.call(automationService, name)
+        : undefined;
+    if (typeof getHeldFlow === 'function') {
+        return async (name) => {
+            try {
+                return await getHeldFlow.call(source, name);
+            } catch (e) {
+                if (e instanceof PackageScopedNameRefusedError && served !== undefined) return served(name);
+                throw e;
+            }
+        };
+    }
+    return served;
+}
+
+/**
+ * [#34145] The clone door's taken-name probe ({@link heldFlowReader}): the
+ * held body, `null` when no holder has the name, and `true` when the read
+ * refuses the name as one two or more packages hold
+ * (`PackageScopedNameRefusedError`, the served read's refusal of a name two
+ * served holders hold): such a name is taken, and the door answers its own
+ * name-taken refusal, whose remedy is a new name. Any other failure is thrown
+ * on.
+ */
+async function cloneTargetHeld(readHeld: (name: string) => Promise<unknown>, name: string): Promise<unknown> {
+    try {
+        return await readHeld(name);
+    } catch (e) {
+        if (e instanceof PackageScopedNameRefusedError) return true;
+        throw e;
+    }
+}
+
 /**
  * [#20552] The write-path inverse for the two doors that overwrite a flow by
  * name (`POST /` onto an existing name, `PUT /:name`): a body that carries the
@@ -2112,19 +2177,21 @@ function servedFlowDefinition<T>(flow: T): T {
  * same inverse (`carryForwardRedactedValues`), so both authoring surfaces keep
  * one rule.
  *
- * The comparison runs against the definition the ENGINE holds (`getFlow`, the
- * raw in-process read), not a served copy. A service without the optional
- * `getFlow`, or a name it does not hold, carries nothing — the body is
- * registered as written, and a missing secret is refused by the engine's own
- * registration gate, loudly.
+ * The comparison runs against the definition the ENGINE holds (the raw
+ * in-process read, {@link heldFlowReader} [#34145]: a disabled sole holder's
+ * included, a name two packages hold read on its served holder), not a
+ * served copy. A service with no read, or a name it does not hold, carries
+ * nothing — the body is registered as written, and a missing secret is
+ * refused by the engine's own registration gate, loudly.
  */
 async function keepStoredFlowCredentials(
     automationService: Pick<IAutomationService, 'getFlow'>,
     name: string,
     definition: unknown,
 ): Promise<unknown> {
-    if (typeof automationService.getFlow !== 'function') return definition;
-    const stored = await automationService.getFlow(name);
+    const readHeld = heldFlowReader(automationService);
+    if (readHeld === undefined) return definition;
+    const stored = await readHeld(name);
     if (!stored) return definition;
     return carryForwardRedactedValues(FLOW_METADATA_TYPE, definition, stored);
 }
@@ -2735,7 +2802,11 @@ async function registerAndSaveFlow(
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
-    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    // [#34145] What the engine held (`heldFlowReader`): the put-back copy of a
+    // name one package holds does not move with that package's enable state;
+    // a name two packages hold is its served holder's, as `registerFlow` files it.
+    const readHeld = heldFlowReader(automationService);
+    const held = readHeld === undefined ? null : await readHeld(name);
     let registered: unknown;
     try {
         registered = automationService.registerFlow(name, definition);
@@ -2990,9 +3061,13 @@ async function unregisterAndDeleteFlow(
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
-    // The trigger door's own probe: the engine holds no such flow.
-    const unknownToEngine = await flowIsUnknown(automationService, name);
-    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    // [#34145] The engine holds no such flow, asked of `heldFlowReader`: a
+    // flow whose one holder's package is disabled is held, removed and
+    // answered as a deletion. A name two packages hold is refused by
+    // `unregisterFlow`, as before. A service with no read is never "unknown" here.
+    const readHeld = heldFlowReader(automationService);
+    const held = readHeld === undefined ? null : await readHeld(name);
+    const unknownToEngine = readHeld !== undefined && !held;
     automationService.unregisterFlow(name);
     let rowDeleted = false;
     if (typeof store?.deleteMetaItem === 'function') {
@@ -3706,7 +3781,15 @@ export async function classifyResumeResult(
  *                                  activation ledger. A flow no package ships → 409
  *                                  `RESOURCE_CONFLICT` naming that flow's own switch,
  *                                  its `status` ('obsolete' / 'active') published
- *                                  through `PUT /:name`; nothing changes (#20726)
+ *                                  through `PUT /:name`; nothing changes (#20726).
+ *                                  Switching ON a packaged flow whose own `status`
+ *                                  disables it → 409 `RESOURCE_CONFLICT` naming the
+ *                                  status; nothing changes. 200 answers
+ *                                  `{ name, enabled }` with `enabled` read back from
+ *                                  `getFlowRuntimeStates` while the name has one
+ *                                  row there (echoed by a service that does not
+ *                                  implement that read, and for a name two packages
+ *                                  hold, which reads one row per holder)
  *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
@@ -4347,7 +4430,31 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // [#26474] Who asked, so the ledger row and its audit row name
                 // them. The id only: this door has already judged the caller.
                 await automationService.toggleFlow(name, enabled, activationCaller(context));
-                return { handled: true, response: deps.success({ name, enabled }) };
+                // [ADR-0126 §7.2] The answer is the engine's state read back,
+                // never the request echoed: the switch moves only the ledger
+                // bit, and the flow's `status` is a second dimension it does
+                // not move, so "the write landed" and "the flow is on" are two
+                // facts. Read through `getFlowRuntimeStates`, the one reading
+                // `GET /_status` serves, so the two doors cannot disagree.
+                // That reading names the switched flow only while the name
+                // has ONE row. A name two packages hold reaches here too: by
+                // its address, or bare with one served holder left, through
+                // `flowSlotView`, whose `toggleFlow` switches one slot while
+                // the engine still reads one row per slot under the bare
+                // name ([ADR-0150 D4], `getFlowRuntimeStates`). A row picked
+                // by name there may be the other holder's, so two or more
+                // rows read back nothing. Then, as for a service that does
+                // not implement the read or holds no row of the name, the
+                // request is echoed, the legacy answer; for the engine's own
+                // service (the only one with slots) that echo is true by
+                // construction, since every toggle entry refuses switching
+                // on a flow its status keeps off.
+                const svc = automationService as Pick<IAutomationService, 'getFlowRuntimeStates'>;
+                const rows = typeof svc.getFlowRuntimeStates === 'function'
+                    ? svc.getFlowRuntimeStates().filter((s) => s.name === name)
+                    : [];
+                const state = rows.length === 1 ? rows[0] : undefined;
+                return { handled: true, response: deps.success({ name, enabled: state ? state.enabled : enabled }) };
             }
         }
 
@@ -4454,13 +4561,26 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (credentialRefusal) return { handled: true, response: deps.errorFromThrown(credentialRefusal) };
 
                 // ⛔ SAME-NAME REFUSAL, loudly, naming the sanctioned path.
-                // Checked against the same probe, so "already exists" means the
-                // same thing here as everywhere else on this domain. This also
+                // Checked against the engine's read over every holder, as the
+                // definition writes' put-back and `DELETE` ask it. This also
                 // catches `name === <source>`, which is the case the ADR is
                 // actually about — see `flowCloneNameTakenMessage` for why a
                 // second definition under one bare name is a silent,
                 // order-dependent shadow rather than a storage error.
-                const collision = await automationService.getFlow(targetName);
+                // [#34145] Taken is judged by `heldFlowReader`, not on the
+                // served read the source probe above uses: a name whose one
+                // holder's package is disabled is still taken. A name two
+                // packages hold is taken too: its served holder's body, or,
+                // when two holders are served, the read's refusal, caught into
+                // this door's own taken-name answer as the store's is
+                // (`flowWriteRefusal`'s clone arm). The remedy is a NEW name,
+                // not a package. The one exception, as on `main` (seat ruling
+                // 6911640332, M1 = B): a name two packages hold with BOTH
+                // holders disabled is NOT taken here. `getHeldFlow` refuses
+                // the shared name, the served fallback `getFlow` answers
+                // `null` (no holder is served), and the copy is admitted.
+                const readHeld = heldFlowReader(automationService);
+                const collision = readHeld === undefined ? null : await cloneTargetHeld(readHeld, targetName);
                 if (collision) {
                     return {
                         handled: true,

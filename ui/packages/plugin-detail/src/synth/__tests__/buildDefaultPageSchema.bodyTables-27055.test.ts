@@ -53,8 +53,8 @@ const shape = (nodes: any[]) =>
 describe('body tables sit in the Details tab after the first section (objectstack#27055)', () => {
   it('splits the details around the body tables; side lists stay in Related', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [LINES, TASKS, SCHEDULE] });
-    // 动态 is second for every object (objectstack#27524, Target 5).
-    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
+    // 动态 is last for every object (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(shape(items(tabs)[0].children)).toEqual([
       'details(Basic)',
       'table(quote_line_item)',
@@ -77,7 +77,8 @@ describe('body tables sit in the Details tab after the first section (objectstac
     expect(shape(items(asBody)[0].children)).toContain('table(task)');
     const asSide = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...primary, isBody: false }] });
     expect(shape(items(asSide)[0].children)).not.toContain('table(task)');
-    expect(items(asSide)[2].value).toBe('related');
+    // Related is second now that 动态 closes the strip (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
+    expect(items(asSide)[1].value).toBe('related');
   });
 
   it('with one section the tables follow the details', () => {
@@ -85,7 +86,7 @@ describe('body tables sit in the Details tab after the first section (objectstac
     expect(shape(items(tabs)[0].children)).toEqual(['details(Basic)', 'table(quote_line_item)']);
   });
 
-  it('emits no per-list tab any more — the strip is Details / Timeline / Related', () => {
+  it('emits no per-list tab any more — the strip is Details / Related / Timeline (objectstack#34590)', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...TASKS, isPrimary: true }, LINES] });
     expect(items(tabs).some((i: any) => String(i.value).startsWith('related:'))).toBe(false);
   });

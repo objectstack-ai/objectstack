@@ -245,6 +245,7 @@ export { Chatbot, TypingIndicator }
 // Export the composable chat hook for custom integrations
 export { useObjectChat } from './useObjectChat';
 export type { UseObjectChatOptions, UseObjectChatReturn } from './useObjectChat';
+export type { ChatFilePart, ChatFileJsonValue } from './useObjectChat';
 /**
  * What `useObjectChat` emits from `messages` and `onSend` — neither the
  * `@object-ui/types` AUTHORING contract (which the hook used to declare while

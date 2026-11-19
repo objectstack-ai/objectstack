@@ -4,8 +4,8 @@
  * [#29985 codemod] The "Diff, deleteMetaItem, loadMetaFromDb, load reports,
  * findReferencesToMeta" facet of `ObjectStackProtocolImplementation`: the
  * bodies of `diffMetaItem`, `deleteMetaItem`, `deleteMetaItemUnaudited`,
- * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole (split
+ * by #29998).
  *
  * A MOVE, not a redesign. `ProtocolDiffDeleteLoadFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -26,9 +26,12 @@
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
     historyRowsOfMember,
+    isVersionOf,
     packagelessAddressAmbiguityRefusal,
     versionNotFoundError,
+    versionOfAnotherSlotError,
 } from './sys-metadata-repository.js';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import {
     ConflictError,
     findUndeclarableFieldType,
@@ -44,7 +47,7 @@ import type { ServedOverrideRow } from './served-override.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
-import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf, servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
@@ -63,14 +66,26 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { packagelessHolderRefusal } from './protocol-save.js';
+
+/**
+ * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
+ * for the package-less row — the binding {@link historySlotOf} reads off the
+ * row a read naming a package serves.
+ */
+function rowSlotOf(row: { package_id?: unknown }): string | null {
+    return typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null;
+}
 
 export class ProtocolDiffDeleteLoadFacet {
     /** The body of `ObjectStackProtocolImplementation#diffMetaItem`; the method's docblock there is its contract. */
-    static async diffMetaItem(host: Pick<ProtocolHost, 'diffMetaItem' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned'>, request: {
+    static async diffMetaItem(host: Pick<ProtocolHost, 'diffMetaItem' | 'engine' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'findServedOverlayRow' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>, request: {
             type: string;
             name: string;
             fromVersion?: number;
             toVersion?: number;
+            /** [ADR-0150 D3/D4, #33308] The package whose versions to compare — {@link historySlotOf}; omitted, the name's. */
+            packageId?: string;
         }): Promise<{
             type: string;
             name: string;
@@ -118,6 +133,10 @@ export class ProtocolDiffDeleteLoadFacet {
         // the read below reads it as "the key the row is stored under" — the same
         // shape {@link rollbackMetaItem} keeps.
         const singularType = request.type;
+        // [#33308] `?package=` addresses a holder of a type stored per
+        // `(package, name)` only; on any other type it is refused first, as
+        // the history and rollback doors refuse it, never accepted and dropped.
+        refusePackageSelectorOutsideSlottedTypes(singularType, request.packageId);
         // [#21442] A view name with no stored row of its own that a stored
         // view container in this caller's scope expands — a name the by-name
         // read answers with the container's expansion — has no versions of its
@@ -132,6 +151,21 @@ export class ProtocolDiffDeleteLoadFacet {
         if (expandedFrom !== undefined) {
             return host.diffMetaItem({ ...request, name: expandedFrom.container.name });
         }
+        // [ADR-0150 D3/D4, #33308] The third door of the history family reads
+        // the slot the history and rollback doors read ({@link historySlotOf}):
+        // for a type stored per `(package, name)` the name's versions
+        // interleave every holder's, so a name two holders hold is refused
+        // `409` naming both when no package is named, before any version is
+        // read, and `?package=` compares that holder's versions alone — its
+        // own versions on both sides, its own active row as the default `to`
+        // side, and the default `from` side found among its own versions.
+        // ⛔ Never a version of another holder compared as this one's earlier
+        // or later body. A name one slot holds, named bare, diffs as before.
+        const slot = await historySlotOf(host, {
+            type: singularType, name: request.name,
+            ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+        });
+        const versionsOf = slot?.addressed ? slot.owner : undefined;
         // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
         // cannot serve this function: its `MetadataEvent` shape doesn't carry
         // the per-(type,name) `version` a diff selects versions by, so its
@@ -155,6 +189,9 @@ export class ProtocolDiffDeleteLoadFacet {
         // so removing the call makes every type take it. Pinned in
         // `protocol.diff-dead-history-read.test.ts`.
         const histRows: Array<{ version: number; body: Record<string, unknown> | null }> = [];
+        // [#33308] The rows of another slot, by version: named, they are
+        // refused saying whose they are, never compared.
+        const otherSlotRows = new Map<number, Record<string, unknown>>();
         try {
             // [#21908, ADR-0096 D5] The explicit system opt-in: the history
             // lineage is a platform store the diff door already authorized.
@@ -173,6 +210,10 @@ export class ProtocolDiffDeleteLoadFacet {
             }));
             rows.sort((a: any, b: any) => (a.version ?? 0) - (b.version ?? 0));
             for (const r of rows) {
+                if (versionsOf !== undefined && !isVersionOf(r, versionsOf)) {
+                    otherSlotRows.set(r.version ?? 0, r);
+                    continue;
+                }
                 const body = r.metadata == null
                     ? null
                     : (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata);
@@ -221,6 +262,15 @@ export class ProtocolDiffDeleteLoadFacet {
         }
         const byVersion = new Map<number, Record<string, unknown> | null>();
         for (const r of histRows) byVersion.set(r.version, r.body);
+        // [#26462] A named version with no row of this item is a miss;
+        // [#33308] one another holder's slot owns is refused saying whose it
+        // is (the rollback door's sentence), and nothing is compared.
+        const namedVersionMiss = (version: number): Error => {
+            const other = otherSlotRows.get(version);
+            return other !== undefined && versionsOf !== undefined
+                ? versionOfAnotherSlotError({ type: singularType, name: request.name }, version, versionsOf, other, 'Nothing was compared.')
+                : versionNotFoundError({ type: singularType, name: request.name }, version);
+        };
 
         let fromBody: Record<string, unknown> | null = null;
         let toBody: Record<string, unknown> | null = null;
@@ -239,7 +289,7 @@ export class ProtocolDiffDeleteLoadFacet {
             // served.
             const named = byVersion.get(request.toVersion);
             if (named === undefined) {
-                throw versionNotFoundError({ type: singularType, name: request.name }, request.toVersion);
+                throw namedVersionMiss(request.toVersion);
             }
             toBody = named;
         } else {
@@ -270,14 +320,22 @@ export class ProtocolDiffDeleteLoadFacet {
             // bodies repeat earlier ones.
             // [#21908, ADR-0096 D5] The explicit system opt-in, as the history
             // read above.
-            const current = (await host.findEnvironmentRow('sys_metadata', {
-                where: {
-                    type: singularType, name: request.name, state: 'active',
-                    // [#22877] The canonical member, as the by-name read serves.
-                    ...overlayMemberWhere(singularType),
-                },
-                context: { isSystem: true },
-            })) as { metadata?: unknown; version?: unknown } | null;
+            const currentWhere = {
+                type: singularType, name: request.name, state: 'active',
+                // [#22877] The canonical member, as the by-name read serves.
+                ...overlayMemberWhere(singularType),
+            };
+            // [#33308] Addressed, the to side is the addressed slot's own
+            // active row (bound to its package, or the package-less row for
+            // the environment's slot), never another holder's row of the
+            // name; a slot no row holds has no active side.
+            const current = (versionsOf !== undefined
+                ? ((await host.findEnvironmentRows('sys_metadata', { where: currentWhere, context: { isSystem: true } }))
+                    .find((row: { package_id?: unknown }) => rowSlotOf(row) === versionsOf.packageId) ?? null)
+                : await host.findEnvironmentRow('sys_metadata', {
+                    where: currentWhere,
+                    context: { isSystem: true },
+                })) as { metadata?: unknown; version?: unknown } | null;
             toBody = current?.metadata == null
                 ? null
                 : (typeof current.metadata === 'string'
@@ -290,7 +348,7 @@ export class ProtocolDiffDeleteLoadFacet {
             // [#26462] The same miss on the from side — see the to side above.
             const named = byVersion.get(request.fromVersion);
             if (named === undefined) {
-                throw versionNotFoundError({ type: singularType, name: request.name }, request.fromVersion);
+                throw namedVersionMiss(request.fromVersion);
             }
             fromBody = named;
         } else if (toVersion !== null) {
@@ -673,8 +731,32 @@ export class ProtocolDiffDeleteLoadFacet {
                     );
                     throw addressRefusal;
                 }
+                // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
+                // read naming no package counts, as the save door asks them
+                // ({@link packagelessHolderRefusal}): two or more enabled holders
+                // are refused naming them, and a name only disabled packages hold
+                // is refused naming none, never one row removed. Over no stored
+                // row too (the delete and the draft discard answered the no-op
+                // receipt). A package-unbound row at the address is the
+                // environment's own, and its removal is left as it was.
+                if (request.packageId == null) {
+                    const holderRefusal = packagelessHolderRefusal(
+                        host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
+                    );
+                    if (holderRefusal) {
+                        addressRefusal = holderRefusal;
+                        throw addressRefusal;
+                    }
+                }
                 const packageId: string | null = request.packageId
                     ?? (draftAddress !== undefined ? draftAddress.key : rowsAtAddress.packageId);
+                // [ADR-0150 D2, #34401] Whether a code-shipped item sits under
+                // THIS address, which the two receipts below claim: a package's
+                // own permission set beside sets other namespaces' packages ship
+                // has none ({@link isOwnPermissionSetWrite}, the verdict its save
+                // reads), so removing it removes the set, never resets one.
+                const shippedUnderAddress = artifactBacked
+                    && !isOwnPermissionSetWrite(host.engine, singularTypeForRepo, request.name, packageId);
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
@@ -742,7 +824,7 @@ export class ProtocolDiffDeleteLoadFacet {
                         // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : artifactBacked
+                            : shippedUnderAddress
                                 ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
                                 : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
@@ -930,7 +1012,7 @@ export class ProtocolDiffDeleteLoadFacet {
                     // discard reads byte for byte as before.
                     message: (request.state === 'draft')
                         ? `Draft discarded${deletedPackage} — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : artifactBacked
+                        : shippedUnderAddress
                             ? (remains
                                 ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
                                 : `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`)

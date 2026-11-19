@@ -809,17 +809,20 @@ export const META_ITEM_AUDIT_PARAMS: readonly string[] = ['limit'];
  * and `to`, and the `fromVersion` / `toVersion` the door falls back to when the
  * short name is absent — each read through `readDeclaredQueryNumber`. The same
  * four names the door's multiplicity guard declares; the authoring-door and
- * per-caller refusals read the session.
+ * per-caller refusals read the session. [ADR-0150 D3/D4, #33308] And
+ * `package`, the holder whose versions to compare, through
+ * {@link metaItemPackageBinding}, as the history door reads it.
  */
-export const META_ITEM_DIFF_PARAMS: readonly string[] = ['from', 'fromVersion', 'to', 'toVersion'];
+export const META_ITEM_DIFF_PARAMS: readonly string[] = ['from', 'fromVersion', 'to', 'toVersion', 'package'];
 
 /**
  * [#20062 / #20139] The reading of a numeric query parameter on a door whose
  * request has no declared schema: a whole number, and nothing about range.
- * Every such parameter in this file counts or addresses whole things — rows
+ * Every such parameter in this file counts whole things — rows
  * (`GET /data/:object/export` `limit`; `GET /search` `limit` / `perObject`;
- * `GET /approvals/requests` `limit` / `offset`) or history versions
- * (`GET /meta/:type/:name/diff` `from` / `to`). Range stays each door's own
+ * `GET /approvals/requests` `limit` / `offset`). (`GET /meta/:type/:name/diff`
+ * `from` / `to` read the same whole number through the door's declared
+ * request, `DiffMetaItemRequestSchema`, since #33308.) Range stays each door's own
  * business — the export route's `Math.max(1, …)` floor and 50000 cap,
  * `searchAll`'s `[1, 100]` / `[1, 25]` clamps, the approvals service's
  * `[1, 200]` — because no card this closes takes a position on bounds; it only
@@ -4184,7 +4187,10 @@ export class RestServer {
      * The default locale is read from `getDefaultLocale()`, the same accessor
      * `extractLocale` already answers a header-less request from, so the
      * request that falls to the default and the rule that recognises the
-     * default read one value. Both are feature-detected like
+     * default read one value — unless the deployment declared the language
+     * its labels are authored in (`i18n.sourceLocale`, `getSourceLocale()`,
+     * #33634), which is then the locale answered from the authored label.
+     * All are feature-detected like
      * `getPackagedObjectBase` (both methods are optional on `II18nService`;
      * the core in-memory fallback declares neither): a service that does not
      * declare a fallback gets NO chain, and one that does not declare a
@@ -4446,7 +4452,30 @@ export class RestServer {
             return;
         }
         const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
-        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        let layered: unknown;
+        try {
+            layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        } catch (readError) {
+            // [ruling 6917064203 on #34398] The read gate answers before the
+            // `not-held-by-qualifier` refusal names any holder — the plain
+            // read's own question; a holder's item is read at its own address.
+            const gated = await metaReadGate.gateHolderNamingRefusal(
+                this.metaItemReadGateSources(environmentId, req, p, true),
+                RestServer.metaTypeSingular(req.params.type), req.params.name,
+                metaReadGate.STORED_VERSION_DOOR_POLICY, readError,
+                async (holder) => (await p.getMetaItem({
+                    type: req.params.type, name: req.params.name,
+                    ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}),
+                    ...metaReadGate.metaMemberSelector(req.query),
+                    ...(environmentId ? { environmentId } : {}),
+                } as any) as { item?: unknown } | undefined)?.item,
+            );
+            if (gated) {
+                RestServer.sendMetaReadRefusal(res, gated);
+                return;
+            }
+            throw readError;
+        }
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door
@@ -5763,7 +5792,11 @@ export class RestServer {
         // `/layers`, `/publish`, `/rollback`, `book/:name/tree`), which keep
         // their routes (ruling Q1 on #31691).
         registerMetaQualifiedItemRoute.call(
-            { routeManager: this.routeManager, resolveProtocol: (...a) => this.resolveProtocol(...a) },
+            {
+                routeManager: this.routeManager,
+                resolveProtocol: (...a) => this.resolveProtocol(...a),
+                resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            },
             scope,
             readMetaItem,
         );

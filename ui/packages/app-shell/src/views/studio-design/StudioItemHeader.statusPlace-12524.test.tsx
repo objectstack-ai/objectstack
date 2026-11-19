@@ -111,6 +111,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AccessPillar, AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
 import '../../services/builtinComponents.js';
 import { t } from '../metadata-admin/i18n';
@@ -171,8 +174,11 @@ const CASES: PillarCase[] = [
     pillar: 'Data',
     testId: 'data-object-header',
     element: (readOnly) => <DataPillar packageId={PKG} readOnly={readOnly} />,
+    // objectstack#34794 — the object's machine name is the title's tooltip.
     settled: async (header) => {
-      await within(header).findByText(OBJECT.name, undefined, { timeout: 8000 });
+      await waitFor(() => expect(within(header).getByRole('heading', { level: 1 })).toHaveAttribute('title', OBJECT.name), {
+        timeout: 8000,
+      });
     },
   },
   {

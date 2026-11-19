@@ -94,7 +94,10 @@ address `GET /api/v1/meta/mapping/<namespace>/<name>` reads, and the import door
 the same way (ADR-0150 D5). The import applies exactly that holder's mapping. When that
 namespace, or the environment, holds no mapping of the name and a package does, the
 import is refused with the `409 RESOURCE_CONFLICT` that read answers, naming every holder,
-and no row is written. A first segment that is neither `_env` nor an installed namespace
+and no row is written. A disabled package holds no name: when every package that holds the
+name is disabled, `"_env/<name>"` answers `404 MAPPING_NOT_FOUND`, naming no package, as
+`GET /api/v1/meta/mapping/_env/<name>` answers `404`. Enable a holder again and the address
+is refused with the `409` naming it, as before. A first segment that is neither `_env` nor an installed namespace
 is no address: the whole string is read as the name, which no mapping has, so the import
 answers `404 MAPPING_NOT_FOUND`. Two limits come with the metadata read's address. Where
 two packages that share a namespace (`base`, `system`, `sys`) both hold the name, the
@@ -113,7 +116,7 @@ mapping under its own name.
 | Key | Type | What it does |
 |:---|:---|:---|
 | `name` | `string` (snake_case) | The id `mappingName` resolves. Missing artifact → `404 MAPPING_NOT_FOUND`. |
-| `label` | `string` | Display text in a saved-mapping picker. Falls back to `name`. |
+| `label` | `string` | Display text in a saved-mapping picker (the import wizard). Falls back to `name`. Translated per locale at `mappings.<name>.label` in the app's translation bundle — see [Translations](/docs/ui/translations). |
 | `sourceFormat` | `'csv' \| 'json' \| 'xml' \| 'sql'` | Declared payload format, checked against what the request actually sent. Defaults to `csv`. See [the format gate](#rejections-before-any-row-is-read). |
 | `targetObject` | `string` | The object this mapping is for. Must equal the object in the URL. |
 | `fieldMapping` | `ImportFieldMapping[]` | The projection itself — one entry per target field. |
@@ -274,8 +277,8 @@ These are whole-request failures — nothing is written, and there is no per-row
 
 | Status | `code` | Cause |
 |:---|:---|:---|
-| 404 | `MAPPING_NOT_FOUND` | No mapping artifact is registered under that name. |
-| 409 | `RESOURCE_CONFLICT` | Two or more packages hold a mapping under that name, and the environment holds none; or a qualified `mappingName` (`<namespace>/<name>`, `_env/<name>`) names a holder that holds no mapping of that name while another does. The error names every holder. |
+| 404 | `MAPPING_NOT_FOUND` | No mapping artifact is registered under that name, or every package that holds it is disabled. |
+| 409 | `RESOURCE_CONFLICT` | Two or more packages hold a mapping under that name, and the environment holds none; or a qualified `mappingName` (`<namespace>/<name>`, `_env/<name>`) names a holder that holds no mapping of that name while another, enabled, package does. The error names every holder. |
 | 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
 | 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
 | 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |

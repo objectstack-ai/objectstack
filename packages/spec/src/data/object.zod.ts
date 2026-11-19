@@ -54,6 +54,23 @@ import { aiReadExposureRefusal } from './ai-read-exposure';
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
 import { DefaultRowScopeSchema, MembershipKeysSchema } from '../security/rls.zod';
+// [ADR-0154 D10] The registry's injected-column plan, read by the
+// `lifecycle.seal.chainField` refusal. A deliberate cycle: that module imports
+// `isTenancyDisabled` from here, and each side calls the other only at parse
+// time (see `refuseUnknownSealChainField`).
+import { resolveInjectedSystemColumns } from './injected-system-columns';
+// [ADR-0154 D10] The injected columns' definitions, so a chain column the
+// registry injects is judged by its type as a declared one is. The same cycle
+// as above, one module further: nothing here is called while a module evaluates.
+import { injectedSystemColumnDefs } from './injected-system-column-provenance';
+import {
+  BOOLEAN_VALUE_TYPES,
+  CALENDAR_DATE_TYPES,
+  INSTANT_TYPES,
+  NUMERIC_VALUE_TYPES,
+  STRUCTURED_JSON_TYPES,
+  isMultiValueField,
+} from './field-value.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1113,6 +1130,13 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       'Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never ' +
       'carries their values; every other declared column enters in clear. Each must name a declared field ' +
       'other than `id` and `created_at`, which order the leaves.',
+    ),
+    chainField: z.string().optional().describe(
+      'The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row ' +
+      'whose value is empty seals into the deployment chain. It must name a declared field or a column the ' +
+      'platform injects, such as the tenant column `organization_id`, whose value is one text on every store ' +
+      '(not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which ' +
+      'order the leaves; and not a `valueFields` member. Fixed once the object has checkpoints.',
     ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
@@ -2856,11 +2880,14 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * attaches to the rows it serves, computed per caller on read and never stored.
  *
  * The worked case is plugin-approvals: `ApprovalService.attachViewers` sets
- * `viewer: { can_act, is_submitter, can_override }` on every `sys_approval_request`
- * row it reads, from the CALLER's identity, and the object's own action
- * predicates gate on `record.viewer.can_act`. Before this key nothing could
- * declare such a block in a shape the build validator reads, so those
- * predicates were refused as naming an undeclared field.
+ * `viewer: { can_act, is_submitter, can_override, can_override_approve }` on
+ * every `sys_approval_request` row it reads, from the CALLER's identity, and
+ * the object's own action predicates gate on those leaves: `can_act` for an
+ * approver's actions, `is_submitter` for the submitter's, and an override arm
+ * that reads `can_override_approve` on Approve and `can_override` on Reject,
+ * Reassign and Recall. Before this key nothing could declare such a block in
+ * a shape the build validator reads, so those predicates were refused as
+ * naming an undeclared field.
  *
  * ## Shape — a strict record of strict records
  *
@@ -2970,6 +2997,46 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
 }
 
 /**
+ * [ADR-0154 D1, D10] The columns that order each sealed leaf (`id`, then
+ * `created_at`) and so enter every leaf in clear. Neither may be committed
+ * (`valueFields`) nor name the chain (`chainField`): the one predicate both
+ * refusals read.
+ */
+function isSealLeafOrderColumn(name: unknown): boolean {
+  return name === 'id' || name === 'created_at';
+}
+
+/**
+ * [ADR-0154 D10, note on `chainField`] The value classes whose stored value is
+ * not one text on every store, from the field-value contract (ADR-0104 D1):
+ * numbers and booleans never are; a `date` or `datetime` is a `Date` on one
+ * driver and text on another; a JSON payload is parsed on one and text on
+ * another. A field declared multi-value stores a list
+ * ({@link isMultiValueField}). The sealer reads a row's chain as a non-empty
+ * string only (`chainValueOf`), so a chain column of one of these would put
+ * some or all rows into the deployment chain, with no report. Every other
+ * class reads as text — its canonical rule in the sealer is `text`.
+ */
+function isNonTextChainValueType(type: string): boolean {
+  // Read at parse time, never at module evaluation: `field-value.zod` sits in
+  // the `field.zod` evaluation cycle, so its sets are not read from here.
+  return NUMERIC_VALUE_TYPES.has(type) || BOOLEAN_VALUE_TYPES.has(type) || CALENDAR_DATE_TYPES.has(type)
+    || INSTANT_TYPES.has(type) || STRUCTURED_JSON_TYPES.has(type);
+}
+
+/** The declared type of a non-text chain column, or `null` when its value reads as text. */
+function nonTextChainColumnType(def: unknown): string | null {
+  if (def === null || typeof def !== 'object') return null;
+  const { type, multiple } = def as { type?: unknown; multiple?: unknown };
+  if (typeof type !== 'string') return null;
+  if (isNonTextChainValueType(type)) return type;
+  // An inherently multi-value type (`multiselect`, `checkboxes`, `tags`) is named as it is; a
+  // multi-capable one is named for the `multiple: true` that makes it store a list.
+  if (isMultiValueField({ type, multiple: false })) return type;
+  return isMultiValueField({ type, multiple: multiple === true }) ? `${type} (multi-value)` : null;
+}
+
+/**
  * [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a field this object
  * declares: a sealed checkpoint commits that column's value instead of carrying
  * it, and a name that matches no column would commit nothing while the author
@@ -2988,7 +3055,7 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
   if (!seal || !Array.isArray(seal.valueFields)) return;
   const declared = fields !== null && typeof fields === 'object' ? fields : {};
   seal.valueFields.forEach((name, index) => {
-    if (name === 'id' || name === 'created_at') {
+    if (isSealLeafOrderColumn(name)) {
       ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'valueFields', index], message: `lifecycle.seal.valueFields cannot name '${name}': it orders each sealed leaf, so it enters in clear (ADR-0154 D10).` });
       return;
     }
@@ -3002,6 +3069,95 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
         + 'column the object stores; declare the field, or remove the name (ADR-0154 D10).',
     });
   });
+}
+
+/**
+ * [ADR-0154 D10, note on `chainField`] A `lifecycle.seal.chainField` the
+ * author names is a field the object has: one it declares, or a column the
+ * registry injects into it ({@link resolveInjectedSystemColumns} — above all
+ * ADR-0131's tenant column `organization_id`). The sealer chains each row by
+ * that column's value, so a name the object does not have would put every
+ * row into the deployment chain, where no organization's check finds it.
+ *
+ * A column the object has is refused too when it cannot name an organization
+ * chain: a leaf-order column ({@link isSealLeafOrderColumn}, the predicate
+ * `valueFields` reads); a `valueFields` member, whose value the leaf commits
+ * while the chain carries it in clear (D1, D9); and a column whose value is not
+ * one text on every store ({@link nonTextChainColumnType}), judged by the
+ * declared field or, for an injected column, by the definition the registry
+ * injects ({@link injectedSystemColumnDefs}). Each is one located issue at
+ * `['lifecycle', 'seal', 'chainField']`. Every refusal here needs the key, which
+ * did not exist before it, so none refuses a declaration that parsed before.
+ *
+ * Only a NAMED chain column is judged here. An object that names none chains
+ * by `tenant_id`, as before the key existed, and one without that column is
+ * reported by the sealer at `error`, as before. The injected plan is read with
+ * no deployment, as every author-time caller reads it; a deployment that
+ * declares the object platform-global withholds the tenant column, and the
+ * sealer reports that object the same way.
+ *
+ * `injected-system-columns` imports this module (for `isTenancyDisabled`), so
+ * the two form an import cycle. Each side calls the other only from inside a
+ * function — here, at parse time — never while a module evaluates, so both
+ * bindings are initialized by the time either is called.
+ */
+function refuseUnknownSealChainField(object: { lifecycle?: unknown; fields?: unknown }, ctx: z.RefinementCtx): void {
+  const lifecycle = object.lifecycle;
+  if (lifecycle === null || typeof lifecycle !== 'object') return;
+  const seal = (lifecycle as { seal?: { chainField?: unknown } }).seal;
+  if (!seal || typeof seal.chainField !== 'string') return;
+  const name = seal.chainField;
+  const path = ['lifecycle', 'seal', 'chainField'];
+  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
+  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
+  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message:
+        `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
+        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
+        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
+        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).',
+    });
+    return;
+  }
+  if (isSealLeafOrderColumn(name)) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message:
+        `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
+        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
+        + '(ADR-0154 D10).',
+    });
+    return;
+  }
+  const valueFields = (seal as { valueFields?: unknown }).valueFields;
+  if (Array.isArray(valueFields) && valueFields.includes(name)) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message:
+        `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
+        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
+        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
+        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).',
+    });
+  }
+  const def = isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name];
+  const nonText = nonTextChainColumnType(def);
+  if (nonText !== null) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message:
+        `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${nonText}\` column, whose value is not one text on `
+        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
+        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
+        + 'such as `organization_id` (ADR-0154 D10).',
+    });
+  }
 }
 
 /**
@@ -4625,6 +4781,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
+  // [ADR-0154 D10, note on `chainField`] A named chain column is a field the
+  // object has, injected ones included. See the helper's docblock.
+  refuseUnknownSealChainField(object, ctx);
   // [ruling A on the read half of #32442] `enable.aiReadable` only on a `sys_*`
   // object, never on the stored-metadata family — the same door: only the
   // object knows its name. See the helper's docblock.

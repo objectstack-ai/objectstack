@@ -22,7 +22,7 @@
 // the lit controls — each MUST conflict, or a clean result would be equally
 // explained by a harness that cannot see a conflict at all.
 //
-// [#29987 codemod] Since the codemod split (`scripts/codemod-split-conversions-registry.mjs`)
+// [#29987 codemod] Since the registry was split by #29993,
 // each conversion is DEFINED in a module of its own, `src/conversions/entries/18/<id>.ts`,
 // which a retirement adds as a new file and which therefore never conflicts. What a
 // retirement still edits in `registry.ts` is two lines: the import of its conversion and

@@ -915,6 +915,17 @@ function sourceBarrel(pkg: DeclaringPackage): string | undefined {
   return barrel === undefined ? undefined : path.join(repoRoot, pkg.dir, barrel);
 }
 
+/**
+ * Whether `entry` is a source entry form of `pkg` other than its barrel: an
+ * `exports` subpath (or the in-repo alias of one) that a consumer imports as a
+ * separate entry point.
+ */
+function isSecondaryEntryForm(pkg: DeclaringPackage, entry: string): boolean {
+  const barrel = sourceBarrel(pkg);
+  const rel = barrel === undefined ? undefined : path.relative(path.join(repoRoot, pkg.dir), barrel).split(path.sep).join('/');
+  return rel !== normalize(entry) && (entryForms.get(pkg.name) ?? []).includes(normalize(entry));
+}
+
 /* -------------------------------------------------------------------------- */
 /* The real-bundler probes (PR #3940's, hoisted and generalised).               */
 /* -------------------------------------------------------------------------- */
@@ -1108,6 +1119,7 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
       '@object-ui/plugin-markdown',
       '@object-ui/plugin-report',
       '@object-ui/plugin-timeline',
+      '@object-ui/plugin-timesheet',
       '@object-ui/plugin-tree',
       '@object-ui/plugin-view',
       '@object-ui/react',
@@ -1390,6 +1402,13 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
         // the stylesheet, and running a TypeScript parser over it would report
         // "no top-level side effect" about a file that has no top level.
         .filter((entry) => isParseableModule(entry))
+        // A SECONDARY entry form (an `exports` subpath beside the barrel, such
+        // as a side-effect-free `/core`) is named because it is an entry form:
+        // the coverage direction above and `check-side-effects-array.mjs` both
+        // require every entry form in the array, whatever its body does. It is
+        // not a claim that it does something on evaluation, so it is not
+        // judged here. The barrel still is.
+        .filter((entry) => !isSecondaryEntryForm(pkg, entry))
         .filter((entry) => scanModule(path.join(repoRoot, pkg.dir, entry)).effects.length === 0)
         .map((entry) => `${pkg.name}: "${entry}" is declared in \`sideEffects\` but has no top-level side effect`),
     );
@@ -1422,6 +1441,17 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
     // barrel, and it is one of the three registrations the 2026-08-29 ruling
     // names as controls.
     expect(sourceEntries).toContain('@object-ui/app-shell/src/console/connect/ConnectAgentWidget.tsx');
+
+    // The secondary-entry exemption above reaches what it was written for
+    // (objectstack#33581's `/core` subpaths) and never a barrel.
+    const exempt = arrayPackages.flatMap((pkg) =>
+      (pkg.declared as string[])
+        .filter((entry) => isSourceEntry(pkg, entry) && isSecondaryEntryForm(pkg, entry))
+        .map((entry) => `${pkg.name}/${normalize(entry)}`),
+    );
+    expect(exempt).toContain('@object-ui/plugin-form/src/core.ts');
+    expect(exempt).toContain('@object-ui/plugin-view/src/core.ts');
+    expect(exempt.filter((e) => /\/src\/index\.[a-z]+$/.test(e))).toEqual([]);
   });
 
   it('no array package declares a wildcard entry (this guard resolves literal paths)', () => {

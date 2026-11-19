@@ -254,6 +254,14 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     // same reason the strip above is: these four facts are
                     // about a recorded-decision-with-stranded-run and
                     // about nothing else.
+                    //
+                    // [#34579] …and, when the run stranded on a refusal,
+                    // that refusal: `innerRefusal` (ruling B′ on #24914,
+                    // the engine's own shape) and the marked `userMessage`
+                    // at the top level, the channel a record save's refusal
+                    // and every flow door's `FLOW_FAILED` already use. Both
+                    // are present only when the producer attached them and
+                    // the recogniser accepted them.
                     ...(code === 'RESUME_FAILED' && stranded ? stranded : {}),
                 });
                 return true;

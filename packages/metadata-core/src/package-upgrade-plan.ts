@@ -22,16 +22,40 @@
  * ## What it reads
  *
  * Each side is ONE flat package body, as far as this function is concerned:
- * its `objects` (each an object with a `name` and a `fields` map) and its
- * `data` (seed datasets). A multi-package artifact is folded by the caller
- * with the platform's one collection reader (`resolveStackCollection` in
- * `@objectstack/core`; `os diff` folds through the CLI's union stack), so this
- * module holds no second reading of `packages[]`.
+ * its `objects` (each an object with a `name` and a `fields` map), its
+ * `objectExtensions` (fields it adds to an object, its own or another
+ * package's) and its `data` (seed datasets). A multi-package artifact is
+ * folded by the caller with the platform's one collection reader
+ * (`resolveStackCollection` in `@objectstack/core`; `os diff` folds through
+ * the CLI's union stack), so this module holds no second reading of
+ * `packages[]`.
+ *
+ * ## Extension fields count like owned ones (#34095)
+ *
+ * An upgrade adds the columns of every field its `objectExtensions` add, so a
+ * comparison that read `objects` alone listed none of them: a preview showed
+ * no added field while the upgrade added seven columns. Each side's fields of
+ * an object are therefore the object as the registry serves it from that
+ * side: the owner's declaration with each extension's `fields` merged over it
+ * BY NAME, a later writer replacing the whole field, in ascending `priority`
+ * (`ext.priority ?? 200`), equal priorities in the order the side lists them
+ * (`mergeObjectDefinitions` in `@objectstack/objectql`, applied by the
+ * registry's fold). The target is the object whose `name` is the `extend`
+ * string verbatim, the registry's own key. From there every rule below
+ * applies unchanged: an extension field added, removed, retyped or renamed is
+ * listed, and judged by the verdict, exactly as an owned one is.
+ *
+ * An object a side reaches ONLY through extensions (another package owns it)
+ * is compared by the fields the extensions add, and it is never listed as an
+ * added or removed object: the upgrade neither creates nor drops it. Its
+ * owner's own fields are not on either side, so they are never listed.
+ * `fieldPatches` change display keys only and store no column: not compared.
  *
  * ## What it reports
  *
  * - objects added and removed, by name;
- * - fields added and removed, by key, within an object both versions declare;
+ * - fields added and removed, by key, within an object both versions declare
+ *   (or that a version reaches only through its extensions);
  * - type changes: a field both versions declare whose `type` differs, with a
  *   drift category ({@link typeChangeCategory});
  * - declared renames: a field of the new version whose `renamedFrom` names a
@@ -64,10 +88,15 @@ import { canonicalize } from './canonicalize.js';
  */
 export type UpgradeDriftCategory = 'safe' | 'needs_confirm' | 'destructive';
 
-/** One side of the comparison: a flat package body's two collections. */
+/** One side of the comparison: a flat package body's three collections. */
 export interface PackageUpgradeSide {
   /** The body's object definitions (`{ name, fields }`). */
   objects?: readonly unknown[];
+  /**
+   * The body's object extensions (`ObjectExtensionSchema`: `{ extend, fields,
+   * priority? }`), whose `fields` merge onto the object `extend` names.
+   */
+  objectExtensions?: readonly unknown[];
   /** The body's seed datasets (`SeedSchema`). */
   data?: readonly unknown[];
 }
@@ -152,13 +181,38 @@ function isBag(value: unknown): value is Bag {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Objects by name, the LAST declaration of a name winning (`os diff`'s reading). */
-function objectsByName(side: PackageUpgradeSide | undefined): Map<string, Bag> {
-  const out = new Map<string, Bag>();
+/** The registry's default `priority` of an extension (the `objectExtensions` loop of `registerApp`). */
+const DEFAULT_EXTENSION_PRIORITY = 200;
+
+/** One side's objects as the registry serves them from that side. */
+interface SideObjects {
+  /** Every object the side reaches, owned or extended, by name, its fields merged. */
+  byName: Map<string, Bag>;
+  /** The names the side OWNS (declares in `objects`): the only ones listed as added or removed. */
+  owned: Set<string>;
+}
+
+/**
+ * Objects by name, the LAST declaration of a name winning (`os diff`'s
+ * reading), each with the side's extensions merged over its fields (see the
+ * module header, *Extension fields count like owned ones*).
+ */
+function objectsByName(side: PackageUpgradeSide | undefined): SideObjects {
+  const byName = new Map<string, Bag>();
   for (const item of side?.objects ?? []) {
-    if (isBag(item) && typeof item.name === 'string' && item.name !== '') out.set(item.name, item);
+    if (isBag(item) && typeof item.name === 'string' && item.name !== '') byName.set(item.name, item);
   }
-  return out;
+  const owned = new Set(byName.keys());
+  const extensions = (side?.objectExtensions ?? [])
+    .filter((ext): ext is Bag => isBag(ext) && typeof ext.extend === 'string' && ext.extend !== '' && isBag(ext.fields))
+    .map((ext, order) => ({ ext, order, priority: typeof ext.priority === 'number' ? ext.priority : DEFAULT_EXTENSION_PRIORITY }))
+    .sort((a, b) => a.priority - b.priority || a.order - b.order);
+  for (const { ext } of extensions) {
+    const target = ext.extend as string;
+    const base = byName.get(target) ?? { name: target, fields: {} };
+    byName.set(target, { ...base, fields: { ...(isBag(base.fields) ? base.fields : {}), ...(ext.fields as Bag) } });
+  }
+  return { byName, owned };
 }
 
 function fieldsOf(object: Bag | undefined): Map<string, Bag> {
@@ -215,10 +269,10 @@ const DEFAULT_SEED_EXTERNAL_ID: string | string[] = SeedSchema.shape.externalId.
 /**
  * Does a replay of a dataset in this mode write its columns over a row it
  * MATCHED by `externalId`? `upsert` and `update` do (a column declaring
- * `applyOn: 'create'` excepted); `insert` and `ignore` never touch a matched
- * row, and `replace` deletes every row before it inserts, so it matches none.
- * The rows a customer edited that an upgrade's replay would overwrite are
- * counted for these modes only.
+ * `applyOn: 'create'` excepted); `ignore` never touches a matched row. The
+ * retired `insert` and `replace` (#34613) matched no row, and a replay now
+ * refuses a dataset that still declares one. The rows a customer edited that
+ * an upgrade's replay would overwrite are counted for these modes only.
  */
 export function seedModeOverwritesMatchedRows(mode: string): boolean {
   return mode === 'upsert' || mode === 'update';
@@ -302,8 +356,8 @@ function compareSeeds(installed: PackageUpgradeSide | undefined, incoming: Packa
  * version's order, objects one after another.
  */
 export function comparePackageVersions(installed: PackageUpgradeSide | undefined, incoming: PackageUpgradeSide | undefined): PackageUpgradePlan {
-  const before = objectsByName(installed);
-  const after = objectsByName(incoming);
+  const { byName: before, owned: ownedBefore } = objectsByName(installed);
+  const { byName: after, owned: ownedAfter } = objectsByName(incoming);
   const plan: PackageUpgradePlan = {
     objects: { added: [], removed: [] },
     fields: { added: [], removed: [] },
@@ -313,12 +367,21 @@ export function comparePackageVersions(installed: PackageUpgradeSide | undefined
     seeds: compareSeeds(installed, incoming),
   };
 
-  for (const name of before.keys()) if (!after.has(name)) plan.objects.removed.push(name);
-  for (const name of after.keys()) if (!before.has(name)) plan.objects.added.push(name);
+  // Owned objects only: an object a side only extends is neither created nor
+  // dropped by this upgrade.
+  for (const name of ownedBefore) if (!ownedAfter.has(name)) plan.objects.removed.push(name);
+  for (const name of ownedAfter) if (!ownedBefore.has(name)) plan.objects.added.push(name);
 
-  for (const [object, beforeObject] of before) {
-    const afterObject = after.get(object);
-    if (!afterObject) continue;
+  // An object one side reaches only through extensions and the other does not
+  // reach at all is compared with no fields on that other side: the
+  // extensions' fields are what the upgrade adds or leaves behind. An OWNED
+  // object one side lacks is an added or removed object, listed above.
+  const unreached = (object: string): Bag => ({ name: object, fields: {} });
+  const names = [...before.keys(), ...[...after.keys()].filter((name) => !before.has(name))];
+  for (const object of names) {
+    const beforeObject = before.get(object) ?? (ownedAfter.has(object) ? undefined : unreached(object));
+    const afterObject = after.get(object) ?? (ownedBefore.has(object) ? undefined : unreached(object));
+    if (!beforeObject || !afterObject) continue;
     const beforeFields = fieldsOf(beforeObject);
     const afterFields = fieldsOf(afterObject);
 
