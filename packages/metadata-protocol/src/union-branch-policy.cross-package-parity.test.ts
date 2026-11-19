@@ -103,6 +103,8 @@
  *   asymmetry itself.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // The spec side, through its PUBLIC surfaces only — the root barrel's prose

@@ -50,6 +50,8 @@
  * expanding exactly as it did, a plain issue still passing through untouched,
  * and an `issues` payload on any other code still ignored.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine

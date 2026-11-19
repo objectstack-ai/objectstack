@@ -81,6 +81,8 @@
  * it to `src/protocol.ts` and no `dist/` is on the path; the ablation therefore
  * needs no rebuild, and its RED result rules out a stale-artifact false green.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';

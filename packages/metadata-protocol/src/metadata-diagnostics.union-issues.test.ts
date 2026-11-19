@@ -22,6 +22,8 @@
  * policy — so the ranking's own behaviour stays pinned where it is defined
  * (`protocol.save-union-issues.test.ts`) and is not restated here.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import type { z } from 'zod';
