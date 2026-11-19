@@ -453,10 +453,57 @@ function seedLandedKey(record: Record<string, unknown>, externalId: string | str
   const pairs: Array<[string, string]> = [];
   for (const field of fields) {
     const value = record[field];
-    if (value === undefined || value === null || value === '') return '';
+    if (isBlankSeedKeyValue(value)) return '';
     pairs.push([field, String(value)]);
   }
   return JSON.stringify(pairs);
+}
+
+/**
+ * [#34857] Whether a seed record's value for one `externalId` field leaves
+ * that key field blank: no value, `null` or `''`. The one blank rule
+ * {@link seedLandedKey} and {@link SeedLoaderService.externalIdKey} key `''`
+ * by, and the keyed modes refuse a record by. A whitespace-only value is a
+ * value here (no trim).
+ */
+function isBlankSeedKeyValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+/**
+ * [#34857, #35336] The refusal of a keyed seed record that leaves a key field
+ * blank — reported in the load result, the record not written. It names the
+ * object, the record, the blank field(s) and the fix; the fix covers both
+ * shapes it arises from: one record missing a value its siblings carry, and a
+ * dataset whose `externalId` names a field no record carries.
+ */
+function blankSeedKeyRefusal(
+  objectName: string,
+  recordIndex: number,
+  externalId: string | string[],
+  defaultKey: boolean,
+  blankFields: readonly string[],
+  mode: string | undefined,
+): ReferenceResolutionError {
+  const fields = Array.isArray(externalId) ? externalId : [externalId];
+  const keyLabel = `externalId '${fields.join('+')}'${defaultKey ? ' (the default key when a dataset names none)' : ''}`;
+  const blank = blankFields.map((field) => `'${field}'`).join(', ');
+  const consequence = mode === 'update'
+    ? 'so an update load can never find the row it names'
+    : 'so no load can ever match it to a row it wrote: written, it would be inserted again on every load';
+  return {
+    sourceObject: objectName,
+    field: blankFields.join(', '),
+    targetObject: objectName,
+    targetField: '(externalId)',
+    attemptedValue: null,
+    recordIndex,
+    message:
+      `Seed record #${recordIndex} of '${objectName}' was NOT loaded: it is keyed on ${keyLabel} and leaves ` +
+      `${blank} blank (no value, null or an empty string), ${consequence}. Give the record a value for ` +
+      `${blank}, or key the dataset on fields every record carries: a field the object declares, a list of ` +
+      `fields when no single field names a row, or 'id' when the records carry their own ids.`,
+  };
 }
 
 /**
@@ -1802,22 +1849,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     }
     // [#28952] A keyed dataset whose every record keys EMPTY — its
     // `externalId` names a field no record carries, most often a field the
-    // object does not have — can never match a row: each record is written as
-    // new (`upsert`, `ignore`) or skipped (`update`) on every load. The save
-    // door and the publish promotion refuse such a seed; this load never
-    // refuses (a boot must not fail on a stored seed), so it says so once per
-    // dataset, at `warn`, and loads exactly as before.
-    if (keyedMode && dataset.records.length > 0
-      && dataset.records.every((record) => this.externalIdKey(record as Record<string, unknown>, externalId) === '')) {
-      this.logger.warn(
-        `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
-          `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
-          `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
-          `Set externalId to a field the object declares and each record carries, a list of fields when no ` +
-          `single field names a row, or 'id' when the records carry their own ids.`,
-        { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
-      );
-    }
+    // object does not have — can never match a row. Each such record is
+    // refused in the record loop below with the fix for both shapes (give the
+    // record the value, or key the dataset on fields every record carries), the
+    // way any record with a blank key field is (#34857); a dataset-level
+    // notice on top would report the same records twice.
 
     // [#21665] Per-organization row identity. On a per-organization replay,
     // decide which id each row authored with an `id` holds in THIS
@@ -2129,6 +2165,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       this.unownedOrganizationCount !== undefined &&
       seedRowNeedsOrganization(objectDefinition);
     let unownedRefusalLogged = false;
+    /** [#34857] The blank-key refusal is logged once per dataset (every refused record is still reported). */
+    let blankKeyRefusalLogged = false;
 
     // Pin a single `now()` snapshot for the entire dataset so multi-pass
     // loads see one logical clock — the M9 determinism guarantee for seeds.
@@ -2289,10 +2327,42 @@ export class SeedLoaderService implements ISeedLoaderService {
         authoredIdByRecordIndex.set(i, authoredId);
       }
 
+      // [#34857, #35336] A keyed record that leaves a key field blank — an
+      // empty string, null or no value; any component of a composite key, or
+      // the one field of a single-field key (`name` when the dataset names
+      // none) — keys `''`, so it matches no row this load or any earlier one
+      // wrote: it was inserted again on every load (never found, on `update`),
+      // and nothing said so. It is REFUSED here, on the key as authored: after
+      // its expressions resolved and its organization was stamped, BEFORE any
+      // reference resolves. A reference deferred to pass 2 still holds its
+      // authored value at this point, so it is never caught here. The blank
+      // rule is {@link seedLandedKey}'s and `externalIdKey`'s (no trim).
+      if (keyedMode) {
+        const blankKeyFields = [...keyFields].filter((field) => isBlankSeedKeyValue(record[field]));
+        if (blankKeyFields.length > 0) {
+          errored++;
+          const error = blankSeedKeyRefusal(objectName, i, externalId, dataset.externalId === undefined, blankKeyFields, mode);
+          errors.push(error);
+          allErrors.push(error);
+          // `error` (#4632): the record is dropped. Said once per dataset — the
+          // fix is the same for every such record — and every refused record
+          // is still reported in the result. A dry run reports it like any
+          // other refusal it finds.
+          if (!config.dryRun && !blankKeyRefusalLogged) {
+            blankKeyRefusalLogged = true;
+            this.logger.error(`[SeedLoader] ${error.message}`, undefined, {
+              object: objectName, recordIndex: i, fields: blankKeyFields,
+            });
+          }
+          continue;
+        }
+      }
+
       // [#34800] The key as AUTHORED, before any of its references resolves:
       // the identity of a row that lands while one of them is still empty.
-      // `''` when the dataset keys on no reference or the record leaves a key
-      // field blank as written; such a record matches by natural key alone.
+      // `''` when the dataset keys on no reference, or — outside the keyed
+      // modes, which refuse such a record above — when the record leaves a
+      // key field blank as written; such a record matches by natural key alone.
       const authoredKey = existingRowsById ? seedLandedKey(record, externalId) : '';
       const authoredKeyValues = authoredKey === ''
         ? undefined
@@ -5374,15 +5444,16 @@ export class SeedLoaderService implements ISeedLoaderService {
    * two keys match on replay and the row dedupes (framework#3434).
    *
    * Returns '' when ANY component is absent — a partial key is not a usable
-   * uniqueness key, so callers fall back to inserting (this mirrors the
-   * single-field miss, which also yields '').
+   * uniqueness key (this mirrors the single-field miss, which also yields
+   * ''). A keyed load refuses such a record before it is written (#34857);
+   * only a load with no keyed mode falls back to inserting it.
    */
   private externalIdKey(record: Record<string, unknown>, externalId: string | string[]): string {
     if (Array.isArray(externalId)) {
       const parts: string[] = [];
       for (const field of externalId) {
         const value = record[field];
-        if (value === undefined || value === null || value === '') return '';
+        if (isBlankSeedKeyValue(value)) return '';
         parts.push(String(value));
       }
       return parts.join('\u0000');

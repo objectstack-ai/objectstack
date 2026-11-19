@@ -76,6 +76,13 @@ customer has since edited.
 | `update` | Update only, skip if not found | Migration patches on existing rows |
 
 Every mode matches on `externalId`, so a replay finds the row an earlier load wrote.
+Every record carries a value for each `externalId` field (`name` when the dataset
+names none). A record that leaves one blank (no value, `null` or `''`) could match no
+row and would be inserted again on every replay, so the load refuses it: nothing of
+it is written, the load reports an error naming the object, the record and the blank
+field, and the dataset's other records load. The check reads the key as written in the
+seed, so a reference the load cannot resolve yet (a person who has not signed up) is
+not blank.
 The unkeyed modes `insert` and `replace` are retired: see
 [Moving off `insert` and `replace`](#moving-off-insert-and-replace).
 
@@ -311,6 +318,7 @@ defineSeed(Account, {
 
 // Automated test fixtures — CI/CD only
 defineSeed(TestUser, {
+  externalId: 'email',   // the records carry no `name`, the default key
   env: ['test'],
   records: [
     { email: 'ci-admin@example.com', role: 'admin' },
@@ -608,7 +616,9 @@ A join (junction) table linking two objects many-to-many has **no single-field
 natural key** — the *pair* of foreign keys is what makes a row unique. Pass a
 **list** of field names as the `externalId` so the seed runner can match existing
 rows on the composite key and stay idempotent across replays. The foreign keys are
-compared by their *resolved* record ids, which are stable between boots.
+compared by their *resolved* record ids, which are stable between boots. Every record
+carries every listed field: a record with one of them blank is refused at load, like
+any record with a blank key (see [Import Modes](#import-modes)).
 
 ```typescript
 // A team can staff many projects; a project can have many teams.
