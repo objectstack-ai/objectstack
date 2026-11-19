@@ -576,9 +576,15 @@ describe('an origin a register or update body names is trusted for that provider
   });
 
   it('the sign-out capability check trusts a body-named origin for the logout endpoint only: on update, its discovery read keeps the configured trust', async () => {
-    restore = stubIdp({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) }, new URL(OTHER_ISSUER).hostname);
+    // Registered while the issuer's host does not resolve to a private address
+    // (a registration reads its discovery document only from a host that
+    // resolves to public addresses); it does by the time the update turns the
+    // switch on.
+    restore = stubIdp({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
     const rp = await makeCheckedRp();
     expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    restore();
+    restore = stubIdp({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) }, new URL(OTHER_ISSUER).hostname);
     const before = JSON.stringify(storedRows(rp));
     const res = await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, BASE);
     expect(res.status, await res.clone().text()).toBe(400);
