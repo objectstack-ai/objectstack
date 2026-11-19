@@ -92,7 +92,7 @@ export function fieldPredicateVisible(
 /** What {@link dropFieldPredicateHidden} judges a list against. */
 export interface FieldPredicateGate {
   /** The OBJECT's field declarations — where a field's `visibleWhen` is read, by name. */
-  objectFields: Record<string, any> | null | undefined;
+  objectFields: Record<string, unknown> | null | undefined;
   /** The record, as {@link lazyPredicateRecord} hands it: asked only when a predicate is declared. */
   record: () => Record<string, unknown>;
   /** The host predicate scope (`usePredicateScope()`): `current_user`, `features`. */
@@ -114,7 +114,8 @@ export function dropFieldPredicateHidden<T>(list: T[] | undefined, gate: FieldPr
   if (!list) return list;
   return list.filter((entry) => {
     const name = columnIdentity(entry);
-    const visibleWhen = name ? gate.objectFields?.[name]?.visibleWhen : undefined;
+    const declared = name ? (gate.objectFields?.[name] as { visibleWhen?: unknown } | undefined) : undefined;
+    const visibleWhen = declared?.visibleWhen;
     if (visibleWhen == null) return true;
     return fieldPredicateVisible(
       visibleWhen as FieldRulePredicate,
