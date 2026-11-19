@@ -663,8 +663,9 @@ export class DeleteAndAggregateFacet {
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();
+                let removed: Awaited<ReturnType<typeof driver.delete>>;
                 try {
-                  const removed = await driver.delete(
+                  removed = await driver.delete(
                     object,
                     hookContext.input.id as string,
                     this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
@@ -675,11 +676,24 @@ export class DeleteAndAggregateFacet {
                   // withdrawn.
                   if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
                   else await entry?.withdraw();
-                  return removed;
                 } catch (e) {
                   await entry?.compensate();
                   throw e;
                 }
+                // [#35329] The pre-image proved the row present and the driver
+                // answers `false` (`IDataDriver.delete`: "false if not found"):
+                // another writer removed it in between. This delete removed
+                // nothing, so it reports nothing — no `afterDelete`, no
+                // roll-up recompute, no `data.record.deleted` — and answers
+                // what a by-id delete answers for a missing row, the pre-image
+                // miss's own error. Thrown here, after the entry's withdrawal
+                // and outside the `try` above (so the entry is never
+                // compensated twice), and inside the unit, so a cascade this
+                // call walked rolls back with it: the cascade and the row's
+                // removal, or neither (#7413). An off-contract `0` keeps its
+                // pass-through answer.
+                if (removed === false) throw recordNotFoundError(object, id, opCtx.context);
+                return removed;
               };
               // WHEN to open one is `planCascadeAtomicity`'s call — see there.
               // `'none'` (nothing references this object) keeps the pre-#7413
