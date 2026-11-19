@@ -47,7 +47,7 @@
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
 - 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
   ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。
-- 轮次报告设 L2 清单专节,与呈裁清单同为强制审计。
+- 碰 `.claude/**` 另落 `Rule-change-verified:` 行,核正文声明与 diff 写同值;轮报 L2 清单专节必设。
 - 请审/求批与落地前检,过则 S 入队、H 等人批:① 现 head 末条同形达档 PASS,无未闭前两级。
 - head 后移例外:纯重生成或只动散文面原记录续管,落 `Regen-provenance:` 行;余移或现 head 落 FAIL
   而已挂 auto-merge ⇒ 派发席读到即照 AGENTS.md disarm 句撤挂,FAIL 记录点名欠撤挂;重挂照 ①。
