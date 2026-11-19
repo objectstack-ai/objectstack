@@ -94,7 +94,9 @@ async function defaultSubjects(): Promise<string[]> {
     />,
   );
   await userEvent.click(container.querySelectorAll('[role="combobox"]')[0] as HTMLElement);
-  return (await screen.findAllByRole('option')).map((o) => o.textContent ?? '');
+  // A field subject reads by its label, its spelling the `.font-mono` hint
+  // (objectstack#34122); read the spelling, which is what the engine judges.
+  return (await screen.findAllByRole('option')).map((o) => (o.querySelector('.font-mono') ?? o).textContent ?? '');
 }
 
 /** The CONTEXT half of the default vocabulary — what is not a catalog field. */

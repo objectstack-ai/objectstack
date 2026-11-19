@@ -102,7 +102,7 @@ describe('an ordering comparison on a field compiles behind a null guard (object
   it('the card flow — Add condition, the optional number, greater than, 40 — writes the guarded shape', async () => {
     const { container } = render(<Harness initial="" />);
     fireEvent.click(screen.getByRole('button', { name: /Add condition/ }));
-    await pick(comboboxes(container)[0], 'record.estimated_hours');
+    await pick(comboboxes(container)[0], 'Estimated Hours record.estimated_hours');
     await pick(comboboxes(container)[1], 'greater than');
     fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: '40' } });
 

@@ -294,7 +294,7 @@ describe('a new row starts on a typed operator, not `truthy`', () => {
     fireEvent.click(screen.getByText('Add condition'));
     expect(lastOpTrigger(container).textContent).toBe('equals');
     await userEvent.click(comboboxes(container)[0]);
-    await userEvent.click(await screen.findByRole('option', { name: 'record.due_date' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Due date record.due_date' }));
     const cel = committed();
     expect(cel).toBe("record.due_date == ''");
     expect(evaluate(cel, { due_date: null })).toEqual({ ok: true, value: false });
