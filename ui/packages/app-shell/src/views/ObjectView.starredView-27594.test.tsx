@@ -24,6 +24,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// Pay `@objectstack/lint`'s first load during collection, not inside a
+// case's timeout (check:test-source-alias): the ObjectView graph reaches it.
+import '@objectstack/lint';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
