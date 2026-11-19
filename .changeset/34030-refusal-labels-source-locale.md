@@ -5,7 +5,7 @@
 
 fix(i18n): a refusal names fields, options and objects in the declared `sourceLocale` as authored
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The labels a write refusal names are now resolved the way `GET /meta` serves them: `translateObject` over the deployment's translations, with the request's locale, the declared fallback chain and the authored language (`i18n.sourceLocale`, else `defaultLocale`). They are no longer looked up through `II18nService.t()`. Before this, an app authored in English that defaults its users to Chinese (`sourceLocale: 'en'`, `defaultLocale: 'zh-CN'`) answered an `en` request with the Chinese row in its validation, duplicate-record, delete-restricted and restore refusals, and in the security layer's master-detail and field-write `userMessage`. `/meta` answered the same request with the English label.
