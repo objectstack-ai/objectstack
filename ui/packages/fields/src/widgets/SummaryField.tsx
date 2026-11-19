@@ -71,8 +71,10 @@ export function SummaryField({ value, field, dependentValues, ...props }: FieldW
         ? formatNumberFieldValue(value, field, locale)
         : String(safe);
 
+  // The colour is the theme's `text-foreground`, the token the record page's
+  // value row sets, so the face follows dark mode instead of a fixed grey.
   return (
-    <span className={`text-sm font-medium tabular-nums text-gray-700 ${props.className || ''}`}>
+    <span className={`text-sm font-medium tabular-nums text-foreground ${props.className || ''}`}>
       {text}
     </span>
   );
