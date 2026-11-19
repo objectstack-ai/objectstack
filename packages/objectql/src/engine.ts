@@ -2683,7 +2683,7 @@ export class ObjectQL implements IObjectQLEngine {
   private objectDisplayLabel(
     objectName: string,
     declaredLabel: unknown,
-    ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
+    ctx: Pick<ValidationMessageContext, 'locale' | 'labelTranslation'>,
   ): string {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts`, its docblock with it; it reads no member.
     return objectDisplayLabel(objectName, declaredLabel, ctx);

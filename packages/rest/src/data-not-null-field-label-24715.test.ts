@@ -89,10 +89,17 @@ const ZH_LABELS: Record<string, string> = {
   [`objects.${OBJECT}.fields.unit_price.label`]: '销售价格',
   [`objects.${OBJECT}.fields.list_price.label`]: '标价',
 };
-/** An `II18nService` holding a `zh-CN` bundle: `t` echoes the key on a miss. */
+/**
+ * An `II18nService` holding a `zh-CN` bundle: `t` echoes the key on a miss.
+ * [#34030] A refusal's field label is read off `getTranslations`, the bundle
+ * the metadata route serves it from, so the same rows ride that channel too.
+ */
 const I18N = {
   t: (key: string, locale: string) => (locale === 'zh-CN' && ZH_LABELS[key]) || key,
   getLocales: () => ['en', 'zh-CN'],
+  getTranslations: (locale: string) => (locale === 'zh-CN'
+    ? { objects: { [OBJECT]: { fields: { unit_price: { label: '销售价格' }, list_price: { label: '标价' } } } } }
+    : {}),
 };
 
 function createMockServer() {

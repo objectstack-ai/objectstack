@@ -863,13 +863,15 @@ describe('validateRecord — messages name the field by its label (#3957)', () =
    */
   it('prefers the translated label over the declared one', () => {
     const en = { fields: { penalty_amount: { type: 'currency', label: 'Penalty Amount', min: 0 } } };
-    const translate = (key: string, locale: string) =>
-      key === 'objects.mes_settlement.fields.penalty_amount.label' && locale === 'zh-CN'
-        ? '处罚金额'
-        : key;
+    // [#34030] The label is read off the deployment's bundle with the metadata
+    // route's `ResolveOptions`, never through `translate`.
+    const labelTranslation = () => ({
+      bundle: { 'zh-CN': { objects: { mes_settlement: { fields: { penalty_amount: { label: '处罚金额' } } } } } },
+      options: { locale: 'zh-CN' },
+    });
     try {
       validateRecord(en, { penalty_amount: -5 }, 'update', {
-        messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate },
+        messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate: (key: string) => key, labelTranslation },
       });
     } catch (e) {
       const [err] = (e as ValidationError).fields;
@@ -880,8 +882,9 @@ describe('validateRecord — messages name the field by its label (#3957)', () =
 
   it('survives a throwing i18n service instead of 500-ing the write', () => {
     const translate = () => { throw new Error('i18n exploded'); };
+    const labelTranslation = () => { throw new Error('i18n exploded'); };
     const [err] = fieldsOf({ penalty_amount: -5 }, 'update', {
-      messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate },
+      messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate, labelTranslation },
     });
     expect(err.message).toBe('处罚金额必须大于或等于 0');
   });
