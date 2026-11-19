@@ -419,6 +419,7 @@
     "HookRefusalSchema (const)",
     "HookSchema (const)",
     "HookText (type)",
+    "HookTextReader (type)",
     "HookTextSchema (const)",
     "HookUpdateDoc (type)",
     "HookUpdateOptions (type)",

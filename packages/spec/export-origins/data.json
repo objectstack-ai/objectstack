@@ -409,6 +409,7 @@
     "HookRefusalSchema": "src/data/hook.zod.ts#HookRefusalSchema (const)",
     "HookSchema": "src/data/hook.zod.ts#HookSchema (const)",
     "HookText": "src/data/hook.zod.ts#HookText (type)",
+    "HookTextReader": "src/data/hook.zod.ts#HookTextReader (type)",
     "HookTextSchema": "src/data/hook.zod.ts#HookTextSchema (const)",
     "HookUpdateDoc": "src/data/hook-api.ts#HookUpdateDoc (type)",
     "HookUpdateOptions": "src/data/hook-api.ts#HookUpdateOptions (type)",
