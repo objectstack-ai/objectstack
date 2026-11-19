@@ -35,9 +35,9 @@
 - 逾 3,000 行须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
 - 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
   (c) PR 正文签名尾行之席以签名评论自请。审计评论在先,回读离队且仍开未合才落地。
-- 该 op 实测离队见 `platform-readings.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
+- 该 op 实测离队见 `readings-queue.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
 - 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
-- PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
+- PR 侧红(非队列)同在本窗口处置:义务与三步只住 `readings-ci.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
 - K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
@@ -68,8 +68,8 @@
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
-- ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
-- ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
+- ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `readings-queue.md`。
+- ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`,仍拒即授权漂移。
 - MERGED 同笔收口:`Fixes` 卡代关亦摘标;`Part of` 卡剩余物落其车道一态并清 assignee。
 - 一态 = `pm:queue`+其车道 `domain:*`(归他车道即改域)/`pm:blocked`+`Blocked-by:`/hold+`Restart-when:`。
 - 同笔评论写清交付了什么、剩下归谁;摘态不补态由写门拒收(`state-machine.md` 跨状态通则)。

@@ -25,8 +25,12 @@
  *    published;
  *  - controls: a declared field, an injected column (`id`), every member of
  *    a composite declared, `insert` and `replace` (they never match), a
- *    draft seed whose object is itself still a draft, an object neither
- *    registered nor drafted, and a `migrate-stored` re-save.
+ *    draft seed whose object is itself still a draft, and a `migrate-stored`
+ *    re-save.
+ *
+ * [#34864] And, in its own `describe` below, a seed whose `object` names no
+ * object at all: refused by the save door, naming the object; left to the
+ * load by the publish promotion and the restore doors.
  *
  * Each refusal is asserted by its code, its status, its path and its
  * finding's first clause, spelled out here.
@@ -362,13 +366,6 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
         expect(stored(rows, 'seed', 'r_new')).toEqual([`active|${PKG}|"sku"`]);
     });
 
-    it('an object neither registered nor drafted is not judged here (the load reports it)', async () => {
-        const { protocol, rows } = makeSession();
-        const res = await protocol.saveMetaItem({ type: 'seed', name: 'r_far', item: seed('seedkey_elsewhere', 'no_such_field'), mode: 'draft' });
-        expect(res.success).toBe(true);
-        expect(stored(rows, 'seed', 'r_far')).toEqual(['draft|-|"no_such_field"']);
-    });
-
     it('a `migrate-stored` re-save of a stored seed is not judged', async () => {
         const { protocol, rows } = makeSession({ objects: OBJECTS });
         const migrated = await protocol.saveMetaItem({
@@ -376,5 +373,90 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
         });
         expect(migrated.success).toBe(true);
         expect(stored(rows, 'seed', 'r_old')).toEqual(['draft|-|"no_such_field"']);
+    });
+});
+
+describe('[#34864] the seed save door — an `object` that names no object', () => {
+    /** The finding's first clause, spelled out: the seed, then the object it names. */
+    const unknownObjectFinding = (seedName: string, objectName: string) =>
+        `Seed '${seedName}' loads its records into object '${objectName}', which is not defined: `;
+
+    const expectUnknownObject = (err: any, seedName: string, objectName: string, fix: string) => {
+        expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message).startsWith(`seed/${seedName} failed spec validation: `), String(err.message)).toBe(true);
+        expect(err.issues.map((i: any) => ({ path: i.path, code: i.code }))).toEqual([{ path: 'object', code: 'custom' }]);
+        const message = String(err.issues[0].message);
+        expect(message.startsWith(unknownObjectFinding(seedName, objectName)), message).toBe(true);
+        expect(message.endsWith(fix), message).toBe(true);
+        expect(message.length).toBeLessThanOrEqual(500);
+    };
+
+    it.each([
+        ['a draft save into a package', { mode: 'draft', packageId: PKG }, 'or create the object first: a draft of it is enough for this draft.'],
+        ['a draft save naming no package', { mode: 'draft' }, 'or create the object first: a draft of it is enough for this draft.'],
+        ['a publish save', {}, 'or create and publish the object first.'],
+    ])('%s is refused 422 at `object`, naming the object, and nothing is stored or loaded', async (_label, saveOpts, fix) => {
+        const { protocol, rows, dataInserts } = makeSession({ objects: OBJECTS });
+
+        const err = await refusalOf(protocol.saveMetaItem({
+            type: 'seed', name: 'r_nope', item: seed('seedkey_nope', 'name'), ...saveOpts,
+        }));
+
+        expectUnknownObject(err, 'r_nope', 'seedkey_nope', fix);
+        expect(stored(rows, 'seed', 'r_nope')).toEqual([]);
+        expect(dataInserts).toEqual([]);
+    });
+
+    it('a publish save whose object is only a draft is refused: the load it runs has no object to write to', async () => {
+        const { protocol, rows } = makeSession();
+        await protocol.saveMetaItem({ type: 'object', name: 'seedkey_new', item: object('seedkey_new'), mode: 'draft', packageId: PKG });
+
+        const err = await refusalOf(protocol.saveMetaItem({ type: 'seed', name: 'r_live', item: seed('seedkey_new', 'sku'), packageId: PKG }));
+
+        expectUnknownObject(err, 'r_live', 'seedkey_new', 'or create and publish the object first.');
+        expect(stored(rows, 'seed', 'r_live')).toEqual([]);
+    });
+
+    describe('controls — an object something resolves is not refused for its existence', () => {
+        it('a registered object (a dependency package\'s object answers the same registry read): saves as a draft and live', async () => {
+            const { protocol, rows } = makeSession({ objects: OBJECTS });
+            expect((await protocol.saveMetaItem({ type: 'seed', name: 'r_reg', item: seed('seedkey_other', 'sku'), mode: 'draft', packageId: PKG })).success).toBe(true);
+            expect((await protocol.saveMetaItem({ type: 'seed', name: 'r_reg_live', item: seed('seedkey_other', 'sku') })).success).toBe(true);
+            expect(stored(rows, 'seed', 'r_reg')).toEqual([`draft|${PKG}|"sku"`]);
+        });
+
+        it('an object drafted in the same package: the draft seed saves and is judged at its publish', async () => {
+            const { protocol, rows } = makeSession();
+            await protocol.saveMetaItem({ type: 'object', name: 'seedkey_new', item: object('seedkey_new'), mode: 'draft', packageId: PKG });
+            const saved = await protocol.saveMetaItem({ type: 'seed', name: 'r_new', item: seed('seedkey_new', 'sku'), mode: 'draft', packageId: PKG });
+            expect(saved.success).toBe(true);
+            expect(stored(rows, 'seed', 'r_new')).toEqual([`draft|${PKG}|"sku"`]);
+        });
+
+        it('a `migrate-stored` re-save of a stored seed naming no object is not judged', async () => {
+            const { protocol, rows } = makeSession();
+            const migrated = await protocol.saveMetaItem({
+                type: 'seed', name: 'r_old', item: seed('seedkey_nope', 'name'), mode: 'draft', source: 'migrate-stored',
+            });
+            expect(migrated.success).toBe(true);
+            expect(stored(rows, 'seed', 'r_old')).toEqual(['draft|-|"name"']);
+        });
+
+        it('the publish promotion leaves it to the load, as before: a seed draft stored before the rule publishes', async () => {
+            const { protocol, rows } = makeSession();
+            plantSeedDraft(rows, 'r_far', seed('seedkey_nope', 'name'));
+
+            const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+            expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+            expect(stored(rows, 'seed', 'r_far')).toEqual([`active|${PKG}|"name"`]);
+        });
+
+        it('the restore door leaves it to the load too', async () => {
+            const { protocol } = makeSession();
+            await expect(protocol.refuseRestoredBodyTheSaveDoorRefuses(
+                'seed', 'r_far', seed('seedkey_nope', 'name'), null, 'protocol.restoreMetaItem',
+            )).resolves.toBeUndefined();
+        });
     });
 });

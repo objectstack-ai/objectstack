@@ -430,7 +430,8 @@ export const CEILINGS = new Map([
   // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
   // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
   // line the renaming touched kept its line. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 329],
+  // 329 → 328 (#35215 G-A, current values and quotes out of the skill): the batch row's current values moved out, the retired `target:<major>` label row deleted; landed count.
+  ['.claude/skills/pm-dispatch/SKILL.md', 328],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -473,7 +474,8 @@ export const CEILINGS = new Map([
   // carries the route, the dev names the owed review in its hand-back and never
   // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
+  // 246 → 245 (#35215 G-A, current values and quotes out of the skill): an expired one-time calibration line deleted, quotes and ids trimmed; landed count.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -617,7 +619,8 @@ export const CEILINGS = new Map([
   // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
   // provenance carrying those two operative quotes (+1). Measured delta +3.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
+  // 63 → 62 (#35215 G-A, current values and quotes out of the skill): the verbatim provenance line deleted; the route it backed stands above it; landed count.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 62],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1199,11 +1202,29 @@ export const CEILINGS = new Map([
   // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
   // now holds were deleted whole (lowering is always legitimate). Landed count.
   // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 458],
+  // 458 → 14: split by subject (card #35236, step 5 of the skills-review order of improvements,
+  // ordered by the maintainer's 「同意」 of 2026-11-18 16:19Z, quoted on that card) — every
+  // reading moved verbatim into the nine `readings-*.md` files below and this file became their
+  // index (lowering is always legitimate). Each new row is its file's landed count, headroom 0;
+  // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
+  // paid by that ruling and by nothing else.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
+  // readings-queue 89 → 86, readings-channels 76 → 71, readings-write-shapes 84 → 81 (#35215 G-D): stale
+  // platform readings trimmed, the lesson kept; landed counts.
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 86],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 71],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 81],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
-  // readings. The policy lives in platform-readings.md's quota section; this
+  // readings. The policy lives in readings-channels.md (platform-readings.md's
+  // quota section until the subject split); this
   // file is the lookup table it points at, so the policy flip did not have to
   // grow the hot file. Set at landed line count (headroom 0, same convention
   // as the entries above).
@@ -1396,7 +1417,8 @@ export const CEILINGS = new Map([
   // one line, the moving seat — an outgoing account still draining moves to a free
   // seat with its own mailbox, the seat post carries the ownership split, and it posts
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
+  // 100 → 99 (#35215 G-A, current values and quotes out of the skill): the expired pre-filed-children transition line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
   // or shift, startup with the maintainer's authorising line per seat thread (an area
   // thread carries none), the in-area rules as pointers to their owning references, the
@@ -1663,7 +1685,8 @@ export const CEILINGS = new Map([
   // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
   // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
   // as his. Measured delta +1. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
+  // 83 → 79 (#35215 G-A, current values and quotes out of the skill): the dated quote block and one maintainer quote deleted; the rules under them stand; landed count.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1833,7 +1856,8 @@ export const CEILINGS = new Map([
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
+  // 82 → 81 (#35215 G-A, current values and quotes out of the skill): a provenance line deleted; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 81],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
@@ -2757,6 +2781,15 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 0],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 0],
   ['.claude/skills/pm-dispatch/references/rest-channel.md', 0],
   ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 0],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 0],

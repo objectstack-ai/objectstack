@@ -82,6 +82,8 @@ const ITEMS: Record<string, unknown> = {
     },
     'object crm_project': { name: 'crm_project', label: PROJECTS, fields: { title: { type: 'text', label: 'Title' } } },
     'seed crm_task_seed': { object: 'crm_task', records: [] },
+    // [#34864] A seed naming an object that does not exist.
+    'seed crm_nope_seed': { object: 'crm_nope', records: [] },
     'view crm_task_list': { name: 'crm_task_list', label: VIEW, object: 'crm_task' },
     'dashboard crm_board': {
         name: 'crm_board',
@@ -142,6 +144,13 @@ const engineThrowing: ProbeEngine = {
     find: async () => {
         throw new Error('no such table: crm_task');
     },
+};
+/** [#34864] An engine that answers its registered objects, and registers none: every read is refused. */
+const engineWithoutObjects: ProbeEngine = {
+    find: async (object) => {
+        throw new Error(`Object '${object}' not found`);
+    },
+    getSchema: () => undefined,
 };
 
 /** One `where` on one row: equality and `{ $in: [...] }`; any other operator or combinator is refused. */
@@ -265,6 +274,13 @@ const CASES: readonly ProbeCase[] = [
         run: probe({ engine: engineThrowing, published: [{ type: 'seed', name: 'crm_task_seed' }] }),
         params: () => ({ object: TASKS, cause: 'unreadable' }),
         hidden: ['crm_task'],
+    },
+    {
+        title: 'a seed whose object does not exist',
+        code: 'seed_not_applied', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ engine: engineWithoutObjects, published: [{ type: 'seed', name: 'crm_nope_seed' }] }),
+        params: () => ({ object: 'crm_nope', cause: 'missing' }),
+        hidden: [],
     },
     {
         title: 'a view whose read throws',
@@ -550,6 +566,16 @@ describe('every probe finding carries the person\'s sentence, in the request\'s 
             '“Tasks”的示例数据没有加载成功，所以“Tasks”中还没有任何记录。请检查示例数据，然后重新发布。',
         );
 
+        // [#34864] An object that does not exist: the sentence names it and the fix, not "publish again" alone.
+        const missing = byTitle('a seed whose object does not exist');
+        expect(onlyIssue(await missing.run(['en-US'])).userMessage).toBe(
+            'The sample data could not load, because "crm_nope" does not exist. Correct the object the sample data '
+                + 'names, or create and publish "crm_nope", then publish again.',
+        );
+        expect(onlyIssue(await missing.run(['zh-CN'])).userMessage).toBe(
+            '示例数据无法加载，因为“crm_nope”不存在。请更正示例数据所指的对象，或先创建并发布“crm_nope”，然后重新发布。',
+        );
+
         const empty = byTitle('a widget whose query returns nothing over an object that has rows');
         expect(onlyIssue(await empty.run(['en-US'])).userMessage).toBe(
             'The widget "Open tasks" on dashboard "Team board" shows no data, although "Tasks" has records. '
@@ -771,5 +797,29 @@ describe('the catalog holds exactly the probe\'s codes, each in every platform l
             '"Tasks" was published, but its field settings could not be checked. The problem is in the check itself, '
                 + 'not necessarily in "Tasks"; contact your administrator if it happens again.',
         );
+    });
+});
+
+describe('[#34864] a seed\'s object that does not exist is not a read that failed', () => {
+    const SEED = [{ type: 'seed', name: 'crm_nope_seed' }];
+
+    it('names the missing object to the agent, with the fix, and says "missing" to the person', async () => {
+        const issue = onlyIssue(await runBuildProbes({ engine: engineWithoutObjects, getItem: readItems, published: SEED }));
+        expect(issue).toMatchObject({ code: 'seed_not_applied', ref: { type: 'object', name: 'crm_nope' } }); // adr0112-ok: D6c build-probe diagnostics code
+        expect(issue.message).toBe('Seed "crm_nope_seed" was published but loads into object "crm_nope", which does not exist — no record was loaded.');
+        expect(issue.fix).toBe("Correct the seed's `object` to the object's full name, or create and publish object \"crm_nope\", then republish the seed.");
+        expect(issue.userMessage).toBe(BUILD_PROBE_USER_TEXT.seed_not_applied.en({ object: 'crm_nope', cause: 'missing' }));
+    });
+
+    it.each<[string, ProbeEngine, GetItem]>([
+        ['the engine registers the object, and its read fails', { ...engineWithoutObjects, getSchema: () => ({ name: 'crm_nope' }) }, readItems],
+        ['the engine cannot answer for its objects (no `getSchema`)', engineThrowing, readItems],
+        ['the engine answers none, but a published object of the name is held', engineWithoutObjects,
+            async (type, name) => (type === 'object' && name === 'crm_nope' ? { name: 'crm_nope', label: 'Nope' } : readItems(type, name))],
+    ])('CONTROL: %s — still `unreadable`', async (_label, engine, getItem) => {
+        const issue = onlyIssue(await runBuildProbes({ engine, getItem, published: SEED }));
+        expect(issue.code).toBe('seed_not_applied'); // adr0112-ok: D6c build-probe diagnostics code
+        expect(issue.message.startsWith('Seed "crm_nope_seed" probe could not read object "crm_nope": ')).toBe(true);
+        expect(issue.userMessage).toContain('could not be read after publishing');
     });
 });

@@ -769,7 +769,8 @@ grid cell: a number is formatted as a number field formats it, keeping its own p
 the field sets a `scale` (`15750.5` reads `15,750.5`; at `scale: 2`, `15,750.50`), and anything
 else is shown as text. A roll-up that declares its currency in `currencyConfig` is drawn as
 money instead: `fixed` in its code, `record` in the parent's code, and `dynamic`, admitted
-only on a roll-up of a stored home amount, in the organization's home currency
+only on a roll-up of an amount in the home currency (a `dynamic` `currency` field, a stored
+home amount included), in the organization's home currency
 ([Currency fields](/docs/data-modeling/currency#totals-in-the-home-currency)).
 
 ### `autonumber`
