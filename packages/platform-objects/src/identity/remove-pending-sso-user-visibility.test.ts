@@ -56,7 +56,8 @@ describe('Setup → Users offers Remove Pending User on a pending row, managed, 
     expect(action.target).toBe('/api/v1/auth/admin/remove-sso-user');
     expect(action.recordIdParam).toBe('userId');
     expect(action.locations).toEqual(['list_item', 'record_header']);
-    expect(typeof action.confirmText).toBe('string');
+    // A confirmation is asked first (the parsed template, whatever its words).
+    expect((action.confirmText as { source?: unknown } | undefined)?.source).toEqual(expect.any(String));
     // The door mounts with or without the better-auth admin plugin, as Add / Import do.
     expect(action.requiresFeature).toBeUndefined();
     // No params: the door's body is the closed key set `{ userId }`.
