@@ -105,7 +105,7 @@ afterEach(() => {
 /** The rail (the `nav` holding the search box) once every row has rendered; `wrap` puts a provider around the pillar. */
 async function renderRail(wrap: (pillar: React.ReactElement) => React.ReactElement = (pillar) => pillar): Promise<HTMLElement> {
   render(<MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>{wrap(<AutomationsPillar packageId={PKG} />)}</MemoryRouter>);
-  const search = await screen.findByPlaceholderText(t('engine.studio.designer.search', 'en'), undefined, { timeout: 8000 });
+  const search = await screen.findByTestId('auto-rail-search', undefined, { timeout: 8000 });
   const rail = search.closest('nav') as HTMLElement;
   await waitFor(() => expect(rail.querySelector('[data-testid="auto-rail-row-welcome_new_member"]')).toBeInTheDocument(), {
     timeout: 8000,
@@ -190,8 +190,9 @@ describe('a rail row names its flow by the package’s translated label (objects
       </I18nProvider>
     );
   };
+  // By its test id: under a zh-CN provider the box's placeholder is the Chinese one.
   const search = (rail: HTMLElement, value: string) =>
-    fireEvent.change(within(rail).getByPlaceholderText(t('engine.studio.designer.search', 'en')), { target: { value } });
+    fireEvent.change(within(rail).getByTestId('auto-rail-search'), { target: { value } });
 
   it('zh-CN: a flow the pack labels reads by that label, on the row and in its title; the rest stay authored', async () => {
     const rail = await renderRail(withPack('zh-CN'));
