@@ -132,7 +132,7 @@ const DEFAULT_DRAFT: AppWizardDraft = {
  * was stored at all depended on the editor's language. An authored definition
  * the host could not read decides nothing: the entry inherits.
  */
-export function generatedEntryLabel(
+function generatedEntryLabel(
   objectName: string,
   authored: Record<string, unknown> | null | undefined,
 ): string | undefined {
@@ -1045,9 +1045,9 @@ export function AppCreationWizard({
   }, [currentStep, isLastStep, generatingNav, enterNavigationStep]);
 
   const handleBack = useCallback(() => {
-    if (isFirstStep) return;
+    if (isFirstStep || generatingNav) return;
     setCurrentStep((s) => s - 1);
-  }, [isFirstStep]);
+  }, [isFirstStep, generatingNav]);
 
   const handleComplete = useCallback(() => {
     onComplete?.(draft);
@@ -1218,7 +1218,7 @@ export function AppCreationWizard({
               type="button"
               data-testid="wizard-back"
               onClick={handleBack}
-              disabled={readOnly}
+              disabled={readOnly || generatingNav}
               className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ChevronLeft className="h-4 w-4" />
