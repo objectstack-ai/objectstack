@@ -25,9 +25,9 @@ import type { FeedItem } from '@object-ui/types';
 
 /**
  * The record's field changes as feed items, from the host's audit read —
- * `null` while the host has none to give (no `trackHistory`, an authored
- * page, a read not made). Read by the timeline stream on the default record
- * page only.
+ * `null` while the host has none to give (no `trackHistory`, a read not made,
+ * not answered or refused). Read by the timeline stream on the default record
+ * page, and by the feed panels of an authored one (objectstack#33996).
  */
 export const RecordFieldChangesContext = React.createContext<FeedItem[] | null>(null);
 
@@ -231,6 +231,37 @@ export function mergeTimelineStream(
   feed: readonly FeedItem[] | null | undefined,
   fieldChanges: readonly FeedItem[] | null | undefined,
 ): TimelineStreamItem[] {
+  return byTime(pairedStream(feed, fieldChanges), -1);
+}
+
+/**
+ * The feed of a panel drawn off the default record page's stream: an authored
+ * `record:discussion` / `record:chatter` / `record:activity` (objectstack#33996).
+ * The same items and the same pairing as {@link mergeTimelineStream}, oldest
+ * first, the order such a panel reads. No field changes: `feed` itself, so a
+ * page without field history draws what it drew before.
+ */
+export function mergeFieldHistoryIntoFeed(
+  feed: readonly FeedItem[],
+  fieldChanges: readonly FeedItem[] | null | undefined,
+): readonly FeedItem[] {
+  if (!fieldChanges || fieldChanges.length === 0) return feed;
+  return byTime(pairedStream(feed, fieldChanges), 1);
+}
+
+/** The items sorted by time, `1` oldest first, `-1` newest first; ties keep their order. */
+function byTime(items: TimelineStreamItem[], direction: 1 | -1): TimelineStreamItem[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => direction * (timeOf(a.item) - timeOf(b.item)) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+/** The feed with the field changes paired in (objectstack#30122), unsorted. */
+function pairedStream(
+  feed: readonly FeedItem[] | null | undefined,
+  fieldChanges: readonly FeedItem[] | null | undefined,
+): TimelineStreamItem[] {
   const changes = (fieldChanges ?? []) as ReadonlyArray<FeedItem & AuditFeedFacts>;
   const activity = feed ?? [];
   const pairs = pairActions(activity, changes);
@@ -246,10 +277,7 @@ export function mergeTimelineStream(
     if (changes.length > 0 && item.activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE) return;
     base.push(item);
   });
-  return [...base, ...unpaired]
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => timeOf(b.item) - timeOf(a.item) || a.index - b.index)
-    .map(({ item }) => item);
+  return [...base, ...unpaired];
 }
 
 /** The stream's filter chips: 全部 / 活动 / 讨论 / 变更. */
