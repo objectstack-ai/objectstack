@@ -177,7 +177,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
-- `domain:*`、队列与级别只由分诊落笔;两例外:sub-issue 承父卡域、main-red 锚卡,免审计评论。
+- `domain:*` 与队列只由分诊落笔;两例外:sub-issue 承父卡域、main-red 锚卡,免审计评论。
 - 无分诊审计评论 ⛔ 不得认领;车道席自分诊是队列与级别的第三例外,住 `triage-duties.md`。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
