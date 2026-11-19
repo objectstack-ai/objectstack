@@ -35,7 +35,7 @@ const FIELDS = [
   { name: 'code', type: 'text' },
 ];
 
-function mount(includePrevious = false, labels: boolean | undefined = true) {
+function mount(includePrevious = false, labels = true) {
   const onChange = vi.fn();
   render(
     <ConditionBuilder
@@ -85,7 +85,11 @@ describe('ConditionBuilder · field subjects read by label (objectstack#27521)',
   });
 
   it('a mount that passes no `labelSubjects` reads labels: the default is on (objectstack#34122)', async () => {
-    mount(false, undefined);
+    // Rendered here rather than through `mount`: handing `mount` an
+    // `undefined` would take ITS default (`true`) and pass that explicitly,
+    // so the builder's own default would never be read.
+    render(<ConditionBuilder value="" onCommit={vi.fn()} fields={FIELDS} />);
+    fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.condition.add', 'en-US') }));
     const texts = (await openSubjects()).map((o) => o.textContent);
     expect(texts).toContain('Estimated Hoursrecord.estimated_hours');
     expect(texts).toContain('record.code');
