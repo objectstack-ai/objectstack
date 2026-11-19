@@ -348,6 +348,7 @@ describe('registration: the invalid-expression header names the braces rule only
     it.each([
         ['a retired `{…}` token in a value slot literal', { assign: 'Due {record.title}' }],
         ['a value envelope naming the template dialect', { assign: { dialect: 'template', source: 'Due' } }],
+        ['a CEL value envelope wrapping a reference in braces', { assign: { dialect: 'cel', source: '{record.title}' } }],
         ['a single-brace token in the flow\'s text slot', { successMessage: 'Done {record.title}' }],
     ])('%s alone: the braces header', (_label, opts) => {
         expect(header(refusalOf(loanFlow(opts)))).toBe(BRACES_HEADER(1));
