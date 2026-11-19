@@ -145,10 +145,18 @@
       URL and the token it sent; the preflight takes it once, and only when
       both match what it would send itself.
 
-      Every safety of the preflight is kept. No token, or blocked storage,
-      sends nothing, exactly as the preflight returns early. A request that
-      fails or answers non-OK hands over a rejection, so the preflight fetches
-      as it always did and the stale-token purge reads its own answer.
+      With no stored token the question is the cookie session's, the one
+      `AuthProvider` would otherwise ask only after React mounts, behind the
+      first visit's language-seed race (objectstack#35455): the same request
+      without the `Authorization` header, and the slot carries a null token.
+      The preflight hands that answer on, a signed-out one (the server's 401
+      UNAUTHENTICATED) included, so the page still sends one `get-session`
+      either way.
+
+      Every safety of the preflight is kept. Blocked storage sends nothing,
+      exactly as the preflight returns early. A request that fails or answers
+      non-OK hands over a rejection, so the preflight fetches as it always did
+      and the stale-token purge reads its own answer.
 
       `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
       text against the real `preflightAuth()`, so a drift between the two
@@ -159,11 +167,10 @@
       (function startEarlySessionCheck() {
         let token;
         try {
-          token = localStorage.getItem('auth-session-token');
+          token = localStorage.getItem('auth-session-token') || null;
         } catch (_) {
           return; // storage blocked: the preflight has nothing to validate either
         }
-        if (!token) return;
 
         // `src/main.tsx`: AUTH_URL = (VITE_SERVER_URL or '') + '/api/v1/auth'.
         // An unsubstituted token reads as same-origin '', as in the script above.
@@ -173,8 +180,14 @@
         const body = fetch(authUrl + '/get-session', {
           method: 'GET',
           credentials: 'include',
-          headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+          // No token: the cookie session's question, asked without the header.
+          headers: token
+            ? { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+            : { Accept: 'application/json' },
         }).then(function (res) {
+          // The cookie question's 401 is the server's "no session" (ADR-0112
+          // UNAUTHENTICATED): a signed-out answer, handed on as one.
+          if (!token && res.status === 401) return null;
           if (!res.ok) throw new Error('get-session ' + res.status);
           return res.json().catch(function () { return null; });
         });
