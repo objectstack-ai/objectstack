@@ -179,7 +179,9 @@ describe('pricing — the hand-written text is ratcheted, shrink-only', () => {
   // measured remainder under the standing ruling it names — with the
   // arithmetic in the PR body, and pinned AT the measurement.
   //   6331 bytes -> ceil(6331 / 4) = 1583 (2026-11-19, the PR that adds the page)
-  const HAND_WRITTEN_CEILING_TOKENS = 1583;
+  //   6321 bytes -> 1581 (the same PR's second review round: the Planned paragraph
+  //   gained the unit-code clause, paid by four cuts in PROSE; lowered to the measurement)
+  const HAND_WRITTEN_CEILING_TOKENS = 1581;
 
   it('measures every hand-written string the page carries and nothing derived', () => {
     const page = renderPlatformCatalog();

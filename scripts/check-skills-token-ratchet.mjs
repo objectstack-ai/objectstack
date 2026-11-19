@@ -1111,7 +1111,11 @@ export const CEILINGS = new Map([
   // headroom, ceiling +204, pinned AT the measurement. Standing ruling (2026-10-27,
   // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
   // ruling record 6513306068.
-  ['skills/objectstack-data/rules/field-types.md', 3553],
+  // 3553 -> 3541 (2026-11-19): the `homeAmount` literal returned to the currency
+  // block and the time-zone / country sentence landed, paid by four same-file
+  // restatement cuts that over-paid by 12 tokens; the row is lowered to the
+  // measurement so the headroom is banked, not spent later. Shrink-only.
+  ['skills/objectstack-data/rules/field-types.md', 3541],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
@@ -2060,8 +2064,8 @@ export const CEILINGS = new Map([
   // the platform checks it." (its technique survives in §2's retire sentence;
   // the aside for an author unsure a check exists does not) and §0's "and read
   // it from there afterwards" (restated by the same sentence's "Record the
-  // answer ... once") — then the measured remainder: `wc -c` = 11977 bytes,
-  // stamp line 20 -> ceil(11957 / 4) = 2990 tokens, zero headroom, ceiling +89,
+  // answer ... once") — then the measured remainder: `wc -c` = 11978 bytes,
+  // stamp line 20 -> ceil(11958 / 4) = 2990 tokens, zero headroom, ceiling +89,
   // pinned AT the measurement. Raise path: the standing ruling (2026-10-27,
   // verbatim and untranslated) 「A:先削重复,余额按实测提高」, recognised per
   // ruling record 6513306068.

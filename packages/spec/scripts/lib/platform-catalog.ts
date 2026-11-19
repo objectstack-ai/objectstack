@@ -216,15 +216,15 @@ export const PLANNED_ROWS: readonly { readonly concept: string; readonly state: 
  */
 export const PROSE = Object.freeze({
   banner: [
-    '> **Auto-generated** — do not edit. Maintainers regenerate this in the',
-    '> framework repo with `pnpm --filter @objectstack/spec gen:skill-refs`',
+    '> **Auto-generated** — do not edit. Regenerate in the framework repo with',
+    '> `pnpm --filter @objectstack/spec gen:skill-refs`',
     '> (not runnable in an installed app). Names come from `@objectstack/spec`;',
     '> the prose columns are authored beside the generator.',
   ],
   intro: [
     'Read this before adding an object, a field or a flow (objectstack-project §0,',
-    'question 3). If the platform ships it, use it. `list_objects` over MCP hides',
-    'system objects, so this page, not the runtime, is where to look.',
+    'question 3). `list_objects` over MCP hides system objects, so look here, not',
+    'at the runtime.',
   ],
   objects: [
     '"Data API" means the generic `/api/v1/data/OBJECT` routes, as the object',
@@ -241,18 +241,19 @@ export const PROSE = Object.freeze({
   ],
   capabilities: [
     'Each token mounts a service plugin; a token marked "every boot" is mounted',
-    'whether or not the stack lists it. Declare what the app uses instead of',
-    'building the service (objectstack-platform teaches the switch).',
+    'whether or not the stack lists it. Declare what the app uses',
+    '(objectstack-platform teaches the switch).',
   ],
   notOwned: [
     'These stay in each app. "Check the platform first" never means "wait for the',
     'platform" here.',
   ],
   planned: [
-    'Each row is **not available**: nothing below can be declared or installed',
-    'today. The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:`',
-    'with the link (objectstack-project §0, question 3). The PR that ships a row',
-    'moves it into the tables above.',
+    'Each row is **not available**: nothing below can be declared or installed.',
+    'The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:` with',
+    'the link; an interim unit field stores the contract\'s UN/ECE Rec 20 codes',
+    '(`H87`, `KGM`) as option values, the business\'s spellings as labels. The PR',
+    'that ships a row moves it into the tables above.',
   ],
 });
 
