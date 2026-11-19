@@ -11,7 +11,6 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
-import type { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { ADVISORY_SAMPLE_SIZE } from './stored-expression-backfill.js';
 import { announceSummaryHoles } from './summary-hole-announce.js';
