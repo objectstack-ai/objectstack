@@ -551,17 +551,20 @@ npx @objectstack/scenarios help                                      # the comma
   (`rowDrift`: every column but `created_at`, `updated_at`, `updated_by` and the fields the build computes — formula,
   summary, autonumber). When an earlier turn moved them (the agent's write, a probe's, a confirmed one, or a question
   turn that wrote), the operation starts from the seeded rows all the same, in one of two ways:
-  - **Scratch and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots the same
-    app again (scratch: the same project; ask: the same blank host with the same build installed the same way), signs
-    the personas in, loads the seed and reads the seeded state there, and that operation and every later turn of the
-    half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no validation rule,
-    hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved never goes back
-    to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
-    `object/id`). A copy that does not boot, or whose seed does not load as the run's did (other rows loaded or
+  - **Scratch, template and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots
+    the same app again (scratch: the same project; ask: the same blank host with the same build installed the same way;
+    template: the same blank host with what the iterated app serves installed unmanaged, `iteratedManifest`: the run's
+    install manifest with each served collection replaced by the items served after the iterate, their read
+    decorations such as `_diagnostics` stripped, so the copy holds the agent's iterate made live through the app's
+    doors), signs the personas in, loads the seed and reads the seeded state there, and that operation and every later
+    turn of the half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no
+    validation rule, hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved
+    never goes back to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
+    `object/id`). A copy that does not boot or install, or whose seed does not load as the run's did (other rows loaded or
     refused, a permission set not assigned alike), makes the operation NOT MEASURED (`restore: no fresh copy of the
     app could be seeded for it (…)`, naming what had moved). Each copy costs one boot, the sign-ins and a seed load.
-  - **Template mode writes the rows back** (`restoreSeededRows`), because its app holds the agent's iterate, made live,
-    which a host booted again would not: a row a turn added is deleted, a seeded row a turn removed is inserted again
+  - **Door mode writes the rows back** (`restoreSeededRows`), as does any Run half given no fresh copy: a row a turn
+    added is deleted, a seeded row a turn removed is inserted again
     with the body the seed sent, and a changed column is set back to the value the seed left, in up to three rounds so
     a cascade settles, all through the app's own doors, which its rules judge. The result carries `restored`
     (`deleted`, `reinserted`, `setBack`). Rows that still differ after the rounds make the operation NOT MEASURED

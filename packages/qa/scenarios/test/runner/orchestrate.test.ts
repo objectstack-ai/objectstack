@@ -3598,13 +3598,13 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     expect(renderScorecard(cardScorecard(run))).toContain('| Run-operations | 2/2 |');
   });
 
-  it('⛔ with no fresh copy (template mode), a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
+  it('⛔ with no fresh copy (a Run half given none), a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
     class NoDeleteApp extends FakeApp {
       override async deleteRow(): Promise<HttpAnswer> {
         return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'refused by the double' };
       }
     }
-    /** The Run half on the booted app alone, as template mode runs it: no fresh copy, so the rows are written back through its doors. */
+    /** The Run half on the booted app alone, given no fresh copy, so the rows are written back through its doors. */
     const halfOn = async (app: () => FakeApp) => {
       const { scenario, ops, driver, apps } = setup({ app });
       await ops.boot('host');
@@ -3653,10 +3653,23 @@ describe('runHalf — an operation an earlier write would meet runs on a fresh s
   const ASSET_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json');
   const REFUSAL = 'That status change is not allowed: a request is approved or rejected once, and only an approved one is disposed of.';
 
-  /** The asset card's app as a well-built one is: a decided scrap request never goes back to submitted (400 VALIDATION_FAILED). Counts the writes its doors take. */
+  /**
+   * The asset card's app as a well-built one is: a decided scrap request never goes back to submitted (400 VALIDATION_FAILED).
+   * Counts the writes its doors take. Its metadata reads carry the platform's read decoration (`_diagnostics`), and its
+   * unmanaged install door refuses an item that still carries one, as a blank 18.6.0 host refuses a served flow.
+   */
   class OneWayApp extends FakeApp {
     writes = { insert: 0, update: 0, delete: 0 };
     refusedTransitions = 0;
+    override async metadataAsArtifact(collections: readonly string[]) {
+      const served = await super.metadataAsArtifact(collections);
+      return Object.fromEntries(Object.entries(served).map(([k, items]) => [k, items.map((i) => (typeof i === 'object' && i !== null ? { ...i, _diagnostics: { valid: true } } : i))]));
+    }
+    override async installUnmanaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+      const decorated = Object.values(manifest).some((v) => Array.isArray(v) && v.some((i) => typeof i === 'object' && i !== null && '_diagnostics' in i));
+      if (decorated) return { ok: false, status: 422, body: {}, code: 'INVALID_METADATA', message: 'Unrecognized key(s): `_diagnostics`' };
+      return super.installUnmanaged(manifest);
+    }
     override async insertRow(object: string, row: Record<string, unknown>) {
       this.writes.insert++;
       return super.insertRow(object, row);
@@ -3710,15 +3723,25 @@ describe('runHalf — an operation an earlier write would meet runs on a fresh s
     expect([life.boots, life.stops]).toEqual([apps.length, apps.length]);
   });
 
-  it('⛔ without a fresh copy the same rule refuses the write-back, and the disposal stays NOT MEASURED with the refusal named', async () => {
-    const { scenario, ops, driver, apps } = assetRun(() => new OneWayApp());
-    await ops.boot('host');
-    const half = await runHalf(namespacedScenario(scenario), apps[0]!, driver, { card: scenario.card.id, mode: 'template', phase: 'iterate-run' });
-    const dispose = half.operations.find((o) => o.operation === 'dispose_scrapped_asset')!;
-    expect(dispose.notMeasured).toMatch(/^restore: the rows could not be restored to the seeded state: demoasset_disposal_request: 1 changed \(dr06: status, decided_on\)/);
-    expect(dispose.notMeasured).toContain(`update demoasset_disposal_request dr06: 400 VALIDATION_FAILED ${REFUSAL.slice(0, 60)}`);
-    expect([dispose.turn, dispose.grade]).toEqual([undefined, undefined]);
-    expect(apps[0]!.refusedTransitions).toBeGreaterThan(0);
+  it('template mode: the iterate Run half measures all six operations, each one an earlier write would meet on a copy installed with what the app serves after the iterate (#34497)', async () => {
+    const { scenario, ops, driver, apps, life } = assetRun(() => new OneWayApp());
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact({ ns: 'demoasset' }) });
+    const half = run.modes[0]!.iterate!.run!;
+    expect(half.operations.map((o) => o.operation)).toEqual(['receive_and_issue_from_text', 'extend_overdue_loaner', 'manager_approves_scrap', 'dispose_scrapped_asset', 'employee_approves_own_scrap', 'check_out_asset_in_repair']);
+    // Six of six measured and asked: the approval moved DR-0006 one way, and the disposal after it ran all the same.
+    expect(half.operations.filter((o) => o.notMeasured !== undefined)).toEqual([]);
+    for (const o of half.operations) expect([o.operation, o.turn !== undefined, o.error]).toEqual([o.operation, true, undefined]);
+    expect(half.operations.find((o) => o.operation === 'dispose_scrapped_asset')!.restored).toEqual({ freshCopy: ['demoasset_disposal_request/dr06'] });
+    // The one-way rule judged no restore, and the host the agent iterated took no write after its seed.
+    expect(apps.map((a) => a.refusedTransitions)).toEqual(apps.map(() => 0));
+    const secondPass = Object.values(half.seed.secondPass ?? {}).reduce((a, b) => a + b, 0);
+    expect([apps[0]!.writes.update, apps[0]!.writes.delete, apps[0]!.writes.insert]).toEqual([secondPass, 0, half.seed.inserted]);
+    // Every copy holds the agent's iterate: installed with the items the iterated host serves, read decorations off.
+    const names = (a: OneWayApp) => ((a.installed!.objects ?? []) as Array<{ name: string }>).map((o) => o.name);
+    expect(names(apps[0]!)).toContain('democrm_opportunity'); // the scripted iterate's object, made live on the host only
+    expect(apps.length).toBeGreaterThan(1);
+    for (const copy of apps.slice(1)) expect(names(copy)).toEqual(names(apps[0]!));
+    expect([life.boots, life.stops]).toEqual([apps.length, apps.length]);
   });
 
   it('⛔ a copy whose seed does not load as the run\'s did, or that does not boot, leaves the operation NOT MEASURED with the reason, never graded on other rows', async () => {
