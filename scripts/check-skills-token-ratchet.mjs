@@ -983,7 +983,16 @@ export const CEILINGS = new Map([
   // letter B): 9128 bytes (9108 priced) -> 9133 (9113 priced) -> 2279 tokens, pinned AT
   // the measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9113 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2279],
+  // 2279 -> 2272 (#35284): the Actions row's In column names the suffix the registry
+  // declares and `os generate action` writes (`**/*.action.ts`, metadata-plugin.zod.ts;
+  // `metadataFileName`), then `*.actions.ts`, which loads too when the actions barrel
+  // imports it (+15 bytes). PAID DOWN FIRST by one restatement cut from this file: Trap
+  // 3's "before writing any widget, dataset or chart" restates the subjects the routing
+  // table's dashboards row sends to the same rule file, so the pointer reads "first"
+  // (-41 bytes). Net shrink, so no raise: the ceiling follows the file down to the
+  // measurement, 9133 bytes (9113 priced) -> 9107 (9087 priced) -> 2272 tokens.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
+  ['skills/objectstack-ui/SKILL.md', 2272],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1439,7 +1448,22 @@ export const CEILINGS = new Map([
   // in the text that row moved in). Same ruling as the lines above (2026-10-27, tap A):
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12720 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3180],
+  // 3180 -> 3333 (#35097): a script action writes a sentence in the organization's language.
+  // One H3 after the refusals paragraph: declare it under `texts`, ask for it with `ctx.text`, the
+  // missing-translation and unreadable-setting answers, when an undeclared key is refused, and the
+  // `texts.<key>.message` key beside the refusals key the paragraph above spells (that key stays:
+  // the bundle's evals grade `_actions` and the with-skill arm reads this bundle only). PAID DOWN
+  // FIRST by 53 bytes of restatement in this file, each of an example right below its sentence:
+  // " as `${result.output.NAME}`" in the `onSuccess` sentence (27; the Convert Lead block's
+  // `${result.output.opportunity_id}` shows the spelling) and "`{recordId}` placeholder; " in the
+  // `newTabUrl` sentence (26; the Open PDF block's `newTabUrl: '/api/v1/invoice/{recordId}/pdf'`
+  // shows it). Nothing else in the file restates another passage (see the 2777 -> 2808 note
+  // above), so the same ruling's second half carries the rest. Arithmetic: the text adds 663
+  // bytes, the cuts remove 53, so the file is 12720 -> 13330 bytes -> 3333 tokens, zero headroom
+  // before, ceiling +153, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(13330 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3333],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

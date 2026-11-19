@@ -187,6 +187,14 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/plugins/plugin-approvals/src/approval-service.ts', call: 'this.servesPayloadDisplayTarget(' },
     pin: 'packages/plugins/plugin-approvals/src/payload-display-target-exposure.test.ts',
   },
+  'packages/metadata-protocol/src/protocol-record-reads.ts': {
+    kind: 'decided',
+    read: "global search's hit title for an object whose `nameField` is a reference field (`searchAll` reads the target records' titles as the searcher)",
+    operation: 'get',
+    decision: { file: 'packages/metadata-protocol/src/protocol-record-reads.ts', fn: 'servesSearchTitleTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol-record-reads.ts', call: 'servesSearchTitleTarget(targetObj' },
+    pin: 'packages/metadata-protocol/src/protocol.search-title-lookup.test.ts',
+  },
   'packages/plugins/plugin-audit/src/audit-writers.ts': {
     kind: 'decided',
     read: "the activity timeline's tracked-change and milestone summaries (`resolveLookupTitles` writes referenced records' titles at write time)",
@@ -559,6 +567,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         'servesLabelTarget',
         'servesPayloadDisplayTarget',
         'servesReferenceTarget',
+        'servesSearchTitleTarget',
         'servesSummaryTitleTarget',
         'stdioExpandMap',
       ]);
