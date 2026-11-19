@@ -313,7 +313,7 @@ export function AiPendingActionsInbox({
 
   const body = (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
           <TabsList>
             <TabsTrigger value="pending">{t('aiApprovals.tabPending')}</TabsTrigger>
@@ -404,7 +404,20 @@ export function AiPendingActionsInbox({
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="rounded-md border">
+        <>
+        {/*
+          Two faces of the same rows, the console's pattern for a table a
+          phone cannot hold (the approvals inbox page draws its rows the same
+          way): the desktop table from `md` up, one stacked card per action
+          below it (objectstack#35449). The table's fixed columns are far
+          wider than a phone, so there Approve / Reject sat off-screen in a
+          sideways scroller and the first thing a row said was the internal
+          tool name. The card leads with the action, keeps the tool name as
+          the secondary line, and wraps its decision buttons inside the card.
+          Viewport breakpoints, not a JS hook, so a phone never paints the
+          table first.
+        */}
+        <div className="hidden md:block rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -473,6 +486,68 @@ export function AiPendingActionsInbox({
             </TableBody>
           </Table>
         </div>
+
+        <div className="md:hidden space-y-2" data-testid="ai-inbox-cards">
+          {rows.map((row) => {
+            const isPending = row.status === 'pending';
+            const isBusy = busyId === row.id;
+            return (
+              <div key={row.id} className="rounded-md border p-3 space-y-2" data-testid={`ai-inbox-card-${row.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 text-sm font-medium [overflow-wrap:anywhere]">{row.action_name}</div>
+                  <div className="shrink-0"><StatusBadge status={row.status} t={t} /></div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{row.object_name}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="min-w-0 font-mono [overflow-wrap:anywhere]">{row.tool_name}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                    <Clock className="h-3 w-3" /> {formatRelative(row.proposed_at, t, displayLocale)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {isPending ? (
+                    <>
+                      <Button
+                        size="lg"
+                        variant="default"
+                        className="flex-1 px-3"
+                        disabled={isBusy}
+                        onClick={() => void handleApprove(row.id)}
+                        data-testid={`ai-inbox-card-approve-${row.id}`}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                        {isBusy ? t('aiApprovals.working') : t('aiApprovals.approve')}
+                      </Button>
+                      <Button
+                        size="lg"
+                        variant="destructive"
+                        className="flex-1 px-3"
+                        disabled={isBusy}
+                        onClick={() => { setRejectFor(row.id); setRejectReason(''); }}
+                        data-testid={`ai-inbox-card-reject-${row.id}`}
+                      >
+                        <XCircle className="h-3.5 w-3.5 mr-1" />
+                        {t('aiApprovals.reject')}
+                      </Button>
+                    </>
+                  ) : null}
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="flex-1 px-3"
+                    onClick={() => setOpenId(row.id)}
+                    data-testid={`ai-inbox-card-view-${row.id}`}
+                  >
+                    <Eye className="h-3.5 w-3.5 mr-1" /> {t('aiApprovals.view')}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        </>
       )}
     </div>
   );
@@ -497,7 +572,14 @@ export function AiPendingActionsInbox({
 
       {/* Detail drawer */}
       <Sheet open={!!openId} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
-        <SheetContent className="sm:max-w-[560px] overflow-y-auto">
+        {/*
+          `w-full`: below `sm` the drawer takes the whole width. The
+          primitive's `w-3/4` left a 293 px drawer at 390 px, too narrow for
+          its two decision buttons, and Reject ran past the screen's edge
+          (objectstack#35449). From `sm` up `sm:max-w-[560px]` caps it as
+          before.
+        */}
+        <SheetContent className="w-full sm:max-w-[560px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
@@ -576,7 +658,7 @@ export function AiPendingActionsInbox({
               ) : null}
 
               {selected.status === 'pending' ? (
-                <div className="pt-2 flex gap-2">
+                <div className="pt-2 flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     onClick={() => void handleApprove(selected.id)}
