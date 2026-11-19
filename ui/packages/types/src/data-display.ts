@@ -1182,6 +1182,22 @@ export interface DataTableRowGroup {
 }
 
 /**
+ * The host's summary row of a `data-table` (objectstack#35548), drawn as the
+ * table's own last row so each figure sits in its column's cell, whatever the
+ * column widths, the frozen columns or the horizontal scroll.
+ * {@link DataTableSchema.summaryRow}.
+ */
+export interface DataTableSummaryRow {
+  /**
+   * Drawn at the row's start, in the first column's cell — beside that
+   * column's own figure when it has one (a count, 「Count 42」).
+   */
+  lead?: React.ReactNode;
+  /** Each column's figure, keyed by the column's `accessorKey`. A column with none draws an empty cell. */
+  cells: Record<string, React.ReactNode>;
+}
+
+/**
  * Enterprise data table with advanced features
  */
 export interface DataTableSchema extends BaseSchema {
@@ -1676,6 +1692,17 @@ export interface DataTableSchema extends BaseSchema {
    * table's own pager is not drawn.
    */
   rowGroups?: DataTableRowGroup[];
+  /**
+   * The summary row (objectstack#35548): one row after the data rows, inside
+   * the table, held at the bottom of the scroll box, with each column's figure
+   * in that column's cell — so a figure's right edge is its column's.
+   *
+   * RUNTIME SLOT — host-built React content, NOT authorable metadata: JSON has
+   * no React node, so the zod twin refuses this key by name. Supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) from the columns' declared
+   * `summary` aggregations. Absent ⇒ no summary row.
+   */
+  summaryRow?: DataTableSummaryRow;
   /**
    * Cell value change handler
    * Called when a cell value is edited

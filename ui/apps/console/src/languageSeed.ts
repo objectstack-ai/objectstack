@@ -97,6 +97,18 @@
  * goes out, and the server answers it only when the app lists that language;
  * otherwise the organization's setting decides, then the app's declared
  * default, then the server's floor.
+ *
+ * ## The request leaves at parse time (objectstack#35534)
+ *
+ * Asked from here, the first visit's request waited for the eager bundle to
+ * download and evaluate, though it needs only discovery's `locale.supported`.
+ * `index.html`'s `startEarlyLanguageSeed` script asks the same question the
+ * moment its parse-time discovery answers, under the same gates, and leaves
+ * the pending response for {@link takeEarlySeedRequest}. The seed takes it
+ * once, only when it is the request the seed would send, through the same
+ * `sharedGetJson` call, so the race, the in-flight sharing with
+ * `LocalizationFetchProvider` and the hand-off of the settled answer are
+ * unchanged.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
@@ -128,6 +140,38 @@ let preferredLocale: Promise<string | undefined> | null = null;
 let settledSeed: { key: string; owner: number; body: object } | null = null;
 /** Whether the boot read has already been offered the seed's answer. */
 let settledSeedSpent = false;
+
+/** Where `index.html`'s parse-time request leaves its pending response. */
+const EARLY_SEED_KEY = Symbol.for('objectui.earlyLanguageSeed');
+
+/**
+ * The slot `index.html`'s `startEarlyLanguageSeed` script fills: the URL it
+ * asks, and once discovery has answered, the `init` it sent and the pending
+ * `Response`. Spelled by hand on both sides: a classic inline script cannot
+ * import.
+ */
+interface EarlySeedSlot {
+  url: string;
+  init: RequestInit | null;
+  response: Promise<Response> | null;
+  taken: boolean;
+}
+
+/**
+ * The parse-time request (objectstack#35534), once per page load, when it is
+ * the request this seed would send: the same in-flight key, so the same URL,
+ * credentials and headers, `Accept-Language` included. The first look spends
+ * the slot whatever it finds, and the script sends nothing after it, so a
+ * mismatch or a script that has not asked yet leaves exactly one request: the
+ * seed's own.
+ */
+function takeEarlySeedRequest(url: string, init: RequestInit): Promise<Response> | null {
+  const slot = (globalThis as unknown as Record<symbol, EarlySeedSlot | undefined>)[EARLY_SEED_KEY];
+  if (!slot || slot.taken) return null;
+  slot.taken = true;
+  if (!slot.init || !slot.response) return null;
+  return inflightGetKey(slot.url, slot.init) === inflightGetKey(url, init) ? slot.response : null;
+}
 
 /**
  * Hand the seed's settled answer to the boot read that asks the SAME request,
@@ -271,7 +315,11 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
         ...(preferred ? { 'Accept-Language': preferred } : {}),
       },
     };
-    const json = await sharedGetJson<MeLocalizationResponse>(url, init);
+    // `index.html` usually sent this very request at parse time
+    // (objectstack#35534): it is taken here as this read's transport, so the
+    // provider still joins it in flight and a failure is this read's own.
+    const early = takeEarlySeedRequest(url, init);
+    const json = await sharedGetJson<MeLocalizationResponse>(url, init, early ? () => early : undefined);
     if (json?.authenticated === false) return;
     if (getSessionOwnerChangeCount() !== ownerAtRequest) return;
     cacheLanguageSeed(json?.locale);

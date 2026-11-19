@@ -35,6 +35,7 @@ import {
   TOOLBAR_USER_FILTERS_LEADING_PHONE,
   TOOLBAR_CLUSTER,
   TOOLBAR_CLUSTER_LEADING_PHONE,
+  TOOLBAR_TEXT_TRIGGER,
 } from './listToolbarRow';
 import {
   calendarWindowCovers,
@@ -453,8 +454,12 @@ export interface ListViewProps {
    * header, so the list draws none. Without it the list draws the description
    * itself, as an info control at the start of the toolbar row — never as a
    * row of its own, so the toolbar sits at one height with or without one.
+   *
+   * It may be a function of the list's state (objectstack#35548): the
+   * console's view switcher reads, inside its one trigger, how many records
+   * the list holds and which layout it draws.
    */
-  toolbarLeading?: React.ReactNode;
+  toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
   /**
    * Whether the grid opens with row numbers in its leading cell — the opening
    * state of the Display control's session-only switch, and what its "Reset to
@@ -1469,6 +1474,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.toolbar.densityCycleShortHint': 'Click to cycle',
   // The toolbar's Display control (objectui#12423).
   'list.display': 'Display',
+  'list.options': 'Options',
   'list.layout': 'Layout',
   'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
@@ -2034,6 +2040,18 @@ function ListOptionPicker({
       </SelectContent>
     </Select>
   );
+}
+
+/**
+ * What a function `toolbarLeading` is called with (objectstack#35548).
+ * `recordCount` is the count the record-count bar says — the server's total
+ * under paging, the rows otherwise, a paged board's view total — or `null`
+ * while the list says none (loading, a windowed calendar, `showRecordCount:
+ * false`). `layout` is the visualization on screen.
+ */
+export interface ListToolbarLeadingState {
+  recordCount: number | null;
+  layout: string;
 }
 
 /**
@@ -2967,14 +2985,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
   // with every list.
   const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
-
-  // objectui#12528 — the grid's column summaries, drawn at the right of the
-  // record-count row instead of a second footer row of the grid's own. The
-  // grid reports them through its `onColumnSummaryChange` host channel (by
-  // content, `null` when it draws none), and draws no summary row itself.
-  const [gridSummaries, setGridSummaries] = React.useState<
-    ReadonlyArray<{ key: string; header: string; label: string }> | null
-  >(null);
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -6586,10 +6596,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const showDescriptionInfo =
     !!viewDescription && schema.appearance?.showDescription !== false && !hasToolbarLeading;
 
-  // objectui#12528 — the footer row's two halves. The summaries only ever come
-  // from the grid (`gridSummaries`), so they are read only while it is the view
-  // on screen; the row draws for either half, so `showRecordCount: false` does
-  // not take the summaries down with the count.
+  // The footer row: the record count (objectui#12528 drew the grid's column
+  // summaries here too; since objectstack#35548 the grid draws them in its own
+  // table, each under its column).
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
   const dataLimitWarningShown =
@@ -6601,10 +6610,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // total the footer says nothing rather than count its own window.
   const boardRecordCountShown =
     kanbanLanesPaged && !loading && data.length > 0 && typeof fetchedTotal === 'number' && schema.showRecordCount !== false;
-  const footerSummaryText =
-    currentView === 'grid' && gridSummaries && gridSummaries.length > 0
-      ? gridSummaries.map((s) => `${s.header}: ${s.label}`).join(' · ')
-      : '';
+  // objectstack#35548 — the count the view switcher shows beside the view's
+  // name: the record-count bar's own figure, and none where that bar says none.
+  const leadingRecordCount: number | null = boardRecordCountShown
+    ? (fetchedTotal as number)
+    : !loading && surfaceDrawsFetchedRows && schema.showRecordCount !== false && !calendarWindowed && !kanbanLanesPaged
+      ? (serverTotal ?? data.length)
+      : null;
+  const drawnToolbarLeading = typeof toolbarLeading === 'function'
+    ? toolbarLeading({ recordCount: leadingRecordCount, layout: currentView })
+    : toolbarLeading;
 
   // objectui#12703 — the compact posture a narrow page region asks for (the
   // `compact` host prop). Only over a paged grid that draws the rows this
@@ -6876,7 +6891,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
           {hasToolbarLeading && (
             <div className={TOOLBAR_LEADING} data-testid="list-toolbar-leading">
-              {toolbarLeading}
+              {drawnToolbarLeading}
             </div>
           )}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
@@ -7060,21 +7075,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
-                // Filter, Sort and Display are icon buttons at every width
-                // (objectui#12695), so the name rides on `aria-label` and
-                // `title` — with the active-filter count, which the badge
-                // would otherwise be alone in carrying (objectui#12500).
+                // From `sm` up Filter, Sort and Options are named text buttons
+                // (objectstack#35548); below `sm` they stay icons
+                // (objectui#12695). `aria-label` carries the active-filter
+                // count, which the badge would otherwise be alone in carrying
+                // (objectui#12500).
                 aria-label={hasFilters
                   ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
-                <Funnel className="h-3.5 w-3.5" />
+                <Funnel className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.filter')}</span>
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {shownFilterCount}
@@ -7163,7 +7180,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   // On a phone an active sort keeps this trigger, with its
                   // level count, on the bar: the Display panel holds the
@@ -7173,12 +7190,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
-                // Icon-only (objectui#12695): no visible label carries the
-                // name, so `aria-label` and `title` do.
+                // Named from `sm` up (objectstack#35548), an icon below it
+                // (objectui#12695): `aria-label` and `title` name it there.
                 aria-label={t('list.sort')}
                 title={t('list.sort')}
               >
-                <ArrowUpDown className="h-3.5 w-3.5" />
+                <ArrowUpDown className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.sort')}</span>
                 {currentSort.length > 0 && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {currentSort.length}
@@ -7519,7 +7537,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
                     searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
                   )}
                   data-testid="search-icon-button"
@@ -7651,6 +7669,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       </div>
       )}
 
+      {/* The condition row under the view bar (objectstack#35548): the slot
+          the filter and sort conditions are drawn in. Empty, it takes no
+          height (`empty:hidden`). */}
+      {listChromeShown && (
+        <div
+          data-slot="list-condition-row"
+          data-testid="list-condition-row"
+          className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
+        />
+      )}
 
       {/* Filters Panel - Removed as it is now in Popover */}
 
@@ -8001,9 +8029,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {...(viewComponentSchema.type === 'object-grid'
               // objectui#12423 — the Display control's Row numbers switch, on
               // the grid's host channel (a React prop, never a node key).
-              // objectui#12528 — and the column summaries, drawn in the
-              // record-count row below rather than in a row of the grid's own.
-              ? { showRowNumbers: rowNumbers, onColumnSummaryChange: setGridSummaries }
+              ? { showRowNumbers: rowNumbers }
               : {})}
             {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
               // objectstack#28461 — the grouped grid's open groups and their
@@ -8179,7 +8205,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -8240,15 +8266,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 }}
               />
             </div>
-          )}
-          {footerSummaryText && (
-            <span
-              className="ml-auto min-w-0 truncate text-right font-medium"
-              title={footerSummaryText}
-              data-testid="record-count-summaries"
-            >
-              {footerSummaryText}
-            </span>
           )}
         </div>
       )}

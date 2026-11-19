@@ -36,7 +36,8 @@ import {
   resolveI18nLabel,
   type I18nLabel,
 } from '@objectstack/spec/ui';
-import type { RegisteredErrorCode } from '@objectstack/spec/api';
+import type { DestructiveChangeIssue, RegisteredErrorCode } from '@objectstack/spec/api';
+import { errorCodeIs } from '@object-ui/types';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import type { MetadataSelection } from '../metadata-admin/preview-registry.js';
 import { t, tFormat, translateSchemaFieldLabel, translateValidationMessage } from '../metadata-admin/i18n.js';
@@ -406,6 +407,18 @@ export function objectSaveRefusal(e: unknown, sent: SentBody, locale: string): S
   const fields = objectFieldLocator(sent, locale);
   const actions = objectActionLocator(sent, locale);
   return guardRefusalOf(e, sent, locale) ?? issueRefusal(e, locale, (path) => fields(path) ?? actions(path));
+}
+
+/**
+ * objectstack#34931 — what a refused object save would lose, when the refusal
+ * is the door's `409 DESTRUCTIVE_CHANGE` (its `issues[]`); `null` for every
+ * other refusal, which {@link objectSaveRefusal} reads. Told by code and
+ * status, never by the prose.
+ */
+export function destructiveFindings(e: unknown): DestructiveChangeIssue[] | null {
+  if ((e as { status?: unknown } | null)?.status !== 409 || !errorCodeIs(e, 'DESTRUCTIVE_CHANGE')) return null;
+  const issues = (e as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? (issues as DestructiveChangeIssue[]) : [];
 }
 
 /**
