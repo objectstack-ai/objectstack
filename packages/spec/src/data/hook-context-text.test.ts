@@ -46,6 +46,7 @@ describe('HookContext.text — the declared-text call a typed handler makes', ()
       object: 'crm_lead',
       event: 'afterInsert',
       input: {},
+      ql: {},
       text: async (key, params) => {
         asked.push([key, params]);
         return `Follow up with qualified lead: ${String(params?.lead)}`;
