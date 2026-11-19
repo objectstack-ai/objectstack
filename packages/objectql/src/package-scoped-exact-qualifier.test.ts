@@ -343,12 +343,49 @@ describe('[#34682] a base shipping no canonical member: at its address, naming n
     expect(await both(A, 'fr-FR')).toEqual(['alpha fr-FR', 'alpha fr-FR']);
   });
 
+  // N6: two unrelated packages hold the name, each in a different
+  // non-canonical member. Naming no package, the read naming no member
+  // answers what naming `en-US` answers, on the plain and the layered read.
+  it('two unrelated holders in different non-canonical members: naming no package, naming no member answers as naming en-US', async () => {
+    tpl('fr-FR', A);
+    tpl('de-DE', B);
+    const outcome = async (member?: string) => {
+      try {
+        return await both(undefined, member);
+      } catch (error) {
+        const e = error as { status?: unknown; code?: unknown };
+        return ['threw', e.status, e.code];
+      }
+    };
+    expect(await outcome()).toEqual(await outcome('en-US'));
+  });
+
   it('through the re-address to the served holder (a disabled holder ships en-US): naming no package and no member answers as naming en-US', async () => {
     tpl('fr-FR', A);
     tpl('en-US', B);
     registry.disablePackage(B);
     expect({ bare: await both(undefined), named: await both(undefined, 'en-US') }).toEqual({ bare: [null, null], named: [null, null] });
     expect(await both(undefined, 'fr-FR')).toEqual(['alpha fr-FR', 'alpha fr-FR']);
+  });
+});
+
+// [#34682, contract review S3 (b)] A type with no members: `/layers?package=C`,
+// where C holds nothing and the only holder is disabled, reports no code layer.
+// A disabled package holds no name (ruling 6917064203). FROM (`main`
+// d947a93cf8, read from the tree): the member-less artifact lookup this PR
+// removes put the disabled holder's artifact back as `code`.
+describe('[#34682] /layers at a non-holder address beside a disabled sole holder, for a type with no members', () => {
+  it('doc: ?package=C, the only holder disabled: no code layer', async () => {
+    registry.registerItem('doc', { name: 'guide', label: 'beta doc' }, 'name' as never, B);
+    registry.disablePackage(B);
+    let answer: unknown;
+    try {
+      answer = await protocol.getMetaItemLayered({ type: 'doc', name: 'guide', packageId: C } as never);
+    } catch (error) {
+      const e = error as { status?: unknown; code?: unknown };
+      answer = ['threw', e.status, e.code];
+    }
+    expect(Array.isArray(answer) ? answer : ((answer as { code?: unknown } | undefined)?.code ?? null)).toBeNull();
   });
 });
 

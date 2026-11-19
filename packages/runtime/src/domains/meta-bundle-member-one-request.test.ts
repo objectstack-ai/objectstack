@@ -42,6 +42,7 @@ const MANIFEST = {
     id: A, name: 'memberbase', namespace: 'memberbase', version: '1.0.0', type: 'app', objects: [],
     emailTemplates: [
         { name: 'ship_fr_mail', ...template('fr-FR', 'ship fr') },
+        { name: 'mixed_fr_mail', ...template('fr-FR', 'ship fr') },
         { name: 'ship_both_mail', ...template('en-US', 'ship en') },
         { name: 'ship_both_mail', ...template('fr-FR', 'ship fr') },
     ],
@@ -52,6 +53,8 @@ const MANIFEST = {
 // a non-canonical member carries its `bundle_member` key column.
 const ROWS: readonly [type: string, name: string, member: string | null, body: Record<string, unknown>][] = [
     ['email_template', 'row_fr_mail', 'fr-FR', template('fr-FR', 'row fr')],
+    // The canonical member stored over a package that ships only `fr-FR`.
+    ['email_template', 'mixed_fr_mail', null, template('en-US', 'row en')],
     ['email_template', 'row_both_mail', null, template('en-US', 'row en')],
     ['email_template', 'row_both_mail', 'fr-FR', template('fr-FR', 'row fr')],
     ['dashboard', 'row_dash', null, { label: 'row dash', widgets: [] }],
@@ -134,6 +137,7 @@ describe('[#34682] naming no member and naming the canonical member are one requ
                 // POSITIVE: the canonical member, shipped or stored, is served on every door.
                 ['ship_both_mail', { name: 'ship_both_mail', locale: 'en-US', subject: 'ship en', label: 'ship en' }],
                 ['row_both_mail', { name: 'row_both_mail', locale: 'en-US', subject: 'row en', label: 'row en' }],
+                ['mixed_fr_mail', { name: 'mixed_fr_mail', locale: 'en-US', subject: 'row en', label: 'row en' }],
             ] as const) {
                 const bare = await doors(b, 'email_template', name);
                 const named = await doors(b, 'email_template', name, CANONICAL);
@@ -149,7 +153,7 @@ describe('[#34682] naming no member and naming the canonical member are one requ
                 }
                 // The preserved half: the `fr-FR` member, named, is served as before.
                 const fr = await doors(b, 'email_template', name, 'fr-FR');
-                const frSubject = name.startsWith('ship_') ? 'ship fr' : 'row fr';
+                const frSubject = name.startsWith('ship_') || name === 'mixed_fr_mail' ? 'ship fr' : 'row fr';
                 expect([leg, name, fr.read]).toEqual([leg, name, [200, { name, locale: 'fr-FR', subject: frSubject, label: frSubject }]]);
                 // …and at the shipping package's own address (`?package=`), for a shipped bundle.
                 if (name.startsWith('ship_')) {
@@ -158,6 +162,27 @@ describe('[#34682] naming no member and naming the canonical member are one requ
                     expect({ leg, name, ...atBaseNamed }, JSON.stringify(atBaseNamed)).toEqual({ leg, name, ...atBase });
                     expect({ leg, name, read: atBase.read, executed: atBase.executed })
                         .toEqual({ leg, name, read: served === undefined ? [404, 'RESOURCE_NOT_FOUND'] : [200, served], executed: served ?? null });
+                }
+                // The canonical member stored over a package that ships only
+                // `fr-FR`: `/layers` naming no member reports no code layer,
+                // as `/layers?member=en-US` does. FROM (`main` d947a93cf8):
+                // `code` was the shipped `fr-FR` body.
+                if (name === 'mixed_fr_mail') {
+                    expect([leg, name, bare.layers]).toEqual([leg, name, [200, [served, null, served]]]);
+                }
+                // At an address that holds nothing of a name the environment
+                // stores only in `fr-FR` (`?package=A`): naming no member is
+                // naming `en-US`, admitted and absent on the plain read, `/layers`
+                // and the execution read. FROM (`main` d947a93cf8): after a
+                // restart it was refused 409 naming the environment
+                // (`not-held-by-qualifier`), the hydrated `fr-FR` counted.
+                if (name === 'row_fr_mail') {
+                    const atOther = await doors(b, 'email_template', name, undefined, A);
+                    const atOtherNamed = await doors(b, 'email_template', name, CANONICAL, A);
+                    expect({ leg, name, ...atOtherNamed }, JSON.stringify(atOtherNamed)).toEqual({ leg, name, ...atOther });
+                    expect({ leg, name, read: atOther.read, layers: atOther.layers, executed: atOther.executed }).toEqual({
+                        leg, name, read: [404, 'RESOURCE_NOT_FOUND'], layers: [404, 'RESOURCE_NOT_FOUND'], executed: null,
+                    });
                 }
                 // `/published` takes no member selector: it reads the canonical member alone.
                 const named400 = await get(b.kernel, `/meta/email_template/${name}/published`, { member: CANONICAL });
