@@ -60,6 +60,10 @@
  *    disabled by a predicate the spec prescribes.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
