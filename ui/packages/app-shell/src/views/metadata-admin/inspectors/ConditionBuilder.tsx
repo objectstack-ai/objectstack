@@ -981,12 +981,13 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     const previousOpts = includePrevious
       ? [
           { value: 'previous', label: 'previous', hint: undefined },
-          ...visible.map((f) =>
-            named(
+          ...visible.map((f) => {
+            const label = labelOf(f);
+            return named(
               `previous.${f.name}`,
-              labelOf(f) ? tFormat('engine.inspector.condition.previousField', locale, { field: labelOf(f) }) : undefined,
-            ),
-          ),
+              label ? tFormat('engine.inspector.condition.previousField', locale, { field: label }) : undefined,
+            );
+          }),
         ]
       : [];
     const contextOpts = contextSubjects.map((c) => ({ value: c.value, label: c.label ?? c.value, hint: undefined }));
