@@ -6,23 +6,23 @@ Register them under `defineStack({ actions: [...] })`; the six types:
 `script`.
 
 **A record button needs a placement and a body that writes.** `objectName`
-folds the action into that object's record surfaces; with neither `locations`
-nor a view naming it in `rowActions` / `bulkActions` it renders nowhere
-(`action-no-placement`). A body that returns or assigns the new values writes
-nothing (`action-record-write-discarded`): it calls
-`ctx.api.object(...).update(...)` in `language: 'js'`, because an `expression`
-body is a pure formula with no I/O, with `capabilities: ['api.write']`,
-because the sandbox throws on `ctx.api…update` / `insert` / `delete` without
-it.
+folds the action into that object's record surfaces: `locations` without it
+is refused at validate and publish (`action-no-object-binding`; set it, or
+`locations: []` if headless). With neither `locations` nor a view naming it in
+`rowActions` / `bulkActions` it renders nowhere (`action-no-placement`). A body
+that returns or assigns the new values writes nothing
+(`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
+in `language: 'js'` (an `expression` body has no I/O) with
+`capabilities: ['api.write']`: without it the sandbox throws on a write.
 
 ## Where Actions Appear (`locations`)
 
 | Value            | Surface |
 |:-----------------|:--------|
-| `record_header`  | Detail page header (single record) |
-| `record_more`    | Detail page overflow menu (the "More" / ⋯ button) |
+| `record_header`  | Detail page header |
+| `record_more`    | Detail page overflow menu (⋯) |
 | `record_related` | Related-list section inside a record |
-| `record_section` | Body section/tab of a record (e.g. a Security tab) |
+| `record_section` | Body section/tab of a record |
 | `list_item`      | Per-row action in list views |
 | `list_toolbar`   | Bulk action on selected rows (`input.selectedIds`) |
 
