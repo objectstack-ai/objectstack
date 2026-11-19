@@ -233,15 +233,22 @@ describe('[#31699] a bundled type (email_template): the exact qualifier reads a 
     registry.installPackage({ ...(manifest(D) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
   });
 
-  it('a dependent\'s added member (a locale its base does not ship): naming the dependent is admitted, with or without a member', async () => {
+  it('a dependent\'s added member (a locale its base does not ship): naming the dependent is admitted at that member; naming no member is naming en-US, which the dependent does not hold', async () => {
     tpl('en-US', A);
     tpl('fr-FR', D);
     // R2: the addition holds no name for a bare read, so a caller with no package reads alpha's.
     expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
     expect(labelOf(await read(D, 'fr-FR'))).toBe('alphaaddon fr-FR');
-    // The read that names no member (the layered door's disabled-package probe
-    // asks it) is the dependent's own holding, never `not-held-by-qualifier`.
-    expect(labelOf(await read(D))).toBe('alphaaddon fr-FR');
+    // [#34682] The read that names no member addresses the canonical member
+    // (the member selector's declared sentence: naming the canonical value is
+    // the same request), so at the dependent's address it answers as
+    // `?member=en-US` does: absent, and never `not-held-by-qualifier`. FROM
+    // (`main` d947a93cf8): it served the dependent's `fr-FR` (the holder's
+    // first member, asked with no member).
+    const bare = await read(D);
+    const named = await read(D, 'en-US');
+    const itemOf = (answer: unknown) => (answer as { item?: unknown } | undefined)?.item;
+    expect([itemOf(bare), itemOf(named)]).toEqual([undefined, undefined]);
   });
 
   it.each(['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'])(
@@ -299,6 +306,89 @@ describe('[#31699] a bundled type (email_template): the exact qualifier reads a 
  * registered; the `?package=` read for a name alpha and beta hold, naming gamma,
  * served alpha's.
  */
+// [#34682] Naming no member is naming the canonical member (the member
+// selector's declared sentence in `packages/spec/src/api/protocol.zod.ts`:
+// "naming the canonical value is the same request"). A base that ships its
+// bundle in `fr-FR` only, beside another package that ships `en-US`, answers
+// the read naming no member at its address exactly as it answers `?member=en-US`:
+// absent, on the plain read and the layered read, at `?package=BASE` and
+// through the face's re-address to the served holder (`servedHolderAddressOf`,
+// beside a disabled holder). FROM (`main` d947a93cf8): the exact qualifier
+// swapped the other package's `en-US` for the base's item asked with no
+// member, so both reads served the base's `fr-FR` (200) where `?member=en-US`
+// answered nothing.
+describe('[#34682] a base shipping no canonical member: at its address, naming no member is naming en-US', () => {
+  const D = 'com.acme.alphaaddon';
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const itemOf = (answer: unknown) => (answer as { item?: { label?: string } } | undefined)?.item?.label ?? null;
+  const effectiveOf = (answer: unknown) => (answer as { effective?: { label?: string } | null } | undefined)?.effective?.label ?? null;
+  /** The plain read and the layered read at one address and member, as labels (`null`: nothing served). */
+  const both = async (packageId: string | undefined, member?: string) => {
+    const request = { type: 'email_template', name: 'welcome', ...(packageId ? { packageId } : {}), ...(member ? { member } : {}) };
+    return [itemOf(await protocol.getMetaItem(request as never)), effectiveOf(await protocol.getMetaItemLayered(request as never))];
+  };
+
+  it.each([
+    { holder: 'a dependent ships en-US', other: D },
+    { holder: 'a disabled package ships en-US', other: B },
+  ])('$holder: ?package=BASE naming no member answers as naming en-US (absent); the base\'s fr-FR named is the base\'s', async ({ other }) => {
+    if (other === D) registry.installPackage({ ...(manifest(D) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
+    tpl('fr-FR', A);
+    tpl('en-US', other);
+    if (other === B) registry.disablePackage(B);
+    expect({ bare: await both(A), named: await both(A, 'en-US') }).toEqual({ bare: [null, null], named: [null, null] });
+    expect(await both(A, 'fr-FR')).toEqual(['alpha fr-FR', 'alpha fr-FR']);
+  });
+
+  // N6: two unrelated packages hold the name, each in a different
+  // non-canonical member. Naming no package, the read naming no member
+  // answers what naming `en-US` answers, on the plain and the layered read.
+  it('two unrelated holders in different non-canonical members: naming no package, naming no member answers as naming en-US', async () => {
+    tpl('fr-FR', A);
+    tpl('de-DE', B);
+    const outcome = async (member?: string) => {
+      try {
+        return await both(undefined, member);
+      } catch (error) {
+        const e = error as { status?: unknown; code?: unknown };
+        return ['threw', e.status, e.code];
+      }
+    };
+    expect(await outcome()).toEqual(await outcome('en-US'));
+  });
+
+  it('through the re-address to the served holder (a disabled holder ships en-US): naming no package and no member answers as naming en-US', async () => {
+    tpl('fr-FR', A);
+    tpl('en-US', B);
+    registry.disablePackage(B);
+    expect({ bare: await both(undefined), named: await both(undefined, 'en-US') }).toEqual({ bare: [null, null], named: [null, null] });
+    expect(await both(undefined, 'fr-FR')).toEqual(['alpha fr-FR', 'alpha fr-FR']);
+  });
+});
+
+// [#34682, contract review S3 (b)] A type with no members: `/layers?package=C`,
+// where C holds nothing and the only holder is disabled, reports no code layer.
+// A disabled package holds no name (ruling 6917064203). FROM (`main`
+// d947a93cf8, read from the tree): the member-less artifact lookup this PR
+// removes put the disabled holder's artifact back as `code`.
+describe('[#34682] /layers at a non-holder address beside a disabled sole holder, for a type with no members', () => {
+  it('doc: ?package=C, the only holder disabled: no code layer', async () => {
+    registry.registerItem('doc', { name: 'guide', label: 'beta doc' }, 'name' as never, B);
+    registry.disablePackage(B);
+    let answer: unknown;
+    try {
+      answer = await protocol.getMetaItemLayered({ type: 'doc', name: 'guide', packageId: C } as never);
+    } catch (error) {
+      const e = error as { status?: unknown; code?: unknown };
+      answer = ['threw', e.status, e.code];
+    }
+    expect(Array.isArray(answer) ? answer : ((answer as { code?: unknown } | undefined)?.code ?? null)).toBeNull();
+  });
+});
+
 describe('fail closed — a registry with no package-scoped resolver refuses what it cannot judge', () => {
   const SLICE = new Set([
     'readsByPackage', 'packageScopedHoldersOf', 'getEnvironmentScopedItem', 'getPackageScopedItem', 'resolveItem',

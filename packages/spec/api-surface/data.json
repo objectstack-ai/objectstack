@@ -1051,6 +1051,7 @@
     "isSeedFilePath (function)",
     "isSeedFileReference (function)",
     "isTenancyDisabled (function)",
+    "isTenantCurrencyAmount (function)",
     "isTextFilterOperator (function)",
     "isTitleEligible (function)",
     "isUnboundedAbove (function)",

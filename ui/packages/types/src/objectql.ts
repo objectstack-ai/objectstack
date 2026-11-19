@@ -748,9 +748,12 @@ export interface BulkActionDef {
    *   injects `params._selectedIds: string[]` (every selected record id) and
    *   publishes the full records as `context.selectedRecords`, so the server
    *   can produce a single aggregate artifact (zip of QR codes, merged PDF,
-   *   batch print job…). Result semantics are all-or-nothing: the one call
-   *   covers the whole selection, so per-row retry is unavailable — a total
-   *   failure keeps the selection for a whole-run re-run.
+   *   batch print job…). A rejection is one outcome for the whole
+   *   selection; a run that moved some rows and refused others resolves
+   *   with a `BulkActionResult` (`{ succeeded, failed }`,
+   *   `@objectstack/spec/ui`), a non-empty `failed` being a legal success
+   *   answer. Per-row retry is unavailable — a total failure keeps the
+   *   selection for a whole-run re-run.
    *
    * Ignored for `operation: 'update' | 'delete'` (their bulk fast-path already
    * aggregates per batch) and for a `custom` def without `actionDef` (nothing

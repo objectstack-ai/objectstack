@@ -296,72 +296,79 @@ export function classifyPackagedPermissionSet(
  * else `en` ({@link packagedSetUserMessage}). The write door states the two
  * locales (`MetadataAuthoringGateContext.userTextLocales`); a caller that
  * states none gets `en`, the text this refusal always carried.
+ *
+ * The control is named by the label the console draws on it, in that
+ * locale: "New similar" in Studio's Access pillar and in Setup alike, and
+ * "新建类似" for a Chinese session, Traditional included (the console's
+ * `perm.clone.action`; its designer strings ship `en` and `zh` only, so every
+ * other language shows the English label). A sentence naming a "Clone" button
+ * sent the admin looking for a control the console does not draw.
  */
 type PackagedSetUserText = Readonly<Record<string, string>>;
 
 const LOCKED_USER_TEXT: PackagedSetUserText = {
   en: `This permission set is provided by an installed package and can't be edited here. Clone it instead `
-    + `with the Clone action, then edit the clone. The clone is your organization's own permission set, `
+    + `with the New similar action, then edit the clone. The clone is your organization's own permission set, `
     + `and package upgrades keep reaching the original.`,
-  'zh-Hans': '此权限集由已安装的软件包提供，不能在这里编辑。请使用“克隆”操作克隆它，然后编辑克隆出的权限集。'
+  'zh-Hans': '此权限集由已安装的软件包提供，不能在这里编辑。请使用“新建类似”操作克隆它，然后编辑克隆出的权限集。'
     + '克隆出的权限集归贵组织所有，软件包升级仍会照常更新原权限集。',
-  'zh-Hant': '此權限集由已安裝的套件提供，無法在這裡編輯。請使用「複製」動作複製它，然後編輯複製出的權限集。'
+  'zh-Hant': '此權限集由已安裝的套件提供，無法在這裡編輯。請使用「新建类似」動作複製它，然後編輯複製出的權限集。'
     + '複製出的權限集歸貴組織所有，套件升級仍會照常更新原權限集。',
   ja: 'この権限セットはインストール済みのパッケージが提供しているため、ここでは編集できません。'
-    + '「複製」アクションで複製し、複製したほうを編集してください。複製した権限セットは組織独自のものになり、'
+    + '「New similar」アクションで複製し、複製したほうを編集してください。複製した権限セットは組織独自のものになり、'
     + 'パッケージのアップグレードは引き続き元の権限セットに適用されます。',
-  ko: '이 권한 집합은 설치된 패키지가 제공하므로 여기에서 편집할 수 없습니다. 복제 작업으로 복제한 다음 복제본을 '
+  ko: '이 권한 집합은 설치된 패키지가 제공하므로 여기에서 편집할 수 없습니다. "New similar" 작업으로 복제한 다음 복제본을 '
     + '편집하세요. 복제본은 조직 고유의 권한 집합이 되며, 패키지 업그레이드는 계속 원본에 적용됩니다.',
   es: 'Este conjunto de permisos lo proporciona un paquete instalado y no se puede editar aquí. Clónelo con la '
-    + 'acción Clonar y edite el clon. El clon es un conjunto de permisos propio de su organización, y las '
+    + 'acción «New similar» y edite el clon. El clon es un conjunto de permisos propio de su organización, y las '
     + 'actualizaciones del paquete siguen llegando al original.',
   fr: 'Cet ensemble d’autorisations est fourni par un package installé et ne peut pas être modifié ici. '
-    + 'Clonez-le avec l’action Cloner, puis modifiez le clone. Le clone appartient à votre organisation, et les '
+    + 'Clonez-le avec l’action « New similar », puis modifiez le clone. Le clone appartient à votre organisation, et les '
     + 'mises à jour du package continuent de s’appliquer à l’original.',
   de: 'Dieser Berechtigungssatz wird von einem installierten Paket bereitgestellt und kann hier nicht bearbeitet '
-    + 'werden. Klonen Sie ihn mit der Aktion „Klonen“ und bearbeiten Sie den Klon. Der Klon gehört Ihrer '
+    + 'werden. Klonen Sie ihn mit der Aktion „New similar“ und bearbeiten Sie den Klon. Der Klon gehört Ihrer '
     + 'Organisation, und Paket-Upgrades erreichen weiterhin das Original.',
   'pt-BR': 'Este conjunto de permissões é fornecido por um pacote instalado e não pode ser editado aqui. Clone-o '
-    + 'com a ação Clonar e edite o clone. O clone é um conjunto de permissões da sua organização, e as '
+    + 'com a ação "New similar" e edite o clone. O clone é um conjunto de permissões da sua organização, e as '
     + 'atualizações do pacote continuam chegando ao original.',
   ru: 'Этот набор разрешений предоставлен установленным пакетом, и его нельзя изменить здесь. Клонируйте его '
-    + 'действием «Клонировать» и измените клон. Клон принадлежит вашей организации, а обновления пакета '
+    + 'действием «New similar» и измените клон. Клон принадлежит вашей организации, а обновления пакета '
     + 'по-прежнему применяются к оригиналу.',
-  ar: 'مجموعة الأذونات هذه يوفرها حزمة مثبتة ولا يمكن تعديلها هنا. انسخها باستخدام إجراء النسخ، ثم عدّل النسخة. '
+  ar: 'مجموعة الأذونات هذه يوفرها حزمة مثبتة ولا يمكن تعديلها هنا. انسخها باستخدام إجراء "New similar"، ثم عدّل النسخة. '
     + 'النسخة مجموعة أذونات خاصة بمؤسستك، وتستمر ترقيات الحزمة في الوصول إلى المجموعة الأصلية.',
 };
 
 const PROVENANCE_UNKNOWN_USER_TEXT: PackagedSetUserText = {
   en: `This permission set can't be saved right now, because the system couldn't confirm whether an installed `
     + `package provides it. Try again in a moment. To customize a permission set that a package provides, `
-    + `clone it with the Clone action and edit the clone.`,
+    + `clone it with the New similar action and edit the clone.`,
   'zh-Hans': '此权限集暂时无法保存，因为系统无法确认它是否由已安装的软件包提供。请稍后重试。'
-    + '如需自定义由软件包提供的权限集，请使用“克隆”操作克隆它，然后编辑克隆出的权限集。',
+    + '如需自定义由软件包提供的权限集，请使用“新建类似”操作克隆它，然后编辑克隆出的权限集。',
   'zh-Hant': '此權限集暫時無法儲存，因為系統無法確認它是否由已安裝的套件提供。請稍後再試。'
-    + '如需自訂由套件提供的權限集，請使用「複製」動作複製它，然後編輯複製出的權限集。',
+    + '如需自訂由套件提供的權限集，請使用「新建类似」動作複製它，然後編輯複製出的權限集。',
   ja: 'この権限セットは現在保存できません。インストール済みのパッケージが提供しているかどうかを確認できなかったためです。'
     + 'しばらくしてからもう一度お試しください。パッケージが提供する権限セットをカスタマイズするには、'
-    + '「複製」アクションで複製し、複製したほうを編集してください。',
+    + '「New similar」アクションで複製し、複製したほうを編集してください。',
   ko: '설치된 패키지가 이 권한 집합을 제공하는지 확인할 수 없어 지금은 저장할 수 없습니다. 잠시 후 다시 시도하세요. '
-    + '패키지가 제공하는 권한 집합을 사용자 지정하려면 복제 작업으로 복제한 다음 복제본을 편집하세요.',
+    + '패키지가 제공하는 권한 집합을 사용자 지정하려면 "New similar" 작업으로 복제한 다음 복제본을 편집하세요.',
   es: 'Este conjunto de permisos no se puede guardar ahora, porque el sistema no pudo confirmar si lo proporciona '
     + 'un paquete instalado. Vuelva a intentarlo en un momento. Para personalizar un conjunto de permisos que '
-    + 'proporciona un paquete, clónelo con la acción Clonar y edite el clon.',
+    + 'proporciona un paquete, clónelo con la acción «New similar» y edite el clon.',
   fr: 'Cet ensemble d’autorisations ne peut pas être enregistré pour le moment, car le système n’a pas pu '
     + 'confirmer s’il est fourni par un package installé. Réessayez dans un instant. Pour personnaliser un '
-    + 'ensemble d’autorisations fourni par un package, clonez-le avec l’action Cloner et modifiez le clone.',
+    + 'ensemble d’autorisations fourni par un package, clonez-le avec l’action « New similar » et modifiez le clone.',
   de: 'Dieser Berechtigungssatz kann gerade nicht gespeichert werden, weil das System nicht bestätigen konnte, '
     + 'ob ein installiertes Paket ihn bereitstellt. Versuchen Sie es gleich noch einmal. Um einen '
-    + 'Berechtigungssatz anzupassen, den ein Paket bereitstellt, klonen Sie ihn mit der Aktion „Klonen“ und '
+    + 'Berechtigungssatz anzupassen, den ein Paket bereitstellt, klonen Sie ihn mit der Aktion „New similar“ und '
     + 'bearbeiten Sie den Klon.',
   'pt-BR': 'Este conjunto de permissões não pode ser salvo agora, porque o sistema não conseguiu confirmar se um '
     + 'pacote instalado o fornece. Tente novamente em instantes. Para personalizar um conjunto de permissões '
-    + 'fornecido por um pacote, clone-o com a ação Clonar e edite o clone.',
+    + 'fornecido por um pacote, clone-o com a ação "New similar" e edite o clone.',
   ru: 'Этот набор разрешений сейчас нельзя сохранить: системе не удалось проверить, предоставлен ли он '
     + 'установленным пакетом. Повторите попытку чуть позже. Чтобы настроить набор разрешений из пакета, '
-    + 'клонируйте его действием «Клонировать» и измените клон.',
+    + 'клонируйте его действием «New similar» и измените клон.',
   ar: 'لا يمكن حفظ مجموعة الأذونات هذه الآن، لأن النظام لم يتمكن من التأكد مما إذا كانت حزمة مثبتة توفرها. '
-    + 'حاول مرة أخرى بعد قليل. لتخصيص مجموعة أذونات توفرها حزمة، انسخها باستخدام إجراء النسخ ثم عدّل النسخة.',
+    + 'حاول مرة أخرى بعد قليل. لتخصيص مجموعة أذونات توفرها حزمة، انسخها باستخدام إجراء "New similar" ثم عدّل النسخة.',
 };
 
 /**
@@ -439,7 +446,7 @@ export class PackagedPermissionSetLockedError extends Error {
       `[Security] Permission set '${name}' is declared by ${by} and is locked — `
       + `editing it here would silently fork it from the package, and the fork would win over `
       + `every future upgrade with no signal. `
-      + `Clone it instead (the "Clone" action on the permission set, or POST `
+      + `Clone it instead (the "New similar" action on the permission set, or POST `
       + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
       + `flowing to '${name}' untouched.`,
     );

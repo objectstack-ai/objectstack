@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
 import { appDefaultSeedLocale, resolveSeedLocaleForLoad } from './seed-locale';
 import { SeedLoaderService } from './seed-loader';
+import { mergeSeedDatasets } from './seed-datasets';
 import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 // The source reaches `@objectstack/metadata` lazily (app-plugin.ts); pay its first load during collection.
 import '@objectstack/metadata';
@@ -639,10 +640,10 @@ describe('Seed.fallback on the boot and install paths', () => {
         });
 
         /**
-         * The shared `seed-datasets` list is appended to on every merge: boot
-         * rehydrate, install / upgrade and reseed each add the package's
-         * datasets again. The loader counts distinct declarations, so the
-         * second copy of the one fallback set is not a second fallback set.
+         * An un-owned merge appends to the shared `seed-datasets` list, as a
+         * config app's boot does (the install door replaces its package's
+         * entries instead, #35109). The loader counts distinct declarations,
+         * so a second copy of the one fallback set is not a second fallback set.
          */
         it('a replay after the same package merged twice still gets the fallback set, and the rest seeds', async () => {
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
@@ -683,9 +684,10 @@ describe('Seed.fallback on the boot and install paths', () => {
         });
 
         /**
-         * An upgrade in a running process appends version 2's datasets beside
-         * version 1's on the shared list. When the marked set changed between
-         * the versions, the list holds two distinct marked declarations of one
+         * Two un-owned merges of one app's versions leave version 2's datasets
+         * beside version 1's on the shared list (the install door's upgrade no
+         * longer does, #35109). When the marked set changed between the
+         * versions, the list holds two distinct marked declarations of one
          * object from one correctly authored package. Only the fallback choice
          * is refused: an `en` organization gets what the same versions give it
          * unmarked, and a `ja-JP` organization gets what it got before the key
@@ -805,5 +807,83 @@ describe('Seed.fallback on the boot and install paths', () => {
             expect(parsed.success).toBe(false);
             expect(!parsed.success && parsed.error.issues[0]?.path).toEqual(['seeds', 0, 'fallback']);
         });
+    });
+});
+
+/**
+ * #35109, carried from the contract review of `Seed.fallback` (N5): a dataset
+ * that declares `dependsOn` an object whose fallback choice is refused, for an
+ * organization whose locale no set lists, refuses the whole load. On the
+ * append-only shared list an upgrade that changed a package's marked set built
+ * exactly that: v1's and v2's marked sets side by side, the choice refused,
+ * the dependent dataset left without its target. The install door's merge now
+ * names the package, so v2 replaces v1 on the list and the replay is v2's
+ * alone: one marked set, chosen, and the dependent dataset loads after it.
+ */
+describe('an upgrade that changed the marked set, on the replaced list: the dependent dataset loads (#35109)', () => {
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+    const ZH = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['zh-CN'], records: [{ name: '标准价格表' }] };
+    const EN = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['en', 'en-US'], records: [{ name: 'Standard' }] };
+    const QUOTE = { object: 'quote', externalId: 'name', mode: 'upsert', dependsOn: ['price_book'], records: [{ name: 'Q-1' }] };
+    const V1 = [ZH, { ...EN, fallback: true }, QUOTE];
+    const V2 = [ZH, { ...EN, fallback: true, records: [{ name: 'Standard' }, { name: 'Partner' }] }, QUOTE];
+
+    let engine: IDataEngine;
+    let store: Record<string, any[]>;
+    let services: Map<string, unknown>;
+    let logger: { info: any; warn: any; error: any; debug: any };
+
+    beforeEach(() => {
+        process.env.OS_MULTI_ORG_ENABLED = 'true';
+        ({ engine, store } = createEngine());
+        services = new Map();
+        logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        services.set('settings', {
+            get: vi.fn(async (_ns: string, _key: string, c?: { tenantId?: string }) =>
+                c?.tenantId === 'org_ja' ? { value: 'ja-JP', source: 'tenant' } : { value: 'en-US', source: 'default' }),
+        });
+    });
+    afterEach(() => {
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+    });
+
+    const metadata = (): IMetadataService => {
+        const base = createMetadata();
+        const quote = { name: 'quote', fields: { name: { type: 'text' } } };
+        return {
+            ...base,
+            getObject: vi.fn(async (name: string) => (name === 'quote' ? quote : base.getObject(name))),
+            listObjects: vi.fn(async () => [...(await base.listObjects()), quote]),
+        } as unknown as IMetadataService;
+    };
+    const ctx = (): PluginContext => ({
+        logger,
+        registerService: vi.fn((name: string, svc: unknown) => { services.set(name, svc); }),
+        getService: vi.fn((name: string) => {
+            if (name === 'objectql') return engine;
+            if (name === 'metadata') return metadata();
+            return services.get(name);
+        }),
+        getServices: vi.fn(() => services),
+        hook: vi.fn(),
+        trigger: vi.fn(),
+    }) as unknown as PluginContext;
+
+    it('a ja-JP organization founded after the upgrade gets v2\'s fallback set, the dependent quote and the host\'s rows', async () => {
+        const host = ctx();
+        await new AppPlugin({ id: 'com.example.host', data: [ACCOUNT_DATASET] }).start(host);
+        const replay = services.get('seed-replayer') as (organizationId: string) => Promise<any>;
+
+        // The install door's merges, as the marketplace install and upgrade make them.
+        mergeSeedDatasets(host, V1, 'com.example.priced');
+        mergeSeedDatasets(host, V2, 'com.example.priced');
+        expect((services.get('seed-datasets') as unknown[]).length).toBe(1 + V2.length);
+
+        const summary = await replay('org_ja');
+        expect(summary.errors ?? []).toEqual([]);
+        expect((store.price_book ?? []).map((r) => r.name).sort()).toEqual(['Partner', 'Standard']);
+        expect((store.quote ?? []).map((r) => r.name)).toEqual(['Q-1']);
+        expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
     });
 });

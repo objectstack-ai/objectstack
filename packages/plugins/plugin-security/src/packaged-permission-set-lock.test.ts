@@ -429,3 +429,34 @@ describe('[#32780] a stored permission set in its package\'s registry slot is ne
     expect(classifyPackagedPermissionSet(N, ql)).toEqual({ status: 'packaged', packageId: CRM, packageIds: [CRM] });
   });
 });
+
+// The control the refusal sends the admin to is named by the label the console
+// draws on it: "New similar" (Studio's Access pillar and Setup, the console's
+// `perm.clone.action`), "新建类似" in a Chinese session, Traditional included,
+// and the English label in every language the console's designer strings do
+// not ship. A sentence naming a "Clone" button points at a control that is not there.
+describe('the lock refusals name the clone control by its console label', () => {
+  const LOCALES = ['en', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'es', 'fr', 'de', 'pt-BR', 'ru', 'ar'];
+  const CHINESE = new Set(['zh-Hans', 'zh-Hant']);
+  const refusals = (locale: string) => [
+    new PackagedPermissionSetLockedError('crm_sales', 'com.example.crm', 'update', [locale]),
+    new PackagedPermissionSetProvenanceUnknownError('crm_sales', 'registry unavailable', [locale]),
+  ];
+
+  for (const locale of LOCALES) {
+    it(`${locale}: the guidance names the "${CHINESE.has(locale) ? '新建类似' : 'New similar'}" action`, () => {
+      for (const refusal of refusals(locale)) {
+        expect(refusal.code).toBe('NOT_OVERRIDABLE');
+        expect(refusal.status).toBe(403);
+        expect(refusal.userMessage).toContain(CHINESE.has(locale) ? '新建类似' : 'New similar');
+        expect(refusal.userMessage).not.toMatch(/Clone action|“克隆”|「複製」動作|「複製」アクション|Clonar|Cloner|„Klonen“|«Клонировать»|복제 작업/);
+      }
+    });
+  }
+
+  it('the diagnostic names the same control', () => {
+    const [locked] = refusals('en');
+    expect(locked.message).toContain('the "New similar" action on the permission set, or POST /api/v1/security/permission-sets/crm_sales/clone');
+    expect(locked.message).not.toContain('"Clone" action');
+  });
+});

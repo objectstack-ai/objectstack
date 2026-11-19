@@ -1037,6 +1037,7 @@
     "isSeedFilePath": "src/data/seed-file.zod.ts#isSeedFilePath (function)",
     "isSeedFileReference": "src/data/seed-file.zod.ts#isSeedFileReference (function)",
     "isTenancyDisabled": "src/data/object.zod.ts#isTenancyDisabled (function)",
+    "isTenantCurrencyAmount": "src/data/record-currency-path.ts#isTenantCurrencyAmount (function)",
     "isTextFilterOperator": "src/data/filter-text-operator-declared-type.ts#isTextFilterOperator (function)",
     "isTitleEligible": "src/data/display-name.ts#isTitleEligible (function)",
     "isUnboundedAbove": "src/data/calendar-day.ts#isUnboundedAbove (function)",
