@@ -12,7 +12,8 @@
  * which the codemod refuses to move (`foreign-private`), so each writes it
  * through that instance's own host setter.
  * The body of `[DETACHED_HOOK_RUN]` (#33651) was written here, in the same
- * stub-and-facet shape, and so was the body of `[PLATFORM_SYSTEM_API]`.
+ * stub-and-facet shape, and so were the bodies of `[PLATFORM_SYSTEM_API]` and
+ * `[ACTION_DOOR_API]`.
  *
  * A MOVE, not a redesign. {@link ScopedContextFacet} is a stateless facet of
  * `ScopedContext`: each static method of it is the body of the `ScopedContext`
@@ -63,6 +64,7 @@ import type { ObjectQL } from './engine.js';
  */
 export interface ScopedContextHost {
   appAuthored: ScopedContext['appAuthored'];
+  actionDoor: ScopedContext['actionDoor'];
   derive: ScopedContext['derive'];
   readonly engine: ScopedContext['engine'];
   readonly executionContext: ScopedContext['executionContext'];
@@ -82,10 +84,23 @@ export class ScopedContextFacet {
    * (`scopedContextHost.of(child)`), the port its class's static block fills:
    * a module function cannot write another instance's private field directly.
    */
-  static derive(this: Pick<ScopedContextHost, 'appAuthored' | 'engine'>, executionContext: ExecutionContext): ScopedContext {
+  static derive(this: Pick<ScopedContextHost, 'appAuthored' | 'actionDoor' | 'engine'>, executionContext: ExecutionContext): ScopedContext {
     const child = new ScopedContext(executionContext, this.engine);
-    scopedContextHost.of(child).appAuthored = this.appAuthored;
+    const host = scopedContextHost.of(child);
+    host.appAuthored = this.appAuthored;
+    host.actionDoor = this.actionDoor;
     return child;
+  }
+
+  /**
+   * The body of `ScopedContext#[ACTION_DOOR_API]`; the method's docblock there
+   * is its contract. A child over the same context, its private `actionDoor`
+   * written through its own host, as in {@link ScopedContextFacet.derive}.
+   */
+  static actionDoorApi(this: Pick<ScopedContextHost, 'derive' | 'executionContext'>): ScopedContext {
+    const api = this.derive(this.executionContext);
+    scopedContextHost.of(api).actionDoor = true;
+    return api;
   }
 
   /**
@@ -124,11 +139,12 @@ export class ScopedContextFacet {
   /**
    * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; its contract, and
    * where its guard stops, is `platform-system-api.ts`'s module header.
-   * An app-authored hook's api is never the platform's: there it is that
-   * api's own {@link ScopedContextFacet.sudo}, provenance kept.
+   * An app-authored hook's api, and the api an action door hands its handler,
+   * are never the platform's: there it is that api's own
+   * {@link ScopedContextFacet.sudo}, provenance kept.
    */
-  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext'>): ScopedContext {
-    if (this.appAuthored) return ScopedContextFacet.sudo.call(this);
+  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'actionDoor' | 'derive' | 'executionContext'>): ScopedContext {
+    if (this.appAuthored || this.actionDoor) return ScopedContextFacet.sudo.call(this);
     const { flowRunId: _run, ...context } = withoutAppAutomationElevation({ ...this.executionContext, isSystem: true });
     return this.derive(context as ExecutionContext);
   }

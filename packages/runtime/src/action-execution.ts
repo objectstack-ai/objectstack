@@ -95,7 +95,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
-import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
+import { ACTION_DOOR_API, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
@@ -3926,11 +3926,27 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * handler (`landed-write-answer.ts`), on this context and every one it
  * derives. That layer sits beneath the reader seam, so the answer is served
  * like any write's return.
+ *
+ * The context is derived through objectql's action-door member
+ * (`ACTION_DOOR_API`), so it and every api derived from it carry the action
+ * door's origin flag: on it, `platformSystemApi(ctx.api)` answers what
+ * `ctx.api.sudo()` answers, the `'action'` mark kept, and the handler's writes
+ * to the identity-assignment and append-only objects stay judged as its own
+ * (`platform-system-api.ts`, objectql). Not the app-authored flag: a host
+ * handler keeps the engine's permanent delete (ADR-0148 D3). An api with no
+ * such member (an engine double) has no `platformSystemApi` member either, so
+ * there is nothing for the flag to guard.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
-    const served = (scoped: unknown) =>
-        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
+    const served = (scoped: any) =>
+        serveStoredMetadataReadsThrough(
+            answerLandedWritesDespiteStaleSummary(
+                typeof scoped?.[ACTION_DOOR_API] === 'function' ? scoped[ACTION_DOOR_API]() : scoped,
+                ACTION_API_SURFACE,
+            ),
+            ql,
+        );
     try {
         return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {

@@ -400,12 +400,24 @@ export function refuseStoredMetadataBodyReads<T>(api: T): T {
 }
 
 /**
+ * The two symbol-keyed members of objectql's `ScopedContext` that derive an
+ * api, named through `Symbol.for` because neither package entry exports them
+ * (`platform-system-api.ts`, objectql): the platform's own system api
+ * (`platformSystemApi`) and the action door's api (`buildActionApi`'s
+ * derivation, `action-execution.ts`).
+ */
+const PLATFORM_SYSTEM_API: unique symbol = Symbol.for('objectstack.objectql.platformSystemApi');
+export const ACTION_DOOR_API: unique symbol = Symbol.for('objectstack.objectql.actionDoorApi');
+
+/**
  * The walk both layers share: `api`, and every context it can derive —
- * `object(name)`, `sudo()`, `withRunAs(...)`, the context a `transaction(fn)`
- * callback receives, and the `ctx` `beginTransaction()` returns — with each
- * repository passed through `wrapRepository`. One definition of what a scoped
- * API can derive, so neither layer can leave a route around it. [#28861] The
- * landed-write layer (`landed-write-answer.ts`) walks it too.
+ * `object(name)`, `sudo()`, `withRunAs(...)`, the api `platformSystemApi(api)`
+ * derives and the action door's api (the two symbol-keyed members above), the
+ * context a `transaction(fn)` callback receives, and the `ctx`
+ * `beginTransaction()` returns — with each repository passed through
+ * `wrapRepository`. One definition of what a scoped API can derive, so neither
+ * layer can leave a route around it. [#28861] The landed-write layer
+ * (`landed-write-answer.ts`) walks it too.
  */
 export function deriveThroughSeam<T>(
   api: T,
@@ -425,6 +437,8 @@ export function deriveThroughSeam<T>(
           return (name: string, ...rest: unknown[]) => wrapRepository(name, value.call(target, name, ...rest));
         case 'sudo':
         case 'withRunAs':
+        case PLATFORM_SYSTEM_API:
+        case ACTION_DOOR_API:
           return (...args: unknown[]) => wrap(value.apply(target, args));
         case 'transaction':
           return (callback: unknown, ...rest: unknown[]) =>
