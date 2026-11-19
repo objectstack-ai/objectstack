@@ -169,6 +169,9 @@ export function getDatasetToolDefinitions(): readonly AIToolDefinition[] {
  * The array form is a complete read. The object form carries `partial: true`
  * and a `warning` when the read was degraded (the `list_objects` shape), and
  * the tools say so instead of presenting a short list as the whole catalogue.
+ * [#34993] A `warning` without `partial` is a whole read the host says
+ * something about (a translation fault: every row, its text untranslated):
+ * `list_datasets` says it, and `query_dataset` still answers.
  */
 export type DatasetToolSource =
   | readonly unknown[]
@@ -393,6 +396,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const source = await deps.loadDatasets(context);
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
+    const said = Array.isArray(source) ? undefined : (source as { warning?: unknown }).warning;
     const datasets: Dataset[] = [];
     const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
@@ -410,7 +414,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       datasets,
       holdings,
       partial: degraded,
-      ...(degraded ? { warning: String((source as { warning?: unknown }).warning ?? 'The dataset read was degraded.') } : {}),
+      ...(degraded ? { warning: String(said ?? 'The dataset read was degraded.') } : typeof said === 'string' ? { warning: said } : {}),
     };
   }
 
@@ -480,7 +484,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const candidates = terms !== undefined ? findDatasetTermCandidates(terms, listed) : [];
 
     const warnings: string[] = [];
-    if (loaded.partial && loaded.warning) warnings.push(loaded.warning);
+    if (loaded.warning) warnings.push(loaded.warning);
     if (unresolved) {
       warnings.push('Some datasets or members could not be checked against this caller\'s permissions and are left out.');
     }

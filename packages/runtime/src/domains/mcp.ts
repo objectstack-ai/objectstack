@@ -1630,7 +1630,7 @@ export function buildMcpBridge(
  */
 export interface McpDatasetToolsService {
     datasetTools(deps: {
-        loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+        loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
         diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
         maxQueryLimit?: number;
     }): {
@@ -1716,7 +1716,8 @@ function metaTranslationSources(
  *   localized with the `/meta` list translation for this request's locale, as
  *   the REST door localizes a saved dataset. A throwing read is left to throw:
  *   the executor answers it as a degraded read (`partial` / 503), never as an
- *   empty catalogue.
+ *   empty catalogue. [#34993] A translation fault is no failed read: the rows
+ *   are handed over untranslated, with the fault's sentence as their `warning`.
  * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
  *   of this request's security service, so `query_dataset` states a narrowing
  *   exactly where `query_records` does.
@@ -1731,15 +1732,17 @@ function datasetToolMembers(
     context: HttpProtocolContext,
 ) {
     const envId = context.environmentId;
-    const loadDatasets = async (): Promise<readonly unknown[]> => {
+    const loadDatasets = async () => {
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
+        let warning: string | undefined;
         const translated = await translateMetaList(
-            metaTranslationSources(deps, context, async () => protocol),
+            { ...metaTranslationSources(deps, context, async () => protocol), reportTranslationFault: (w) => { warning = w; } },
             'dataset',
             items,
         );
-        return Array.isArray(translated) ? translated : items;
+        const rows = Array.isArray(translated) ? translated : items;
+        return warning === undefined ? rows : { items: rows, warning };
     };
     const diagnoseDelegation = async (object: string) => {
         try {

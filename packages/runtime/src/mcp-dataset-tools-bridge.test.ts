@@ -10,9 +10,9 @@
  * carries no dataset member); the executor is bound to the saved datasets of
  * the protocol's merged read, to the request's security probe and to the tool
  * layer's page cap; and every call runs as the request's own principal.
- * Also pinned (its own describe below): an i18n service that resolves but
- * whose `getLocales` / `getTranslations` throws, over the REAL executor, is a
- * degraded read on both dataset tools (seat ruling A).
+ * Also pinned (its own describes below): an i18n service that resolves but
+ * whose `getLocales` / `getTranslations` throws, over the REAL executor, serves
+ * the datasets untranslated with a warning (#34993).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -114,22 +114,15 @@ describe('[ADR-0149 D2] the MCP bridge\'s dataset members', () => {
 });
 
 /**
- * [ADR-0149 D2] The HTTP door's dataset members when the request's i18n
- * service RESOLVES but its reads throw — not the lookup that throws, which
- * `metaTranslationSources` reads as none (text served untranslated).
- * `translationBundleOf` calls `getLocales` and `getTranslations` unguarded, so
- * the `/meta` list translation rejects with the i18n error, and `loadDatasets`
- * leaves that rejection to throw. The executor is the REAL one (the analytics
- * service `AnalyticsServicePlugin` registers, admission wired), so the answer
- * is its degraded-read contract: `list_datasets` lists nothing, says `partial`
- * and names the error; `query_dataset` refuses 503 `SERVICE_UNAVAILABLE`.
- * The control case lists the dataset over the same harness, so the empty
- * catalogue is the failed read's doing, not the harness's.
+ * [ADR-0149 D2 · #34993] The HTTP door's dataset members when the request's
+ * i18n service RESOLVES but its reads throw — a translation fault, which the
+ * shared translator (`translationBundleOf`) answers as no bundle and says. The
+ * executor is the REAL one (the analytics service `AnalyticsServicePlugin`
+ * registers, admission wired): `list_datasets` keeps the dataset, in its
+ * authored text, `partial` with the fault's warning; `query_dataset` answers.
  *
- * Pinned on purpose under seat ruling A: the catalogue degrades and says so.
- * A follow-up (B: serve the untranslated text on a translation fault, inside
- * the shared translator) would flip these expectations deliberately, on both
- * transports at once.
+ * Flipped on purpose by #34993 (seat ruling B) from #34876's ruling-A pin
+ * (`datasets: []` + `partial`, and a 503), on both transports at once.
  */
 describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves but its reads throw', () => {
     const METRICS = {
@@ -214,24 +207,17 @@ describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves bu
         expect(answer.datasets.map((d: { name: string; label: string }) => [d.name, d.label])).toEqual([['sales_analysis', '销售分析']]);
     });
 
-    it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
+    it.each(CASES)('$read throwing: list_datasets keeps the dataset untranslated, partial, naming the i18n error', async ({ read, message }) => {
         const bridge = await bridgeOverRealExecutor(i18nWhoseReadThrows(read, message));
         const answer = await bridge.listDatasets!({});
-        expect(answer).toEqual({ datasets: [], partial: true, warning: expect.stringContaining(message) });
-        expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
+        expect(answer.datasets.map((d: { name: string; label: string }) => [d.name, d.label])).toEqual([['sales_analysis', 'Sales analysis']]);
+        expect(answer).toMatchObject({ partial: true, warning: expect.stringContaining(message) });
     });
 
-    it.each(CASES)('$read throwing: query_dataset refuses 503 SERVICE_UNAVAILABLE, naming the failed read', async ({ read, message }) => {
+    it.each(CASES)('$read throwing: query_dataset answers, in the authored labels', async ({ read, message }) => {
         const bridge = await bridgeOverRealExecutor(i18nWhoseReadThrows(read, message));
-        const refused = await bridge
-            .queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 })
-            .then(
-                () => undefined,
-                (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown },
-            );
-        expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
-        // The failed read's own 503 (naming the i18n error), not the executor's
-        // "not available on this deployment" one.
-        expect(refused?.message).toContain(`the dataset read failed (${message})`);
+        const answer = await bridge.queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 });
+        expect(answer.rowCount).toBe(1);
+        expect(answer.provenance.dataset).toEqual({ name: 'sales_analysis', label: 'Sales analysis' });
     });
 });
