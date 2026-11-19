@@ -86,7 +86,7 @@ describe('query_records — ADR-0090 D10 delegated-read diagnostic (#16549)', ()
   it('an UN-NARROWED delegated read carries NO statement — the payload is byte-identical to before', async () => {
     const bridge = makeBridge(async () => ({ narrowed: false }));
     const payload = await queryRecords(runtime, bridge);
-    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0 });
+    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0, source: expect.any(Object) });
     expect(payload.delegationNarrowed).toBeUndefined();
     expect(payload.warning).toBeUndefined();
   });
@@ -97,19 +97,19 @@ describe('query_records — ADR-0090 D10 delegated-read diagnostic (#16549)', ()
     // and "nothing to say" are deliberately the same rendered outcome.
     const bridge = makeBridge(undefined);
     const payload = await queryRecords(runtime, bridge);
-    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0 });
+    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0, source: expect.any(Object) });
   });
 
   it('a THROWING probe never fails the query it annotates', async () => {
     const bridge = makeBridge(async () => { throw new Error('security service exploded'); });
     const payload = await queryRecords(runtime, bridge);
-    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0 });
+    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0, source: expect.any(Object) });
     expect(bridge.calls).toContain('query');
   });
 
   it('narrowed:true with NO statement adds nothing — a notice with no sentence is not a notice', async () => {
     const bridge = makeBridge(async () => ({ narrowed: true }));
     const payload = await queryRecords(runtime, bridge);
-    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0 });
+    expect(payload).toEqual({ object: 'crm_opportunity', records: [], total: 0, source: expect.any(Object) });
   });
 });
