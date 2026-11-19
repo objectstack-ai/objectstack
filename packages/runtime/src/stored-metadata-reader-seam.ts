@@ -400,37 +400,38 @@ export function refuseStoredMetadataBodyReads<T>(api: T): T {
 }
 
 /**
- * The two symbol-keyed members of objectql's `ScopedContext` that derive an
- * api, named through `Symbol.for` because neither package entry exports them
- * (`platform-system-api.ts`, objectql): the platform's own system api
- * (`platformSystemApi`) and the action door's api (`buildActionApi`'s
- * derivation, `action-execution.ts`).
+ * The symbol-keyed member of objectql's `ScopedContext` that derives the
+ * platform's own system api (`platformSystemApi`, `platform-system-api.ts`),
+ * named through `Symbol.for` because neither package entry exports it.
  */
-const PLATFORM_SYSTEM_API: unique symbol = Symbol.for('objectstack.objectql.platformSystemApi');
-export const ACTION_DOOR_API: unique symbol = Symbol.for('objectstack.objectql.actionDoorApi');
+export const PLATFORM_SYSTEM_API: unique symbol = Symbol.for('objectstack.objectql.platformSystemApi');
 
 /**
  * The walk both layers share: `api`, and every context it can derive —
  * `object(name)`, `sudo()`, `withRunAs(...)`, the api `platformSystemApi(api)`
- * derives and the action door's api (the two symbol-keyed members above), the
- * context a `transaction(fn)` callback receives, and the `ctx`
- * `beginTransaction()` returns — with each repository passed through
- * `wrapRepository`. One definition of what a scoped API can derive, so neither
- * layer can leave a route around it. [#28861] The landed-write layer
- * (`landed-write-answer.ts`) walks it too.
+ * derives ({@link PLATFORM_SYSTEM_API}), the context a `transaction(fn)`
+ * callback receives, and the `ctx` `beginTransaction()` returns — with each
+ * repository passed through `wrapRepository`. One definition of what a scoped
+ * API can derive, so neither layer can leave a route around it. [#28861] The
+ * landed-write layer (`landed-write-answer.ts`) walks it too, and so does the
+ * action door's provenance layer (`action-execution.ts`), which alone passes
+ * `answeredBy`: a member named there is answered by the member it maps to (on
+ * the same walk, so what it derives is wrapped as that member's result is).
  */
 export function deriveThroughSeam<T>(
   api: T,
   marker: symbol,
   wrapRepository: (name: string, repo: unknown) => unknown,
+  answeredBy?: ReadonlyMap<PropertyKey, PropertyKey>,
 ): T {
   if (api === null || typeof api !== 'object') return api;
   if ((api as Record<PropertyKey, unknown>)[marker] === true) return api;
-  const wrap = (derived: unknown) => deriveThroughSeam(derived, marker, wrapRepository);
+  const wrap = (derived: unknown) => deriveThroughSeam(derived, marker, wrapRepository, answeredBy);
   return new Proxy(api as unknown as Record<PropertyKey, unknown>, {
     get(target, prop) {
       if (prop === marker) return true;
-      const value = Reflect.get(target, prop, target);
+      const answering = answeredBy?.get(prop);
+      const value = Reflect.get(target, answering === undefined ? prop : answering, target);
       if (typeof value !== 'function') return value;
       switch (prop) {
         case 'object':
@@ -438,7 +439,6 @@ export function deriveThroughSeam<T>(
         case 'sudo':
         case 'withRunAs':
         case PLATFORM_SYSTEM_API:
-        case ACTION_DOOR_API:
           return (...args: unknown[]) => wrap(value.apply(target, args));
         case 'transaction':
           return (callback: unknown, ...rest: unknown[]) =>

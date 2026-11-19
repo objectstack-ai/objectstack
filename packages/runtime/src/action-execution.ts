@@ -95,7 +95,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
-import { ACTION_DOOR_API, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
+import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
@@ -3927,24 +3927,15 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * derives. That layer sits beneath the reader seam, so the answer is served
  * like any write's return.
  *
- * The context is derived through objectql's action-door member
- * (`ACTION_DOOR_API`), so it and every api derived from it carry the action
- * door's origin flag: on it, `platformSystemApi(ctx.api)` answers what
- * `ctx.api.sudo()` answers, the `'action'` mark kept, and the handler's writes
- * to the identity-assignment and append-only objects stay judged as its own
- * (`platform-system-api.ts`, objectql). Not the app-authored flag: a host
- * handler keeps the engine's permanent delete (ADR-0148 D3). An api with no
- * such member (an engine double) has no `platformSystemApi` member either, so
- * there is nothing for the flag to guard.
+ * It is built over {@link keepActionDoorProvenance}, beneath both layers, so
+ * it and every api derived from it carry the action door's origin flag: on
+ * it, `platformSystemApi(ctx.api)` answers what `ctx.api.sudo()` answers.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
-    const served = (scoped: any) =>
+    const served = (scoped: unknown) =>
         serveStoredMetadataReadsThrough(
-            answerLandedWritesDespiteStaleSummary(
-                typeof scoped?.[ACTION_DOOR_API] === 'function' ? scoped[ACTION_DOOR_API]() : scoped,
-                ACTION_API_SURFACE,
-            ),
+            answerLandedWritesDespiteStaleSummary(keepActionDoorProvenance(scoped), ACTION_API_SURFACE),
             ql,
         );
     try {
@@ -3959,6 +3950,35 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
             return undefined;
         }
     }
+}
+
+/** The action door's origin flag: `true` on the api {@link buildActionApi} builds, and on every api derived from it. */
+const ACTION_DOOR_ORIGIN = Symbol.for('objectstack.runtime.actionDoorOrigin');
+
+/** On the action door's api, the platform's own system api is answered by `sudo()`. */
+const ACTION_DOOR_ANSWERS: ReadonlyMap<PropertyKey, PropertyKey> = new Map([[PLATFORM_SYSTEM_API, 'sudo']]);
+
+/**
+ * The action door's provenance layer: `api`, and every api derived from it
+ * (the shared walk, `deriveThroughSeam`), carry {@link ACTION_DOOR_ORIGIN},
+ * and on each the platform's own system api (`platformSystemApi`, objectql)
+ * is the api's `sudo()`: the `'action'` mark {@link buildActionExecutionContext}
+ * sets, and any `flowRunId`, stay. So a handler handing its own `ctx.api` to
+ * `platformSystemApi` gains nothing, and its writes to the identity-assignment
+ * objects are refused as an action handler's are
+ * (`content/docs/permissions/system-context.mdx`). `platformSystemApi` takes
+ * the mark off only the api the audit writer holds, a hook api the engine
+ * builds, which this layer never wraps.
+ *
+ * A flag of the action door's own, and ⛔ not the engine's app-authored one:
+ * that one also refuses a permanent delete (ADR-0148 D3), and a host code
+ * handler keeps the engine's permanent delete. Repositories pass through
+ * unchanged. Not a security boundary: the handler's package registered
+ * through the engine it holds, whose `createContext({ isSystem: true })`
+ * already builds a system api with neither the mark nor the run.
+ */
+function keepActionDoorProvenance<T>(api: T): T {
+    return deriveThroughSeam(api, ACTION_DOOR_ORIGIN, (_name, repo) => repo, ACTION_DOOR_ANSWERS);
 }
 
 /** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */

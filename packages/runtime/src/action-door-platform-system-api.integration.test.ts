@@ -6,8 +6,9 @@
  * handler's included.
  *
  *  - It keeps the `'action'` app-automation mark: that api, and every api
- *    derived from it, carries the action door's origin flag, and on a flagged
- *    api `platformSystemApi` answers what `sudo()` answers. So the handler's
+ *    derived from it, carries the action door's origin flag (runtime's
+ *    provenance layer), and on a flagged api `platformSystemApi` answers what
+ *    `sudo()` answers. So the handler's
  *    writes to the identity-assignment objects through it are refused as
  *    `content/docs/permissions/system-context.mdx` says (the identity-assignment
  *    refusal), and its insert is owner-stamped as an action body's is.
@@ -60,6 +61,8 @@ const OBJECTS = Object.keys(ROWS);
 /** The idempotence markers of `buildActionApi`'s two layers: each reads `true` on an api its walk serves. */
 const SERVED_BY_READ_SEAM = Symbol.for('objectstack.runtime.storedMetadataReaderSeam');
 const SERVED_BY_LANDED_WRITE_ANSWER = Symbol.for('objectstack.runtime.landedWritesAnswered');
+/** The action door's origin flag, `true` on every api its provenance layer serves. */
+const ACTION_DOOR_ORIGIN = Symbol.for('objectstack.runtime.actionDoorOrigin');
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -172,17 +175,18 @@ describe("platformSystemApi on the action door's api keeps the 'action' mark", (
 });
 
 describe("what platformSystemApi derives from the action door's api stays inside runtime's walk", () => {
-  it('both layers of buildActionApi serve it, as they serve sudo()', async () => {
+  it('both layers of buildActionApi serve it, as they serve sudo(), and it keeps the origin flag', async () => {
     const engine = await boot();
     const api = actionApi(engine);
-    const actionDoor = Symbol.for('objectstack.objectql.actionDoorApi');
-    for (const derived of [platformSystemApi(api), platformSystemApi(api.sudo()), api[actionDoor](), api.sudo()]) {
+    for (const derived of [platformSystemApi(api), platformSystemApi(api.sudo()), api.sudo()]) {
       expect(derived[SERVED_BY_READ_SEAM]).toBe(true);
       expect(derived[SERVED_BY_LANDED_WRITE_ANSWER]).toBe(true);
+      expect(derived[ACTION_DOOR_ORIGIN]).toBe(true);
     }
     // CONTROL: the markers are the walk's, not a property every api answers.
     const bare = engine.createContext({ isSystem: true });
     expect((bare as any)[SERVED_BY_READ_SEAM]).toBeUndefined();
+    expect((bare as any)[ACTION_DOOR_ORIGIN]).toBeUndefined();
     expect((platformSystemApi(bare) as any)[SERVED_BY_LANDED_WRITE_ANSWER]).toBeUndefined();
   }, 30000);
 });

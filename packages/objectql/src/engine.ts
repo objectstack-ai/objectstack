@@ -246,7 +246,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
-import { ACTION_DOOR_API, PLATFORM_SYSTEM_API } from './platform-system-api.js';
+import { PLATFORM_SYSTEM_API } from './platform-system-api.js';
 import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -6466,14 +6466,6 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    */
   private appAuthored = false;
 
-  /**
-   * Set on the api an action door hands its handler ({@link ACTION_DOOR_API})
-   * and kept by every api derived from it ({@link derive}); read by
-   * {@link PLATFORM_SYSTEM_API} alone. Not {@link appAuthored}, which also
-   * refuses a permanent delete (ADR-0148 D3) that a host code handler keeps.
-   */
-  private actionDoor = false;
-
   private derive(executionContext: ExecutionContext): ScopedContext {
     // [#30975] The body moved to `engine-scoped-context.ts`, its docblock with it (see `ScopedContextHost`).
     return ScopedContextFacet.derive.call(scopedContextHost.of(this), executionContext);
@@ -6515,18 +6507,6 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    */
   [PLATFORM_SYSTEM_API](): ScopedContext {
     return ScopedContextFacet.platformSystemApi.call(scopedContextHost.of(this));
-  }
-
-  /**
-   * The api an action door hands its handler: this api's context, carrying the
-   * action-door origin flag, which every api derived from it keeps. On it, and
-   * on each of those, {@link PLATFORM_SYSTEM_API} answers what `sudo()`
-   * answers, the `'action'` mark kept (`platform-system-api.ts`). Keyed on an
-   * unexported symbol that runtime's `buildActionApi` names through
-   * `Symbol.for`.
-   */
-  [ACTION_DOOR_API](): ScopedContext {
-    return ScopedContextFacet.actionDoorApi.call(scopedContextHost.of(this));
   }
 
   /**
@@ -6860,8 +6840,6 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     scopedContextHost.install((instance) => ({
       get appAuthored() { return instance.appAuthored; },
       set appAuthored(v) { instance.appAuthored = v; },
-      get actionDoor() { return instance.actionDoor; },
-      set actionDoor(v) { instance.actionDoor = v; },
       derive: (...a) => instance.derive(...a),
       get engine() { return instance.engine; },
       get executionContext() { return instance.executionContext; },
