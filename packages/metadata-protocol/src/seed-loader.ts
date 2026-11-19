@@ -476,17 +476,22 @@ function isBlankSeedKeyValue(value: unknown): boolean {
  * object, the record, the blank field(s) and the fix; the fix covers both
  * shapes it arises from: one record missing a value its siblings carry, and a
  * dataset whose `externalId` names a field no record carries.
+ *
+ * A key of `name` alone says it is also the key a dataset gets when it names
+ * none: the parse defaults `externalId` to `name` before any load sees it, so
+ * whether the author wrote it cannot be told here, and an author who never
+ * wrote one is the commonest reader of this refusal.
  */
 function blankSeedKeyRefusal(
   objectName: string,
   recordIndex: number,
   externalId: string | string[],
-  defaultKey: boolean,
   blankFields: readonly string[],
   mode: string | undefined,
 ): ReferenceResolutionError {
   const fields = Array.isArray(externalId) ? externalId : [externalId];
-  const keyLabel = `externalId '${fields.join('+')}'${defaultKey ? ' (the default key when a dataset names none)' : ''}`;
+  const defaultKey = fields.length === 1 && fields[0] === DEFAULT_EXTERNAL_ID_FIELD;
+  const keyLabel = `externalId '${fields.join('+')}'${defaultKey ? ' (also the key a dataset gets when it names none)' : ''}`;
   const blank = blankFields.map((field) => `'${field}'`).join(', ');
   const consequence = mode === 'update'
     ? 'so an update load can never find the row it names'
@@ -2341,7 +2346,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         const blankKeyFields = [...keyFields].filter((field) => isBlankSeedKeyValue(record[field]));
         if (blankKeyFields.length > 0) {
           errored++;
-          const error = blankSeedKeyRefusal(objectName, i, externalId, dataset.externalId === undefined, blankKeyFields, mode);
+          const error = blankSeedKeyRefusal(objectName, i, externalId, blankKeyFields, mode);
           errors.push(error);
           allErrors.push(error);
           // `error` (#4632): the record is dropped. Said once per dataset — the

@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -174,15 +175,37 @@ describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a 
     }
   });
 
-  it('the default key (`name`, no externalId declared): a record with no name is refused, and the message says the key is the default', async () => {
-    const seed = { object: 'demo_other', mode: 'ignore', env: ['prod', 'dev', 'test'], records: [{ name: 'A', sku: 'a' }, { sku: 'b' }] };
-    const { counts, results } = await threeLoads([seed]);
+  it('the default key (`name`, no externalId declared), through a parsed request: a record with no name is refused, and the message says `name` is also the default key', async () => {
+    // Every production caller parses its request first, and the parse
+    // defaults `externalId` to `name`: the loader never sees "undeclared".
+    const request = SeedLoaderRequestSchema.parse({
+      seeds: [{ object: 'demo_other', mode: 'ignore', records: [{ name: 'A', sku: 'a' }, { sku: 'b' }] }],
+      config: CONFIG,
+    });
+    expect(request.seeds[0].externalId).toBe('name');
+    const { engine, store } = createFaithfulEngine();
+    const counts: number[] = [];
+    let first: any;
+    for (let boot = 0; boot < 3; boot++) {
+      const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load(request);
+      first ??= result;
+      counts.push(store.demo_other.length);
+    }
 
     expect(counts).toEqual([1, 1, 1]);
-    const refused = blankKeyRefusals(results[0]);
+    const refused = blankKeyRefusals(first);
     expect(refused).toHaveLength(1);
     expect(refused[0]).toMatchObject({ field: 'name', recordIndex: 1 });
-    expect(refused[0].message).toContain("keyed on externalId 'name' (the default key when a dataset names none) and leaves 'name' blank");
+    expect(refused[0].message).toContain(
+      "keyed on externalId 'name' (also the key a dataset gets when it names none) and leaves 'name' blank",
+    );
+  });
+
+  it('an authored key other than `name` carries no default-key hint', async () => {
+    const { results } = await threeLoads([dataset(['name', 'sku'], 'upsert', [{ sku: 'a' }])]);
+    const [refused] = blankKeyRefusals(results[0]);
+    expect(refused.message).toContain("keyed on externalId 'name+sku' and leaves 'name' blank");
+    expect(refused.message).not.toContain('names none');
   });
 
   it('an expression that evaluates empty in a key field is refused the same way (it is read after expressions resolve)', async () => {
