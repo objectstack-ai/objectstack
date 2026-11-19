@@ -27,7 +27,7 @@ import {
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
-import { lintItem, resolveItemType } from '../lint/item-lint.js';
+import { judgeItemAlone, resolveItemType } from '../lint/item-lint.js';
 import {
   printHeader,
   printSuccess,
@@ -1417,7 +1417,7 @@ export default class Lint extends Command {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         throw new Error(`${file} must hold one metadata item, a JSON object.`);
       }
-      const result = lintItem(item as Record<string, unknown>, resolved.type, resolved.stackKey);
+      const result = judgeItemAlone(item as Record<string, unknown>, resolved.type, resolved.stackKey);
       const issues: LintIssue[] = [
         ...entryConventionIssues(result.stack),
         ...result.findings.map(authoringFindingToLintIssue),

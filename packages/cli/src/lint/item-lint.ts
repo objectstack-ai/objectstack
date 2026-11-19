@@ -183,7 +183,7 @@ function familiesNotRunFor(type: string): ItemFamilyNotRun[] {
  * `os lint` normalizes a config, and run each rule-table entry through the
  * recording proxy (see the header for the classification).
  */
-export function lintItem(item: AnyRec, type: string, stackKey: string): ItemLintResult {
+export function judgeItemAlone(item: AnyRec, type: string, stackKey: string): ItemLintResult {
   const conversions: ConversionNotice[] = [];
   const stack = normalizeStackInput({ [stackKey]: [item] } as Record<string, unknown>, {
     onConversionNotice: (n) => conversions.push(n),
