@@ -133,7 +133,7 @@ refused row never lands. `os validate` does not run them on seed rows;
 `os verify` fails on each dropped row. A rule reading a parent roll-up
 (`record.invoice.amount_paid`) sees the total earlier rows left, so children
 must fit in record order. ⛔ Never seed the roll-up: a seeded `amount_paid` is
-stored as written, and a cap on payments then refuses them all.
+stored as written, and a cap on payments refuses those it counts.
 
 ### Dynamic values (CEL)
 
