@@ -15,13 +15,18 @@
  * auth gate still runs; the limiter keys by IP instead), so throwing would turn
  * an auth hiccup into an outage on surfaces that never needed auth to begin
  * with.
+ *
+ * The read goes through the request's session-read carrier (`@objectstack/core`
+ * `readRequestSession`), which the transport opens per request. The limiter
+ * reads in the transport's middleware seam, before the route; the route's own
+ * identity step then reads the same request through the same carrier, and is
+ * answered by the limiter's read unless a write has landed on `ql` since. One
+ * request, one session read. A read that throws is not stored, so the route
+ * still reads for itself after a limiter read that failed.
  */
 
-import type { AuthSessionApi, IAuthService } from '@objectstack/spec/contracts';
-import { inProcessSessionReadInput } from '@objectstack/types';
-
-/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
-type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+import { readRequestSession, type RequestSessionRead } from '@objectstack/core';
+import type { IAuthService } from '@objectstack/spec/contracts';
 
 /** Headers as adapters deliver them, or an already-built `Headers`. */
 export type HeaderBag = Record<string, unknown> | Headers;
@@ -48,7 +53,13 @@ function toHeaders(headers: HeaderBag): Headers {
 export async function resolveSessionData(
     authService: IAuthService | undefined,
     headers: HeaderBag,
-): Promise<SessionRead | null> {
+    /**
+     * The data engine the auth service reads through (the kernel's `objectql`),
+     * whose writes decide whether the carrier may hand this read to a later
+     * reader of the same request. `undefined`: this read is not handed on.
+     */
+    ql?: unknown,
+): Promise<RequestSessionRead | null> {
     try {
         if (!authService) return undefined;
         let api = authService.api;
@@ -56,12 +67,12 @@ export async function resolveSessionData(
             api = await authService.getApi();
         }
         if (!api?.getSession) return undefined;
-        // [#22258] The in-process session-read rule: a request carrying a
-        // session cookie reads without renewal. Load-bearing here twice over —
+        // [#22258] The carrier reads under the in-process session-read rule: a
+        // request carrying a session cookie reads without renewal. Load-bearing here twice over —
         // the inbound rate limiter runs this on EVERY request, `/get-session`
         // included, so a renewal here would also leave the very route that
         // re-issues the cookie with nothing left to renew.
-        return await api.getSession(inProcessSessionReadInput(toHeaders(headers)));
+        return await readRequestSession(api, toHeaders(headers), ql);
     } catch {
         return undefined;
     }
@@ -73,8 +84,10 @@ export async function resolveSessionData(
 export async function resolveSessionPrincipalId(
     authService: IAuthService | undefined,
     headers: HeaderBag,
+    /** As {@link resolveSessionData}'s `ql`. */
+    ql?: unknown,
 ): Promise<string | undefined> {
-    const sessionData = await resolveSessionData(authService, headers);
+    const sessionData = await resolveSessionData(authService, headers, ql);
     const userId: unknown = sessionData?.user?.id ?? sessionData?.session?.userId;
     return typeof userId === 'string' && userId.length > 0 ? userId : undefined;
 }

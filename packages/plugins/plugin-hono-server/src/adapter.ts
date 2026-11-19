@@ -9,6 +9,7 @@ import {
     Middleware,
     UNMATCHED_ROUTE_PATTERN,
     createLogger,
+    withRequestSessionRead,
 } from '@objectstack/core';
 import type {
     HttpResponseObserver,
@@ -755,6 +756,7 @@ export class HonoHttpServer implements IHttpServer {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
         this.installResponseCompressionSeam();
+        this.installRequestSessionReadScope();
         // Inside the compression seam, ahead of every other middleware and
         // route, so every reader of a request body reads through the limit.
         installRequestBodyLimit(this.app, () => this.maxRequestBodyBytes);
@@ -792,6 +794,31 @@ export class HonoHttpServer implements IHttpServer {
             await next();
             await compressResponse(c, { streamed: this.streamedRequests.has(c.req.raw) });
         });
+    }
+
+    /**
+     * Open the request's session-read carrier (`@objectstack/core`
+     * `withRequestSessionRead`) around everything that serves the request: the
+     * {@link installMiddlewareSeam} chain and the route alike. Installed from
+     * the constructor, ahead of every middleware but the compression seam
+     * (which reads no session), so no later `use()` or route can sit outside
+     * it.
+     *
+     * Why this transport opens it: the middleware seam runs the whole
+     * {@link Middleware} chain to completion and only then hands the request
+     * on, and the seam and the route each get a request object of their own.
+     * The inbound rate limiter keys its bucket by the principal in that chain
+     * and the route's identity step reads the principal again, so nothing held
+     * on either object could carry the limiter's read to the route. One async
+     * scope around both can, and every reader of the request's session reads
+     * through it, so a request reads its session once.
+     *
+     * One scope per request: a request served in process from inside another
+     * opens its own, concurrent requests never share one, and the scope closes
+     * when the request settles. Nothing is kept across requests.
+     */
+    private installRequestSessionReadScope(): void {
+        this.app.use('*', (_c, next) => withRequestSessionRead(() => next()));
     }
 
     /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */
