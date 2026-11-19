@@ -28,6 +28,7 @@
  * are different questions, and only one of them moved.
  */
 
+import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
 
@@ -215,8 +216,12 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
     }
 
     // ── (d) declared group fully shadowed by the detail highlight strip ──
-    // Detail pages render the first 4 highlightFields as the top strip and
-    // HIDE those fields from the details body; the record's title field is
+    // Detail pages render the first RECORD_HIGHLIGHTS_MAX highlightFields
+    // (after the title leaves the list) as the top strip and HIDE those
+    // fields from the details body. The count is the spec constant the record
+    // page synthesizer cuts with, so the verdict and the screen cannot drift
+    // apart; a literal here once judged 4 while the page drew 6, so a group
+    // emptied by the 5th or 6th highlight passed. The record's title field is
     // the page H1 and never renders in the body either. A group whose every
     // visible member is covered by strip ∪ title therefore renders on FORMS
     // but silently never on detail pages — legal, but almost never what the
@@ -239,7 +244,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       const titleField = declaredTitle
         ?? ['name', 'full_name', 'title', 'subject', 'display_name'].find((c) => fieldNames.has(c));
       const stripSet = new Set(
-        declaredStrings.filter((h) => h !== titleField).slice(0, 4),
+        declaredStrings.filter((h) => h !== titleField).slice(0, RECORD_HIGHLIGHTS_MAX),
       );
       const hiddenFromBody = new Set(stripSet);
       if (titleField) hiddenFromBody.add(titleField);
@@ -263,7 +268,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
           hint:
             `Keep at least one non-highlighted field in "${key}", or remove the ` +
             `group if the strip already covers it. (Detail pages show the first ` +
-            `4 highlightFields as the top strip and hide them from the body.)`,
+            `${RECORD_HIGHLIGHTS_MAX} highlightFields as the top strip and hide them from the body.)`,
         });
       }
     }
