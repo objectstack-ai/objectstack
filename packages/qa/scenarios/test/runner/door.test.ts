@@ -377,7 +377,9 @@ describe('the built-in rules corpus (`--door-rules builtin`) — the hosted buil
 
   it('the arm reads it by `--door-rules builtin`, the variable or the flag, and states it as `builtin`', () => {
     expect(parseArgs(['--modes', 'door', '--door-rules', 'builtin', '--door-rules-omit', 'ondemand'])).toMatchObject({ doorRules: 'builtin', doorRulesOmit: 'ondemand' });
-    expect(() => makeDriver('claude', { doorRules: 'builtin', doorRulesOmit: 'ondemand' }, { repoRoot: root })).not.toThrow();
+    // `makeDriver` reads the rules before it builds the live driver (whose version probe needs a `claude` on PATH):
+    // a selector the corpus does not hold is refused there, so the flag reaches the built-in reader with no CLI installed.
+    expect(() => makeDriver('claude', { doorRules: 'builtin', doorRulesOmit: 'rule-z' }, { repoRoot: root })).toThrow(DoorRulesRefusedError);
     const { info } = readDoorRules(BUILTIN_DOOR_RULES, { omit: 'ondemand' });
     expect(doorArmText({ rules: info })).toBe(`skills: none · rules: builtin (sha256 ${info.sha256.slice(0, 12)}) ${sets.inline!.length} active, ${sets.ondemand!.length} omitted (ondemand)`);
     expect(() => readDoorRules(BUILTIN_DOOR_RULES, { omit: 'rule-z' })).toThrow(
