@@ -94,6 +94,7 @@ export const ar: TranslationData = {
         nav_settings_hub: { label: 'جميع الإعدادات' },
         nav_settings_localization: { label: 'الترجمة والإعدادات المحلية' },
         nav_exchange_rates: { label: 'أسعار الصرف' },
+        nav_units_of_measure: { label: 'وحدات القياس' },
         nav_settings_company: { label: 'الشركة' },
         nav_settings_mail: { label: 'إرسال البريد' },
         nav_settings_sms: { label: 'إرسال الرسائل النصية' },

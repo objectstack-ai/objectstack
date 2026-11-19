@@ -10,7 +10,7 @@
  * value is passed in as a prop.
  */
 
-import { createElement } from 'react';
+import { createElement, useCallback, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import {
   Button,
@@ -34,6 +34,7 @@ import type { useObjectViewToolbarAffordances } from './objectViewToolbarAfforda
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import { useListPageBarHost } from '@object-ui/plugin-grid';
 
 /**
  * objectstack#35446 — the list header's width under which it takes
@@ -80,13 +81,43 @@ export function ObjectViewPageHeader({
     foldedHeaderActions: ReturnType<typeof useObjectViewHeaderChrome>['foldedHeaderActions'];
 }) {
     const pluralLabel = objectPluralLabel(objectDef);
+    // objectstack#35554 — the page bar's selection slot (`useListPageBarHost`,
+    // `@object-ui/plugin-grid`). The list in this page column fills it while
+    // rows are selected — 「已选 N 条」, Cancel and the actions for what is
+    // selected — and this bar shows it in place of its title and actions.
+    const [selectionSlot, setSelectionSlot] = useState<HTMLDivElement | null>(null);
+    const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
+    const headerRootRef = useCallback((el: HTMLDivElement | null) => {
+        setPageColumn(el?.parentElement ?? null);
+    }, []);
+    const pageBar = useListPageBarHost(selectionSlot, pageColumn);
     const description = objectDef.description ? objectDesc(objectDef) : undefined;
     // The ⋮ menu: the description (no longer a resident subtitle), Import and
     // the favorites entry — the page's once-in-a-while acts.
     const moreShown = !!description || importShown || !!listFavorite;
     return (
-             <div className="hidden sm:block">
+             <div className="hidden sm:block" ref={headerRootRef}>
+             {/* objectstack#35554 — the selection face: the object's name, then
+                 what the list draws into the slot. Always mounted, so the slot
+                 is there the moment a row is ticked; shown only while one is. */}
+             <div
+                 className={pageBar.selecting
+                     ? 'relative shrink-0 border-b bg-background z-10'
+                     : 'hidden'}
+                 data-testid="list-selection-page-bar"
+                 aria-hidden={pageBar.selecting ? undefined : true}
+             >
+                 {/* The list bar's measure (objectstack#35548): 44px, 13px type. */}
+                 <div className="flex h-11 items-center gap-2 px-4">
+                     <span className="shrink-0 text-[13px] font-semibold leading-5 text-muted-foreground">
+                         {pluralLabel}
+                     </span>
+                     <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
+                     <div ref={setSelectionSlot} className="flex min-w-0 flex-1 items-center" />
+                 </div>
+             </div>
              <PageHeader
+                 className={pageBar.selecting ? 'hidden' : undefined}
                  posture="list"
                  // The object's plural: the page lists its records (objectui#11696).
                  // The view is named in the view bar below, by its switcher.

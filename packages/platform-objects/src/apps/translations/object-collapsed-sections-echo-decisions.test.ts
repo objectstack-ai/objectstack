@@ -952,10 +952,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // `writeRequiresMasterRead` toggle (ADR-0055 §3 as amended) — a label and
     // a help text, two leaves, all six translated leaves authored by the same
     // card. `advanced` reads 102 → 104; `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(115);
+    // 117 since the `userActions` composite offers `transfer`, the Change Owner
+    // switch (ruling 7000907189 point 1) — a label and a help text, two leaves,
+    // all translated leaves authored by the same card. `advanced` reads
+    // 104 → 106; `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(117);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(104);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(106);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {

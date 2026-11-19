@@ -173,13 +173,24 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
             lifecycle: { class: 'record', ttl: { field: 'secret_score', expireAfter: '30d' } },
             publicSharing: { enabled: true, redactFields: ['secret_score', 'title'], eligibility: 'record.secret_score > 0' },
             external: { remoteName: 't', columnMap: { SCORE: 'secret_score', TITLE: 'title' } },
-            userActions: { edit: { enabled: true, disabledWhen: 'record.secret_score > 5' }, delete: false },
+            userActions: {
+                edit: { enabled: true, disabledWhen: 'record.secret_score > 5' },
+                delete: false,
+                transfer: { enabled: true, visibleWhen: 'record.secret_score > 0', disabledWhen: 'record.title == ""' },
+            },
         });
         expect(served.tenancy).toEqual({ enabled: true });
         expect(served.lifecycle).toEqual({ class: 'record' });
         expect(served.publicSharing).toEqual({ enabled: true, redactFields: ['title'] });
         expect(served.external).toEqual({ remoteName: 't', columnMap: { TITLE: 'title' } });
-        expect(served.userActions).toEqual({ edit: { enabled: true }, delete: false });
+        // `transfer` is a CRUD flag like `edit`: the predicate reading the denied
+        // field goes, the switch and the readable predicate stay (the unclassified
+        // fail-safe would drop the whole entry instead).
+        expect(served.userActions).toEqual({
+            edit: { enabled: true },
+            delete: false,
+            transfer: { enabled: true, disabledWhen: 'record.title == ""' },
+        });
     });
 
     it('filters a list view\'s columns, and drops a view whose filter reads the denied field', () => {

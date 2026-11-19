@@ -661,8 +661,16 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     // `type === 'repeater'`, and `body` is a `composite`. All five echoed in
     // all three locales, and they are five of the six keys this round decides.
     // 7 since the action form offers the `onSuccess` composite — its two
-    // children, `navigate` and `openIn`, authored in all three locales.
-    expect(ACTION_ENUMERATED.skipped.length).toBe(7);
+    // children, `navigate` and `openIn`, authored in all three locales. 9
+    // since #35096: the form offers the `texts` record, whose entry fields
+    // (`message`, `params`) are enumerated the same way. 14 since #34823: the
+    // form offers the `refusals` record, the hook row's five entry fields.
+    expect(ACTION_ENUMERATED.skipped.length).toBe(14);
+    expect(ACTION_ENUMERATED.skipped).toContain('texts.message');
+    expect(ACTION_ENUMERATED.skipped).toContain('texts.params');
+    for (const child of ['message', 'status', 'reasons', 'reasons.message', 'params']) {
+      expect(ACTION_ENUMERATED.skipped).toContain(`refusals.${child}`);
+    }
     for (const child of SHARED_BODY_CHILDREN) {
       expect(ACTION_ENUMERATED.skipped).toContain(`body.${child}`);
       expect(
@@ -728,8 +736,10 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     const coveredParents = new Set(ACTION_ENUMERATED.covered.map((k) => k.replace(/\.[^.]+$/, '')));
     const skippedParents = new Set(ACTION_ENUMERATED.skipped.map((k) => k.replace(/\.[^.]+$/, '')));
     expect([...coveredParents]).toEqual(['params']);
-    // `onSuccess` since the action form offers it as a composite beside `body`.
-    expect([...skippedParents]).toEqual(['body', 'onSuccess']);
+    // `onSuccess` since the action form offers it as a composite beside `body`,
+    // `texts` since #35096 and `refusals` (with its nested `reasons`) since
+    // #34823, the two record rows after `body`.
+    expect([...skippedParents]).toEqual(['body', 'refusals', 'refusals.reasons', 'texts', 'onSuccess']);
     for (const parent of ['params', 'body']) {
       expect(ACTION_ENUMERATED.covered.includes(parent), `${parent} is not itself a row property`).toBe(false);
       expect(ACTION_ENUMERATED.skipped.includes(parent), `${parent} is not itself an unwalked child`).toBe(false);

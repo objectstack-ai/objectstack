@@ -39,9 +39,11 @@ test('a row flow action renders its screen and resumes the run', async ({ page }
   });
 
   await page.goto('/apps/showcase_app/showcase_task');
-  const rowMenu = page.locator('[data-testid="row-action-trigger"]').first();
-  await rowMenu.waitFor();
-  await rowMenu.click();
+  // objectstack#35554 — the list page draws no row "⋮": a row's actions are
+  // its context menu (right-click), the same items.
+  const row = page.locator('tbody tr').filter({ hasText: /\S/ }).first();
+  await row.waitFor();
+  await row.locator('td').last().click({ button: 'right' });
   await page.getByTestId('row-action-showcase_bulk_reassign').click();
 
   // The run paused at its screen node — the console renders it as a dialog.

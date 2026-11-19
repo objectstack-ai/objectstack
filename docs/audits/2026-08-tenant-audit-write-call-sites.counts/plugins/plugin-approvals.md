@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 40 |
-| Object name statically decidable | 38 |
+| Write call sites | 41 |
+| Object name statically decidable | 39 |
 | Object name chosen at run time | 2 |
-| Object name spelled inline | 37 |
+| Object name spelled inline | 38 |
 | Object name spelled through a `const` | 1 |
 | Object name is an `object: string` parameter | 1 |
 | Object name is some other run-time expression | 1 |
-| Against a tenancy-enabled object | 38 |
+| Against a tenancy-enabled object | 39 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 40 |
+| Threading a tenant context | 41 |
 | Provably carrying none (options read, no context key) | 0 |
 | …and decidably tenancy-enabled | 0 |
 | Options argument unreadable | 0 |
 | …and decidably tenancy-enabled | 0 |
-| Threading a decidably elevated (`isSystem`) context | 38 |
+| Threading a decidably elevated (`isSystem`) context | 39 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 2 |
-| Receiver carried a readable engine type | 40 |
+| Receiver carried a readable engine type | 41 |
 | Receiver erased, placed by the object NAME | 0 |
 | Receiver erased, placed by an `object: string` PARAMETER | 0 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 0 |
@@ -49,7 +49,7 @@ a row or a number here — fix the code, or the census, and regenerate.
 |---|---|---|---|---|---:|
 | `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 16 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 17 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
