@@ -255,11 +255,13 @@ describe('[#34681] the bare write doors follow the row-held base the bare read s
 
         it('the bare draft read and the bare discard address the same draft, the base\'s, with the dependent\'s draft beside it', async () => {
             await layPair(b.engine, 'w_drafts', WA, WD);
-            expect((await saveOf(b, 'w_drafts', 'base drafted', { mode: 'draft' })).resolved).toMatchObject({ success: true });
+            // The dependent's draft is stored FIRST, so a first-match read would meet it before the base's.
             expect((await saveOf(b, 'w_drafts', 'addon drafted', { mode: 'draft', packageId: WD })).resolved).toMatchObject({ success: true });
+            expect((await saveOf(b, 'w_drafts', 'base drafted', { mode: 'draft' })).resolved).toMatchObject({ success: true });
             expect(await rowsOf(b.engine, 'w_drafts')).toEqual([`active:${WD}:addon en`, `active:${WA}:base en`, `draft:${WD}:addon drafted`, `draft:${WA}:base drafted`]);
             const readDraft = await settle(b.protocol.getMetaItem({ type: 'email_template', name: 'w_drafts', state: 'draft' }));
-            expect(readDraft.resolved?.item?.subject, JSON.stringify(readDraft)).toBe('base drafted');
+            expect([readDraft.resolved?.item?.subject, readDraft.resolved?.item?._packageId], JSON.stringify(readDraft)).toEqual(['base drafted', WA]);
+            expect(readDraft.resolved?.version, 'the address a save pins to, never the best-effort null').toEqual(expect.any(String));
             const discarded = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'w_drafts', state: 'draft' }));
             expect(discarded.resolved, JSON.stringify(discarded)).toMatchObject({ success: true, reset: true });
             expect(await rowsOf(b.engine, 'w_drafts')).toEqual([`active:${WD}:addon en`, `active:${WA}:base en`, `draft:${WD}:addon drafted`]);
