@@ -56,13 +56,17 @@ function stubEngine() {
           ? { ok: false, errors: [{ message: 'Parse error: unexpected end of input' }], warnings: [] }
           : { ok: true, errors: [], warnings: [] };
       },
-      introspectScope: () => ({ fields: ['est_hours'], roots: ['record'], functions: ['has'] }),
+      introspectScope: () => ({ fields: ['est_hours', 'budget'], roots: ['record'], functions: ['has'] }),
       // A broken source proves no type, as the engine answers it.
       inferExpressionType: (input: unknown) => {
         const src = typeof input === 'string' ? input : '';
         if (BROKEN.test(src)) return 'unknown' as const;
         if (src.includes("'")) return 'text' as const;
         if (src.includes('+')) return 'unknown' as const;
+        // A field-over-field operator types `dyn`, as the engine answers it
+        // (formula-return.ts): the quotient's type is unproven.
+        if (/record\.\w+\s*\/\s*record\./.test(src)) return 'unknown' as const;
+        if (src.includes('>')) return 'boolean' as const;
         return 'number' as const;
       },
     }),
@@ -150,5 +154,45 @@ describe('ObjectFieldInspector — a declared percent survives a number verdict 
     await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
     await settle();
     expect(latest().returnType).toBe('number');
+  });
+});
+
+describe('ObjectFieldInspector — a declared percent or currency survives an unproven verdict (objectstack#35047)', () => {
+  const RATIO = 'record.est_hours / record.budget';
+
+  it("the spec's ratio shape: a field-over-field quotient proves no type and keeps `percent`", async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().expression).toBe(RATIO), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('the same quotient keeps a declared `currency`', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().expression).toBe(RATIO), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a `number` verdict keeps a declared `currency` too', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a verdict that proves another type still stamps over a declared `currency`', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: 'record.est_hours > 40' } });
+    await waitFor(() => expect(latest().returnType).toBe('boolean'), { timeout: 3000 });
+  });
+
+  it('CONTROL — the same quotient still clears a declared `number`, as before', async () => {
+    const { box, latest } = renderFormula();
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().returnType).toBeUndefined(), { timeout: 3000 });
   });
 });

@@ -1101,10 +1101,12 @@ export function ObjectFieldInspector({
     // Spec: `returnType` carries only a PROVEN concrete type —
     // an ambiguous (`unknown`) or unavailable verdict clears it.
     const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
-    // objectstack#35047 — `percent` is DECLARED, never inferred: no CEL type
-    // proves a quotient is a percentage, so a source the engine proves a
-    // `number` keeps the author's `percent`. Any other verdict still stamps.
-    if (def.returnType === 'percent' && next === 'number') return;
+    // objectstack#35047 — `percent` and `currency` are DECLARED: no CEL type
+    // proves a quotient is a percentage or a number is money, so a declared
+    // one survives every verdict that proves no OTHER type — `number`, and an
+    // unproven one alike (a field-over-field quotient types `dyn`). A verdict
+    // that proves text, boolean or date still stamps.
+    if ((def.returnType === 'percent' || def.returnType === 'currency') && (next === undefined || next === 'number')) return;
     if (def.returnType !== next) patchDef({ returnType: next });
   };
 

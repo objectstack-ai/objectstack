@@ -2372,7 +2372,8 @@ export const FieldSchema = lazySchema(() => {
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
-   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   * absent when the type can't be proven (an ambiguous/`dyn` expression),
+   * except that a declared `percent` or `currency` stays (below).
    *
    * `currency` (#22727): the result is an amount of money. It carries its
    * currency exactly the way a `currency` field does — through the formula's
@@ -2392,10 +2393,14 @@ export const FieldSchema = lazySchema(() => {
    * (absent ⇒ 0), so the engine rounds a fraction to `scale + 2` places and a
    * whole percentage to `scale`. It is DECLARED, never inferred: no CEL type
    * proves a quotient is a percentage, so authoring keeps a declared `percent`
-   * where it would stamp `number`.
+   * under every verdict that proves no other type — where it would stamp
+   * `number`, and where the type is unproven (a field-over-field quotient such
+   * as `record.spent / record.budget` types `dyn`), which would otherwise
+   * clear it. A declared `currency` is kept the same way. A verdict that
+   * proves `text`, `boolean` or `date` still stamps.
    */
   returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date/currency/percent). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face. Declared by the author, never inferred.'),
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `currency` and `percent` are declared by the author, and a verdict that proves no other type (`number`, or none) keeps them. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
