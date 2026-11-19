@@ -281,8 +281,9 @@ describe('a dashboard route reads from the app bundle and asks its widgets\' obj
     // An object this runtime does not register is never asked by name: that
     // read answers 404 on every open (a cloud-only `requiresObject`).
     expect(objectCalls()).not.toContain('object/cloud_only');
-    // A served widget object is still read by name for the route's scope.
-    expect(objectCalls()).toContain('object/crm_case');
+    // A served widget object joins the route's scope from that read
+    // (objectstack#35306): it is not asked again by name.
+    expect(objectCalls()).not.toContain('object/crm_case');
     expect(objectCalls()).not.toContain('object');
     expect(server.calls).not.toContain('dashboard');
   });

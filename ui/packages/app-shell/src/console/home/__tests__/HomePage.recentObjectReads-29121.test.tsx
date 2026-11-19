@@ -8,7 +8,9 @@
  * label (`useNavTargetLabel`), an object row's title and a list-view row's
  * label (`useRecentItemLabel`). Each loaded the whole object registry on every
  * visit. Now each row reads its own object by name; a list-view row reads its
- * object with its views (the `/meta/view` list), which its label is.
+ * object with its views (the `/meta/view` list), which its label is. The rows'
+ * names go in one `?names=` presence read, and a name it served is not read
+ * again as `/meta/object/NAME` (objectstack#35306).
  *
  * Real subjects: `HomePage` and `MetadataProvider` over a fake adapter that
  * records each read; the rest of the page is the harness of
@@ -19,6 +21,9 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
+// `HomePage` reaches `@objectstack/lint` (through the drafts row), so its first
+// load is paid here, at collection, never inside a clocked `waitFor`.
+import '@objectstack/lint';
 import { MetadataProvider } from '../../../providers/MetadataProvider';
 
 const navigateMock = vi.fn();
@@ -156,10 +161,16 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
-          calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          calls.push(
+            options?.names ? `${type}?names=${options.names.join(',')}` : options?.packageId ? `${type}?package=${options.packageId}` : type,
+          );
           const all = type === 'object' ? OBJECTS : type === 'app' ? state.apps : type === 'view' ? VIEWS : [];
-          const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
+          const items = options?.names
+            ? all.filter((o: any) => options.names!.includes(o.name))
+            : options?.packageId
+              ? all.filter((o: any) => o._packageId === options.packageId)
+              : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
@@ -229,7 +240,9 @@ describe('Home’s recent rows read the objects they name, by name (objectstack#
       'Account',
     ]);
     await settle();
-    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_contact']);
+    // The presence read SERVED both objects, so it answers their by-name scope
+    // too: no `object/NAME` read follows it (objectstack#35306).
+    expect([...metaReads(calls)].sort()).toEqual(['object?names=crm_account,crm_contact']);
   });
 
   it('an object row reads its object by name; a list-view row its object with its views (the view list, never the object list)', async () => {
@@ -249,6 +262,7 @@ describe('Home’s recent rows read the objects they name, by name (objectstack#
       expect(rows().map((row) => row.querySelector('span.truncate')?.textContent)).toEqual(['Accounts', 'Open Leads']),
     );
     await settle();
-    expect([...metaReads(calls)].sort()).toEqual(['object/crm_account', 'object/crm_lead', 'view']);
+    // Served by the presence read, each object is not read again by name (objectstack#35306).
+    expect([...metaReads(calls)].sort()).toEqual(['object?names=crm_account,crm_lead', 'view']);
   });
 });
