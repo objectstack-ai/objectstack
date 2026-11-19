@@ -731,6 +731,23 @@ export type {
     HookSkipReason,
 } from './hook-metrics.js';
 
+// [ADR-0157] The working-calendar service and the calendar objects' write
+// hooks. Its contract, refusals and arithmetic are `@objectstack/spec/data`'s.
+export {
+  WorkCalendarService,
+  installWorkCalendarHooks,
+  WORK_CALENDAR_OBJECT,
+  WORK_CALENDAR_EXCEPTION_OBJECT,
+  WORK_CALENDAR_CACHE_TTL_MS,
+  WORK_CALENDAR_HOOK_PACKAGE,
+} from './work-calendar-service.js';
+export type {
+  WorkCalendarServiceOptions,
+  WorkCalendarHookOptions,
+  WorkCalendarReadEngine,
+  WorkCalendarHookEngine,
+} from './work-calendar-service.js';
+
 // Export LifecycleService (ADR-0057 — declarative retention/rotation/archival)
 export {
   LifecycleService,

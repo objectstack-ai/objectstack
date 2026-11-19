@@ -496,6 +496,13 @@ export function addWorkingHours(cal: WorkCalendar, start: number | Date, hours: 
 
 // ── The service contract (ADR-0157 D2, D8, open point 4) ────────────────
 
+/**
+ * The machine-code shape a calendar is named by (`sys_work_calendar.code`):
+ * snake_case, as every machine name in the platform. A consumer's code that
+ * does not match names no calendar, and is never read as a filter token.
+ */
+export const WORK_CALENDAR_CODE_PATTERN = '^[a-z][a-z0-9_]*$';
+
 /** The kernel service the calendar service registers under (`ctx.getService`). */
 export const WORK_CALENDAR_SERVICE = 'work-calendar' as const;
 
