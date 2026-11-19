@@ -105,6 +105,34 @@ describe('Hook.texts — a key the source asks for literally is refused at save 
     expect(hookTextKeysAskedIn(source)).toEqual(['follow_up_subject']);
   });
 
+  // The optional-call and non-null call shapes are literal asks too: strict
+  // TypeScript reaches for them once `HookContext.text` is optional.
+  const SHAPES = [
+    ['ctx.text?.(', (k: string) => `ctx.text?.('${k}')`],
+    ['await ctx.text?.(', (k: string) => `await ctx.text?.('${k}', { lead: ctx.input.name })`],
+    ['ctx.text!(', (k: string) => `ctx.text!('${k}')`],
+    ['await ctx.text!(', (k: string) => `await ctx.text!('${k}', { lead: ctx.input.name })`],
+  ] as const;
+
+  it.each(SHAPES)('refuses an undeclared key asked for as %s at save, with the same sentence', (_shape, ask) => {
+    const r = HookSchema.safeParse({ ...base, body: body(`const s = ${ask('follow_up_title')};`), texts });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookTextKeyAtSave('follow_up_title', ['follow_up_subject'], 'body.source'));
+  });
+
+  it.each(SHAPES)('CONTROL: a declared key asked for as %s, and a computed key in that shape, pass the save', (_shape, ask) => {
+    const computed = ask('follow_up_subject').replace("'follow_up_subject'", 'k');
+    const source = `${ask('follow_up_subject')};\nconst k = pick(); ${computed};`;
+    expect(HookSchema.safeParse({ ...base, body: body(source), texts }).success).toBe(true);
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up_subject']);
+  });
+
+  it('reads the shapes with whitespace around the operator; CONTROL: a `!` on the next line ends the statement and is not read', () => {
+    expect(hookTextKeysAskedIn("ctx.text ?. ('a_key'); ctx.text !('b_key');")).toEqual(['a_key', 'b_key']);
+    expect(hookTextKeysAskedIn("ctx.text\n!('c_key');")).toEqual([]);
+  });
+
   it('a hook that declares no texts is not read for ctx.text calls (the run-time fault names it)', () => {
     expect(HookSchema.safeParse({ ...base, body: body("await ctx.text('anything');") }).success).toBe(true);
     expect(undeclaredHookTextAtRun('lead_follow_up', 'anything', [])).toMatch(/hook 'lead_follow_up' asked for text 'anything'.*declared: none/);

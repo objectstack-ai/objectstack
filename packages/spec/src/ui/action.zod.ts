@@ -1572,7 +1572,8 @@ const actionObject = () => strictObject({
    * rejects the call. A string the body builds itself is written as it is
    * (parameter 4).
    *
-   * A key the body asks for literally that `texts` does not declare is
+   * A key the body asks for literally that `texts` does not declare —
+   * `ctx.text('key')`, `ctx.text?.('key')` or `ctx.text!('key')` — is
    * refused at save; any other undeclared key is refused when the action
    * runs, as a fault naming the action and the key. Served where an action
    * runs code of its own: a `type: 'script'` action's sandboxed `js` body —

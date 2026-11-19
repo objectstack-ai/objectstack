@@ -423,8 +423,9 @@ function undeclaredRefusalReasonAtRun(
  * (parameter 4).
  *
  * The same two halves as a refusal code: a key the hook's source asks for
- * LITERALLY and `texts` does not declare is refused at save
- * ({@link hookTextKeysAskedIn}); any other key is refused when the hook runs.
+ * LITERALLY — `ctx.text('key'`, `ctx.text?.('key'` or `ctx.text!('key'` — and
+ * `texts` does not declare is refused at save ({@link hookTextKeysAskedIn});
+ * any other key is refused when the hook runs.
  */
 
 /**
@@ -433,15 +434,21 @@ function undeclaredRefusalReasonAtRun(
  */
 export const HOOK_TEXT_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
-/** `ctx.text('key'` — the call a hook's code asks for a declared text with. */
+/**
+ * `ctx.text('key'` — the call a hook's code asks for a declared text with — and
+ * its optional-call `ctx.text?.('key'` and non-null `ctx.text!('key'` shapes,
+ * which strict TypeScript reaches for because `HookContext.text` is optional.
+ * All three ask for the key literally. A `!` on the next line is not the
+ * non-null shape (it ends the statement), so it is read only on the same line.
+ */
 const TEXT_CALL = new RegExp(
-  String.raw`(?<![\w$.])ctx\s*\.\s*text\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>`,
+  String.raw`(?<![\w$.])ctx\s*\.\s*text(?:\s*\?\.|[ \t]*!)?\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>`,
   'g',
 );
 
 /**
- * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)` —
- * in first-seen order: the cases a save can decide. A key that arrives any
+ * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)`,
+ * `ctx.text?.('key', …)` or `ctx.text!('key', …)` — in first-seen order: the cases a save can decide. A key that arrives any
  * other way (a variable, a computed value) is left to the run-time refusal.
  * Comments and longer strings are blanked first, as for a refusal code.
  */

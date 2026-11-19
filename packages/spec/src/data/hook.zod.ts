@@ -816,7 +816,8 @@ export const HookSchema = lazySchema(() => strictObject(
    * hook builds itself is written as it is (parameter 4).
    *
    * A key the hook's source asks for literally that `texts` does not declare
-   * is refused at save; any other undeclared key is refused when the hook
+   * — `ctx.text('key')`, `ctx.text?.('key')` or `ctx.text!('key')` — is
+   * refused at save; any other undeclared key is refused when the hook
    * runs. Served on every path a hook runs on — a sandboxed `js` body and an
    * in-process `handler` — and refused on a hook whose code cannot ask for one
    * (an `expression` body, or neither a body nor a handler). Keyed by hook
@@ -1939,8 +1940,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * The runtime binds it on every path a hook runs on — a sandboxed `js` body
    * and an in-process `handler` (`buildHookTextSurface`). The save-time check
-   * reads the literal spelling `ctx.text('key'`, so a key asked for through
-   * an alias or a computed name is only judged when the hook runs.
+   * reads the literal spellings `ctx.text('key'`, `ctx.text?.('key'` and
+   * `ctx.text!('key'`, so a key asked for through an alias or a computed name
+   * is only judged when the hook runs.
    *
    * Runtime-only, like {@link api} and {@link notice}: a live function, so the
    * RUNTIME schema is `z.unknown()` (JSON Schema `{}`) and the type is a static
