@@ -37,7 +37,10 @@
  * complement:
  *
  *   - `hidden: true` -> absent          | `hidden: false` / absent -> present
- *   - a FALSE `visibleWhen` -> absent   | a TRUE `visibleWhen` -> present
+ *   - `visibleWhen`, either way -> present: since objectstack#35249 the
+ *     predicate is judged by the form, where the record is bound, and the
+ *     list reads `hidden` alone. `hidden: true` still wins over a TRUE
+ *     predicate (the AND below).
  *
  * Measured directions (both legs run for this card):
  *   - RED before the fix: every `hidden: true` / false-`visibleWhen` absence
@@ -75,12 +78,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+import { registerAllFields } from '@object-ui/fields';
 import { RecordFormPage } from './RecordFormPage';
+
+registerAllFields();
 
 const h = React.createElement;
 
-const { formSchemas, getAuthConfig, authState } = vi.hoisted(() => ({
+const { formSchemas, getAuthConfig, authState, drawn } = vi.hoisted(() => ({
   formSchemas: [] as any[],
+  // `drawn.adapter` set ⇒ the REAL `ObjectForm` draws the page's schema over
+  // it (objectstack#35249's drawn-level rows); unset ⇒ the probe stands in.
+  drawn: { adapter: null as null | Record<string, any> },
   getAuthConfig: vi.fn(async () => ({ features: {} as Record<string, unknown> })),
   authState: {
     user: null as Record<string, unknown> | null,
@@ -104,17 +113,20 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ObjectForm: ({ schema }: any) => {
-    formSchemas.push(schema);
-    return h('div', { 'data-testid': 'object-form' });
-  },
-}));
+vi.mock('@object-ui/plugin-form', async (importOriginal) => {
+  const real = await importOriginal<Record<string, any>>();
+  return {
+    ...real,
+    ObjectForm: (props: any) => {
+      formSchemas.push(props.schema);
+      return drawn.adapter ? h(real.ObjectForm, props) : h('div', { 'data-testid': 'object-form' });
+    },
+  };
+});
 
 const metadataState = { objects: [] as any[], loading: false };
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => metadataState }));
-vi.mock('../providers/AdapterProvider', () => ({ useAdapter: () => null }));
+vi.mock('../providers/AdapterProvider', () => ({ useAdapter: () => drawn.adapter }));
 
 /** The served shape: `ExpressionInputSchema` normalises authored strings into this. */
 const cel = (source: string) => ({ dialect: 'cel', source });
@@ -146,6 +158,8 @@ const CONTACTS = {
 
     // --- composition: the static gate is not overridable by the predicate --
     hidden_but_predicated: { type: 'text', hidden: true, visibleWhen: ALWAYS },
+    // A total (`has()`-guarded) predicate over the record (objectstack#35249).
+    record_gated: { type: 'text', visibleWhen: cel('has(record.stage) && record.stage == "closed_lost"') },
 
     // --- the DELETED read: the spec-refused spelling decides nothing ------
     legacy_predicate: { type: 'text', visible: NEVER },
@@ -186,6 +200,7 @@ beforeEach(() => {
   authState.activeOrganization = null;
   getAuthConfig.mockResolvedValue({ features: {} });
   formSchemas.length = 0;
+  drawn.adapter = null;
 });
 afterEach(cleanup);
 
@@ -214,38 +229,25 @@ describe('objectui#6514 — RecordFormPage honours the static `hidden` key, in b
   });
 });
 
-describe('objectui#6514 — RecordFormPage honours the `visibleWhen` predicate, in both directions', () => {
-  it('WITHHOLDS a field whose `visibleWhen` is FALSE', async () => {
+describe('objectstack#35249 — RecordFormPage lists a `visibleWhen` field for the FORM to judge', () => {
+  // The page's list reads the static `hidden` only. A field's `visibleWhen` is
+  // evaluated by the form, where the record and this page's scope are bound
+  // (`expressionUser.mountParity.test.tsx` pins that scope's verdicts); judged
+  // here, with no record, a `has()`-guarded predicate answered a clean FALSE
+  // and the field never reached the form.
+  it('lists a field whose `visibleWhen` reads the record, whatever the predicate answers without one', async () => {
     renderPage();
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
-    // RED before the fix, same reason: the predicate lived on a key nothing read.
-    expect(lastFields()).not.toContain('never_shown');
+    expect(lastFields()).toContain('record_gated');
     expect(lastFields()).toContain('name');
   });
 
-  it('SHOWS a field whose `visibleWhen` is TRUE', async () => {
+  it('lists a field whose `visibleWhen` is FALSE or TRUE for the signed-in user alike', async () => {
     renderPage();
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
-    // The complement — RED against inverted predicate handling.
-    expect(lastFields()).toContain('always_shown');
-  });
-
-  it('decides the same predicate per user — excluded, then admitted', async () => {
-    authState.user = CLERK;
-    renderPage();
-    await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-    expect(lastFields()).not.toContain('commission');
-
-    cleanup();
-    formSchemas.length = 0;
-    authState.user = MANAGER;
-    renderPage();
-    await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-    // Both halves in ONE case: the same authored predicate, opposite verdicts.
-    // A gate stuck in either position fails one of these two lines.
-    expect(lastFields()).toContain('commission');
+    expect(lastFields()).toEqual(expect.arrayContaining(['never_shown', 'always_shown', 'commission']));
   });
 });
 
@@ -282,5 +284,119 @@ describe('objectui#6514 — the spec-refused `visible` read is DELETED, not mere
 
     // The literal arm of the same refusal. Also RED before the fix.
     expect(lastFields()).toContain('legacy_literal');
+  });
+});
+
+/**
+ * objectstack#35249 — the field a record predicate admits is DRAWN on the page.
+ *
+ * The real `ObjectForm` draws the schema this page hands it, over a data
+ * source serving the object and the record, under the page's own
+ * `ExpressionProvider`. The predicates are total (`has()`-guarded), the shape
+ * that answered a clean FALSE when the page's list judged them with no record.
+ */
+const LOST = cel(
+  '(has(record.stage) && record.stage == "closed_lost") || (has(record.requested_status) && record.requested_status == "closed_lost")',
+);
+const WON = cel(
+  '(has(record.stage) && record.stage == "closed_won") || (has(record.requested_status) && record.requested_status == "closed_won")',
+);
+const DEAL = {
+  name: 'deal',
+  label: 'Deal',
+  fieldGroups: [
+    { key: 'basics', label: 'Basics' },
+    { key: 'outcome', label: 'Outcome' },
+  ],
+  fields: {
+    title: { type: 'text', label: 'Title', group: 'basics' },
+    stage: {
+      type: 'select',
+      label: 'Stage',
+      group: 'basics',
+      options: [
+        { label: 'Open', value: 'open' },
+        { label: 'Closed Lost', value: 'closed_lost' },
+        { label: 'Closed Won', value: 'closed_won' },
+      ],
+    },
+    loss_reason: { type: 'text', label: 'Loss Reason', group: 'outcome', visibleWhen: LOST },
+    win_reason: { type: 'text', label: 'Win Reason', group: 'outcome', visibleWhen: WON },
+    loss_memo: { type: 'text', label: 'Loss Memo', group: 'outcome', hidden: true, visibleWhen: LOST },
+    next_step: { type: 'text', label: 'Next Step', group: 'outcome' },
+  },
+};
+const LOST_DEAL = { id: 'd1', title: 'Stark Expansion', stage: 'closed_lost', loss_reason: 'Price', next_step: 'Debrief' };
+
+function serveDeal(object: Record<string, unknown> = DEAL) {
+  metadataState.objects = [object];
+  drawn.adapter = {
+    getObjectSchema: vi.fn(async () => structuredClone(object)),
+    findOne: vi.fn(async () => structuredClone(LOST_DEAL)),
+    create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'd2', ...d })),
+    update: vi.fn(async () => ({ id: 'd1' })),
+  };
+}
+
+function renderDealPage(mode: 'edit' | 'create') {
+  const path = mode === 'edit' ? '/apps/crm/deal/record/d1/edit' : '/apps/crm/deal/new';
+  return render(
+    h(I18nProvider, {
+      config: { defaultLanguage: 'en', detectBrowserLanguage: false },
+      children: h(
+        MemoryRouter,
+        { initialEntries: [path] },
+        h(Routes, null,
+          h(Route, { path: '/apps/:appName/:objectName/record/:recordId/edit', element: h(RecordFormPage, { mode: 'edit' }) }),
+          h(Route, { path: '/apps/:appName/:objectName/new', element: h(RecordFormPage, { mode: 'create' }) }),
+        ),
+      ),
+    }),
+  );
+}
+
+const drawnField = (name: string) => document.body.querySelector(`[name="${name}"]`) != null;
+
+describe('objectstack#35249 — RecordFormPage draws the field a record predicate admits', () => {
+  it('edit, form laid out from `fieldGroups`: the predicate that holds draws its field', async () => {
+    serveDeal();
+    renderDealPage('edit');
+    await waitFor(() => expect(drawnField('title')).toBe(true));
+    await waitFor(() => expect(document.body.textContent).toContain('Outcome'));
+
+    expect(drawnField('loss_reason'), 'visibleWhen holds for the record: drawn').toBe(true);
+    expect(drawnField('win_reason'), 'CONTROL: visibleWhen is false for the record: hidden').toBe(false);
+    expect(drawnField('loss_memo'), 'CONTROL: `hidden: true` wins over a predicate that holds').toBe(false);
+    expect(drawnField('next_step'), 'CONTROL: no predicate: drawn').toBe(true);
+  });
+
+  it('edit, authored form view: a section naming the field draws it too', async () => {
+    serveDeal({
+      ...DEAL,
+      form: {
+        type: 'simple',
+        sections: [
+          { name: 'main', label: 'Main', fields: ['title', 'stage'] },
+          { name: 'close', label: 'Close', fields: ['loss_reason', 'win_reason', 'loss_memo', 'next_step'] },
+        ],
+      },
+    });
+    renderDealPage('edit');
+    await waitFor(() => expect(drawnField('title')).toBe(true));
+    await waitFor(() => expect(document.body.textContent).toContain('Close'));
+
+    expect(drawnField('loss_reason')).toBe(true);
+    expect(drawnField('win_reason')).toBe(false);
+    expect(drawnField('loss_memo')).toBe(false);
+    expect(drawnField('next_step')).toBe(true);
+  });
+
+  it('create: the record-reading predicate is judged against the empty record and the form stays usable', async () => {
+    serveDeal();
+    renderDealPage('create');
+    await waitFor(() => expect(drawnField('title')).toBe(true));
+
+    expect(drawnField('loss_reason'), 'no stage yet: the predicate is false').toBe(false);
+    expect(drawnField('next_step')).toBe(true);
   });
 });
