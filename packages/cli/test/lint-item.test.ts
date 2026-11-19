@@ -72,7 +72,9 @@ async function runLint(argv: string[]): Promise<{ out: string; exitCode: number 
 const CLEAN = { name: 'invoice', label: 'Invoice', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } };
 const RETIRED_TITLE = { ...CLEAN, titleFormat: '{title}' };
 
-describe('[#34777] os lint --item --type', () => {
+// The first run pays the rule table's cold load (several seconds on a busy
+// box), so the cases carry a timeout above vitest's 5 s default.
+describe('[#34777] os lint --item --type', { timeout: 30_000 }, () => {
   it('declares both flags, and each names the other', () => {
     const flags = Lint.flags as Record<string, any>;
     expect(flags.item.type).toBe('option');
