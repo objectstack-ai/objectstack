@@ -1937,7 +1937,19 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7492 / 4)
   // = 1873 (+94), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1873],
+  // 1873 -> 1877, re-measured on the same PR before it landed, after its
+  // contract review (record 6997032414, M1) found the shared bullet telling the
+  // agent a total is unknown on a capped `query_records` page, which states
+  // its own `total`. The bullet now cites `totalGroups` as the pre-cut count and
+  // scopes "unknown" to a `query_dataset` answer without it (`aggregate_records`
+  // always answers it). Same raise path (ruling record 6513306068, letter B);
+  // the restatements were cut on the row's previous measurement and nothing
+  // else in the file restates it. Bullet 215 -> 230 bytes: 7512 -> 7527 bytes,
+  // less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
+  // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1877],
 
   // ── the objectstack-project skill joins the catalog ──
   // A new published process skill: how a change moves through a metadata-app

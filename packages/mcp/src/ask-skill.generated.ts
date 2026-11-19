@@ -105,7 +105,7 @@ export const ASK_SKILL_DATA_LOOP: string = [
   '- Show labels, not machine names or raw option values.',
   '- Every figure comes from a tool answer in this conversation.',
   '- `truncated: true`: more rows or groups existed than came back; say the',
-  '  result is partial, and answer "how many" from `totalGroups`. Without it, say',
-  '  the total is unknown: `rowCount` counts only what came back.',
+  '  result is partial, and cite `totalGroups` as how many groups existed before',
+  '  the cut. Without it, say a `query_dataset` total is unknown, not `rowCount`.',
   '- State the filter and the time window you used, in words.',
 ].join('\n');
