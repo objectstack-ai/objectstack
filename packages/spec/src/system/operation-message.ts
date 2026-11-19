@@ -289,6 +289,25 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *
  * Their English is byte-identical to the fixed sentence the hook answered
  * before it was localized.
+ *
+ * Three keys are the `userMessage` of refusals whose `message` stays the
+ * developer sentence (code, status and `message` unchanged). None takes a
+ * placeholder, re-derived per site:
+ *
+ *   - `record_not_found` — `404 RECORD_NOT_FOUND` from `recordNotFoundError`
+ *     (`@objectstack/core`). The by-id doors answer an id the caller cannot
+ *     read exactly as an id naming no row (ruling of record 5985885287), so
+ *     the sentence says both and tells the user neither. The only nameable
+ *     facts at the throw site are the object's API name and the row's id,
+ *     the #7414 vocabulary that must not reach a toast.
+ *   - `query_field_not_readable` — plugin-security's `403 PERMISSION_DENIED`
+ *     for a query that filters, sorts, groups or aggregates by a field the
+ *     caller may not read (the filter-oracle guard). The fields are the ones
+ *     the caller may not see, so the sentence names none of them.
+ *   - `delegation_scope_violation` — `403 DELEGATION_SCOPE_VIOLATION`, a
+ *     delegated administrator's write outside their own `adminScope`. The
+ *     reason in `message` names business units and permission sets by their
+ *     API names and ids; the user's half names none of them.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -345,6 +364,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This {{object}} is locked while an approval is in progress, and cannot be edited until that approval is complete',
     record_locked_opaque:
       'This record is locked while an approval is in progress, and cannot be edited until that approval is complete',
+    record_not_found: 'This record does not exist, or you do not have access to it.',
+    query_field_not_readable:
+      'This request filters, sorts or groups by a field you do not have access to. Remove that condition and try again, or contact your administrator if you need access.',
+    delegation_scope_violation:
+      'This change is outside the scope you were delegated to administer. Contact your administrator if it needs to be made.',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -380,6 +404,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_locked_unlabeled: '「{{title}}」正在审批中，已被锁定，审批完成前无法编辑',
     record_locked_untitled: '该{{object}}正在审批中，已被锁定，审批完成前无法编辑',
     record_locked_opaque: '该记录正在审批中，已被锁定，审批完成前无法编辑',
+    record_not_found: '该记录不存在，或您无权访问它。',
+    query_field_not_readable: '当前请求按您无权查看的字段筛选、排序或分组，请去掉该条件后重试，或联系管理员。',
+    delegation_scope_violation: '此更改超出了您被委派管理的范围，如需更改请联系管理员。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -430,6 +457,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_locked_unlabeled: '「{{title}}」は承認処理中のためロックされています。承認が完了するまで編集できません',
     record_locked_untitled: 'この{{object}}は承認処理中のためロックされています。承認が完了するまで編集できません',
     record_locked_opaque: 'このレコードは承認処理中のためロックされています。承認が完了するまで編集できません',
+    record_not_found: 'このレコードは存在しないか、アクセスする権限がありません。',
+    query_field_not_readable:
+      'この要求は、閲覧権限のない項目で絞り込み、並べ替え、またはグループ化しています。その条件を削除して再試行するか、アクセスが必要な場合は管理者にお問い合わせください。',
+    delegation_scope_violation:
+      'この変更は、管理を委任された範囲を超えています。変更が必要な場合は管理者にお問い合わせください。',
   },
   'es-ES': {
     permission_denied:
@@ -485,6 +517,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Este registro de {{object}} está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
     record_locked_opaque:
       'Este registro está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
+    record_not_found: 'Este registro no existe o no tiene acceso a él.',
+    query_field_not_readable:
+      'Esta solicitud filtra, ordena o agrupa por un campo al que no tiene acceso. Quite esa condición e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
+    delegation_scope_violation:
+      'Este cambio está fuera del ámbito que se le ha delegado para administrar. Póngase en contacto con su administrador si es necesario realizarlo.',
   },
 };
 
@@ -501,7 +538,11 @@ export interface RenderOperationMessageInput {
 export interface RenderOperationMessageOptions {
   /** BCP-47 locale; defaults to `en`. */
   locale?: string;
-  /** Deployment override hook — an `II18nService.t`-compatible lookup. */
+  /**
+   * Deployment override hook — an `II18nService.t`-compatible lookup. It is
+   * asked for the override TEMPLATE with no params (`translate(key, locale)`);
+   * the renderer fills the placeholders once.
+   */
   translate?: ValidationMessageTranslator;
 }
 

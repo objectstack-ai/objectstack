@@ -671,11 +671,11 @@ export async function declaredMemberOverrideAddressOf(
  * row holders ({@link storedRowHoldersRefusal}) and the layered door's
  * (`packagelessLayeredReadRefusal`) ask this first, so the plain read,
  * `/layers` and the execution face serve the base's row where they refused
- * naming both; beside a package-less row they still refuse (#33210). The
- * writes naming no package do not ask it: the save, delete, publish, draft
- * and history doors still refuse these rows naming base and dependent
- * (`packagelessAddress`), so the read serves the base's stack where the
- * write it would send is refused (#34441 contract review S1).
+ * naming both; beside a package-less row they still refuse (#33210).
+ * [#34681] The writes naming no package ask it too, where their rows' address
+ * names two or more packages (`packagelessRowHeldBaseAddress`): the save,
+ * delete, draft discard, publish, history, diff and rollback doors act on the
+ * base's row, as the read serves it.
  * `preread` is the item's active rows when the caller read them already.
  */
 export async function rowHeldBaseAddressOf(
@@ -775,12 +775,50 @@ async function rowHeldBaseJudgment(
     return { base, atMember: atMemberPackages, pairAmongHolders: [...atMemberPackages].some(isPairOfAHolder) };
 }
 
+/**
+ * [#34901] `item`, a SERVED object body, with the `_withheldFields` read
+ * decoration: each field a disabled package's `extend` contribution adds and
+ * the served fold therefore withholds, with that package
+ * (`SchemaRegistry.getWithheldExtensionFields`), less any name the body itself
+ * declares. `item` itself when nothing is withheld, or when the registry
+ * cannot answer.
+ *
+ * Why it is served: an owner's view keeps naming such a field on purpose (the
+ * column returns when the package is re-enabled, with no write), while the
+ * data door refuses the name as unknown on every query axis. The console reads
+ * this map to leave exactly those names out of a request — a name nothing
+ * declares is still sent, and still refused, so a typo stays loud.
+ *
+ * A read decoration (`METADATA_READ_DECORATIONS`, `@objectstack/spec`): derived
+ * on every read, stripped on every write and before any re-parse, never
+ * authorable. Stamped on the served faces only (this by-name read and the
+ * served list); never on the layered/editor read, the execution face, a
+ * pending draft's authoring read or a registry fold.
+ */
+export function withWithheldFieldsDecoration(registry: unknown, item: unknown, name?: string): unknown {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+    const body = item as Record<string, unknown>;
+    const objectName = typeof name === 'string' && name !== '' ? name : body.name;
+    const r = registry as { getWithheldExtensionFields?: (name: string) => Record<string, { packageId: string }> } | null | undefined;
+    if (typeof objectName !== 'string' || typeof r?.getWithheldExtensionFields !== 'function') return item;
+    const withheld = r.getWithheldExtensionFields(objectName);
+    const declared = body.fields !== null && typeof body.fields === 'object' && !Array.isArray(body.fields)
+        ? body.fields as Record<string, unknown>
+        : undefined;
+    const entries = Object.entries(withheld)
+        .filter(([field]) => !(declared && Object.prototype.hasOwnProperty.call(declared, field)));
+    if (entries.length === 0) return item;
+    return { ...body, _withheldFields: Object.fromEntries(entries.map(([field, at]) => [field, { packageId: at.packageId }])) };
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'readMetaItem'> & ServedRowHost,
     request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     },
     face: 'served' | 'execution',
 ) {
@@ -873,6 +911,13 @@ export async function readMetaItemFace(
                         ? activeRows.rows : undefined));
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
+        // [#34901] The served object read names the fields a disabled
+        // package withholds ({@link withWithheldFieldsDecoration}); the
+        // execution face and a pending draft's authoring read never do.
+        if (request.type === 'object' && face === 'served' && request.state !== 'draft' && answer?.item != null) {
+            const item = withWithheldFieldsDecoration(this.engine?.registry, answer.item, request.name);
+            return item === answer.item ? answer : { ...answer, item };
+        }
         return answer;
     }
     if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);

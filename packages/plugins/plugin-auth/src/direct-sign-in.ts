@@ -47,6 +47,18 @@
  * `'off'` stops the page from offering it. Either way the server's password
  * sign-in is unchanged, so the break-glass administrator of ADR-0135 D5.2
  * keeps a local credential reachable.
+ *
+ * ## Where an explicit sign-out returns
+ *
+ * `afterSignOut: 'hold'` (default) keeps the sign-out ruling on the sign-in
+ * page: an identity provider that ends its own session sends the browser back
+ * to `/login`, and the page holds with a button to sign in again.
+ * `'identity-provider'` sends it back to the start door instead, so the person
+ * lands on the identity provider's own sign-in page (a hosted environment
+ * keeps no sign-in page of its own). The return is only ever used after the
+ * provider has ended its session, and the door starts a fresh sign-in with no
+ * cookie, so the provider asks for credentials again: the door cannot sign
+ * the person straight back in, and it never sends the browser back to itself.
  */
 
 import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
@@ -69,29 +81,52 @@ export interface DirectSignInOptions {
    * password sign-in is the same either way.
    */
   localSignIn?: DirectSignInLocalPath;
+  /**
+   * Where the Console's explicit sign-out returns when the identity provider
+   * ends its own session: `hold` (default) returns to the sign-in page, which
+   * holds with a button to sign in again; `identity-provider` returns through
+   * the start door, so the identity provider's own sign-in page is shown.
+   */
+  afterSignOut?: DirectSignInAfterSignOut;
 }
 
 /** The two states of the local sign-in path behind direct sign-in. */
 export const DIRECT_SIGN_IN_LOCAL_PATHS = ['hidden', 'off'] as const;
 export type DirectSignInLocalPath = (typeof DIRECT_SIGN_IN_LOCAL_PATHS)[number];
 
+/** The two places an explicit sign-out returns to behind direct sign-in. */
+export const DIRECT_SIGN_IN_AFTER_SIGN_OUT = ['hold', 'identity-provider'] as const;
+export type DirectSignInAfterSignOut = (typeof DIRECT_SIGN_IN_AFTER_SIGN_OUT)[number];
+
 /** The setting in force. */
 export type ResolvedDirectSignIn =
   | { enabled: false }
-  | { enabled: true; provider?: string; localSignIn: DirectSignInLocalPath };
+  | { enabled: true; provider?: string; localSignIn: DirectSignInLocalPath; afterSignOut: DirectSignInAfterSignOut };
 
 /** The environment variables a self-hosted deployment sets. */
 export const DIRECT_SIGN_IN_ENV = {
   enabled: 'OS_AUTH_DIRECT_SIGN_IN_ENABLED',
   provider: 'OS_AUTH_DIRECT_SIGN_IN_PROVIDER',
   localSignIn: 'OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH',
+  afterSignOut: 'OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT',
 } as const;
 
 /** The start door's path under the auth `basePath`. */
 export const DIRECT_SIGN_IN_PATH = '/sign-in/direct';
 
-/** The start door's closed query-parameter set (AGENTS.md, route rule 5). */
-export const DIRECT_SIGN_IN_QUERY_PARAMS: readonly string[] = ['callbackURL'];
+/**
+ * The start door's closed query-parameter set (AGENTS.md, route rule 5), each
+ * name accepted at most once.
+ *
+ * - `callbackURL`: the return path ({@link keptReturnPath}).
+ * - `state`: accepted and never read. Under `afterSignOut: 'identity-provider'`
+ *   the door is the post-logout redirect URI, and an identity provider echoes
+ *   there the opaque `state` a `/sign-out` body carried to its logout
+ *   (OpenID Connect RP-Initiated Logout 1.0 §3). The door starts a fresh
+ *   sign-in with the vendor's own state, so there is nothing to check it
+ *   against, and it is never forwarded.
+ */
+export const DIRECT_SIGN_IN_QUERY_PARAMS: readonly string[] = ['callbackURL', 'state'];
 
 /**
  * The `error` code the door lands on the sign-in page with when it cannot
@@ -138,13 +173,19 @@ function isLocalPath(value: unknown): value is DirectSignInLocalPath {
   return (DIRECT_SIGN_IN_LOCAL_PATHS as readonly unknown[]).includes(value);
 }
 
+function isAfterSignOut(value: unknown): value is DirectSignInAfterSignOut {
+  return (DIRECT_SIGN_IN_AFTER_SIGN_OUT as readonly unknown[]).includes(value);
+}
+
 /**
  * The setting in force: the environment wins over the option, field by field
  * (the `OS_AUTH_SSO_ONLY` parity rule), so a deployment can turn it on or off
  * whatever the host passed. Absent everywhere ⇒ off.
  *
  * An off-vocabulary `localSignIn` (option or env) THROWS: a typo there must
- * not quietly reopen, or quietly close, the local sign-in page.
+ * not quietly reopen, or quietly close, the local sign-in page. So does an
+ * off-vocabulary `afterSignOut`: a typo must not quietly send sign-out
+ * somewhere the deployment did not choose.
  */
 export function resolveDirectSignIn(
   option: DirectSignInOptions | undefined,
@@ -160,12 +201,22 @@ export function resolveDirectSignIn(
       + 'to hidden, to keep the sign-in page at /login?local=1, or to off.',
     );
   }
+  const afterRaw = readEnvText(env[DIRECT_SIGN_IN_ENV.afterSignOut]) ?? option?.afterSignOut;
+  if (afterRaw !== undefined && !isAfterSignOut(afterRaw)) {
+    throw new Error(
+      `[auth] Direct sign-in: the sign-out return is ${JSON.stringify(afterRaw)}, which is not one of `
+      + `${DIRECT_SIGN_IN_AFTER_SIGN_OUT.join(', ')}. Set ${DIRECT_SIGN_IN_ENV.afterSignOut} (or directSignIn.afterSignOut) `
+      + 'to hold, to return an explicit sign-out to the sign-in page, or to identity-provider, to return it through the '
+      + "identity provider's sign-in page.",
+    );
+  }
   if (!enabled) return { enabled: false };
   const provider = readEnvText(env[DIRECT_SIGN_IN_ENV.provider]) ?? readEnvText(option?.provider);
   return {
     enabled: true,
     ...(provider !== undefined ? { provider } : {}),
     localSignIn: localRaw ?? 'hidden',
+    afterSignOut: afterRaw ?? 'hold',
   };
 }
 
@@ -373,8 +424,9 @@ function queryOf(url: URL): Record<string, string[]> {
 /**
  * Answer one `GET {basePath}/sign-in/direct` request.
  *
- * - An unknown query parameter, or `callbackURL` sent more than once ⇒
- *   `400 VALIDATION_ERROR` (the door's closed set).
+ * - An unknown query parameter, or `callbackURL` or `state` sent more than
+ *   once ⇒ `400 VALIDATION_ERROR` (the door's closed set,
+ *   {@link DIRECT_SIGN_IN_QUERY_PARAMS}); a single `state` changes nothing.
  * - Otherwise `302` to the identity provider with the vendor's state cookie,
  *   returning to the kept path ({@link keptReturnPath}) or the Console root;
  *   every failure of the sign-in lands on the Console's `/login` with `error`.
@@ -400,9 +452,11 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   const query = queryOf(url);
   // The shared sentences every route answers these two refusals with
   // (`@objectstack/rest`); the unknown name outranks the repeated one.
-  const callbackCount = query.callbackURL?.length ?? 0;
+  const repeated = DIRECT_SIGN_IN_QUERY_PARAMS
+    .map((name) => [name, query[name]?.length ?? 0] as const)
+    .find(([, count]) => count > 1);
   const message = unknownQueryParamRefusalMessage(query, DIRECT_SIGN_IN_QUERY_PARAMS)
-    ?? (callbackCount > 1 ? repeatedQueryParamMessage('callbackURL', callbackCount) : undefined);
+    ?? (repeated !== undefined ? repeatedQueryParamMessage(...repeated) : undefined);
   if (message !== undefined) {
     return new Response(JSON.stringify({ success: false, error: { code: 'VALIDATION_ERROR', message } }), {
       status: 400,

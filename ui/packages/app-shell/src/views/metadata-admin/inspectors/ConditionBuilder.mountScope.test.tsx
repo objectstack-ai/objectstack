@@ -60,6 +60,10 @@
  *    disabled by a predicate the spec prescribes.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -78,9 +82,19 @@ import '@objectstack/formula';
 // the real network. The verdict under test does not depend on the catalog: the
 // engine reports a bare reference from the SCOPE, not from the field list
 // (measured with `fields: []` and with `fields: undefined` — identical).
-const state = vi.hoisted(() => ({
-  metadataClient: { get: vi.fn(async () => undefined), list: vi.fn(async () => [] as unknown[]), withPreviewDrafts() { return this; } },
-}));
+// `objects` is empty for every scope case; only the subject-label cases at the
+// foot of this file serve an object definition through it.
+const state = vi.hoisted(() => {
+  const objects: Record<string, unknown> = {};
+  return {
+    objects,
+    metadataClient: {
+      get: vi.fn(async (type: string, name: string) => (type === 'object' ? objects[name] : undefined)),
+      list: vi.fn(async () => [] as unknown[]),
+      withPreviewDrafts() { return this; },
+    },
+  };
+});
 vi.mock('../useMetadata', () => ({
   useMetadataClient: () => state.metadataClient,
 }));
@@ -377,5 +391,89 @@ describe('mounts that pass no `scope` are byte-for-byte unchanged (objectui#8167
     const box = rawEditorIn(screen.getByText('Condition').parentElement!.parentElement! as HTMLElement);
     fireEvent.change(box, { target: { value: BARE } });
     await expectAccepted(box);
+  });
+});
+
+/* ── Field subjects read by label at every mount (objectstack#34122) ───── */
+
+/**
+ * objectstack#34122 — each mount's subject dropdown names a field by its label,
+ * with the CEL spelling beside it as the hint
+ * (`ux-conventions.labels-over-machine-names`). No mount passes
+ * `labelSubjects`: the builder's default is on, so these cases pin the default
+ * as every mount receives it. A field with no label reads as its spelling.
+ */
+describe('every mount names a field subject by its label (objectstack#34122)', () => {
+  /** `invoice`, as the object-field catalog serves it: one labelled field, one not. */
+  const INVOICE = { name: 'invoice', fields: { status: { type: 'text', label: 'Status' }, code: { type: 'text' } } };
+
+  afterEach(() => {
+    delete state.objects.invoice;
+  });
+
+  /** The builder labelled `label`, with one row added; its subject dropdown opened. */
+  function openSubjects(label: string): void {
+    const root = builderLabelled(label);
+    fireEvent.click(within(root).getByRole('button', { name: 'Add condition' }));
+    fireEvent.keyDown(within(root).getAllByRole('combobox')[0], { key: 'ArrowDown' });
+  }
+
+  /** The labelled field reads `Status`, its spelling `record.status` the hint. */
+  async function expectLabelFirst(): Promise<void> {
+    const option = await screen.findByRole('option', { name: 'Status record.status' }, { timeout: 4000 });
+    expect(option.querySelector('.font-mono')).toHaveTextContent(/^record\.status$/);
+  }
+
+  /** CONTROL — the unlabelled field reads as its spelling alone, with no hint. */
+  async function expectSpellingOnly(): Promise<void> {
+    const option = await screen.findByRole('option', { name: 'record.code' }, { timeout: 4000 });
+    expect(option.querySelector('.font-mono')).toBeNull();
+  }
+
+  for (const label of ['Visible when', 'Disabled when'] as const) {
+    it(`an action's "${label}" reads a field by its label, its spelling as the hint`, async () => {
+      state.objects.invoice = INVOICE;
+      render(<ActionHarness />);
+      openSubjects(label);
+      await expectLabelFirst();
+      await expectSpellingOnly();
+    });
+  }
+
+  it("a hook's condition reads a field by its label, its spelling as the hint", async () => {
+    state.objects.invoice = INVOICE;
+    render(<HookHarness />);
+    openSubjects('Run only when (optional CEL)');
+    await expectLabelFirst();
+    await expectSpellingOnly();
+  });
+
+  it("a record page block's Visible when reads a field by its label, its spelling as the hint", async () => {
+    state.objects.invoice = INVOICE;
+    const draft = PageSchema.parse({
+      name: 'invoice_page',
+      label: 'Invoice',
+      type: 'record',
+      object: 'invoice',
+      template: 'default',
+      regions: [{ name: 'main', components: [{ type: 'text', id: 'b1' }] }],
+    }) as unknown as Record<string, unknown>;
+    render(
+      <PageBlockInspector
+        type="page"
+        name="invoice_page"
+        draft={draft}
+        selection={{ kind: 'block', id: 'regions[0].components[0]' }}
+        onPatch={() => {}}
+        onClearSelection={() => {}}
+        onSelectionChange={() => {}}
+        onBlockingIssuesChange={() => {}}
+        readOnly={false}
+        locale={'en-US' as never}
+      />,
+    );
+    openSubjects('Visible when (CEL)');
+    await expectLabelFirst();
+    await expectSpellingOnly();
   });
 });

@@ -334,4 +334,41 @@ describe('import_sso_users draws the per-row report as a table', () => {
       ['rows', 'table'],
     ]);
   });
+
+  // A deactivated pending person is re-added with `alreadyPending: true` and
+  // `host: { notified: false, reason: 'deactivated' }`: whether anyone was told
+  // is the host columns' answer, so the `alreadyPending` count and column say
+  // only that the person was already pending, as Add User's `pendingAgain` does.
+  it('labels `alreadyPending` "Already pending", leaving "told" to the host columns', () => {
+    const dialog = declared('import_sso_users').resultDialog as { fields?: Array<{ path: string; label?: unknown }> };
+    const summary = dialog.fields?.find((field) => field.path === 'summary.alreadyPending');
+    const columns = (rowsField()?.columns ?? []) as Array<{ path: string; label?: unknown }>;
+    const column = (path: string) => columns.find((entry) => entry.path === path)?.label;
+    expect(summary?.label).toBe('Already pending');
+    expect(column('alreadyPending')).toBe('Already pending');
+    expect(column('host.notified')).toMatch(/\btold\b/);
+  });
+});
+
+/**
+ * objectstack#34651: the add door answers `pendingAgain: true` only on a
+ * re-add of a person still pending, and never `false`. The result dialog
+ * skips a field whose path resolves to nothing, so a field reading that key
+ * draws its row exactly on a re-add; a field reading `alreadyPending`, which
+ * the door answers on every add, would draw a misleading `false` row on each
+ * fresh add (ruling A on objectstack#33187 turned that row down).
+ */
+describe('add_sso_user names an address that was already pending', () => {
+  const fields = () =>
+    ((declared('add_sso_user').resultDialog as { fields?: Array<{ path: string; label?: unknown; format?: string }> }).fields ?? []);
+
+  it('declares one field reading `pendingAgain`, drawn as the boolean it is', () => {
+    const matching = fields().filter((field) => field.path === 'pendingAgain');
+    expect(matching).toHaveLength(1);
+    expect(matching[0]).toMatchObject({ label: 'Already pending', format: 'json' });
+  });
+
+  it('CONTROL: no field reads `alreadyPending`, which the door answers on every add', () => {
+    expect(fields().map((field) => field.path)).not.toContain('alreadyPending');
+  });
 });

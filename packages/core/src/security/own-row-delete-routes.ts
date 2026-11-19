@@ -216,7 +216,7 @@ export async function removeOwnRow(
     | Record<string, unknown>
     | null
     | undefined;
-  if (!row) throw recordNotFoundError(door.object, id);
+  if (!row) throw recordNotFoundError(door.object, id, context);
 
   // Step 6: the structural check, and the only thing that admits the write below.
   if (row[door.ownerField] !== callerId) throw notYourRowError(door, id);
@@ -230,7 +230,7 @@ export async function removeOwnRow(
     } as ExecutionContext,
   });
   // The driver's own "nothing matched": the row went between the read and here.
-  if (removed === false || removed === 0) throw recordNotFoundError(door.object, id);
+  if (removed === false || removed === 0) throw recordNotFoundError(door.object, id, context);
 }
 
 async function handleRemoveOwnRow(

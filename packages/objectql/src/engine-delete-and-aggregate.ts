@@ -81,6 +81,10 @@ import {
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import {
+    aggregateOrderCutDirective, aggregateOrderCutRefusal, aggregateOrderCutRequestOf, assertAggregateOrderCutShape,
+    takeAggregateGroupCount, withAggregateOrderCutDirective,
+} from './aggregate-order-cut.js';
+import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
   RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
   relationGroupDriverRefusal, relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
@@ -145,13 +149,19 @@ export interface DeleteAndAggregateHost {
 /** The bodies of the "Delete, count, aggregate and execute" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class DeleteAndAggregateFacet {
   /** The body of `ObjectQL#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'delete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
+  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782, #34412] An aborting `afterDelete`, or a refusal after a `beforeDelete` hook's
     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.delete(object, options));
-    }
+    //
+    // [#35167] As in `insert` and `update`: the unit opens around the ENGINE
+    // BODY (the executor below), never around the door, so the middleware
+    // chain — the authorization gate's reads, and whatever a middleware does
+    // after `next()` — runs outside it. Nothing between here and the executor
+    // writes; the cascade claim below is an in-memory marker.
+    const ownUnit = this.opensAfterAbortUnit('afterDelete', object, options?.context);
+    const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+      ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -161,7 +171,7 @@ export class DeleteAndAggregateFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'delete');
+    this.enforceTransactionOrigin(object, driver, 'delete', options?.context?.transaction);
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -221,7 +231,7 @@ export class DeleteAndAggregateFacet {
       opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
     }
 
-    await this.executeWithMiddleware(opCtx, async () => {
+    await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
       // [ADR-0139 D1] As in `update`: a leaf the middleware chain wrote into a
       // delete's predicate is refused at the executor's entry, before the
       // pre-image reads reach the driver.
@@ -455,17 +465,18 @@ export class DeleteAndAggregateFacet {
         // from `protocol.deleteData` and #5138 removed from `callData`, still
         // live here on the path an action body's `.delete()` actually takes.
         //
-        // The pre-image is the only honest place to ask. `IDataDriver.delete`
-        // does declare `Promise<boolean>` ("true if deleted, false if not
-        // found"), so the answer exists downstream — but downstream is AFTER
-        // `beforeDelete` has dispatched and after `cascadeDeleteRelations` has
-        // run, i.e. after handlers have fired and children have been touched
-        // for a parent that was never there. `IDataEngine.delete` also declares
-        // `Promise<any>` and passes its driver's result through the hook chain,
-        // so testing it for `=== false` here would read a signal this layer's
-        // contract does not promise — #5138's argument, unchanged.
+        // The pre-image is the first place to ask, not the only one.
+        // `IDataDriver.delete` declares `Promise<boolean>` ("true if deleted,
+        // false if not found"), but that answer arrives AFTER `beforeDelete`
+        // has dispatched and after `cascadeDeleteRelations` has run, i.e. after
+        // handlers have fired and children have been touched — so a row that
+        // was never there is refused here, before any of that. The driver's
+        // `false` is still read, after the row was proven present: [#35329]
+        // another writer removed it in between, and `runByIdDelete` below
+        // answers the same refusal (or, for a cascade-issued child delete,
+        // `false` with no after-effects).
         priorRecord = await readPreImage(id);
-        if (!priorRecord) throw recordNotFoundError(object, id);
+        if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
         // Bound unconditionally now that the row is proven present.
         // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
         // still the reason the binding goes through it rather than around it.
@@ -648,13 +659,17 @@ export class DeleteAndAggregateFacet {
               // (`options.onRecycleBinEntry`) only once the unit has landed:
               // after the transaction commits, never from inside it.
               let binEntryId: string | undefined;
+              // [#35329] Set when a cascade-issued child delete's driver
+              // answers `false`; see the throw below.
+              let cascadeChildVanished = false;
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
                 const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 const entry = await bin?.write();
+                let removed: Awaited<ReturnType<typeof driver.delete>>;
                 try {
-                  const removed = await driver.delete(
+                  removed = await driver.delete(
                     object,
                     hookContext.input.id as string,
                     this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
@@ -665,11 +680,39 @@ export class DeleteAndAggregateFacet {
                   // withdrawn.
                   if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
                   else await entry?.withdraw();
-                  return removed;
                 } catch (e) {
                   await entry?.compensate();
                   throw e;
                 }
+                // [#35329] The pre-image proved the row present and the driver
+                // answers `false` (`IDataDriver.delete`: "false if not found"):
+                // another writer removed it in between. This delete removed
+                // nothing, so it reports nothing — no `afterDelete`, no
+                // roll-up recompute, no `data.record.deleted` — and answers
+                // what a by-id delete answers for a missing row, the pre-image
+                // miss's own error. Thrown here, after the entry's withdrawal
+                // and outside the `try` above (so the entry is never
+                // compensated twice), and inside the unit, so a cascade this
+                // call walked rolls back with it: the cascade and the row's
+                // removal, or neither (#7413). An off-contract `0` keeps its
+                // pass-through answer.
+                //
+                // A child delete a parent's cascade issued (decided by the
+                // claim alone, never by the error code: the read door answers
+                // a dependent the caller cannot read with the same code,
+                // ADR-0055 step 2.7) does not throw. The row it was sent to
+                // remove is gone, which is what the walk wanted, so the walk
+                // goes on and the parent's delete completes, as a batched
+                // chunk's count already lets it. It still reports nothing:
+                // the after-effects are skipped below, as for the refusal.
+                if (removed === false) {
+                  if (referentialCascadeDelete) {
+                    cascadeChildVanished = true;
+                    return removed;
+                  }
+                  throw recordNotFoundError(object, id, opCtx.context);
+                }
+                return removed;
               };
               // WHEN to open one is `planCascadeAtomicity`'s call — see there.
               // `'none'` (nothing references this object) keeps the pre-#7413
@@ -694,6 +737,10 @@ export class DeleteAndAggregateFacet {
               if (binEntryId !== undefined && typeof options?.onRecycleBinEntry === 'function') {
                   options.onRecycleBinEntry(binEntryId);
               }
+              // [#35329] The vanished cascade child removed nothing: no
+              // `afterDelete`, no secret release, no roll-up recompute, no
+              // `data.record.deleted`. Its answer is the driver's `false`.
+              if (cascadeChildVanished) return result;
               // [#27581] The handles the removed row held, off its pre-image.
               deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
           } else {
@@ -826,11 +873,13 @@ export class DeleteAndAggregateFacet {
 
           // [#16231] The `delete()` twin, on its own declaration: whether the
           // by-id row was there (`boolean`), or how many rows a predicate
-          // delete removed (`number`). ⚠️ `false` and `0` are the two most
-          // ordinary answers this verb gives, so `isDeleteResultShape` is a
-          // pair of `typeof` tests and never a truthiness check — a lenient
-          // guard here would refuse exactly the answers
-          // `metadata-protocol`'s `deleteData` turns into its 404.
+          // delete removed (`number`). ⚠️ `0` is the most ordinary answer of a
+          // predicate delete, and `false` / `0` still reach here from a hook's
+          // rewrite or an off-contract by-id driver count (a driver's `false`
+          // no longer does, [#35329]), so `isDeleteResultShape` is a pair of
+          // `typeof` tests and never a truthiness check — a lenient guard here
+          // would refuse exactly the answers `metadata-protocol`'s
+          // `deleteData` turns into its 404.
           if (!isDeleteResultShape(hookContext.result)) {
             throw new DeleteHookResultNotWriteShapeError({
               object,
@@ -926,7 +975,7 @@ export class DeleteAndAggregateFacet {
           );
           throw e;
       }
-    });
+    }));
 
     return opCtx.result;
   }
@@ -971,6 +1020,12 @@ export class DeleteAndAggregateFacet {
       // related read a relation group join is built from is this verb,
       // stopped at its driver call. Only the engine's own planner sets it.
       const scopePlan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
+      // [aggregate order and cut] The engine-internal request to order the
+      // groups by an aggregated column, cut them and count them, in the
+      // driver's own statement (`aggregate-order-cut.ts`). Its shape is judged
+      // once every door below has judged the query; the driver and the path
+      // are judged at the driver call.
+      const orderCut = aggregateOrderCutRequestOf(options);
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
@@ -1303,6 +1358,11 @@ export class DeleteAndAggregateFacet {
           );
           if (numeric !== query.having) query = { ...query, having: numeric };
       }
+      // [aggregate order and cut] Every door above has judged the query; now
+      // the request's order keys against the aggregated row it orders.
+      if (orderCut !== undefined) {
+          assertAggregateOrderCutShape(object, orderCut, aggregatedRowColumns(query.groupBy, query.aggregations));
+      }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
       // [relation group join] Every door above has judged the base query;
@@ -1486,6 +1546,21 @@ export class DeleteAndAggregateFacet {
             });
         const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
         const nativeAggregate = typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative);
+        // [aggregate order and cut] Served only as the driver's own statement,
+        // and refused — before the driver is asked — on every path that is not
+        // one (`aggregateOrderCutRefusal`): no in-memory sort, no slower path.
+        if (orderCut !== undefined) {
+            const refused = aggregateOrderCutRefusal(object, {
+                driver: drv,
+                nativeAggregate,
+                hasHaving: ast.having != null && typeof ast.having === 'object' && Object.keys(ast.having).length > 0,
+                hasRelationGroup: relationGroup !== undefined,
+            });
+            if (refused !== undefined) throw refused;
+            const directive = aggregateOrderCutDirective(orderCut, aggregatedRowColumns(ast.groupBy, []));
+            const cut = await drv.aggregate(object, withBucketZone(withAggregateOrderCutDirective(ast, directive)), aggregateOptions);
+            return takeAggregateGroupCount(object, drv, cut, orderCut);
+        }
         // [relation group join] Served only as the driver's own statement:
         // the rows path below cannot join. Each planned related read is
         // answered at this boundary, under these driver options, by the rule

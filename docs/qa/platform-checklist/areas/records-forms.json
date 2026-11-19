@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "records-forms",
-  "axis": "records",
+  "axis": "data",
   "title": "Records, lists, detail pages, forms",
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed, nothing to un-seed beyond the teardown line) and every call below is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted.",
@@ -615,7 +615,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -641,7 +641,8 @@
         "visualization-switcher",
         "bulk-actions",
         "row-actions",
-        "conditional-formatting"
+        "conditional-formatting",
+        "list-frame"
       ],
       "steps": [
         "open /_console/apps/com.example.showcase/showcase_task and screenshot the default All Tasks grid",
@@ -650,10 +651,11 @@
         "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "page a list past page 1. No stock list holds more rows than the 50-row page (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616), then page the Inquiries list; capture `top`/`skip` on every data request; confirm no unpaged full fetch",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
-        "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
+        "on in_progress, with the export grant from fixtures.requires[3] bound, open the view bar's Options (选项) popover — the Display popover, a text trigger since objectstack#35548 — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
         "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
-        "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
+        "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal",
+        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: a 44px page bar with the object's icon and name on the left and ⋮ (description, import, favorite) and 「+ 新建」 on the right; a 40px view bar with ONE switcher trigger reading type icon → view name → record count → caret on the left and 「筛选」「排序」「选项」 plus the search icon on the right; no condition row height while no condition is set; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two bars (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)"
       ],
       "acceptance": [
         {
@@ -715,6 +717,12 @@
           "oracle": "dom",
           "verify": "after screenshot, open a row menu on the legacy_row_actions view; click each entry and confirm it dispatches (objectui#2960 contract)",
           "evidence": "menu screenshot + dispatch traces"
+        },
+        {
+          "clause": "the list frame holds its geometry: page bar 44, view bar 40, header 32, rows 33, 13px on the header, the cells and the bar buttons, the first data row top at or above 168px under the 48px shell bar, the switcher read type icon → name → count → caret, every column total's right edge on its column's (±1px), no doubled colon in the summary row, and the kanban view under the same two bars",
+          "oracle": "dom",
+          "verify": "read getBoundingClientRect and the computed font size of each part at 1280×800 zh-CN (the geometry and order halves are pinned by ui/e2e/list-frame-geometry-35548.spec.ts over the real class strings; the kanban half by ui/packages/plugin-list/src/__tests__/ListView.viewBarLeading-35548.test.tsx); the summary half needs a view whose columns declare `summary`, which task.view.ts does not, so stage one in the showcase's customization pair as negative[0] does",
+          "evidence": "light and dark screenshots of the grid and the kanban, plus the measured heights"
         }
       ],
       "negative": [
@@ -792,6 +800,12 @@
           "date": "2026-11-04",
           "change": "steps[8], acceptance[8] (clause and verify), negative[0] and negative[1] corrected from QA run #29890 (W5-FAIL, at 589049b0; the re-point wave 4 parked until #29173 landed). The aggregate showcase_recalc_selection is sent through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}}, since #27611, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process (buildApiActionRequest). negative[0]'s package-less overlay of showcase_task.done is refused 403 NOT_OVERRIDABLE since ADR-0146 D11, so the stage goes into com.example.showcase.custom through the ensure door; negative[1] says how to stage a tabs userFilter view. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-19",
+          "change": "list-frame variant, steps[10] and its acceptance clause added, and steps[6] re-pointed: the list page's frame was redrawn (objectstack#35548, epic #35547). The toolbar's icon-only Display trigger is now the view bar's 「选项」 (Options) text trigger beside 「筛选」 and 「排序」, the view switcher carries the type icon and record count (the count objectstack#34603 had taken away), and the column totals moved into the grid's own last row. No earlier clause changed",
+          "ref": "#35548"
         }
       ]
     },
@@ -3255,7 +3269,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3277,7 +3291,7 @@
           "the @mention TARGET and the bell/notification clauses need a SECOND user. A stock showcase boot is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the user with POST /api/v1/auth/admin/create-user, which answers mustChangePassword true, and the user calls POST /api/v1/auth/change-password and signs in again before it drives anything (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration'). ⛔ Do not record those clauses blocked(fixture) on the 403: the refusal is the posture working, and the admin door mints the user on the same boot. The optimistic-reconcile, sys_comment and activity-interleave clauses need only the author",
           "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
           "acceptance[9]'s cross-organization leg runs live on its own group-posture boot (fixtures.requires[2]) through steps[13]'s walled sequence, which #26625 wrote and drove once at main 1708115e2f: the control mention in organization B notified the user, and both mentions on organization A's account (by id, by email) were withheld cannot_read_source. A run that cannot boot the posture records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; both live legs, the stock `single` one and the walled one, are driven live",
-          "acceptance[7]'s changes_only leg has no stock carrier: the panel offers that mode only on an object with field history (ui/packages/plugin-detail/src/RecordActivityTimeline.tsx getFilterOptions), and the stock showcase's only authored record:discussion panel sits on showcase_project (examples/app-showcase/src/ui/pages/project-detail.page.ts), which has none (QA run #33048, comment 6846028996). A fixture that put the panel on such an object would not offer it either: the panel offers changes_only from RecordFieldHistoryContext, which RecordDetailView fills from its sys_audit_log read, and that read goes out only for the page it synthesizes, never for an assigned page (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyPage), while a record:discussion panel always sits on an authored, assigned page (QA run #33861). So the leg is blocked(fixture) on every stock or scratch page; the synthesized page's stream offers its own Changes chip, a different control that scores nothing here"
+          "acceptance[7]'s changes_only leg has no stock carrier: the panel offers that mode only on an object with field history (ui/packages/plugin-detail/src/RecordActivityTimeline.tsx getFilterOptions), and the stock showcase's only authored record:discussion panel sits on showcase_project (examples/app-showcase/src/ui/pages/project-detail.page.ts), which has none (QA run #33048, comment 6846028996). Since objectstack#33996 a fixture that puts the panel on an object with enable.trackHistory opens the leg: an assigned page reads the record's sys_audit_log while a feed panel is on screen (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyConsumerOnScreen), fills RecordFieldHistoryContext from that read and hands the field changes to the panel (RecordFieldChangesContext, mergeFieldHistoryIntoFeed in ui/packages/plugin-detail/src/recordTimelineStream.ts), so changes_only is offered to a reader whose audit read answers. No stock showcase page carries such a panel, so on stock the leg stays blocked(fixture); the synthesized page's stream offers its own Changes chip, a different control that scores nothing here"
         ]
       },
       "steps": [
@@ -3489,6 +3503,12 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[1], steps[0] and steps[5] steer off showcase_task, whose authored Task Detail page has no discussion surface and no stream (QA run #33861, ledger row 148): the record is a showcase_project (panel) or a showcase_account (stream), and the interleave is read on the panel or on showcase_field_zoo's stream. steps[13] creates the private note with its required title. knownGaps[3] says the changes_only mode is offered only where the page is synthesized, which an authored record:discussion panel never is (RecordDetailView historyPage; row 149). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-19",
+          "change": "knownGaps[3] re-read: an assigned page now reads the record's field history while a feed panel is on screen and hands it to record:discussion / record:chatter / record:activity, so the changes_only leg is blocked only by the missing stock carrier (no showcase record:discussion panel sits on an object with enable.trackHistory), no longer by the platform. No clause changed; acceptance[7] still scores the modes offered. Read at base 01889892.",
+          "ref": "#33996"
         }
       ]
     },

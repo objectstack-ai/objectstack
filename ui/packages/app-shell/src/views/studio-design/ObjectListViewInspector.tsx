@@ -104,6 +104,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
 import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
 import { FieldsListEditor } from '../metadata-admin/previews/FieldsListEditor.js';
+import { FieldListRowNameOnHover } from '../metadata-admin/previews/ViewColumnPanes.js';
 import { useObjectFields } from '../metadata-admin/previews/useObjectFields.js';
 import { colFieldName } from '../metadata-admin/previews/view-column-io.js';
 import { WIDGETS, type ObjectFieldOption } from '../metadata-admin/widgets.js';
@@ -1276,6 +1277,7 @@ function KanbanCardSection({
 export function ObjectListViewInspector({
   listView,
   readOnly,
+  readOnlyNote = null,
   locale,
   selection,
   onSelectionChange,
@@ -1283,6 +1285,12 @@ export function ObjectListViewInspector({
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
+  /**
+   * objectstack#35600 — why a read-only panel is read-only, when it is not
+   * the package's being read-only (a view the base does not ship): shown in
+   * that sentence's place, with its reason on the note.
+   */
+  readOnlyNote?: { reason: string; text: string } | null;
   locale: string;
   /**
    * objectui#12725 — the column selection, held by the host so a click on a
@@ -1435,17 +1443,16 @@ export function ObjectListViewInspector({
         ) : null
       }
     >
-      <div data-testid="studio-list-view-inspector" className="space-y-3">
-        {/* objectui#13151 — the machine name, secondary to the title, as a
-            Studio row shows it (smaller, monospace, only where it differs). */}
-        {target.viewId !== title && (
-          <p className="truncate font-mono text-[10px] leading-tight text-muted-foreground" data-testid="list-view-name">
-            {target.viewId}
-          </p>
-        )}
+      {/* objectstack#34796 — no `object.view` machine name under the title: the
+          panel names the view by its label alone; the name stays an attribute. */}
+      <div data-testid="studio-list-view-inspector" data-view-id={target.viewId} className="space-y-3">
         {readOnly ? (
-          <p className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-read-only">
-            {t('engine.studio.inspector.listView.readOnly', locale)}
+          <p
+            className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground"
+            data-testid="list-view-read-only"
+            data-reason={readOnlyNote?.reason}
+          >
+            {readOnlyNote?.text ?? t('engine.studio.inspector.listView.readOnly', locale)}
           </p>
         ) : (
           <p className="text-[11px] leading-snug text-muted-foreground">
@@ -1476,8 +1483,8 @@ export function ObjectListViewInspector({
         ) : (
           <>
             {!row && (
-              <p className="rounded-md border border-dashed px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-not-created">
-                {tFormat('engine.studio.inspector.listView.notCreated', locale, { view: title })}
+              <p className="text-[11px] leading-snug text-muted-foreground" data-testid="list-view-not-created">
+                {t('engine.studio.inspector.listView.notCreated', locale)}
               </p>
             )}
             {body.type === 'kanban' && (
@@ -1516,21 +1523,25 @@ export function ObjectListViewInspector({
               />
             )}
             <div className="space-y-1.5" data-testid="list-view-columns">
-              <FieldsListEditor
-                variantKey="config"
-                schema={body}
-                columns={columns}
-                allStrings={allStrings}
-                objectName={objectName}
-                objectFieldsOverride={fields}
-                selectedIndex={selectedIndex}
-                readOnly={readOnly}
-                onPatch={(patch) => {
-                  if (isPlainObject(patch.config)) writeBody(patch.config);
-                }}
-                onSelectionChange={selectColumn}
-                copilotAdded={addedColumns.length > 0 ? new Set(addedColumns) : undefined}
-              />
+              {/* objectstack#34796 — a column row shows its label; the field's
+                  machine name is on hover only. */}
+              <FieldListRowNameOnHover.Provider value={true}>
+                <FieldsListEditor
+                  variantKey="config"
+                  schema={body}
+                  columns={columns}
+                  allStrings={allStrings}
+                  objectName={objectName}
+                  objectFieldsOverride={fields}
+                  selectedIndex={selectedIndex}
+                  readOnly={readOnly}
+                  onPatch={(patch) => {
+                    if (isPlainObject(patch.config)) writeBody(patch.config);
+                  }}
+                  onSelectionChange={selectColumn}
+                  copilotAdded={addedColumns.length > 0 ? new Set(addedColumns) : undefined}
+                />
+              </FieldListRowNameOnHover.Provider>
               {/* A copilot change to `columns` that added no column (a reorder,
                   a removal) has no row to mark: the setting carries the chip. */}
               {columnsMark && addedColumns.length === 0 && <DraftChip locale={locale} of="columns" />}

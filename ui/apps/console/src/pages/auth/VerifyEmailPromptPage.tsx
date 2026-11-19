@@ -1,6 +1,12 @@
 /**
- * VerifyEmailPromptPage — "we sent you a link" page shown after sign-up
- * or after a sign-in attempt was blocked by `EMAIL_NOT_VERIFIED`.
+ * VerifyEmailPromptPage — the verification-mail page shown after sign-up,
+ * after a sign-in attempt was blocked by `EMAIL_NOT_VERIFIED`, and after an
+ * invitation accept was refused for an unverified address.
+ *
+ * Only the sign-up arrival has had a mail sent for it, and only it says so
+ * (`?sent=1`, `./verifyEmailPromptQuery`). Every other arrival asks the person
+ * to send the link and reads "sent" only once the button has sent it
+ * (objectstack#34706).
  *
  * Ported from `framework/apps/account/src/routes/verify-email-prompt.tsx`.
  * Calls `useAuth().sendVerificationEmail(email, callbackURL)` on resend.
@@ -22,6 +28,7 @@ import {
 } from '@object-ui/components';
 import { AuthLayout } from './AuthLayout';
 import { handoffMarkQuery, verificationCallbackURL } from './handoffRedirect';
+import { VERIFICATION_SENT_PARAM } from './verifyEmailPromptQuery';
 
 export function VerifyEmailPromptPage() {
   const { t } = useObjectTranslation();
@@ -29,6 +36,8 @@ export function VerifyEmailPromptPage() {
   const [params] = useSearchParams();
   const email = params.get('email') ?? '';
   const redirect = params.get('redirect') ?? '';
+  // Did this arrival's server call already send the mail? Only the sign-up's.
+  const sentOnArrival = params.get(VERIFICATION_SENT_PARAM) === '1';
   const { sendVerificationEmail } = useAuth();
 
   const [resending, setResending] = useState(false);
@@ -112,15 +121,23 @@ export function VerifyEmailPromptPage() {
             {t('auth.verifyEmail.title', { defaultValue: 'Verify your email address' })}
           </CardTitle>
           <CardDescription>
-            {t('auth.verifyEmail.description', {
-              defaultValue:
-                'We sent a verification link to your email address. Please click the link to verify your account.',
-            })}
+            {sentOnArrival
+              ? t('auth.verifyEmail.description', {
+                  defaultValue:
+                    'We sent a verification link to your email address. Please click the link to verify your account.',
+                })
+              : email
+                ? t('auth.verifyEmail.sendDescription', {
+                    email,
+                    defaultValue:
+                      'Your email address has not been verified yet. Send a verification link to {{email}}, then click the link to verify your account.',
+                  })
+                : t('auth.verifyEmail.emailMissing', { defaultValue: 'Email address is missing' })}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
-            {email ? (
+            {email && (sentOnArrival || resent) ? (
               <p className="text-center text-sm text-muted-foreground">
                 {t('auth.verifyEmail.sentTo', { defaultValue: 'Sent to:' })}{' '}
                 <span className="font-medium text-foreground">{email}</span>
@@ -159,9 +176,13 @@ export function VerifyEmailPromptPage() {
               ) : (
                 <>
                   <RefreshCw className="mr-2 size-4" />
-                  {t('auth.verifyEmail.resendButton', {
-                    defaultValue: 'Resend verification email',
-                  })}
+                  {sentOnArrival
+                    ? t('auth.verifyEmail.resendButton', {
+                        defaultValue: 'Resend verification email',
+                      })
+                    : t('auth.verifyEmail.sendButton', {
+                        defaultValue: 'Send verification email',
+                      })}
                 </>
               )}
             </Button>
@@ -181,12 +202,14 @@ export function VerifyEmailPromptPage() {
               {t('auth.verifyEmail.backToLogin', { defaultValue: 'Back to login' })}
             </Button>
 
-            <p className="text-center text-xs text-muted-foreground">
-              {t('auth.verifyEmail.checkSpam', {
-                defaultValue:
-                  "Didn't receive the email? Check your spam folder or contact support.",
-              })}
-            </p>
+            {sentOnArrival || resent ? (
+              <p className="text-center text-xs text-muted-foreground">
+                {t('auth.verifyEmail.checkSpam', {
+                  defaultValue:
+                    "Didn't receive the email? Check your spam folder or contact support.",
+                })}
+              </p>
+            ) : null}
           </div>
         </CardContent>
       </Card>

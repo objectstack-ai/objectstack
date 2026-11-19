@@ -190,6 +190,9 @@ export const SysInvitation = ObjectSchema.create({
       // [#27843, ruling E on #27797] The pending invitation's accept link, for
       // a deployment whose mail is not delivered (invite-member answers
       // `outcome: 'link_only'` there): the one way the invitee is reached.
+      // It admits the sign-up only: accepting needs a verified address, so
+      // without mail it brings in just an invitee whose social or SSO sign-in
+      // verifies the address (the `link_only` copy says so).
       // The handler is plugin-auth's (`invitation-link-action.ts`), registered
       // under `target`; it builds the link the invitation mail carries, and
       // enforces this action's gates itself, because the link is a bearer
@@ -261,7 +264,8 @@ export const SysInvitation = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address.',
+          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address. '
+          + 'While this deployment delivers email, the caller\'s address must also be verified: an unverified caller is refused with EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION and nothing is written, so ask the human to verify their email address first, then accept.',
       },
     },
     {

@@ -1117,7 +1117,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1150,7 +1150,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1185,7 +1185,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', org_label: cel('os.org.id') }],
           },
@@ -1194,7 +1194,7 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.success).toBe(true);
-      // One record, mode 'insert' ⇒ exactly ONE engine write. Seed application is
+      // One record ⇒ exactly ONE engine write. Seed application is
       // the very path where a doubled collect writes twice and stays green under
       // `toHaveBeenCalledWith` (#15607).
       expect(engine.insert).toHaveBeenCalledTimes(1);
@@ -1220,12 +1220,12 @@ describe('SeedLoaderService', () => {
           {
             object: 'account',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'Acme' }],
           },
         ],
-        config: baseConfig({ defaultMode: 'insert' }),
+        config: baseConfig({ defaultMode: 'ignore' }),
       });
 
       expect(result.success).toBe(false);
@@ -1236,7 +1236,7 @@ describe('SeedLoaderService', () => {
   });
 
   describe('load — edge cases', () => {
-    it('should handle records with no matching externalId field', async () => {
+    it('refuses a record with no value for its externalId field, writing nothing (#34857)', async () => {
       const metadata = createMockMetadata({
         account: { name: 'account', fields: { name: { type: 'text' } } },
       });
@@ -1253,8 +1253,12 @@ describe('SeedLoaderService', () => {
         },
       });
 
-      // Should still insert (externalId 'code' not present in record, insert path)
-      expect(result.summary.totalInserted).toBe(1);
+      // A keyed record that leaves its key blank could match no row and would
+      // be inserted again on every load: it is refused, by index and field.
+      expect(result.summary.totalInserted).toBe(0);
+      expect(result.summary.totalErrored).toBe(1);
+      expect(result.errors[0]).toMatchObject({ sourceObject: 'account', field: 'code', recordIndex: 0 });
+      expect(engine.insert).not.toHaveBeenCalled();
     });
 
     it('should handle insert errors gracefully', async () => {

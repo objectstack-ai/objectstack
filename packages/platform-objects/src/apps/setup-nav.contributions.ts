@@ -38,53 +38,33 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_system_overview', type: 'dashboard', label: 'System Overview', dashboardName: 'system_overview', icon: 'activity' },
     ],
   },
-  {
-    // No unfiltered Packages entry here (#25098, ruling 甲 amending #23892 B):
-    // the full `developer:packages` list is a development surface, so its one
-    // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
-    // reaches installed packages through the marketplace-filtered "Installed
-    // Apps" door (`nav_marketplace_installed`, `developer:packages` with
-    // `params: { source: 'marketplace' }`), which
-    // `@objectstack/cloud-connection` contributes to this group wherever the
-    // marketplace capability is present. `setup-packages-door.test.ts` pins
-    // both halves.
-    app: 'setup',
-    group: 'group_apps',
-    priority: BASE_PRIORITY,
-    items: [
-      // Packaged actions are OPERATIONAL state — on/off per packaged action
-      // (ADR-0126 §7.4: "Studio keeps the editing; Setup gets the operational
-      // state"). ADR-0146 D4 keeps the action switch here while the flow
-      // switch moved onto the flow's item in Studio, and its clone became
-      // Studio's New similar (D11 retired Setup's packaged FLOWS page). The
-      // console binds `automation:packaged-actions` to the packaged-actions
-      // page (objectui app-shell `builtinComponents`). The entry lives HERE,
-      // not in service-automation: the page's data source is the
-      // `sys_metadata_activation` ledger this package registers (#12419), and
-      // the action switches work on compositions with no automation service —
-      // a nav entry riding that service would hide a page that still works
-      // there.
-      //
-      // `visible` gives the entry the audience of its page's own data read
-      // (#33224). The page reads `/data/sys_metadata_activation`, and a member
-      // who may not read that ledger was shown an entry whose page renders only
-      // `activation ledger HTTP 403`. Being the first entry the Setup app
-      // serves, it was also their LANDING page: the console's object-read prune
-      // judges `type: 'object'` entries only, so nothing else hid this
-      // `component` one. The console's sidebar and its landing walk ask this
-      // predicate with the member's `/auth/me/permissions` map, so such a member
-      // now neither sees the entry nor lands on it. A member who reads the
-      // ledger is shown it as before.
-      {
-        id: 'nav_packaged_actions',
-        type: 'component',
-        label: 'Packaged Actions',
-        componentRef: 'automation:packaged-actions',
-        icon: 'zap',
-        visible: "current_user.can('sys_metadata_activation', 'read')",
-      },
-    ],
-  },
+  // No `group_apps` entry ships from this package.
+  //
+  // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
+  // full `developer:packages` list is a development surface, so its door is in
+  // Studio only. The Studio that every boot serves is the console's own, at
+  // `/_console/studio` (the `@objectstack/studio` app is not default-loaded,
+  // so `studio.app.ts`'s Overview → Packages entry is served only where a host
+  // loads that app). There, the landing's "All packages" link opens the
+  // unfiltered page, and each package card's Manage (like the top-bar
+  // switcher's "Package info & settings") opens the package's detail sheet,
+  // with Disable / Enable (#35196, pinned on the console side by
+  // `BuilderLanding.packagesDoor-35196.test.tsx`). Setup reaches installed
+  // packages through the marketplace-filtered "Installed Apps" door
+  // (`nav_marketplace_installed`, `developer:packages` with
+  // `params: { source: 'marketplace' }`), which
+  // `@objectstack/cloud-connection` contributes to this group wherever the
+  // marketplace capability is present. `setup-packages-door.test.ts` pins
+  // what this package ships for each app.
+  //
+  // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
+  // amendment of 2026-11-17): a packaged action's on/off switch for this
+  // deployment is on the action, in its app in Studio (the object's Actions
+  // view, a standalone action's item page), the way D4 put the flow switch on
+  // the flow. The `nav_packaged_actions` entry and its
+  // `automation:packaged-actions` page retired, as `nav_packaged_automation`
+  // did under D11; the console sends the old URL to Studio.
+  // `setup-packaged-actions-nav.test.ts` pins both retirements.
   {
     app: 'setup',
     group: 'group_people_org',

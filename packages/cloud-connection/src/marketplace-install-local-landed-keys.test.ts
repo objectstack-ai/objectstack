@@ -433,3 +433,52 @@ describe('an unmanaged copy\'s sample data: the install honours the record, the 
         expect(names('lk_account')).toEqual(['Acme', 'Globex']);
     });
 });
+
+/**
+ * The record has no package component (`(organization_id, object_name,
+ * seed_key)`), so it is the organization's, not the installing package's. The
+ * scenario runner loads its seed, and puts a removed seed row back, as data-only
+ * packages keyed on `id`, each under a namespace of its own
+ * (`loadSeedRows` in `packages/qa/scenarios/src/runner/orchestrate.ts`). This
+ * pins what such a load meets at this door: a second package carrying a
+ * recorded row that is gone does not insert it (withheld, counted in
+ * `skipped`, no error), and that package's reseed does.
+ */
+describe('a data-only package keyed on `id`: the record is the organization\'s, whichever package carries the row', () => {
+    const dataOnly = (namespace: string, records: Row[]) => ({
+        id: `com.scenario.seed.${namespace}`,
+        namespace,
+        version: '0.0.1',
+        type: 'app',
+        scope: 'project',
+        name: 'Scenario seed',
+        data: [{ object: 'lk_account', externalId: 'id', records }],
+    });
+    const ids = (object: string) => (store[object] ?? []).filter((r) => r.organization_id === ORG).map((r) => r.id).sort();
+
+    it('a row deleted after one package seeded it is withheld from a second package\'s install; the second package\'s reseed brings it back', async () => {
+        const rt = await boot();
+        const first = await rt.install(dataOnly('scenarioseeda', [{ id: 'ct1', name: 'Ann' }, { id: 'ct2', name: 'Ben' }]));
+        expect(first.payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 2, skipped: 0, errors: 0 });
+        expect(landed()).toEqual(['lk_account:ct1', 'lk_account:ct2']);
+        store.lk_account = store.lk_account!.filter((r) => r.id !== 'ct2');
+
+        const second = await rt.install(dataOnly('scenarioseedb', [{ id: 'ct2', name: 'Ben' }]));
+        expect(second.payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 0, skipped: 1, errors: 0, errorList: [] });
+        expect(ids('lk_account')).toEqual(['ct1']);
+
+        const reseed = await rt.reseed('com.scenario.seed.scenarioseedb');
+        expect(reseed.status, JSON.stringify(reseed.payload)).toBe(200);
+        expect(reseed.payload.data).toMatchObject({ inserted: 1, skipped: 0, errors: 0 });
+        expect(ids('lk_account')).toEqual(['ct1', 'ct2']);
+        expect(landed()).toEqual(['lk_account:ct1', 'lk_account:ct2']);
+    });
+
+    it('control: a row no load recorded is inserted by a second package\'s install', async () => {
+        const rt = await boot();
+        await rt.install(dataOnly('scenarioseeda', [{ id: 'ct1', name: 'Ann' }]));
+        const second = await rt.install(dataOnly('scenarioseedb', [{ id: 'ct2', name: 'Ben' }]));
+        expect(second.payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 1, skipped: 0, errors: 0 });
+        expect(ids('lk_account')).toEqual(['ct1', 'ct2']);
+    });
+});

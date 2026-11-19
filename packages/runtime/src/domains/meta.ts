@@ -897,6 +897,11 @@ async function readPendingDraft(
             // [#23072] The member the item read's `?member=` named: its own
             // draft row, as `RestServer`'s draft read asks for it.
             ...item.memberSelector,
+            // [#34818] The languages the folded publish advisories' user
+            // sentences are composed in: the request's locale, then the
+            // workspace default, off the execution context, as `RestServer`'s
+            // draft read states them.
+            userTextLocales: userTextLocalesOf(context.executionContext),
         });
     } catch (e: any) {
         return { handled: true, response: deps.errorFromThrown(e, 404) };

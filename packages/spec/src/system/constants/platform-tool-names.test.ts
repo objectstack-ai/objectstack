@@ -14,6 +14,8 @@ import {
   PLATFORM_TOOLS_BY_PACKAGE,
   PLATFORM_PROVIDED_TOOL_NAMES,
   PLATFORM_TOOL_FAMILY_PREFIXES,
+  MCP_DOOR_TOOL_NAMES,
+  MCP_FILE_TOOL_NAMES,
   isPlatformProvidedToolName,
 } from './platform-tool-names';
 import { LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME } from '../../ai/dataset-tools.zod';
@@ -67,6 +69,67 @@ describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
   it('each group is sorted, so diffs stay reviewable', () => {
     for (const [pkg, names] of Object.entries(PLATFORM_TOOLS_BY_PACKAGE)) {
       expect([...names].sort(), pkg).toEqual([...names]);
+    }
+  });
+});
+
+describe('MCP_FILE_TOOL_NAMES — the MCP door\'s file tools, kept apart from the cloud registry', () => {
+  // Which names the door registers is pinned in `@objectstack/mcp`
+  // (`mcp-file-tools.test.ts`), and that the lint rule resolves them in
+  // `@objectstack/lint`. What this file pins is the list's own shape, and the
+  // separation that keeps every PLATFORM_TOOLS_BY_PACKAGE group the exact set
+  // one cloud package registers.
+  it('is snake_case, sorted and duplicate-free', () => {
+    for (const name of MCP_FILE_TOOL_NAMES) {
+      expect(name).toMatch(/^[a-z_][a-z0-9_]*$/);
+    }
+    expect([...MCP_FILE_TOOL_NAMES].sort()).toEqual([...MCP_FILE_TOOL_NAMES]);
+    expect(new Set(MCP_FILE_TOOL_NAMES).size).toBe(MCP_FILE_TOOL_NAMES.length);
+  });
+
+  it('shares no name with the cloud registry and none sits inside a materialised family', () => {
+    for (const name of MCP_FILE_TOOL_NAMES) {
+      expect(isPlatformProvidedToolName(name), name).toBe(false);
+      for (const prefix of PLATFORM_TOOL_FAMILY_PREFIXES) {
+        expect(name.startsWith(prefix), name).toBe(false);
+      }
+    }
+  });
+});
+
+describe('MCP_DOOR_TOOL_NAMES — every tool the MCP door registers, kept apart from the cloud registry', () => {
+  // Which names the door registers is pinned in `@objectstack/mcp`
+  // (`mcp-file-tools.test.ts`), and which the lint rule resolves in
+  // `@objectstack/lint`. What this file pins is the list's own shape and how
+  // it sits beside the cloud registry and the file pair.
+  it('is snake_case, sorted and duplicate-free', () => {
+    for (const name of MCP_DOOR_TOOL_NAMES) {
+      expect(name).toMatch(/^[a-z_][a-z0-9_]*$/);
+    }
+    expect([...MCP_DOOR_TOOL_NAMES].sort()).toEqual([...MCP_DOOR_TOOL_NAMES]);
+    expect(new Set(MCP_DOOR_TOOL_NAMES).size).toBe(MCP_DOOR_TOOL_NAMES.length);
+  });
+
+  it('holds the file pair and the dataset pair, and no name inside a materialised family', () => {
+    expect(MCP_DOOR_TOOL_NAMES).toEqual(expect.arrayContaining([...MCP_FILE_TOOL_NAMES]));
+    expect(MCP_DOOR_TOOL_NAMES).toEqual(expect.arrayContaining([LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME]));
+    for (const name of MCP_DOOR_TOOL_NAMES) {
+      for (const prefix of PLATFORM_TOOL_FAMILY_PREFIXES) {
+        expect(name.startsWith(prefix), name).toBe(false);
+      }
+    }
+  });
+
+  it('is not folded into the cloud registry: a name the door alone serves is not a cloud name', () => {
+    // Some door names are cloud registrations too (a cloud package registers
+    // the same name); the rest are the door's alone and stay out of every
+    // PLATFORM_TOOLS_BY_PACKAGE group, each the exact set one cloud package
+    // registers.
+    const shared = MCP_DOOR_TOOL_NAMES.filter((name) => isPlatformProvidedToolName(name));
+    expect(shared).toEqual(expect.arrayContaining(['describe_object', 'get_record', 'query_records']));
+    for (const doorOnly of ['run_action', 'delete_records', 'read_file']) {
+      expect(MCP_DOOR_TOOL_NAMES, doorOnly).toContain(doorOnly);
+      expect(isPlatformProvidedToolName(doorOnly), doorOnly).toBe(false);
     }
   });
 });

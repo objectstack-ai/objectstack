@@ -157,7 +157,7 @@ import {
   withServerOnlyErrors,
   type ServerDiagnostics,
 } from './draftVerdict.js';
-import { describeIssuePath, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
+import { describeIssuePath, issuePathHead, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
 import { buildCreateModeBody, seedStructuralDefaults, unsetSeedPlaceholders } from './createBody.js';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
@@ -166,12 +166,16 @@ import { PositionHoldersSection } from './PositionHoldersSection.js';
 import { PositionPermissionSetsSection } from './PositionPermissionSetsSection.js';
 import { PositionHoldersSetupLink } from './SetupAssignmentsLink.js';
 import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
+import { FlowLedgerSwitch } from '../studio-design/FlowLedgerSwitch.js';
+import { useActionLedger } from '../setup/packagedActionLedger.js';
+import { standaloneActionObjectName } from '../setup/packagedActions.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { authoredBuffer, authoredPublished, editsAuthoredLayers, type AuthoredLayers } from './authoredObjectBuffer.js';
+import { clearPublishChecksShown, markPublishChecksShown } from '../../preview/publishChecksShown.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
 interface EnvironmentSectionProps {
@@ -199,6 +203,77 @@ function catalogActiveSection(type: string): React.ComponentType<EnvironmentSect
     return <CatalogItemActiveSwitch type={type} name={name} label={label} />;
   }
   return CatalogActiveSection;
+}
+
+/**
+ * objectstack#34724 (ADR-0146 D4 as amended 2026-11-17) — a standalone
+ * `action` item of a read-only app package, on its page in Studio's "All
+ * metadata" area: the activation ledger's switch, the one the object's Actions
+ * view draws for an embedded action (`ObjectActionsPanel`), over the same
+ * doors and hook (`setup/packagedActionLedger.ts`). The flip addresses the
+ * action's owning object as the runtime registers it (`standaloneActionObjectName`,
+ * `global` for an object-less action). A platform package's action carries no
+ * switch: the hook offers none for a package not served as an app package.
+ */
+function ActionItemLedgerSwitch({
+  packageId,
+  name,
+  draft,
+  locale,
+}: {
+  packageId: string;
+  name: string;
+  draft: Readonly<Record<string, unknown>>;
+  locale: string;
+}) {
+  const ledger = useActionLedger(packageId);
+  const objectName = standaloneActionObjectName(draft);
+  if (ledger.loadError) {
+    return (
+      <p role="alert" data-testid="action-ledger-load-error" className="text-xs text-muted-foreground">
+        {tFormat('engine.studio.actions.ledger.loadFailed', locale, { message: ledger.loadError })}
+      </p>
+    );
+  }
+  if (!ledger.offered) return null;
+  const enabled = ledger.enabledOf(name);
+  const label = typeof draft.label === 'string' && draft.label ? draft.label : name;
+  const refusal = ledger.refusalOf(objectName, name);
+  return (
+    <div data-testid="action-ledger-bar" className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <FlowLedgerSwitch
+          checked={enabled}
+          reading={enabled ? 'on' : 'off'}
+          busy={ledger.busyKey === `${objectName}:${name}`}
+          walledReason={ledger.walled ? t('engine.studio.actions.ledger.walled', locale) : undefined}
+          hint={t('engine.studio.actions.ledger.hint', locale)}
+          testId="action-ledger-switch"
+          locale={locale}
+          onToggle={() =>
+            void ledger
+              .toggle(objectName, name, {
+                http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
+                network: t('engine.studio.auto.ledger.toggleFailed', locale),
+              })
+              .then((now) => {
+                if (now === null) return;
+                toast.success(
+                  tFormat(now ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, {
+                    label,
+                  }),
+                );
+              })
+          }
+        />
+      </div>
+      {refusal && (
+        <p role="alert" data-testid="action-ledger-refusal" className="whitespace-pre-line text-xs text-destructive">
+          {refusal}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -2171,17 +2246,25 @@ function MetadataResourceEditPageImpl({
           seenSlices.add(slicePath);
           held.push({ slicePath, fingerprint, label: labelForIssuePath(m.path) });
         }
+        // objectstack#35499 — a root slice has no label: it is skipped, never
+        // joined as an empty name, and a refusal held only at the root says
+        // the root entry's own message.
+        const heldLabels = held.map((h) => h.label).filter((label) => label !== '');
         setSaveRefusal({
           held,
-          summary: held.map((h) => h.label).join(', '),
+          summary:
+            heldLabels.length > 0
+              ? heldLabels.join(', ')
+              : (mapped.find((m) => !m.path)?.message ?? ''),
         });
         // objectstack#27865 — a refusal the form draws in full on its fields is
         // said there, once. Only where the summary banner reads these issues
         // (a client validator exists), so a field that leaves the screen still
-        // has its message somewhere.
+        // has its message somewhere. Judged by the path's HEAD, the key the form
+        // places an issue by (objectstack#35499).
         const drawnInline =
           hasClientValidator(type, draftMode) &&
-          mapped.every((m) => !!m.path && inlineIssueFieldsRef.current.has(m.path));
+          mapped.every((m) => !!m.path && inlineIssueFieldsRef.current.has(issuePathHead(m.path)));
         if (drawnInline) {
           setError(null);
         } else if (mapped.length === 1 && !mapped[0].path) {
@@ -2318,10 +2401,20 @@ function MetadataResourceEditPageImpl({
       // objectstack#28680 — whether this publish is the item's first: before
       // it, the item held no layer at all (its body lived only in the draft).
       const firstPublish = holdsNoLayer(layered);
-      await client.publish<any>(type, name, {
-        ...(activePackage ? { packageId: activePackage } : {}),
-        ...memberScope,
-      });
+      // objectstack#34818 — a flow whose Problems tab is listing the draft's
+      // publish checks: the author has read them, so the post-publish toast
+      // keeps its one title line (`publishChecksShown.ts`). Marked for this
+      // publish's flight only.
+      const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
+      if (reviewedChecks) markPublishChecksShown(type, name);
+      try {
+        await client.publish<any>(type, name, {
+          ...(activePackage ? { packageId: activePackage } : {}),
+          ...memberScope,
+        });
+      } finally {
+        if (reviewedChecks) clearPublishChecksShown(type, name);
+      }
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
@@ -3186,6 +3279,12 @@ function MetadataResourceEditPageImpl({
                 <span>{t('engine.studio.pkg.readonlyHint', locale)}</span>
               </div>
             )}
+            {hostReadOnly && !createMode && type === 'action' && areaHost?.packageId && (
+              // The package that ships the item when the read names it, the
+              // area's otherwise: an app's area can show an item another
+              // package ships, and a kernel-shipped one gets no switch.
+              <ActionItemLedgerSwitch packageId={layered?.packageId ?? areaHost.packageId} name={name} draft={draft} locale={locale} />
+            )}
             {readOnly && !hostReadOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
               <div
                 data-testid="capability-readonly-banner"
@@ -3319,9 +3418,15 @@ function MetadataResourceEditPageImpl({
                 return null;
               }
               // objectstack#27865 — an error the form already draws on its
-              // field is not repeated here.
+              // field is not repeated here — any issue whose HEAD names a row
+              // the form draws, which places it on that row or deeper
+              // (objectstack#35499).
               const errs = liveErrors.filter(
-                (e) => !(inlineIssueFields.has(e.path) && displayIssues.some((d) => d.path === e.path)),
+                (e) =>
+                  !(
+                    inlineIssueFields.has(issuePathHead(e.path)) &&
+                    displayIssues.some((d) => d.path === e.path)
+                  ),
               );
               const warns = diag?.warnings ?? [];
               const hasErrs = !liveValid && errs.length > 0;

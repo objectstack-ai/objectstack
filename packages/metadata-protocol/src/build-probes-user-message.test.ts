@@ -66,6 +66,11 @@ const BOARD: I18nLabel = { en: 'Team board', 'zh-CN': '团队看板', de: 'Team�
 const WIDGET: I18nLabel = { en: 'Open tasks', 'zh-CN': '未完成任务' };
 const DATASET: I18nLabel = { en: 'Task totals', 'zh-CN': '任务汇总' };
 const VIEW: I18nLabel = { en: 'All tasks', 'zh-CN': '全部任务' };
+const ACCOUNTS = 'Accounts';
+const DEALS = 'Deals';
+const OPEN_DEALS: I18nLabel = { en: 'Open deals', 'zh-CN': '未结交易' };
+const ACCT_REF: I18nLabel = { en: 'Customer', 'zh-CN': '客户' };
+const ERP_SYNC: I18nLabel = { en: 'ERP sync', 'zh-CN': 'ERP 同步' };
 
 const ITEMS: Record<string, unknown> = {
     'object crm_task': {
@@ -77,6 +82,8 @@ const ITEMS: Record<string, unknown> = {
     },
     'object crm_project': { name: 'crm_project', label: PROJECTS, fields: { title: { type: 'text', label: 'Title' } } },
     'seed crm_task_seed': { object: 'crm_task', records: [] },
+    // [#34864] A seed naming an object that does not exist.
+    'seed crm_nope_seed': { object: 'crm_nope', records: [] },
     'view crm_task_list': { name: 'crm_task_list', label: VIEW, object: 'crm_task' },
     'dashboard crm_board': {
         name: 'crm_board',
@@ -96,6 +103,31 @@ const ITEMS: Record<string, unknown> = {
         widgets: [{ id: 'w_open_tasks', title: WIDGET, dataset: 'crm_bare_totals', values: ['total'] }],
     },
     'dataset crm_bare_totals': { name: 'crm_bare_totals', label: DATASET, measures: [{ name: 'total', aggregate: 'count' }] },
+    // [#35146] A parent with a roll-up over its children, the children's
+    // reference back, the seed that loads them, and a flow with a connector step.
+    'object crm_acct': {
+        name: 'crm_acct',
+        label: ACCOUNTS,
+        fields: {
+            title: { type: 'text', label: 'Title' },
+            open_deal_count: { type: 'summary', label: OPEN_DEALS, summaryOperations: { object: 'crm_deal', function: 'count' } },
+        },
+    },
+    'object crm_deal': {
+        name: 'crm_deal',
+        label: DEALS,
+        fields: { acct_ref: { type: 'lookup', reference: 'crm_acct', label: ACCT_REF } },
+    },
+    'seed crm_deal_seed': { object: 'crm_deal', records: [{ name: 'Big deal' }] },
+    'flow crm_erp_sync': {
+        name: 'crm_erp_sync',
+        label: ERP_SYNC,
+        nodes: [
+            { id: 'start', type: 'start' },
+            { id: 'push_step', type: 'connector_action', label: 'Push order', connectorConfig: { connectorId: 'erp_link', actionId: 'push' } },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'push_step' }],
+    },
 };
 
 type GetItem = RunBuildProbesOptions['getItem'];
@@ -113,6 +145,52 @@ const engineThrowing: ProbeEngine = {
         throw new Error('no such table: crm_task');
     },
 };
+/** [#34864] An engine that answers its registered objects, and registers none: every read is refused. */
+const engineWithoutObjects: ProbeEngine = {
+    find: async (object) => {
+        throw new Error(`Object '${object}' not found`);
+    },
+    getSchema: () => undefined,
+};
+
+/** One `where` on one row: equality and `{ $in: [...] }`; any other operator or combinator is refused. */
+const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
+    Object.entries(where ?? {}).every(([key, want]) => {
+        if (key.startsWith('$')) throw new Error(`double: combinator ${key} not implemented`);
+        if (!want || typeof want !== 'object') return row[key] === want;
+        const ops = Object.keys(want);
+        const $in = (want as { $in?: unknown }).$in;
+        if (ops.length !== 1 || !Array.isArray($in)) throw new Error(`double: operator ${ops.join(',')} not implemented`);
+        return $in.includes(row[key]);
+    });
+/**
+ * An engine over fixed tables: honours `where`, then `limit`, so the roll-up
+ * and reference probes read exactly the rows a real engine would give.
+ */
+const engineOver = (tables: Record<string, Array<Record<string, unknown>>>): ProbeEngine => ({
+    find: async (object, query) => {
+        const rows = (tables[object] ?? []).filter((r) => matches(r, (query as { where?: Record<string, unknown> } | undefined)?.where));
+        return limited(rows, query);
+    },
+});
+/** The automation engine's connector lookups, answering as a test says. */
+const automationAnswering = (answer: {
+    instance?: 'refused' | 'none';
+    degraded?: string;
+}): NonNullable<RunBuildProbesOptions['automation']> => ({
+    resolveConnectorInstanceFor: () =>
+        answer.instance === 'refused'
+            ? { status: 'refused', refusal: { message: 'two packages hold the connector "erp_link".' } }
+            : answer.instance === 'none' ? { status: 'none' } : { status: 'instance', packageId: null },
+    resolveConnectorAction: () => undefined,
+    getConnectorDegradedReason: () => answer.degraded,
+});
+const FLOW = [{ type: 'flow', name: 'crm_erp_sync' }];
+const flowNames = (tag: PlatformLocaleTag): Names => ({
+    flow: said(ERP_SYNC, tag, 'crm_erp_sync'),
+    step: 'Push order',
+    connector: 'erp_link',
+});
 
 const analyticsReturning = (result: unknown) => ({ queryDataset: async () => result });
 const analyticsThrowing = (message: string, fields: Record<string, unknown> = {}) => ({
@@ -196,6 +274,13 @@ const CASES: readonly ProbeCase[] = [
         run: probe({ engine: engineThrowing, published: [{ type: 'seed', name: 'crm_task_seed' }] }),
         params: () => ({ object: TASKS, cause: 'unreadable' }),
         hidden: ['crm_task'],
+    },
+    {
+        title: 'a seed whose object does not exist',
+        code: 'seed_not_applied', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ engine: engineWithoutObjects, published: [{ type: 'seed', name: 'crm_nope_seed' }] }),
+        params: () => ({ object: 'crm_nope', cause: 'missing' }),
+        hidden: [],
     },
     {
         title: 'a view whose read throws',
@@ -347,6 +432,58 @@ const CASES: readonly ProbeCase[] = [
         silent: ['object'],
     },
     {
+        title: 'a widget whose query answers only zeros',
+        code: 'widget_empty_result', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ analytics: analyticsReturning({ rows: [{ total: 0 }] }), published: DASHBOARD }),
+        params: (tag) => ({ ...widgetNames(tag), dataset: said(DATASET, tag, 'crm_task_totals') }),
+        hidden: ['crm_board', 'w_open_tasks', 'crm_task_totals'],
+    },
+    {
+        title: 'a roll-up blank on every parent that has children',
+        code: 'rollup_never_computed', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({
+            engine: engineOver({
+                crm_deal: [{ id: 'd1', acct_ref: 'a1' }, { id: 'd2', acct_ref: 'a1' }],
+                crm_acct: [{ id: 'a1', open_deal_count: null }, { id: 'a2', open_deal_count: null }],
+            }),
+            published: [{ type: 'object', name: 'crm_acct' }],
+        }),
+        params: (tag) => ({ object: ACCOUNTS, field: said(OPEN_DEALS, tag, 'open_deal_count'), child: DEALS, cause: 'fills' }),
+        hidden: ['crm_acct', 'open_deal_count', 'crm_deal'],
+    },
+    {
+        title: 'sample records whose reference names no record',
+        code: 'seed_reference_unresolved', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({
+            engine: engineOver({ crm_deal: [{ id: 'd1', name: 'Big deal', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
+            seedLanded: [{ object: 'crm_deal', inserted: { ids: ['d1'] }, matched: { ids: [] } }],
+            published: [{ type: 'seed', name: 'crm_deal_seed' }],
+        }),
+        params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1' }),
+        hidden: ['crm_deal', 'acct_ref', 'crm_acct', 'Acme Corp'],
+    },
+    {
+        title: 'a flow step whose connector name two connectors share',
+        code: 'flow_connector_action_unresolved', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ automation: automationAnswering({ instance: 'refused' }), published: FLOW }),
+        params: (tag) => ({ ...flowNames(tag), cause: 'refused' }),
+        hidden: ['crm_erp_sync', 'push_step', 'two packages hold'],
+    },
+    {
+        title: 'a flow step whose connector this environment does not have',
+        code: 'flow_connector_action_unresolved', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ automation: automationAnswering({ instance: 'none' }), published: FLOW }),
+        params: (tag) => ({ ...flowNames(tag), cause: 'no-action' }),
+        hidden: ['crm_erp_sync', 'push_step', 'push'],
+    },
+    {
+        title: 'a flow step whose connector is degraded',
+        code: 'flow_connector_action_unresolved', // adr0112-ok: D6c build-probe diagnostics code
+        run: probe({ automation: automationAnswering({ degraded: 'the upstream is unreachable.' }), published: FLOW }),
+        params: (tag) => ({ ...flowNames(tag), cause: 'degraded' }),
+        hidden: ['crm_erp_sync', 'push_step', 'unreachable'],
+    },
+    {
         title: 'dataset widgets and no analytics service',
         code: 'probes_unavailable', // adr0112-ok: D6c build-probe diagnostics code
         run: probe({ published: DASHBOARD }),
@@ -427,6 +564,16 @@ describe('every probe finding carries the person\'s sentence, in the request\'s 
         );
         expect(onlyIssue(await seed.run(['zh-CN'])).userMessage).toBe(
             '“Tasks”的示例数据没有加载成功，所以“Tasks”中还没有任何记录。请检查示例数据，然后重新发布。',
+        );
+
+        // [#34864] An object that does not exist: the sentence names it and the fix, not "publish again" alone.
+        const missing = byTitle('a seed whose object does not exist');
+        expect(onlyIssue(await missing.run(['en-US'])).userMessage).toBe(
+            'The sample data could not load, because "crm_nope" does not exist. Correct the object the sample data '
+                + 'names, or create and publish "crm_nope", then publish again.',
+        );
+        expect(onlyIssue(await missing.run(['zh-CN'])).userMessage).toBe(
+            '示例数据无法加载，因为“crm_nope”不存在。请更正示例数据所指的对象，或先创建并发布“crm_nope”，然后重新发布。',
         );
 
         const empty = byTitle('a widget whose query returns nothing over an object that has rows');
@@ -650,5 +797,29 @@ describe('the catalog holds exactly the probe\'s codes, each in every platform l
             '"Tasks" was published, but its field settings could not be checked. The problem is in the check itself, '
                 + 'not necessarily in "Tasks"; contact your administrator if it happens again.',
         );
+    });
+});
+
+describe('[#34864] a seed\'s object that does not exist is not a read that failed', () => {
+    const SEED = [{ type: 'seed', name: 'crm_nope_seed' }];
+
+    it('names the missing object to the agent, with the fix, and says "missing" to the person', async () => {
+        const issue = onlyIssue(await runBuildProbes({ engine: engineWithoutObjects, getItem: readItems, published: SEED }));
+        expect(issue).toMatchObject({ code: 'seed_not_applied', ref: { type: 'object', name: 'crm_nope' } }); // adr0112-ok: D6c build-probe diagnostics code
+        expect(issue.message).toBe('Seed "crm_nope_seed" was published but loads into object "crm_nope", which does not exist — no record was loaded.');
+        expect(issue.fix).toBe("Correct the seed's `object` to the object's full name, or create and publish object \"crm_nope\", then republish the seed.");
+        expect(issue.userMessage).toBe(BUILD_PROBE_USER_TEXT.seed_not_applied.en({ object: 'crm_nope', cause: 'missing' }));
+    });
+
+    it.each<[string, ProbeEngine, GetItem]>([
+        ['the engine registers the object, and its read fails', { ...engineWithoutObjects, getSchema: () => ({ name: 'crm_nope' }) }, readItems],
+        ['the engine cannot answer for its objects (no `getSchema`)', engineThrowing, readItems],
+        ['the engine answers none, but a published object of the name is held', engineWithoutObjects,
+            async (type, name) => (type === 'object' && name === 'crm_nope' ? { name: 'crm_nope', label: 'Nope' } : readItems(type, name))],
+    ])('CONTROL: %s — still `unreadable`', async (_label, engine, getItem) => {
+        const issue = onlyIssue(await runBuildProbes({ engine, getItem, published: SEED }));
+        expect(issue.code).toBe('seed_not_applied'); // adr0112-ok: D6c build-probe diagnostics code
+        expect(issue.message.startsWith('Seed "crm_nope_seed" probe could not read object "crm_nope": ')).toBe(true);
+        expect(issue.userMessage).toContain('could not be read after publishing');
     });
 });

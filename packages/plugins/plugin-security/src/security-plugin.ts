@@ -185,6 +185,9 @@ import {
   resolveProjectionFieldMask,
   type FieldReadersHost,
 } from './security-plugin-field-readers.js';
+// [#34901] The metadata-plane answer for a disabled package's withheld fields
+// (`WithheldFieldReadersHost`).
+import { computeMetadataReadableWithheldFields, type WithheldFieldReadersHost } from './security-plugin-withheld-field-readers.js';
 // [#25223 cut 9] The object-level admissions: read, read over resolved sets,
 // write and export; the methods of the same names below hand each body the
 // members it reads (`ObjectAdmissionHost`).
@@ -2328,7 +2331,7 @@ export class SecurityPlugin implements Plugin {
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
       const readEpoch = () => this.epoch;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getMetadataReadableWithheldFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         baselinePermissionSets: this.baselinePermissionSets,
         bootstrapPermissionSets: this.bootstrapPermissionSets,
@@ -2345,6 +2348,7 @@ export class SecurityPlugin implements Plugin {
         explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
         getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
         getMetadataReadableFields: (...a) => this.getMetadataReadableFields(...a),
+        getMetadataReadableWithheldFields: (...a) => this.getMetadataReadableWithheldFields(...a),
         getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
         getQueryableFields: (...a) => this.getQueryableFields(...a),
         getReadFilter: (...a) => this.getReadFilter(...a),
@@ -3229,6 +3233,33 @@ export class SecurityPlugin implements Plugin {
    */
   async getMetadataReadableFields(object: string, context?: any): Promise<string[] | undefined> {
     return this.computeReadableFields(object, context, { fallbackOnEmptySets: true });
+  }
+
+  /**
+   * [ADR-0106 D1/D7, #34901] The metadata-plane answer {@link getMetadataReadableFields}
+   * cannot give: which of the fields a disabled package withholds from
+   * `object`'s served schema may be disclosed to `context`, judged against
+   * each field's STORAGE definition by the same evaluator, sets, fallback,
+   * capability fold and delegator intersection. The object-schema projection
+   * drops every `_withheldFields` entry not named here. The body and its
+   * derivation are in `security-plugin-withheld-field-readers.ts`.
+   */
+  async getMetadataReadableWithheldFields(object: string, context?: any): Promise<string[] | undefined> {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<WithheldFieldReadersHost, 'foldFieldRequiredPermissions' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      resolveCallerPosture: (...a) => this.resolveCallerPosture(...a),
+      resolveDelegatorForContext: (...a) => this.resolveDelegatorForContext(...a),
+      resolveFallbackPermissionSets: (...a) => this.resolveFallbackPermissionSets(...a),
+      resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return computeMetadataReadableWithheldFields.call(host, object, context);
   }
 
   private computeReadableFields(

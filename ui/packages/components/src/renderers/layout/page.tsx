@@ -56,17 +56,43 @@ function getRegionWidthClass(width?: string): string {
   }
 }
 
-/** Sidebar/aside width — full-width on mobile, fixed at md+ so the rail stacks
- *  above/below the main column on phones instead of squeezing it. LITERAL
- *  responsive strings so Tailwind's JIT scanner emits them. */
+// ---------------------------------------------------------------------------
+// The region row — laid out by the page's own width (objectstack#34826)
+// ---------------------------------------------------------------------------
+//
+// The body row (sidebar | main | aside) and the rail widths switch on the
+// width of the layout they are drawn in, never the viewport. The same page is
+// drawn full page, in a split pane and in the record drawer, which the reader
+// can drag down to 360 px at a 1280 px viewport; a viewport `md:` kept the row
+// there and squeezed `main` to a few pixels under a fixed-width rail, so the
+// rail's cards lay over the tab row and the field cards. Each template's root
+// is the named container below, and the row switches at its `@3xl` (48rem,
+// 768 px: the pixel value of the viewport `md` it replaces, now measured on the
+// layout). A viewport below 768 px still stacks, since the layout is never
+// wider than it. LITERAL strings so Tailwind's JIT scanner emits them; the
+// vitest pin is `page-template-slots-12476.test.tsx`, the geometry pin
+// `ui/e2e/page-region-row-narrow-drawer-34826.spec.ts`.
+
+/** A template root: the container the region row is measured against. */
+const PAGE_REGION_LAYOUT_CONTAINER_CLASS = '@container/regions';
+
+/** The body row: stacked, side by side from the layout's own `@3xl`. */
+const PAGE_REGION_ROW_CLASS = 'flex flex-col @3xl/regions:flex-row flex-1 gap-6';
+
+/** A rail (sidebar / aside) keeps its width beside `main`, never shrinks. */
+const PAGE_RAIL_SHRINK_CLASS = '@3xl/regions:shrink-0';
+
+/** Sidebar/aside width — full width while the row is stacked, fixed once the
+ *  row is side by side, so a narrow layout stacks the rail above/below the
+ *  main column instead of squeezing it. */
 function getSidebarWidthClass(width?: string): string {
   switch (width) {
     case 'small':
-      return 'w-full md:w-64';
+      return 'w-full @3xl/regions:w-64';
     case 'medium':
-      return 'w-full md:w-80';
+      return 'w-full @3xl/regions:w-80';
     case 'large':
-      return 'w-full md:w-96';
+      return 'w-full @3xl/regions:w-96';
     default:
       return 'w-full';
   }
@@ -409,7 +435,7 @@ const RegionLayout: React.FC<{
   }
 
   return (
-    <div className={cn('flex flex-col gap-6', className)} data-page-layout={pageType}>
+    <div className={cn(PAGE_REGION_LAYOUT_CONTAINER_CLASS, 'flex flex-col gap-6', className)} data-page-layout={pageType}>
       <RunningRegions
         header={header && (
           <RegionContent
@@ -425,9 +451,9 @@ const RegionLayout: React.FC<{
         )}
       >
         {/* Body: sidebar + main + aside */}
-        <div className="flex flex-col md:flex-row flex-1 gap-6">
+        <div className={PAGE_REGION_ROW_CLASS}>
           {sidebar && (
-            <aside className={cn('md:shrink-0', getSidebarWidthClass(sidebar.width as string || 'small'))}>
+            <aside className={cn(PAGE_RAIL_SHRINK_CLASS, getSidebarWidthClass(sidebar.width as string || 'small'))}>
               <RegionContent region={sidebar} rail />
             </aside>
           )}
@@ -441,7 +467,7 @@ const RegionLayout: React.FC<{
           </div>
 
           {aside && (
-            <aside className={cn('md:shrink-0', getSidebarWidthClass(aside.width as string || 'small'), aside.className)}>
+            <aside className={cn(PAGE_RAIL_SHRINK_CLASS, getSidebarWidthClass(aside.width as string || 'small'), aside.className)}>
               <RegionContent region={aside} rail />
             </aside>
           )}
@@ -497,11 +523,11 @@ const HeaderSidebarMainTemplate: React.FC<{ schema: PageNodeSchema }> = ({ schem
   const unplaced = getRemainingRegions(regions, PAGE_TEMPLATE_SLOTS['header-sidebar-main']);
 
   return (
-    <div className="flex flex-col gap-6" data-template="header-sidebar-main">
+    <div className={cn(PAGE_REGION_LAYOUT_CONTAINER_CLASS, 'flex flex-col gap-6')} data-template="header-sidebar-main">
       <RunningRegions header={header && <RegionContent region={header} />}>
-        <div className="flex flex-col md:flex-row flex-1 gap-6">
+        <div className={PAGE_REGION_ROW_CLASS}>
           {sidebar && (
-            <aside className={cn('md:shrink-0', getSidebarWidthClass(sidebar.width as string || 'medium'))}>
+            <aside className={cn(PAGE_RAIL_SHRINK_CLASS, getSidebarWidthClass(sidebar.width as string || 'medium'))}>
               <RegionContent region={sidebar} rail />
             </aside>
           )}
@@ -528,14 +554,14 @@ const ThreeColumnTemplate: React.FC<{ schema: PageNodeSchema }> = ({ schema }) =
   const unplaced = getRemainingRegions(regions, PAGE_TEMPLATE_SLOTS['three-column']);
 
   return (
-    <div className="flex flex-col gap-6" data-template="three-column">
+    <div className={cn(PAGE_REGION_LAYOUT_CONTAINER_CLASS, 'flex flex-col gap-6')} data-template="three-column">
       <RunningRegions
         header={header && <RegionContent region={header} />}
         footer={footer && <RegionContent region={footer} />}
       >
-        <div className="flex flex-col md:flex-row flex-1 gap-6">
+        <div className={PAGE_REGION_ROW_CLASS}>
           {sidebar && (
-            <aside className={cn('md:shrink-0', getSidebarWidthClass(sidebar.width as string || 'small'))}>
+            <aside className={cn(PAGE_RAIL_SHRINK_CLASS, getSidebarWidthClass(sidebar.width as string || 'small'))}>
               <RegionContent region={sidebar} rail />
             </aside>
           )}
@@ -544,7 +570,7 @@ const ThreeColumnTemplate: React.FC<{ schema: PageNodeSchema }> = ({ schema }) =
             <UnplacedRegionsRefusal regions={unplaced} template="three-column" />
           </div>
           {aside && (
-            <aside className={cn('md:shrink-0', getSidebarWidthClass(aside.width as string || 'small'), aside.className)}>
+            <aside className={cn(PAGE_RAIL_SHRINK_CLASS, getSidebarWidthClass(aside.width as string || 'small'), aside.className)}>
               <RegionContent region={aside} rail />
             </aside>
           )}

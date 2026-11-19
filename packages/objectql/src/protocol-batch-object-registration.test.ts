@@ -603,10 +603,12 @@ describe('[#33593] an extension\'s record-mode amount on a single save and in th
 
 // ── [#33713, ADR-0144 D6 and D8 rule 5] A `dynamic` roll-up on a metadata-API save ──
 //
-// `defineStack` admits a `dynamic` summary only over a stored home amount
-// (case (d)); a published save through the metadata API answers the same,
-// with the same sentence, through the registry's follow door.
-describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field that is not a stored home amount', () => {
+// `defineStack` admits a `dynamic` summary only over an amount in the home
+// currency, a `dynamic` `currency` field (case (d); seat ruling record
+// 7000258793 widened it from a stored home amount alone); a published save
+// through the metadata API answers the same, with the same sentence, through
+// the registry's follow door.
+describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field that is not an amount in the home currency', () => {
     const P = 'com.qa.homeroll';
     /** The #33659 probe's child: an amount converted at write into `amount_home`, beside amounts that are not home amounts. */
     const expense = {
@@ -624,6 +626,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
             eur_amount: { name: 'eur_amount', type: 'currency', label: 'EUR', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
             plain: { name: 'plain', type: 'number', label: 'Plain' },
             doubled: { name: 'doubled', type: 'formula', label: 'Doubled', expression: 'record.plain * 2', returnType: 'number' },
+            cost: { name: 'cost', type: 'currency', label: 'Cost' },
         },
     };
     const total = (field: string, extra: Record<string, unknown> = { currencyConfig: { currencyMode: 'dynamic' } }, fn = 'sum') => ({
@@ -645,7 +648,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
         }
         return undefined;
     };
-    const DYNAMIC_HEAD = "Object 'homeroll_project' field 'total' currencyConfig: `currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of a stored home amount";
+    const DYNAMIC_HEAD = "Object 'homeroll_project' field 'total' currencyConfig: `currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of an amount in the organization's home currency";
     async function bootWithExpense(): Promise<Harness> {
         const h = await boot();
         vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -655,7 +658,7 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
     }
 
     it('refuses one over a fixed EUR amount, a plain number and a formula 422 INVALID_METADATA, with case (d)\'s sentence, and stores nothing', async () => {
-        for (const [field, says] of [['eur_amount', 'is fixed to EUR'], ['plain', 'is not a stored home amount'], ['doubled', 'is not a stored home amount']] as const) {
+        for (const [field, says] of [['eur_amount', 'is fixed to EUR'], ['plain', "is a 'number' field"], ['doubled', "is a 'formula' field"]] as const) {
             const h = await bootWithExpense();
             const err = await caught(() => publish(h, 'object', project({ total: total(field) })));
             expect(err, field).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError' });
@@ -666,6 +669,13 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
             expect(registered(h, 'homeroll_project'), field).toBeUndefined();
             await h.kernel.shutdown();
         }
+    });
+
+    it('a `dynamic` roll-up over a plain `dynamic` amount no `homeAmount` names saves and is served (seat ruling record 7000258793)', async () => {
+        const h = await bootWithExpense();
+        await publish(h, 'object', project({ total: total('cost') }));
+        expect(registered(h, 'homeroll_project')?.fields?.total?.currencyConfig).toEqual({ currencyMode: 'dynamic' });
+        expect(bodyOf(activeRow(h, 'object', 'homeroll_project', P))?.fields?.total?.summaryOperations?.field).toBe('cost');
     });
 
     it('CONTROL: the #33659 probe shape, a `dynamic` roll-up over the stored home amount, saves and is served', async () => {
@@ -703,5 +713,115 @@ describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field
         expect(String(err.message).startsWith(DYNAMIC_HEAD)).toBe(true);
         expect(registered(h, 'homeroll_project')?.fields?.total).toBeUndefined();
         expect(activeRow(h, 'object_extension', 'homeroll_project', P)).toBeUndefined();
+    });
+});
+
+// ── [ADR-0144 D2, amended] An extension's ONE-SEGMENT record-currency pointer, judged as its object is served ──
+//
+// `ObjectSchema` refuses a record-mode amount whose sibling `currencyField`
+// names no code field of the object; `ObjectExtensionSchema` cannot (an
+// extension's pointer may name a field only the owner declares). The follow
+// door judges the pointer against the object AS SERVED — the owner, every
+// enabled extension, and this body in its slot — so a pointer into nothing is
+// refused at the save, never at every later write of the amount.
+describe('an object_extension\'s record-mode amount naming a sibling code field is judged against its object as served', () => {
+    const P = 'com.qa.sib';
+    const X = 'com.qa.siblingext';
+    const fee = (pointer: string) => ({ name: 'fee', type: 'currency', label: 'Fee', currencyConfig: { currencyMode: 'record', currencyField: pointer } });
+    const caught = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+            await run();
+        } catch (e) {
+            return e;
+        }
+        return undefined;
+    };
+    async function bootWithInvoice(owner: Record<string, unknown> = invoice('sib')): Promise<Harness> {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Sibling', type: 'app' } });
+        await h.protocol.saveMetaItem({ type: 'object', name: String(owner.name), packageId: P, item: owner, writeFace: 'external-import' });
+        return h;
+    }
+    const saveExtension = (h: Harness, fields: Record<string, unknown>) => h.protocol.saveMetaItem({
+        type: 'object_extension', name: 'sib_invoice', packageId: P, mode: 'publish', writeFace: 'meta-envelope',
+        item: { extend: 'sib_invoice', fields },
+    });
+
+    it('refuses 422 INVALID_METADATA a pointer naming no field of the served object, naming the field and the code-field candidates, and stores nothing', async () => {
+        const h = await bootWithInvoice();
+        const err = await caught(() => saveExtension(h, { fee: fee('zz_missing') }));
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(err.message).toContain("'zz_missing'");
+        expect(err.message).toContain("candidates: 'currency_code'");
+        expect(registered(h, 'sib_invoice')?.fields?.fee).toBeUndefined();
+        expect(activeRow(h, 'object_extension', 'sib_invoice', P)).toBeUndefined();
+    });
+
+    it('refuses a pointer naming a served field that holds no ISO 4217 code', async () => {
+        const h = await bootWithInvoice();
+        const err = await caught(() => saveExtension(h, { fee: fee('title') }));
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(err.message).toContain("a 'text' field that does not hold an ISO 4217 code");
+        expect(err.message).toContain("candidates: 'currency_code'");
+        expect(activeRow(h, 'object_extension', 'sib_invoice', P)).toBeUndefined();
+    });
+
+    it('says the object has no code field when the served object holds none', async () => {
+        const { currency_code: _code, ...withoutCode } = invoice('sib').fields;
+        const h = await bootWithInvoice({ ...invoice('sib'), fields: withoutCode });
+        const err = await caught(() => saveExtension(h, { fee: fee('currency_code') }));
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA', fieldName: 'fee' });
+        expect(err.message).toContain("it has none; declare one");
+    });
+
+    it('CONTROL: a pointer naming the code field the owner declares is saved and served', async () => {
+        const h = await bootWithInvoice();
+        await saveExtension(h, { fee: fee('currency_code') });
+        expect(registered(h, 'sib_invoice')?.fields?.fee?.currencyConfig?.currencyField).toBe('currency_code');
+        expect(activeRow(h, 'object_extension', 'sib_invoice', P)).toBeDefined();
+    });
+
+    it('CONTROL: a pointer naming a code field the same body, or another registered extension, declares is saved', async () => {
+        const { currency_code: _code, ...withoutCode } = invoice('sib').fields;
+        const h = await bootWithInvoice({ ...invoice('sib'), fields: withoutCode });
+        await saveExtension(h, { own_code: { name: 'own_code', type: 'text', label: 'Code', ...CODE }, fee: fee('own_code') });
+        expect(registered(h, 'sib_invoice')?.fields?.fee?.currencyConfig?.currencyField).toBe('own_code');
+
+        const other = await bootWithInvoice({ ...invoice('sib'), fields: withoutCode });
+        other.engine.registry.registerObject({ name: 'sib_invoice', fields: { ext_code: { name: 'ext_code', type: 'text', label: 'Code', ...CODE } } } as never, X, undefined, 'extend');
+        await saveExtension(other, { fee: fee('ext_code') });
+        expect(registered(other, 'sib_invoice')?.fields?.fee?.currencyConfig?.currencyField).toBe('ext_code');
+    });
+
+    it('the owner re-saved without the code field a registered extension\'s amount names is refused, naming the package that adds the amount', async () => {
+        const h = await bootWithInvoice();
+        h.engine.registry.registerObject({ name: 'sib_invoice', fields: { fee: fee('currency_code') } } as never, X, undefined, 'extend');
+        const { currency_code: _code, ...withoutCode } = invoice('sib').fields;
+        const refusal = h.engine.registry.objectRegistrationRefusal({ ...invoice('sib'), fields: withoutCode } as never, P, 'own', { againstRegistry: true });
+        expect(refusal).toMatchObject({ name: 'RecordCurrencyFollowRefusedError', status: 422, code: 'INVALID_METADATA', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(refusal?.message).toContain(`package '${X}'`);
+    });
+
+    // A single save asks with its slot left empty (`before: null`), so it does
+    // not get the run's R7 comparison: a pointer already dangling when the save
+    // arrives (registered unasked, as a cold boot registers it) refuses both an
+    // unchanged re-publish of that extension and an unchanged owner save.
+    it('a published single save is refused over a sibling pointer that already dangles: the extension\'s unchanged re-publish, and the owner\'s unchanged save', async () => {
+        const h = await bootWithInvoice();
+        h.engine.registry.registerObject({ name: 'sib_invoice', fields: { fee: fee('zz_missing') } } as never, P, undefined, 'extend');
+        expect(registered(h, 'sib_invoice')?.fields?.fee?.currencyConfig?.currencyField).toBe('zz_missing');
+
+        const republish = await caught(() => saveExtension(h, { fee: fee('zz_missing') }));
+        expect(republish).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(activeRow(h, 'object_extension', 'sib_invoice', P)).toBeUndefined();
+
+        const other = await bootWithInvoice();
+        other.engine.registry.registerObject({ name: 'sib_invoice', fields: { fee: fee('zz_missing') } } as never, X, undefined, 'extend');
+        // Asked as the single save asks it (a protocol re-save of the owner first meets the destructive-change
+        // door, which reads the extension's column as one the body would drop).
+        const ownerSave = other.engine.registry.objectRegistrationRefusal(invoice('sib') as never, P, 'own', { againstRegistry: true });
+        expect(ownerSave).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError', objectName: 'sib_invoice', fieldName: 'fee' });
+        expect(String(ownerSave?.message)).toContain(`package '${X}'`);
     });
 });

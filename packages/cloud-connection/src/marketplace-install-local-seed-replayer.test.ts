@@ -39,6 +39,7 @@
 // replayer IS the scenario.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -71,7 +72,7 @@ const helperRegisterOnce = vi.fn((ctx: any, replayer: unknown): boolean => {
     try { if (ctx.getService('seed-replayer') !== undefined) return false; } catch { /* absent */ }
     try { ctx.registerService('seed-replayer', replayer); return true; } catch { return false; }
 });
-const helperMerge = vi.fn((ctx: any, datasets: readonly unknown[]): unknown[] => {
+const helperMerge = vi.fn((ctx: any, datasets: readonly unknown[], _owner?: string): unknown[] => {
     let current: any[] | undefined;
     try { const v = ctx.getService('seed-datasets'); if (Array.isArray(v)) current = v; } catch { /* absent */ }
     const list: any[] = current ?? [];
@@ -93,6 +94,11 @@ const appDefaultBodies: unknown[] = [];
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The real `loadStored` parses the stored request and hands it to `load`;
+        // the stand-in keeps that funnel, so the request `load` records is the parsed one.
+        async loadStored(raw: any) {
+            return this.load(SeedLoaderRequestSchema.parse(raw));
+        }
         async load(request: any) { loadCalls.push(request); return seedResult; }
     },
     recordSeedOutcome: vi.fn(),
@@ -630,5 +636,205 @@ describe('#30281 — the install paths seed for the organization\'s locale', () 
         expect(res.payload?.success).toBe(true);
         expect(loadCalls).toHaveLength(0);
         expect(JSON.stringify(res.payload)).toContain('settings backend down');
+    });
+});
+
+/**
+ * #35109 — an upgrade in a running process REPLACES the package's datasets on
+ * the shared list. The list was append-only: after an upgrade it kept the
+ * superseded version's datasets beside the new ones until a restart, and every
+ * organization founded in between replayed both versions. The install door now
+ * merges under the package id, so the list holds the installed version only.
+ *
+ * Driven on the inline fallback (`helpersPresent = false`) for the end-to-end
+ * legs, because that is this package's own merge; the helper's semantics are
+ * pinned in `packages/runtime/src/seed-datasets.test.ts`, and the helper leg
+ * here pins only that the door hands it the package id.
+ */
+describe('#35109 — an upgrade replaces the package\'s datasets on the shared list', () => {
+    // The locale is not this block's subject; the block above leaves a throwing answer behind.
+    beforeEach(() => { localeAnswer = async () => undefined; });
+
+    const V2 = {
+        ...MANIFEST,
+        version: '2.0.0',
+        objects: [...MANIFEST.objects, { name: 'crm_y', fields: { name: { type: 'text' } } }],
+        data: [
+            { object: 'crm_x', records: [{ id: 'a2', name: 'a2' }] },
+            { object: 'crm_y', records: [{ id: 'y2', name: 'y2' }] },
+        ],
+    };
+
+    it('install v1, upgrade to v2, then create an organization: only v2\'s sets are replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const upgraded = await installOn(harness, rawApp, V2, plugin);
+        expect(upgraded.res.payload?.success, JSON.stringify(upgraded.res.payload)).toBe(true);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        await replayer('org_after_upgrade');
+
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].seeds).toEqual(V2.data);
+    });
+
+    it('CONTROL: two different packages are both kept through an upgrade of one of them', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        await installOn(harness, rawApp, MANIFEST_2, plugin);
+        await installOn(harness, rawApp, V2, plugin);
+
+        expect(harness.peek('seed-datasets')).toEqual([...V2.data, ...MANIFEST_2.data]);
+    });
+
+    it('CONTROL: installing the same version again adds no duplicate', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const again = await installOn(harness, rawApp, MANIFEST, plugin);
+        expect(again.res.payload?.success, JSON.stringify(again.res.payload)).toBe(true);
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('a version that ships no seed data takes its predecessor\'s datasets off the list', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        const { data: _dropped, ...noData } = { ...MANIFEST, version: '2.0.0' };
+        const upgraded = await installOn(harness, rawApp, noData, plugin);
+        expect(upgraded.res.payload?.success, JSON.stringify(upgraded.res.payload)).toBe(true);
+
+        expect(harness.peek('seed-datasets')).toEqual([]);
+    });
+
+    it('hands the runtime helper the package id as the owner', async () => {
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+
+        expect(helperMerge).toHaveBeenCalledTimes(1);
+        expect(helperMerge.mock.calls[0][0]).toBe(harness.ctx);
+        expect(helperMerge.mock.calls[0][2]).toBe(MANIFEST.id);
+    });
+});
+
+/**
+ * #35375 — an uninstall in a running process takes the package's datasets off
+ * the shared list. The uninstall door withdrew the package from the registry
+ * and ran its cleanups, but left its entries on `seed-datasets`, so every
+ * organization founded before the next restart replayed the removed package's
+ * seed sets (over objects that may be gone). The door now merges an empty list
+ * under the package id once the registry withdrawal succeeded — the owner-keyed
+ * replace #35109 added, with nothing to put back.
+ *
+ * Driven on the inline fallback (`helpersPresent = false`) for the end-to-end
+ * legs, as the #35109 block is; the helper leg pins that the door hands it the
+ * package id and an empty list.
+ */
+describe('#35375 — an uninstall takes the package\'s datasets off the shared list', () => {
+    // The locale is not this block's subject; an earlier block leaves a throwing answer behind.
+    beforeEach(() => { localeAnswer = async () => undefined; });
+
+    const uninstall = (rawApp: any, manifestId: string) => {
+        const c = makeC({});
+        c.req.param = ((k: string) => (k === 'manifestId' ? manifestId : undefined)) as any;
+        return rawApp.routes.get('DELETE /api/v1/marketplace/install-local/:manifestId')!(c);
+    };
+
+    /**
+     * A registry that holds the installed package from the uninstall on (the
+     * mocked `manifest.register` registers nothing at install time). `refuse`
+     * picks the refusal: the pre-check's coded 409, or the withdrawal's throw.
+     */
+    const holdInRegistry = (harness: ReturnType<typeof makeCtx>, refuse: 'precheck' | 'withdrawal') => {
+        const objectql = harness.ctx.getService('objectql');
+        objectql.registry = {
+            getPackage: (id: string) => (id === MANIFEST.id ? { manifest: { id } } : undefined),
+            ...(refuse === 'precheck'
+                ? {
+                    assertPackageUninstallable: (id: string) => {
+                        throw Object.assign(new Error(`Package '${id}' is extended by another package.`), {
+                            code: 'RESOURCE_CONFLICT', status: 409, extenders: ['app.test.other'],
+                        });
+                    },
+                }
+                : {}),
+            uninstallPackage: vi.fn(() => { throw new Error('the registry refused the withdrawal'); }),
+        };
+    };
+
+    it('install, uninstall, then create an organization: none of the package\'s sets are replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload?.success).toBe(true);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        const summary = await replayer('org_after_uninstall');
+
+        expect(harness.peek('seed-datasets')).toEqual([]);
+        expect(loadCalls).toHaveLength(0);
+        expect(summary.inserted).toBe(0);
+    });
+
+    it('CONTROL: another package\'s sets are kept, and still replayed', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        const { plugin } = await installOn(harness, rawApp);
+        await installOn(harness, rawApp, MANIFEST_2, plugin);
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        const replayer = harness.peek('seed-replayer') as (id: string) => Promise<any>;
+        await replayer('org_after_uninstall');
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST_2.data);
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].seeds).toEqual(MANIFEST_2.data);
+    });
+
+    it('CONTROL: an uninstall the registry refuses up front leaves the list as it was', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        holdInRegistry(harness, 'precheck');
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload?.error?.code).toBe('RESOURCE_CONFLICT');
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('CONTROL: a withdrawal the running kernel refuses leaves the list as it was — the package stays loaded until the restart', async () => {
+        helpersPresent = false;
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        holdInRegistry(harness, 'withdrawal');
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload?.data?.cleanups).toContainEqual(expect.objectContaining({ name: 'registry.uninstallPackage', success: false }));
+
+        expect(harness.peek('seed-datasets')).toEqual(MANIFEST.data);
+    });
+
+    it('hands the runtime helper the package id and an empty list', async () => {
+        const { rawApp, harness } = freshHarness();
+        await installOn(harness, rawApp);
+        helperMerge.mockClear();
+
+        const res = await uninstall(rawApp, MANIFEST.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        expect(helperMerge).toHaveBeenCalledTimes(1);
+        expect(helperMerge.mock.calls[0]).toEqual([harness.ctx, [], MANIFEST.id]);
     });
 });

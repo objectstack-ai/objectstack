@@ -72,6 +72,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "パスワード変更必須",
         help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_RESET_REQUIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
       },
+      dev_seed_credential: {
+        label: "開発シード資格情報",
+        help: "開発シードが作成したアカウントに設定されます。パスワードがシードのパスワードのままである間、本番サーバーはそのサインインと新しいセッションをすべて拒否します。os user set-password で新しいパスワードを設定すると消去されます。システム管理。読み取りでは返されません。"
+      },
       mfa_required_at: {
         label: "MFA 強制適用日時",
         help: "強制 MFA がこのユーザーに最初に適用された日時（猶予期間の起点）。mfa_required の基準になります。システム管理。"
@@ -155,7 +159,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -240,6 +244,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             email: "メールアドレス",
+            pendingAgain: "既に保留中",
             notApplied: "保留中のため適用されませんでした（レコードで設定してください）",
             managerError: "上司",
             "host.reason": "招待は送信されませんでした"
@@ -260,11 +265,29 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             "summary.added": "追加済み",
-            "summary.alreadyPending": "保留中のため再通知",
+            "summary.alreadyPending": "既に保留中",
             "summary.failed": "未追加",
             rows: "行ごとの結果"
+          },
+          columns: {
+            rows: {
+              row: "行",
+              email: "メール",
+              ok: "成功",
+              alreadyPending: "既に保留中",
+              "host.notified": "ホスティング組織に通知済み",
+              "host.reason": "通知しなかった理由",
+              "error.message": "追加されなかった理由",
+              notApplied: "未適用（レコードで設定してください）",
+              managerError: "上長"
+            }
           }
         }
+      },
+      remove_sso_user: {
+        label: "保留中のユーザーを削除",
+        confirmText: "まだサインインしていないこのユーザーを削除し、招待を取り消しますか？その間にサインインした場合、またはホスト組織に接続できない場合は、誰も削除されません。",
+        successMessage: "保留中のユーザーを削除しました"
       },
       set_user_password: {
         label: "パスワードを設定",
@@ -691,7 +714,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -797,7 +820,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -949,7 +972,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を送信しました",
-          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         },
         params: {
           role: {
@@ -976,7 +999,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を再送しました",
-          link_only: "{{ result.email }} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          link_only: "{{ result.email }} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の承諾には確認済みのメールアドレスが必要です。メールがない場合、承諾できるのはソーシャルまたは SSO サインインでアドレスが確認される招待者だけです。それ以外の方は、プラットフォーム管理者がアカウントを作成してください。"
         }
       },
       copy_invitation_link: {

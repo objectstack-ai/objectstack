@@ -370,10 +370,15 @@ import { planCustomizationPairInstall, type PairInstallItem } from './marketplac
 import {
     INSTALL_RENAME_PLANNER_SERVICE,
     carryInstallDeclaredRenames,
+    contributionsOf,
     reverseInstallDeclaredRenames,
     type InstallRenameRefusal,
     type InstallRenameTable,
 } from './marketplace-install-declared-renames.js';
+// [#35390] The engine's capture of one object's stored computed fields, and
+// the report of its fill — the walk `os migrate stored-expressions` runs.
+// Types only: the door asks the data engine it is handed, by member.
+import type { StoredExpressionBackfillReport, StoredExpressionCapture } from '@objectstack/objectql';
 // [#31895] The planner's one implementation, shared with the door-less
 // MarketplaceInstallRenamePlannerPlugin. Each side of the schema upgrade
 // verdict is folded by `packageUpgradeSideOf`, as `planUpgrade` folds it.
@@ -527,6 +532,48 @@ function declaredRefusalAnswer(
             },
         },
     };
+}
+
+/**
+ * [#34583, #34846] Both sides of a re-install folded through the artifact
+ * resolver FIRST, by the fold the upgrade comparison reads them by
+ * ({@link packageUpgradeSideOf}), so a body the resolver refuses is answered
+ * ({@link declaredRefusalAnswer}) before any reader that would throw it: the
+ * resolver is deterministic over the same bytes, so a reader after this never
+ * meets its refusal. Each side on its own, the incoming body first: a refusal
+ * of the installed copy (stored by an earlier install, read to compare
+ * against) is answered naming that copy, never as "Package 'X' cannot be
+ * installed", which blames the incoming one. `installed` `null` (a fresh
+ * install) or `undefined` (none can be read) folds no installed side.
+ *
+ * The one pre-resolve of the two readers of both sides: step 2c″'s declared
+ * renames ({@link MarketplaceInstallLocalPlugin.evaluateDeclaredRenames}) and
+ * the dry run's `planUpgrade` (`answerUpgradeDryRun`), so a dry-run re-install
+ * answers the refusal the real install answers. `undefined` when neither side
+ * is refused; an undeclared throw out of the resolver is rethrown, never
+ * relabelled.
+ */
+function upgradeSideRefusal(
+    manifestId: string,
+    converted: unknown,
+    installed: unknown,
+): ReturnType<typeof declaredRefusalAnswer> {
+    try {
+        packageUpgradeSideOf(converted);
+    } catch (err: unknown) {
+        const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
+        if (!refused) throw err;
+        return refused;
+    }
+    if (installed === null || installed === undefined) return undefined;
+    try {
+        packageUpgradeSideOf(installed);
+    } catch (err: unknown) {
+        const refused = declaredRefusalAnswer(manifestId, err, 'installed');
+        if (!refused) throw err;
+        return refused;
+    }
+    return undefined;
 }
 
 /**
@@ -1412,6 +1459,170 @@ export function asMarketplaceRegistration<T>(artifact: T): T {
 }
 
 /**
+ * [#35390, #32527 ruling 6816429574 letter A] The stored-expression fill a
+ * managed install or upgrade owes: the version it makes live adds a stored
+ * computed field (a non-`formula` field declaring `expression`), changes one's
+ * expression, stored type or scale, or turns a formula into one, so the
+ * object's EXISTING rows are filled with the write's own computation — every
+ * row, every organization, under `preserveAudit` — and each field is reported
+ * on the answer's `advisories`, as the metadata doors report it
+ * (`@objectstack/metadata-protocol`'s `protocol-stored-expression-fill.ts`):
+ * the same rule ids, the same element shape. Not opt-in. A boot (and so the
+ * rehydrate) never fills: rewriting data nobody ordered is why the backfill
+ * is a command (`os migrate stored-expressions`), and that command stays for
+ * a database changed outside a door.
+ *
+ * The walk and its writes are the data engine's (`captureStoredExpressions`,
+ * the walk the command runs); this door only decides when, and says what the
+ * rows hold.
+ */
+const STORED_EXPRESSION_FILLED = 'stored-expression-filled';
+const STORED_EXPRESSION_FILL_INCOMPLETE = 'stored-expression-fill-incomplete';
+
+/** One element of the install answer's `advisories`: the metadata doors' advisory shape. */
+interface InstallStoredExpressionAdvisory {
+    rule: typeof STORED_EXPRESSION_FILLED | typeof STORED_EXPRESSION_FILL_INCOMPLETE;
+    severity: 'info' | 'warning';
+    where: string;
+    path: string;
+    message: string;
+    hint: string;
+}
+
+/** The data-engine member the fill asks, duck-typed: `ObjectQL#captureStoredExpressions`. */
+interface StoredExpressionCaptureEngine {
+    captureStoredExpressions?(object: string): StoredExpressionCapture;
+}
+
+const fillWhere = (object: string, field: string) => `object "${object}" · field "${field}"`;
+const fillPath = (object: string, field: string) => `objects.${object}.fields.${field}`;
+const fillRows = (n: number) => `${n} row${n === 1 ? '' : 's'}`;
+const fillRemedy = (object: string, field: string): string =>
+    'Each such row is computed when it is next written. To fill them all at once, run '
+    + `\`os migrate stored-expressions --object ${object} --field ${field} --changed --apply\` against the `
+    + 'database (its dry run, without --apply, lists them first).';
+
+/**
+ * Capture, BEFORE the install registers anything, the stored computed fields
+ * of every object the incoming body contributes to — its own objects and the
+ * objects its `objectExtensions` extend, across every unit of a composed
+ * artifact ({@link contributionsOf}). Empty for an engine without the capture
+ * (a metadata-only test double), which fills nothing.
+ */
+function captureInstallStoredExpressions(engine: unknown, converted: unknown): StoredExpressionCapture[] {
+    const capture = (engine as StoredExpressionCaptureEngine | undefined)?.captureStoredExpressions;
+    if (typeof capture !== 'function') return [];
+    return [...contributionsOf(converted).keys()].map((object) => capture.call(engine, object));
+}
+
+/** Each changed field of `capture`, reported unfilled for `why`. */
+function unfilledAdvisories(capture: StoredExpressionCapture, why: string, hint: (field: string) => string): InstallStoredExpressionAdvisory[] {
+    const { object } = capture;
+    return capture.changedFields().map((field) => ({
+        rule: STORED_EXPRESSION_FILL_INCOMPLETE,
+        severity: 'warning' as const,
+        where: fillWhere(object, field),
+        path: fillPath(object, field),
+        message: `'${object}.${field}' computes a new value in the version this install made live, and the object's `
+            + `existing rows were NOT filled with it: ${why}. Until they are written, those rows hold NULL or the old `
+            + 'value, and every reader of the column reads it.',
+        hint: hint(field),
+    }));
+}
+
+/**
+ * Fill what each capture's object now serves that computes something new,
+ * once the install's storage sync ran, and say per field what the rows hold.
+ * Nothing for a field the version did not change, and nothing for an object
+ * that holds no row (a fresh install's new table): a clean answer stays
+ * unchanged. One object's fill failing never fails the install, nor stops the
+ * other objects' fills.
+ *
+ * `storageSyncFailed`: the install's schema sync threw, so a column this
+ * version adds may not exist; no fill is attempted and each field is reported
+ * unfilled.
+ */
+async function fillInstallStoredExpressions(
+    captures: readonly StoredExpressionCapture[],
+    options: { storageSyncFailed?: string; logger?: { info?(m: string): void; warn?(m: string): void } },
+): Promise<InstallStoredExpressionAdvisory[]> {
+    const advisories: InstallStoredExpressionAdvisory[] = [];
+    for (const capture of captures) {
+        const { object } = capture;
+        if (options.storageSyncFailed !== undefined) {
+            advisories.push(...unfilledAdvisories(capture,
+                `the schema sync this install ran failed (${options.storageSyncFailed}), so the fill was not attempted`,
+                (field) => `Resolve the schema sync failure first. ${fillRemedy(object, field)}`));
+            continue;
+        }
+        let report: StoredExpressionBackfillReport | undefined;
+        try {
+            report = await capture.fillChanged();
+        } catch (err: unknown) {
+            // Handed to the caller on the answer it reads; the install itself stands.
+            const reason = String((err as Error)?.message ?? err);
+            options.logger?.warn?.(`[MarketplaceInstallLocal] the stored-expression fill of '${object}' did not run: ${reason}`);
+            advisories.push(...unfilledAdvisories(capture, `the fill did not run (${reason})`, (field) => fillRemedy(object, field)));
+            continue;
+        }
+        if (!report) continue;
+        const whole = report.failures.length === 0 && report.skippedRows === 0 && !report.truncated
+            && report.unreadableObjects.length === 0;
+        if (whole && report.scannedRecords === 0) continue;
+        for (const f of report.fields) {
+            const concurrent = f.concurrentRows ?? 0;
+            const left = Math.max(0, f.nullRows + f.staleRows - f.written - concurrent);
+            const meanwhile = concurrent > 0
+                ? ` ${fillRows(concurrent)} written by another write while the fill ran computed it there, and were not written over.`
+                : '';
+            const faulted = f.faultedRows > 0
+                ? ` On ${fillRows(f.faultedRows)} the expression does not evaluate, so it computes NULL there, as any write of them stores.`
+                : '';
+            if (whole || (left === 0 && report.unreadableObjects.length === 0 && !report.truncated)) {
+                options.logger?.info?.(
+                    `[MarketplaceInstallLocal] filled ${f.object}.${f.field}: ${fillRows(f.written)} of ${report.scannedRecords} written`,
+                );
+                advisories.push({
+                    rule: STORED_EXPRESSION_FILLED,
+                    severity: 'info',
+                    where: fillWhere(f.object, f.field),
+                    path: fillPath(f.object, f.field),
+                    message: `'${f.object}.${f.field}' computes a new value in the version this install made live, so the `
+                        + `platform filled the object's existing rows: ${fillRows(f.written)} of ${report.scannedRecords} `
+                        + `written with the value its expression computes; the others already held it.${meanwhile}${faulted}`,
+                    hint: 'Nothing to do: every row holds what a write of it would store.',
+                });
+                continue;
+            }
+            const why = [
+                report.failures.length > 0 ? `${fillRows(report.failures.length)} refused the write` : '',
+                report.skippedRows > 0
+                    ? `${fillRows(report.skippedRows)} hold a value that a field which does not evaluate there would replace with NULL`
+                    : '',
+                report.unreadableObjects.length > 0 || report.truncated ? 'the object\'s rows could not all be read' : '',
+            ].filter(Boolean).join('; ');
+            options.logger?.warn?.(
+                `[MarketplaceInstallLocal] the stored-expression fill of ${f.object}.${f.field} did not finish: `
+                + `${fillRows(f.written)} written, ${left > 0 ? `${fillRows(left)} not` : 'others not read'} (${why})`,
+            );
+            advisories.push({
+                rule: STORED_EXPRESSION_FILL_INCOMPLETE,
+                severity: 'warning',
+                where: fillWhere(f.object, f.field),
+                path: fillPath(f.object, f.field),
+                message: `'${f.object}.${f.field}' computes a new value in the version this install made live, and the fill `
+                    + `of the object's existing rows did not finish: ${fillRows(f.written)} written, `
+                    + `${left > 0 ? `${fillRows(left)} not` : 'others not read'} (${why}). Until they are written, those rows `
+                    + `hold NULL or the old value, and every reader of the column (filters, sorts, roll-ups, reports) reads it.`
+                    + `${meanwhile}${faulted}`,
+                hint: fillRemedy(f.object, f.field),
+            });
+        }
+    }
+    return advisories;
+}
+
+/**
  * [#31425] The package body an unmanaged copy's reseed hands the seed-locale
  * resolution: the copy base's own manifest, as the registry holds it — the
  * copy keeps no ledger body of the source package. `undefined` when the
@@ -2219,15 +2430,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * did. {@link registerSeedReplayerIntoKernel} is that consumer; the two are
      * called together so the split cannot recur.
      */
-    private mergeSeedDatasetsIntoKernel = async (ctx: PluginContext, datasets: any[]): Promise<number> => {
+    //
+    // [#35109] `owner` is the package id: the merge REPLACES what an earlier
+    // merge of the same package put on the shared list (an upgrade, a reinstall,
+    // a reseed, a rehydrate), so the list holds the installed version's datasets
+    // only and an organization founded after an upgrade replays no superseded set.
+    private mergeSeedDatasetsIntoKernel = async (ctx: PluginContext, datasets: any[], owner: string): Promise<number> => {
         try {
             const mod: any = await import('@objectstack/runtime');
             if (typeof mod?.mergeSeedDatasets === 'function') {
-                const list = mod.mergeSeedDatasets(ctx, datasets);
+                const list = mod.mergeSeedDatasets(ctx, datasets, owner);
                 return Array.isArray(list) ? list.length : datasets.length;
             }
         } catch { /* fall through to the inline merge below */ }
-        return this.mergeSeedDatasetsInline(ctx, datasets);
+        return this.mergeSeedDatasetsInline(ctx, datasets, owner);
+    };
+
+    /**
+     * [#35375] Take an uninstalled package's datasets off the shared
+     * `seed-datasets` list: the owner-keyed merge under the id the install
+     * merged them under, with nothing to put back. Never throws — the
+     * uninstall has already happened; a failure is logged with what it costs.
+     */
+    private withdrawSeedDatasets = async (ctx: PluginContext, manifestId: string): Promise<void> => {
+        try {
+            await this.mergeSeedDatasetsIntoKernel(ctx, [], manifestId);
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but its seed datasets stay on the shared replay list `
+                + 'until the next restart, so an organization founded before then still replays them. '
+                + `Cause: ${err?.message ?? err}`,
+            );
+        }
     };
 
     /**
@@ -2238,12 +2472,34 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `(ctx as any).kernel` read clobbered instead of accumulating — push in place,
      * and register only when the service does not yet exist so a second source
      * cannot trip the duplicate-register throw. Returns the post-merge total.
+     *
+     * [#35109] Replaces `owner`'s earlier entries as the runtime helper does, on
+     * the one owner index the helper keeps on the array (the same registry
+     * symbol): removed by reference, latest first, and the new entries put where
+     * the first of them stood.
      */
-    private mergeSeedDatasetsInline = (ctx: PluginContext, datasets: any[]): number => {
+    private mergeSeedDatasetsInline = (ctx: PluginContext, datasets: any[], owner: string): number => {
         const c = ctx as any;
         const current = this.readSharedSeedDatasets(ctx);
+        if (datasets.length === 0 && !Array.isArray(current)) return 0;
         const list: any[] = Array.isArray(current) ? current : [];
-        list.push(...datasets);
+        const ownersKey = Symbol.for('objectstack.seed-datasets.owners');
+        let owners = (list as any)[ownersKey] as Map<string, unknown[]> | undefined;
+        if (!(owners instanceof Map)) Object.defineProperty(list, ownersKey, { value: owners = new Map(), enumerable: false });
+        const stale = new Map<unknown, number>();
+        for (const entry of owners.get(owner) ?? []) stale.set(entry, (stale.get(entry) ?? 0) + 1);
+        let at = list.length;
+        for (let i = list.length - 1; i >= 0 && stale.size > 0; i--) {
+            const left = stale.get(list[i]);
+            if (left === undefined) continue;
+            if (left > 1) stale.set(list[i], left - 1);
+            else stale.delete(list[i]);
+            list.splice(i, 1);
+            at = i;
+        }
+        list.splice(at, 0, ...datasets);
+        if (datasets.length > 0) owners.set(owner, [...datasets]);
+        else owners.delete(owner);
         if (!Array.isArray(current)) {
             if (typeof c?.kernel?.registerService === 'function') c.kernel.registerService('seed-datasets', list);
             else if (typeof c?.registerService === 'function') c.registerService('seed-datasets', list);
@@ -3440,6 +3696,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         }
 
+        // 2g. [#35390, #32527 ruling 6816429574 letter A] Capture the stored
+        //     computed fields of every object this version contributes to,
+        //     BEFORE the register makes it live, so step 4d can fill what it
+        //     changed ({@link fillInstallStoredExpressions}). Reads only the
+        //     definitions the registry serves now; no row.
+        let storedExpressionEngine: unknown;
+        try { storedExpressionEngine = ctx.getService('objectql'); } catch { /* no data engine: nothing to fill */ }
+        const storedExpressionCaptures = captureInstallStoredExpressions(storedExpressionEngine, converted);
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -3541,6 +3806,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     object definitions to the in-memory registry; the driver
         //     must be asked to materialize tables/columns before any seed
         //     insert (or user write) succeeds.
+        //     [#35390] A failed sync is recorded for step 4d, which then
+        //     fills nothing and says so on the answer.
+        let storageSyncFailed: string | undefined;
         try {
             const ql: any = ctx.getService('objectql');
             if (ql && typeof ql.syncSchemas === 'function') {
@@ -3548,6 +3816,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] syncSchemas() ran after registering ${manifestId}`);
             }
         } catch (err: any) {
+            storageSyncFailed = String(err?.message ?? err);
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] syncSchemas failed for ${manifestId}: ${err?.message ?? err}`);
         }
 
@@ -3577,6 +3846,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     makes for a boot artifact. A reinstall replaces the previous
         //     version's set rather than adding to it.
         await this.bindArtifactHandlers(ctx, converted, manifestId);
+
+        // 4d. [#35390, #32527 ruling 6816429574 letter A] Fill the existing
+        //     rows of each stored computed field this version made live —
+        //     added, its expression changed, or turned from a formula — once,
+        //     every row, every organization, under `preserveAudit`, reported
+        //     per field on the answer's `advisories`. After the schema sync
+        //     (the column exists), the datasources (the rows can be read) and
+        //     the handler bind (each write is one of this version's), and
+        //     BEFORE the seed: a freshly created table holds no row and the
+        //     answer stays clean, and seeded rows are computed by their own
+        //     writes. What is filled is what the registry SERVES now that the
+        //     capture did not: on the lenient path a register that threw
+        //     after serving part of the version fills that part, and one that
+        //     served none of it fills nothing. Never fails the install.
+        const storedExpressionAdvisories = await fillInstallStoredExpressions(storedExpressionCaptures, {
+            storageSyncFailed,
+            logger: ctx.logger,
+        });
 
         // 5. Replicate the AppPlugin start-time side-effects that the
         //    `manifest` service does NOT do on its own:
@@ -3658,6 +3945,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the object, its table, the old key and the new. Omitted when
                 // none was, so that answer's key set is unchanged.
                 ...(renamesCarried.length > 0 ? { renamesCarried } : {}),
+                // [#35390] Each stored computed field whose existing rows step
+                // 4d filled, or did not finish filling — the metadata doors'
+                // `advisories`, same rule ids and element shape. Omitted when
+                // the version changed none over rows, so that answer's key
+                // set is unchanged.
+                ...(storedExpressionAdvisories.length > 0 ? { advisories: storedExpressionAdvisories } : {}),
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
                 // #6721: the RESOLVED ledger directory on THIS host — the same
@@ -4091,6 +4384,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // a refused withdrawal, which leaves the package loaded and running.
         // They are bound once for the whole install, under its entry's id.
         if (!withdrawal) await this.unbindArtifactHandlers(ctx, manifestId);
+        // [#35375] …and its seed datasets leave the shared `seed-datasets` list
+        // the per-organization replay reads, so an organization founded before
+        // the next restart replays none of them. The install merged them under
+        // its entry's id (a composed artifact's every package body's under that
+        // one id, {@link applySideEffects}), so one owner-keyed merge with
+        // nothing to put back takes them all off. Never on a refused
+        // withdrawal: the package stays loaded until the restart, its datasets
+        // with it.
+        if (!withdrawal) await this.withdrawSeedDatasets(ctx, manifestId);
         const copies: UninstallCleanupOutcome[] = [];
         for (const memberId of withdrawn) {
             const kept = await this.withdrawObjectCopies(ctx, memberId);
@@ -4691,26 +4993,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // throws is answered as the table read's. Without this, the
         // resolver's 422 was answered as the 503 below and its author was told
         // to retry once the database answers.
-        // [#34583] Each side in its own `try`, the incoming body first: a
-        // refusal of the installed copy (stored by an earlier install, read
-        // here to compare against) is answered naming that copy, never as
-        // "Package 'X' cannot be installed", which blames the incoming one.
-        try {
-            packageUpgradeSideOf(converted);
-        } catch (err: unknown) {
-            const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
-            if (!refused) throw err;
-            return { tables: [], refusal: refused };
-        }
-        if (installed !== null && installed !== undefined) {
-            try {
-                packageUpgradeSideOf(installed);
-            } catch (err: unknown) {
-                const refused = declaredRefusalAnswer(manifestId, err, 'installed');
-                if (!refused) throw err;
-                return { tables: [], refusal: refused };
-            }
-        }
+        // [#34583] Each side on its own, the incoming body first
+        // ({@link upgradeSideRefusal}).
+        const sideRefused = upgradeSideRefusal(manifestId, converted, installed);
+        if (sideRefused) return { tables: [], refusal: sideRefused };
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
@@ -6899,7 +7185,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A runtime whose `manifest` service answers no `planUpgrade` answers 503:
      * a preview that could not run is never answered as an empty one. A
      * ledger entry that will not parse is said so, and the plan is then
-     * against no installed version.
+     * against no installed version. [#34846] A side the artifact resolver
+     * refuses — the incoming body, or the installed copy stored by an earlier
+     * install — is answered with that refusal, as the real install answers it
+     * at step 2c″ ({@link upgradeSideRefusal}), never thrown.
      */
     private answerUpgradeDryRun = async (
         c: any,
@@ -6922,7 +7211,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const ledgerRead = this.ledger.read(manifestId);
         const installedEntry = ledgerRead.entry;
         const installed = installedEntry?.manifest ? this.convertPackageBodyForward(ctx, installedEntry.manifest) : undefined;
-        const reading = await service.planUpgrade(installed, this.convertPackageBodyForward(ctx, manifest)) as {
+        const incoming = this.convertPackageBodyForward(ctx, manifest);
+        // [#34846] `planUpgrade` folds both sides through the artifact
+        // resolver, so a side it refuses is answered here first, as step 2c″
+        // answers it on the real install ({@link upgradeSideRefusal}): the
+        // refusal's own 422 naming whose body was refused. Before, the refusal
+        // was thrown out of the door, which the transport answers 500.
+        const refused = upgradeSideRefusal(manifestId, incoming, installed);
+        if (refused) return c.json(refused.body, refused.status);
+        const reading = await service.planUpgrade(installed, incoming) as {
             plan: unknown;
             environment: unknown;
         };
@@ -7475,8 +7772,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // is reported in the summary rather than thrown, per this method's
         // contract.
         let datasets: PurgeSeedDataset[] = [];
+        let datasetsRead = false;
         try {
             datasets = seedDatasetsOf(manifest);
+            datasetsRead = true;
         } catch (err: any) {
             seedSummary = { mode: 'skipped', reason: `seed-datasets-unread: ${err?.message ?? err}` };
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: its seed datasets could not be read, so none were merged or seeded: ${err?.message ?? err}`);
@@ -7484,7 +7783,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         if (datasets.length > 0) {
             try {
-                const total = await this.mergeSeedDatasetsIntoKernel(ctx, datasets);
+                const total = await this.mergeSeedDatasetsIntoKernel(ctx, datasets, appId);
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] merged ${datasets.length} seed dataset(s) into kernel (total: ${total})`);
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to merge seed-datasets: ${err?.message ?? err}`);
@@ -7507,6 +7806,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 );
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to register seed-replayer: ${err?.message ?? err}`);
+            }
+        } else if (datasetsRead) {
+            // [#35109] A version that ships no seed data takes its predecessor's
+            // datasets off the shared list (a no-op for a package that never had any).
+            try {
+                await this.mergeSeedDatasetsIntoKernel(ctx, [], appId);
+            } catch (err: any) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] failed to clear ${appId}'s previous seed-datasets: ${err?.message ?? err}`);
             }
         }
 
@@ -7691,10 +7998,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
-            import('@objectstack/runtime'),
-            import('@objectstack/spec/data'),
-        ]);
+        const { SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad } = await import('@objectstack/runtime');
         const seedLocale = await resolveSeedLocaleForLoad(ctx, {
             seeds: datasets,
             organizationId,
@@ -7703,7 +8007,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
-        const request = (SeedLoaderRequestSchema as any).parse({
+        // [#34613] `loadStored`: a stored dataset declaring a retired `mode`
+        // is refused alone, as an error of the result; the rest load.
+        const result = await seedLoader.loadStored({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
@@ -7718,7 +8024,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ...(seedLocale ? { locale: seedLocale.locale } : {}),
             },
         });
-        const result = await seedLoader.load(request);
         // [#30324 · ruling 6670861426] The rows this load CREATED get the
         // person this door names as `owner_id` and `created_by`, then follow
         // the ordinary permission rules like any record they own.

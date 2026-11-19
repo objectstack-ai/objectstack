@@ -21,9 +21,9 @@
  * An app item with no package id asks its route's names by name instead
  * (objectstack#29416; it read the whole registry).
  *
- * CONTROLs: the root of an app whose package holds no objects of its own (a
- * platform app such as Setup; its object routes read by name, objectui#13046)
- * asks the whole registry, as before; a record overlay (`?recordId=`) reads the whole registry, because a record's
+ * The root of an app whose package holds no objects of its own (a platform app
+ * such as Setup) asks its entries' required objects, as its object routes do
+ * (objectui#13046, objectstack#34211). CONTROL: a record overlay (`?recordId=`) reads the whole registry, because a record's
  * related lists come from every object that points at it (since
  * objectstack#27626 the drawer reads it beside the list's scope, and the list
  * does not wait for it: `AppContent.recordDrawerKeepsScope-27626.test.tsx`).
@@ -117,9 +117,11 @@ interface Server {
   calls: string[];
   apps: unknown[];
   holdByName: boolean;
+  /** objectstack#35306 — hold the `?names=` presence reads too. */
+  holdNames: boolean;
   release: () => void;
 }
-const server: Server = { calls: [], apps: [], holdByName: false, release: () => {} };
+const server: Server = { calls: [], apps: [], holdByName: false, holdNames: false, release: () => {} };
 
 function makeAdapter() {
   const held: Array<() => void> = [];
@@ -143,7 +145,9 @@ function makeAdapter() {
           if (options?.names) {
             server.calls.push(`${type}?names=${options.names.join(',')}`);
             const named: any[] = type === 'object' ? OBJECTS.filter((o: any) => options.names!.includes(o.name)) : [];
-            return Promise.resolve({ type, items: structuredClone(named) });
+            const answer = { type, items: structuredClone(named) };
+            if (!server.holdNames) return Promise.resolve(answer);
+            return new Promise((resolve) => held.push(() => resolve(answer)));
           }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : [];
@@ -217,6 +221,7 @@ const splashUp = () => document.querySelector('[data-boot-splash]') !== null;
 beforeEach(() => {
   server.calls = [];
   server.holdByName = false;
+  server.holdNames = false;
   server.apps = [{ name: 'crm', label: 'CRM', _packageId: CRM, navigation: NAVIGATION }];
   localStorage.clear();
   sessionStorage.clear();
@@ -240,9 +245,10 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     // The route's lookup target outside the package, and the object the app's
     // `requiresObject` entry names, each in a `?names=` presence read
     // (objectstack#34244): the unregistered `cloud_only` is never asked by
-    // name, and the gate still hides its entry; the served `sys_user` is.
+    // name, and the gate still hides its entry; the served `sys_user` is
+    // answered by its presence read and not asked again (objectstack#35306).
     expect([...objectCalls()].sort()).toEqual(
-      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user', 'object/sys_user'].sort(),
+      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user'].sort(),
     );
     // The route element and the chrome are handed the scope.
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact,sys_user');
@@ -259,20 +265,24 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     // target's, and (objectstack#34244) the `requiresObject` entry's.
     expect([...objectCalls().filter((c) => c.startsWith('object?'))].sort()).toEqual(['object?names=cloud_only', 'object?names=sys_user']);
     expect(objectCalls()).not.toContain('object/cloud_only');
-    expect(objectCalls()).toEqual(expect.arrayContaining(['object/crm_account', 'object/sys_user']));
+    // objectstack#35306 — the lookup target's presence read served it: no by-name read of it.
+    expect(objectCalls()).toContain('object/crm_account');
+    expect(objectCalls()).not.toContain('object/sys_user');
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
 
-  it("CONTROL: the root of an app whose package holds no objects of its own reads the whole registry, and asks none by name", async () => {
-    // objectui#13046 moved this control from an object's route to the app's
-    // root: an object's route in such an app now reads by name
-    // (`AppContent.emptyPackageScope-13046.test.tsx`), its landing does not.
+  it("the root of an app whose package holds no objects of its own asks its entries' required objects, never the whole registry (objectstack#34211)", async () => {
+    // objectui#13046 read the whole registry here; the root now reads as the
+    // app's object routes do (`AppContent.emptyPackageScope-13046.test.tsx`).
     server.apps = [{ name: 'crm', label: 'Setup-like', _packageId: 'app.platform', navigation: NAVIGATION }];
     boot('/apps/crm');
-    await waitFor(() => expect(objectCalls()).toContain('object'));
+    await waitFor(() => expect(objectCalls()).toContain('object?names=cloud_only'));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(objectCalls()).toEqual(['object?package=app.platform', 'object']);
+    // Then it lands on its first entry, which reads its own names by name; the
+    // whole registry is read at no point.
+    expect(objectCalls().slice(0, 2)).toEqual(['object?package=app.platform', 'object?names=cloud_only']);
+    expect(objectCalls()).not.toContain('object');
   });
 
   it('CONTROL: a record overlay reads the whole registry (a record\'s related lists come from every object)', async () => {
@@ -297,14 +307,21 @@ describe('an object outside the package is read by name, behind the skeleton (ob
   });
 
   it('does not hold the route for its lookup targets: they are asked beside it, and the list renders meanwhile', async () => {
-    server.holdByName = true;
+    server.holdNames = true;
     boot('/apps/crm/crm_account');
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact'));
-    expect(server.calls).toContain('object/sys_user');
+    // The lookup target is asked in a `?names=` presence read (objectstack#34188),
+    // whose served answer is its definition (objectstack#35306): wait for that
+    // read, never assume it went out in the same render as the list's first
+    // paint. It is held, so the list drawn without it is still the route not
+    // waiting for it.
+    await waitFor(() => expect(server.calls).toContain('object?names=sys_user'));
+    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact');
     expect(screen.getByTestId('object-view')).not.toHaveTextContent('sys_user');
 
     act(() => server.release());
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
+    expect(server.calls).not.toContain('object/sys_user');
   });
 
   it('after the first paint, shows the route skeleton inside the chrome, never an empty route, until it lands', async () => {

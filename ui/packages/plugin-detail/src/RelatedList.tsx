@@ -1257,7 +1257,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    *    (objectui#10690), so the first query carries the operands;
    *  - the mobile card gallery's cover (`MOBILE_GALLERY_COVER_FIELD`), which
    *    no column shows and the gallery reads off every row — through the same
-   *    declared-and-readable gate, once the child schema has landed.
+   *    declared-and-readable gate, once the child schema has landed;
+   *  - the child object's DECLARED name field, which the row Delete confirm
+   *    names the row by — through the same gates, never drawn.
    *
    * ⛔ `pruneEmpty` is NOT applied: it judges emptiness from the rows this
    * request fetches, so the projection is taken before it — it only ever
@@ -1328,6 +1330,23 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           && readable(MOBILE_GALLERY_COVER_FIELD)) {
         projection.add(MOBILE_GALLERY_COVER_FIELD);
       }
+      // The object's DECLARED name field (ADR-0079 D2/D4). The row Delete
+      // confirm names the row from the row this projection fetched
+      // (`getRecordDisplayName`), so a `nameField` no column shows must still
+      // be on the row, or the sentence reads the `Record #<id>` floor. Fetched,
+      // never drawn: it joins the projection, not the columns — the arm
+      // `ObjectGrid` and `ListView` carry for their own confirms. Asked by
+      // name whatever its type (the server serves a formula field like any
+      // other), through the operands' gates: declared or a platform column,
+      // readable when declared, and not one the block redacts. A derived or
+      // `titleFormat` title is not asked for: it is no declared pointer.
+      const declaredName = declaredNameField(objectSchema);
+      if (typeof declaredName === 'string' && declaredName !== '' && !redactedFields.has(declaredName)) {
+        const declared = parentRelationshipFieldDef(fields, declaredName) !== undefined;
+        if ((declared || PLATFORM_RECORD_COLUMNS.has(declaredName)) && (!declared || readable(declaredName))) {
+          projection.add(declaredName);
+        }
+      }
     }
     return Array.from(projection);
   }, [columns, redactedFields, referenceField, objectName, api, perms, expandFields, objectSchema, rowActions]);
@@ -1382,28 +1401,44 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * columns, redacted and unreadable fields. The key is skipped even when no
    * authored column survives: the declared fields are read next. `undefined`:
    * the row names the record as everywhere else.
+   *
+   * Otherwise, when the list declares authored columns and they leave the
+   * child's name field out (objectstack#35263), the row names the first
+   * authored column that is a lookup to another record, under the same
+   * candidate test: a line named by a stored COPY of the product's title reads
+   * the product page's own name on every row, and the author already said
+   * which columns tell the rows apart. Only the authored columns are read on
+   * this path, and a template title (`titleFormat` with no declared name) is
+   * no name field: the row keeps it.
    */
   const compactNameField = React.useMemo((): string | undefined => {
     if (!compact || !objectSchema || !referenceField) return undefined;
-    if (resolveNameField(objectSchema) !== referenceField) return undefined;
+    const nameField = resolveNameField(objectSchema);
     const relatedObjectName = objectName || api || '';
-    const authored = dropRedactedColumns(Array.isArray(columns) ? columns : [], redactedFields)
+    const authoredColumns = Array.isArray(columns) ? columns : [];
+    const authored = dropRedactedColumns(authoredColumns, redactedFields)
       .map(drawnColumnKey)
       .filter((key): key is string => !!key);
     const fields = objectSchema.fields;
+    const candidate = (key: string): boolean =>
+      key !== referenceField &&
+      !redactedFields.has(key) &&
+      !PLATFORM_RECORD_COLUMNS.has(key) &&
+      parentRelationshipFieldDef(fields, key) !== undefined &&
+      !(perms?.isLoaded && relatedObjectName && !perms.checkField(relatedObjectName, key, 'read'));
+    if (nameField !== referenceField) {
+      const declaredName = declaredNameField(objectSchema);
+      if (!(typeof declaredName === 'string' && declaredName) && objectSchema.titleFormat) return undefined;
+      if (!nameField || authored.length === 0) return undefined;
+      if (authoredColumns.some((c) => drawnColumnKey(c) === nameField)) return undefined;
+      return authored.find((key) => candidate(key) && isExpandableFieldType(parentRelationshipFieldDef(fields, key)));
+    }
     const declared = Array.isArray(fields)
       ? fields.map((f: any) => f?.name).filter((n: unknown): n is string => typeof n === 'string')
       : fields && typeof fields === 'object'
         ? Object.keys(fields)
         : [];
-    return [...authored, ...declared].find(
-      (key) =>
-        key !== referenceField &&
-        !redactedFields.has(key) &&
-        !PLATFORM_RECORD_COLUMNS.has(key) &&
-        parentRelationshipFieldDef(fields, key) !== undefined &&
-        !(perms?.isLoaded && relatedObjectName && !perms.checkField(relatedObjectName, key, 'read')),
-    );
+    return [...authored, ...declared].find(candidate);
   }, [compact, objectSchema, referenceField, columns, redactedFields, objectName, api, perms]);
 
   /**

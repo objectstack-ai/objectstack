@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "access-security",
-  "axis": "access",
+  "axis": "data",
   "title": "Access, permissions, RLS/FLS, write-path guards",
   "items": [
     {
@@ -5313,7 +5313,7 @@
       "title": "The MCP agent ceiling sets (mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted) reach no person through any door: a direct grant, a position definition saved at the metadata door (active or draft), a position assignment, a seed and the deployment baseline are each refused 400 VALIDATION_FAILED at the field that named the set, and an ordinary set passes every one of them",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5338,7 +5338,7 @@
         "PUT /api/v1/meta/position/qa_ceiling_pos {\"name\": \"qa_ceiling_pos\", \"label\": \"QA ceiling\", \"permissionSets\": [\"showcase_auditor\", \"mcp_agent_data_read\"]}; then PUT /api/v1/meta/position/qa_ceiling_pos?mode=draft&package=com.qa.ceil with the same body; then GET /api/v1/meta/position/qa_ceiling_pos",
         "control: PUT /api/v1/meta/position/qa_person_pos {\"name\": \"qa_person_pos\", \"label\": \"QA person\", \"permissionSets\": [\"showcase_auditor\"]}, then POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_person_pos\"}",
         "POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_declared_ceiling\"}; read P's sys_user_position rows",
-        "seed: PUT /api/v1/meta/seed/qa_ceiling_seed?mode=draft&package=com.qa.ceil {\"object\": \"sys_user_permission_set\", \"mode\": \"insert\", \"records\": [{\"user_id\": P, \"permission_set\": \"mcp_agent_restricted\"}]} and PUT /api/v1/meta/seed/qa_person_seed?mode=draft&package=com.qa.ceil with permission_set showcase_ops; POST /api/v1/packages/com.qa.ceil/publish-drafts {}; read P's sys_user_permission_set rows",
+        "seed: PUT /api/v1/meta/seed/qa_ceiling_seed?mode=draft&package=com.qa.ceil {\"object\": \"sys_user_permission_set\", \"externalId\": [\"user_id\", \"permission_set\"], \"records\": [{\"user_id\": P, \"permission_set\": \"mcp_agent_restricted\"}]} and PUT /api/v1/meta/seed/qa_person_seed?mode=draft&package=com.qa.ceil with permission_set showcase_ops; POST /api/v1/packages/com.qa.ceil/publish-drafts {}; read P's sys_user_permission_set rows",
         "as P: GET /api/v1/auth/me/permissions"
       ],
       "acceptance": [
@@ -5409,6 +5409,12 @@
           "date": "2026-11-14",
           "change": "fixtures.knownGaps[0] re-pointed (card #33332; QA run #33081 comment 6850173588): the gap worried that installing qa_decl might itself be refused, leaving the assignment leg no position. The run built and installed it without a refusal, and source agrees: no lint or build rule judges a position's permissionSets against the MCP agent ceiling (mcp_agent_data_read is only named in packages/spec/src/ai/mcp.zod.ts and judged at grant time). The gap now states the measured admit and keeps the blocked(fixture) fallback for a future refusal. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-19",
+          "change": "steps[4] rekeyed: the seed drafts declared `mode: 'insert'`, which #34791 (#34613) retired, so their save is refused 422 INVALID_METADATA before the ceiling rule this leg scores could run. They now take the default mode (ignore) and `externalId: ['user_id', 'permission_set']`, the junction's natural key, as the retirement's prescription says. No clause changed",
+          "ref": "#34975"
         }
       ]
     },

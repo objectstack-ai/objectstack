@@ -72,6 +72,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "须修改密码",
         help: "开启后，用户必须先修改密码才能继续使用。管理员创建账号、导入用户或重置密码时会自动开启；系统维护。"
       },
+      dev_seed_credential: {
+        label: "开发种子凭据",
+        help: "开发种子创建的账号会带上此标记。只要其密码仍是种子密码，生产服务器就拒绝其登录和任何新会话；使用 os user set-password 设置新密码后会清除。系统维护；读取时从不返回。"
+      },
       mfa_required_at: {
         label: "MFA 强制生效时间",
         help: "强制 MFA 首次对该用户生效的时间（宽限期计时起点）。支撑 mfa_required；系统维护。"
@@ -155,7 +159,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -240,6 +244,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "邮箱",
+            pendingAgain: "已在待激活中",
             notApplied: "此人仍待激活，以下内容未生效（请在其记录上设置）",
             managerError: "上级",
             "host.reason": "邀请未发出"
@@ -260,11 +265,29 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             "summary.added": "已添加",
-            "summary.alreadyPending": "已在待激活中，已再次通知",
+            "summary.alreadyPending": "已在待激活中",
             "summary.failed": "未添加",
             rows: "逐行结果"
+          },
+          columns: {
+            rows: {
+              row: "行",
+              email: "邮箱",
+              ok: "成功",
+              alreadyPending: "已在待激活中",
+              "host.notified": "已通知托管组织",
+              "host.reason": "未通知的原因",
+              "error.message": "未添加的原因",
+              notApplied: "未应用（请在记录上设置）",
+              managerError: "上级"
+            }
           }
         }
+      },
+      remove_sso_user: {
+        label: "移除待登录用户",
+        confirmText: "移除这位尚未登录的人员并取消其邀请？如果对方在此期间已经登录，或无法联系到托管组织，则不会移除任何人。",
+        successMessage: "已移除待登录用户"
       },
       set_user_password: {
         label: "设置密码",
@@ -691,7 +714,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -797,7 +820,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -949,7 +972,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -976,7 +999,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "邀请已重新发送",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 重新发送邀请",
-          link_only: "已为 {{ result.email }} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         }
       },
       copy_invitation_link: {

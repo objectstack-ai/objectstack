@@ -38,6 +38,7 @@ import { AlertCircle, AlertTriangle, Maximize2, Plus, ZoomIn, ZoomOut } from 'lu
 import { cn } from '@object-ui/components';
 import { uniqueId, appendArray, spliceArray } from '../inspectors/_shared.js';
 import { t as tr, tFormat } from '../i18n.js';
+import { useFlowLabelTranslationsContext } from './flow-label-translations.js';
 import {
   computeLayoutWithGeometry,
   NODE_W,
@@ -175,9 +176,11 @@ export interface FlowCanvasProps {
    * objectui#11772 — the host's id minter for a new node, when the host keeps
    * an editing session (`FlowPreview` remembers every node id it has seen, so
    * a removed node's id is never minted again). Absent, the canvas mints with
-   * `freshNodeId` (`flow-problems`) over the draft alone.
+   * `freshNodeId` (`flow-problems`) over the draft alone. `alsoTaken` names
+   * ids this same gesture has already minted and not yet written (an approval
+   * inserts its outcome ends with it — objectstack#34818 item 4).
    */
-  mintNodeId?: () => string;
+  mintNodeId?: (alsoTaken?: readonly string[]) => string;
   /**
    * The object catalog's labels by object name: a node card names the object
    * it works on by its label, not its API name. Absent, the name shows.
@@ -216,6 +219,8 @@ export function FlowCanvas({
   // has an index signature). Same reference when nothing needed migrating, so
   // the memos keyed on `nodes` are unaffected.
   const nodes = React.useMemo(() => withCanonicalGeometry(storedNodes), [storedNodes]);
+  // An approval step's label in the viewer's language, where the package translates it.
+  const labelTranslations = useFlowLabelTranslationsContext();
 
   const viewportRef = React.useRef<HTMLDivElement>(null);
   // objectui#11795 — the viewport width the diagram was last framed at (the
@@ -334,6 +339,13 @@ export function FlowCanvas({
     ? describeEdgeConnectionRefusal(connectRefused.refusal, connectRefused.source, connectRefused.target, locale)
     : null;
 
+  // objectstack#34818 item 4 — which edges are an approval's outcomes, so
+  // their pills read in the designer's language.
+  const approvalWords = React.useMemo<ApprovalWords>(
+    () => ({ sources: new Set(nodes.filter((n) => n.type === 'approval').map((n) => n.id)), locale }),
+    [nodes, locale],
+  );
+
   const positionOf = React.useCallback(
     (id: string): Point => {
       if (dragPos && dragPos.id === id) return { x: dragPos.x, y: dragPos.y };
@@ -373,7 +385,7 @@ export function FlowCanvas({
   // objectui#11772 — the one place this canvas names a node it adds: the
   // host's session minter when it keeps one, else `freshNodeId` over the draft.
   const newNodeId = React.useCallback(
-    () => (mintNodeId ? mintNodeId() : freshNodeId(nodes, edges)),
+    (alsoTaken: readonly string[] = []) => (mintNodeId ? mintNodeId(alsoTaken) : freshNodeId(nodes, edges, alsoTaken)),
     [mintNodeId, nodes, edges],
   );
 
@@ -394,9 +406,15 @@ export function FlowCanvas({
         ...defaultNodeExtras(type, nodes),
         ...(at ? { position: { x: at.x, y: at.y } } : {}),
       };
-      const nextNodes = appendArray(nodes, newNode);
+      const inEdges = opts?.from ? [outEdge(opts.from, id, nodes, edges)] : [];
+      // objectstack#34818 item 4 — an approval comes with its two outcomes.
+      const outcomes = type === 'approval'
+        ? approvalOutcomes(id, undefined, [...edges, ...inEdges], newNodeId, locale)
+        : { nodes: [], edges: [] };
+      const nextNodes = [...nodes, newNode, ...outcomes.nodes];
+      const addedEdges = [...inEdges, ...outcomes.edges];
       const patch: Record<string, unknown> = { nodes: nextNodes };
-      if (opts?.from) patch.edges = appendArray(edges, outEdge(opts.from, id, nodes, edges));
+      if (addedEdges.length) patch.edges = [...edges, ...addedEdges];
       onPatch(patch);
       onSelect(newNode);
       setPaletteAt(null);
@@ -423,14 +441,24 @@ export function FlowCanvas({
         label: defaultNodeLabel(type, locale),
         ...defaultNodeExtras(type, nodes),
       };
-      // A→N inherits the original edge's branch semantics; N→B is plain.
+      // A→N inherits the original edge's branch semantics; N→B is plain —
+      // except out of an approval, whose N→B is its `approve` outcome and
+      // which also gets a `reject` outcome to a new end (objectstack#34818
+      // item 4).
       const firstSegment: FlowDesignerEdge = { ...edge, target: id };
+      const nextEdges = spliceArray(edges, edgeIdx, firstSegment);
+      if (type === 'approval') {
+        const outcomes = approvalOutcomes(id, edge.target, nextEdges, newNodeId, locale);
+        onPatch({ nodes: [...nodes, newNode, ...outcomes.nodes], edges: [...nextEdges, ...outcomes.edges] });
+        onSelect(newNode);
+        setPaletteAt(null);
+        return;
+      }
       const secondSegment: FlowDesignerEdge = {
         id: uniqueId('edge', [...edges.map((e) => e.id).filter(Boolean) as string[], 'edge']),
         source: id,
         target: edge.target,
       };
-      const nextEdges = spliceArray(edges, edgeIdx, firstSegment);
       onPatch({ nodes: appendArray(nodes, newNode), edges: appendArray(nextEdges, secondSegment) });
       onSelect(newNode);
       setPaletteAt(null);
@@ -829,7 +857,7 @@ export function FlowCanvas({
           t.target,
           bottomAnchor(s, heights.get(t.source) ?? NODE_H),
           topAnchor(d),
-          edge && branchPillSize(edge),
+          edge && branchPillSize(edge, approvalWords),
         ).label;
       }
     }
@@ -887,7 +915,7 @@ export function FlowCanvas({
     if (back) return { back, from, to, d: backEdgePath(from, to), labelPos: backEdgeLabelAnchor(from, to) };
     // objectui#13144 — a forward edge that would cross a card it skips detours
     // around it; its pill, insert handle and wide hit path all follow the route.
-    const route = forwardRoute(edge.source, edge.target, from, to, branchPillSize(edge));
+    const route = forwardRoute(edge.source, edge.target, from, to, branchPillSize(edge, approvalWords));
     return { back, from, to, d: route.d, labelPos: route.label };
   };
   // objectui#13242 — an edge end as its hover title names it: by the rule, and
@@ -899,7 +927,7 @@ export function FlowCanvas({
   // objectui#12507 — each edge's branch pill: its text, its full wording, and
   // how wide it may draw before it would reach a neighbouring pill.
   const branchLabels = layoutBranchLabels(edges.map((edge) => {
-    const label = branchLabelOf(edge);
+    const label = branchLabelOf(edge, approvalWords);
     const ends = label && edgeEnds(edge);
     return label && ends ? { ...label, at: ends.labelPos } : undefined;
   }));
@@ -1269,7 +1297,7 @@ export function FlowCanvas({
                   id={node.id}
                   locale={locale}
                   type={node.type}
-                  label={node.label || node.id}
+                  label={labelTranslations?.stepLabel(node) ?? (node.label || node.id)}
                   summary={nodeSummary(node, locale, objectLabels)}
                   position={pos}
                   selected={selectedId === node.id}
@@ -1472,15 +1500,76 @@ interface BranchLabel {
  * cannot run across its sibling or a node card, and the full wording rides
  * in `title` (the edge inspector still edits the condition itself).
  */
-function branchLabelOf(edge: FlowDesignerEdge): BranchLabel | undefined {
+function branchLabelOf(edge: FlowDesignerEdge, approval?: ApprovalWords): BranchLabel | undefined {
   if (edge.isDefault) return { text: 'else' };
   const cond = conditionText(edge.condition);
   const ifCond = cond ? `if ${cond}` : undefined;
-  const full = edge.label || ifCond;
+  // objectstack#34818 item 4 — an approval's outcome label reads in the
+  // designer's language (`approve` → 通过); the engine's keyword stays in the
+  // title beside it.
+  const outcome = approval && approval.sources.has(edge.source) ? approvalOutcomeWord(edge.label, approval.locale) : undefined;
+  const full = outcome || edge.label || ifCond;
   if (!full) return undefined;
   const chars = Array.from(full);
   const text = chars.length > BRANCH_LABEL_MAX_CHARS ? `${chars.slice(0, BRANCH_LABEL_MAX_CHARS).join('')}…` : full;
-  return { text, title: [edge.label, ifCond].filter(Boolean).join('\n') };
+  return { text, title: [outcome, edge.label, ifCond].filter(Boolean).join('\n') };
+}
+
+/** The approval nodes of the flow, and the language their outcome pills read in. */
+interface ApprovalWords {
+  sources: ReadonlySet<string>;
+  locale?: string;
+}
+
+const APPROVAL_OUTCOME_KEYS: Readonly<Record<string, string>> = {
+  approve: 'engine.inspector.flowEdge.branchApprove',
+  reject: 'engine.inspector.flowEdge.branchReject',
+  revise: 'engine.inspector.flowEdge.branchRevise',
+};
+
+/** The words for an approval outcome label, or `undefined` for any other label. */
+function approvalOutcomeWord(label: string | undefined, locale?: string): string | undefined {
+  const key = typeof label === 'string' ? APPROVAL_OUTCOME_KEYS[label.trim().toLowerCase()] : undefined;
+  return key ? tr(key, locale) : undefined;
+}
+
+/**
+ * objectstack#34818 item 4 — the two outcomes an approval node is inserted
+ * with: an `approve` edge to `next` (the node it was inserted before), or to
+ * a new 「Approved」 end when there is none, and a `reject` edge to a new
+ * 「Rejected」 end. The engine routes an approval down the out-edge whose label
+ * matches the decision (ADR-0019), so both labels are the engine's keywords;
+ * `revise` (ADR-0044) stays for the author to add. Ids come from the canvas's
+ * minter, each told about the ones minted before it.
+ */
+export function approvalOutcomes(
+  approvalId: string,
+  next: string | undefined,
+  edges: ReadonlyArray<FlowDesignerEdge>,
+  mint: (alsoTaken?: readonly string[]) => string,
+  locale?: string,
+): { nodes: FlowDesignerNode[]; edges: FlowDesignerEdge[] } {
+  const minted: string[] = [approvalId];
+  const end = (labelKey: string): FlowDesignerNode => {
+    const id = mint(minted);
+    minted.push(id);
+    return { id, type: 'end', label: tr(labelKey, locale) };
+  };
+  const approved = next ? undefined : end('engine.flowCanvas.approvedEnd');
+  const rejected = end('engine.flowCanvas.rejectedEnd');
+  const edgeIds = edges.map((e) => e.id).filter(Boolean) as string[];
+  const edgeId = () => {
+    const id = uniqueId('edge', edgeIds);
+    edgeIds.push(id);
+    return id;
+  };
+  return {
+    nodes: approved ? [approved, rejected] : [rejected],
+    edges: [
+      { id: edgeId(), source: approvalId, target: next ?? approved!.id, label: 'approve' },
+      { id: edgeId(), source: approvalId, target: rejected.id, label: 'reject' },
+    ],
+  };
 }
 
 /**
@@ -1488,8 +1577,8 @@ function branchLabelOf(edge: FlowDesignerEdge): BranchLabel | undefined {
  * per-character estimate, at most a node card wide), which the edge router keeps
  * clear of every card. Undefined for an edge that draws no pill.
  */
-function branchPillSize(edge: FlowDesignerEdge): { width: number; height: number } | undefined {
-  const label = branchLabelOf(edge);
+function branchPillSize(edge: FlowDesignerEdge, approval?: ApprovalWords): { width: number; height: number } | undefined {
+  const label = branchLabelOf(edge, approval);
   if (!label) return undefined;
   const width = Math.min(NODE_W, Array.from(label.text).length * BRANCH_PILL_CHAR_W + BRANCH_PILL_CHROME_W);
   return { width, height: BRANCH_PILL_H };

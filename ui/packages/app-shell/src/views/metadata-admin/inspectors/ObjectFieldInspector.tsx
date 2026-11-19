@@ -82,12 +82,24 @@ import {
   InspectorNumberField,
   InspectorSelectField,
   InspectorCheckboxField,
-  InspectorRemoveButton,
   InspectorEmptyState,
   moveArray,
 } from './_shared.js';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Input,
   Label,
   Badge,
@@ -101,7 +113,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@object-ui/components';
-import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle } from 'lucide-react';
+import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle, ChevronRight, MoreHorizontal, Trash2 } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
 import { ObjectPicker } from './ObjectPicker.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
@@ -133,6 +145,7 @@ import {
   useExternalWriteState,
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
+import { useRequiredVisibleWhenFormulaReads, useRequiredVisibleWhenReferenceReads } from './requiredVisibleWhenReference.js';
 import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
@@ -835,6 +848,24 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides
+  // its requirement on the server; a read through a reference there faults and
+  // counts as shown, so the field stays required where the form hides it.
+  const siblingTypes = React.useMemo(() => {
+    const out: Record<string, unknown> = {};
+    for (const e of view.entries) out[e.name] = e.def?.type;
+    return out;
+  }, [view]);
+  const visibleWhenReferenceReads = useRequiredVisibleWhenReferenceReads(entry?.def ?? null, siblingTypes);
+  // …and a formula it reads is computed over the saved record there, and that
+  // value decides; one the server cannot compute keeps it required on every
+  // save, and the form shows it.
+  const siblingDefs = React.useMemo(() => {
+    const out: Record<string, Record<string, unknown> | undefined> = {};
+    for (const e of view.entries) out[e.name] = e.def as Record<string, unknown> | undefined;
+    return out;
+  }, [view]);
+  const visibleWhenFormulaReads = useRequiredVisibleWhenFormulaReads(entry?.def ?? null, siblingDefs);
   // A Chinese Label derives the API name through its pinyin (`romanizeHan`);
   // the dictionary starts loading as soon as the Label holds a Chinese
   // character, so the keystrokes after it derive.
@@ -1070,6 +1101,12 @@ export function ObjectFieldInspector({
     // Spec: `returnType` carries only a PROVEN concrete type —
     // an ambiguous (`unknown`) or unavailable verdict clears it.
     const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
+    // objectstack#35047 — `percent` and `currency` are DECLARED: no CEL type
+    // proves a quotient is a percentage or a number is money, so a declared
+    // one survives every verdict that proves no OTHER type — `number`, and an
+    // unproven one alike (a field-over-field quotient types `dyn`). A verdict
+    // that proves text, boolean or date still stamps.
+    if ((def.returnType === 'percent' || def.returnType === 'currency') && (next === undefined || next === 'number')) return;
     if (def.returnType !== next) patchDef({ returnType: next });
   };
 
@@ -1381,6 +1418,24 @@ export function ObjectFieldInspector({
 
   /* ─── Render ─── */
 
+  // objectstack#34794 — delete is in the header's ⋯ menu, confirmed first,
+  // not the panel's most prominent button. An external field offers none.
+  const removeLabel = typeof def.label === 'string' && def.label ? def.label : entry.name;
+  const moreMenu = external ? null : (
+    <DisplayPatchLock>
+      <FieldMoreMenu
+        label={tr('engine.studio.if.more')}
+        removeLabel={tFormat('designer.field.remove', locale, { label: removeLabel })}
+        confirmTitle={tFormat('designer.field.removeConfirmTitle', locale, { label: removeLabel })}
+        confirmBody={tr('designer.field.removeConfirmBody')}
+        confirmAction={tr('engine.edit.delete')}
+        cancelLabel={tr('engine.cancel')}
+        onRemove={removeField}
+        disabled={locked}
+      />
+    </DisplayPatchLock>
+  );
+
   const headerActions = (
     <div className="flex items-center gap-1">
       {!ddlLocked && (
@@ -1405,19 +1460,8 @@ export function ObjectFieldInspector({
           />
         </DisplayPatchLock>
       )}
+      {moreMenu}
     </div>
-  );
-
-  const footer = external ? undefined : (
-    <DisplayPatchLock>
-      <InspectorRemoveButton
-        label={tFormat('designer.field.remove', locale, {
-          label: typeof def.label === 'string' ? def.label : entry.name,
-        })}
-        onClick={removeField}
-        disabled={locked}
-      />
-    </DisplayPatchLock>
   );
 
   const typeMetaLabel = typeMeta ? t(`engine.fieldType.${typeMeta.id}`, locale) : undefined;
@@ -1444,7 +1488,6 @@ export function ObjectFieldInspector({
       onClose={onClearSelection}
       closeLabel={tr('designer.field.close')}
       headerActions={headerActions}
-      footer={footer}
     >
       {/* Basic */}
       <Section title={tr('designer.field.section.basic')}>
@@ -1462,16 +1505,8 @@ export function ObjectFieldInspector({
             <ExternalFieldBadge binding={external} state={externalWriteState} locale={locale} />
           </div>
         )}
-        <DisplayPatchLock>
-          <FieldApiNameInput
-            label={tr('designer.field.apiName')}
-            value={entry.name}
-            takenNames={takenNames}
-            onRename={setKey}
-            disabled={ddlLocked}
-            locale={locale}
-          />
-        </DisplayPatchLock>
+        {/* objectstack#34794 — the label leads; the API name is in the
+            collapsed Developer info section below. */}
         <InspectorTextField
           label={tr('designer.field.label')}
           value={typeof def.label === 'string' ? (def.label as string) : ''}
@@ -1574,6 +1609,24 @@ export function ObjectFieldInspector({
           placeholder={tr('designer.field.helpTextPlaceholder')}
         />
       </Section>
+      {/* objectstack#34794 — the field's API name: how the API and formulas
+          refer to it. Collapsed by default, since an everyday edit never
+          needs it; the rename, its checks and its hints are unchanged. */}
+      <DeveloperSection
+        title={tr('designer.field.section.developer')}
+        hint={tr('designer.field.section.developerHint')}
+      >
+        <DisplayPatchLock>
+          <FieldApiNameInput
+            label={tr('designer.field.apiName')}
+            value={entry.name}
+            takenNames={takenNames}
+            onRename={setKey}
+            disabled={ddlLocked}
+            locale={locale}
+          />
+        </DisplayPatchLock>
+      </DeveloperSection>
 
       {/* Type-specific */}
       {(isPicklist(type) || isLookup(type) || offersReferenceNameVisible(type) || isComputed(type) || isNumeric(type) || isTexty(type) || offersValueDomain(type)) && (
@@ -1904,6 +1957,37 @@ export function ObjectFieldInspector({
               slot="visibleWhen"
               t={tr}
             />
+            {visibleWhenReferenceReads.length > 0 && (
+              <p
+                data-testid="field-required-visiblewhen-reference"
+                className="flex items-start gap-1 px-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {tFormat('designer.field.requiredVisibleWhenReference', locale, {
+                    fields: visibleWhenReferenceReads.join(', '),
+                  })}
+                </span>
+              </p>
+            )}
+            {/* Only a formula the form cannot compute: one it computes is judged on the server's value. */}
+            {(visibleWhenFormulaReads.writePath.length > 0 || visibleWhenFormulaReads.formOnly.length > 0) && (
+              <p
+                data-testid="field-required-visiblewhen-formula"
+                className="flex items-start gap-1 px-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {visibleWhenFormulaReads.writePath.length > 0
+                    ? tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
+                        fields: visibleWhenFormulaReads.writePath.join(', '),
+                      })
+                    : tFormat('designer.field.requiredVisibleWhenFormulaFormOnly', locale, {
+                        fields: visibleWhenFormulaReads.formOnly.join(', '),
+                      })}
+                </span>
+              </p>
+            )}
             <CelPredicateField
               id={`field-rule-readonly-${entry.name}`}
               label={tr('designer.field.readonlyWhen')}
@@ -1968,7 +2052,7 @@ export function ObjectFieldInspector({
       </Section>
     </InspectorShell>
   );
-  // The shell draws the header's reorder pair and the footer's Remove, so the
+  // The shell draws the header's reorder pair and the ⋯ menu's Remove, so the
   // reason their locks read is provided above it.
   return <DisplayPatchReasonContext.Provider value={displayPatchReason}>{shell}</DisplayPatchReasonContext.Provider>;
 }
@@ -1983,6 +2067,117 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </div>
       <div className="space-y-2">{children}</div>
     </div>
+  );
+}
+
+/**
+ * objectstack#34794 — a section collapsed by default: its title is the toggle,
+ * its one-line hint says what is inside. The body stays mounted and is only
+ * hidden while collapsed, so a control inside keeps its state across a toggle.
+ * Ephemeral UI state (ui/AGENTS.md #8): each field opens with it collapsed.
+ */
+function DeveloperSection({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  const bodyId = React.useId();
+  return (
+    <div className="space-y-2" data-testid="field-developer-section">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="field-developer-toggle"
+        className="flex w-full items-center justify-between border-b pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+      >
+        {title}
+        <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+      </button>
+      <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>
+      <div id={bodyId} hidden={!open} className="space-y-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * objectstack#34794 — the field header's ⋯ menu. Its Delete asks first: the
+ * delete leaves the panel's footer, so a confirmation stands in for the
+ * visibility the button had there.
+ */
+function FieldMoreMenu({
+  label,
+  removeLabel,
+  confirmTitle,
+  confirmBody,
+  confirmAction,
+  cancelLabel,
+  onRemove,
+  disabled,
+}: {
+  label: string;
+  removeLabel: string;
+  confirmTitle: string;
+  confirmBody: string;
+  confirmAction: string;
+  cancelLabel: string;
+  onRemove: () => void;
+  disabled?: boolean;
+}) {
+  const [confirming, setConfirming] = React.useState(false);
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            aria-label={label}
+            title={label}
+            data-testid="field-more-menu"
+            // Its one entry is Delete: a locked field offers the menu disabled,
+            // so the lock's reason wraps a disabled control.
+            disabled={disabled}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem
+            data-testid="field-remove"
+            disabled={disabled}
+            className="text-destructive focus:text-destructive"
+            onSelect={() => setConfirming(true)}
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            {removeLabel}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent data-testid="field-remove-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmBody}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="field-remove-confirm-cancel">{cancelLabel}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="field-remove-confirm-action"
+              onClick={() => {
+                setConfirming(false);
+                onRemove();
+              }}
+            >
+              {confirmAction}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

@@ -40,6 +40,10 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // …and over rows a host handed in while declaring them one page of more.
   'grid.grouping.needsWholeRows':
     'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+  // …and the note over a grouping entry on a field only the draft declares,
+  // dropped under the console's draft preview (objectstack#34898).
+  // Byte-identical to the `en` pack.
+  'grid.grouping.draftOnly': 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
   // Reused by the grouped-view pager (falls back here when no I18nProvider).
   'table.rowsPerPage': 'Rows per page',
   'table.pageInfo': 'Page {{current}} of {{total}}',
@@ -96,6 +100,8 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // package's own tests) never reaches the locale packs.
   'detail.recordDetail': 'Record Detail',
   'detail.recordDetailWithLabel': '{{label}} Detail',
+  // objectstack#35548 — the summary row's lead, under the first column.
+  'grid.summary.countLead': 'Count {{value}}',
 };
 
 /**

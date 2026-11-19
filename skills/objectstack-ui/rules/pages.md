@@ -59,7 +59,7 @@ A `slotted` record page has no `tabs` slot — see [Record Page](./record-page.m
 > `{current_quarter_start}` etc. resolve from the page's `variables` block,
 > the bound record, and the runtime context. Declare `variables: [...]` at
 > the page root for any non-record value; relative-date placeholders:
-> [Date Macros](../SKILL.md#date-macros--filter-placeholders).
+> objectstack-query → `rules/filters.md`.
 
 ### Print pages
 

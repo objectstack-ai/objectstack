@@ -28,6 +28,8 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererContext } from '@object-ui/react';
 // Module scope, not `beforeAll` — see object-ui/no-dynamic-import-in-test-hook.
 import '../../../renderers';
+// `react-page.tsx` (reached through `../../../renderers`) loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 import { patchingUpdateActions } from '../actionRequirements';
 
 beforeEach(() => {
@@ -151,11 +153,15 @@ describe('form renderer — fields an update action would require (objectstack#2
     expect(noteOnIssuedOn()).toBeNull();
   });
 
-  it('does not read or note anything on a create form', async () => {
+  it('makes one object read on a create form, the formula pass\'s, and notes nothing', async () => {
     const { getObjectSchema } = renderInvoiceForm({ edit: false });
     // Let any effect settle before reading the absence.
     await new Promise((r) => setTimeout(r, 20));
-    expect(getObjectSchema).not.toHaveBeenCalled();
+    // Exactly one read, and it is not this feature's: a form whose fields
+    // declare a rule reads the object once for its formula fields
+    // (objectstack#35033), on a create as on an edit. The action requirements
+    // add none on a create.
+    expect(getObjectSchema).toHaveBeenCalledTimes(1);
     expect(noteOnIssuedOn()).toBeNull();
   });
 

@@ -36,3 +36,4 @@ import '@object-ui/plugin-map';
 import '@object-ui/plugin-markdown';
 import '@object-ui/plugin-report';
 import '@object-ui/plugin-tree';
+import '@object-ui/plugin-timesheet';

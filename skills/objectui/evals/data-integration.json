@@ -39,7 +39,7 @@
     },
     {
       "id": 3,
-      "prompt": "My ObjectUI table shows 'undefined' for all rows. The dataSource.find() call returns data correctly in the console. What's wrong?",
+      "prompt": "My ObjectUI table shows 'undefined' for all rows. The dataSource.find() call returns data correctly in the console. What's wrong? The app's source is not in this directory: answer from what is stated here.",
       "expected_output": "Diagnoses likely bind path mismatch or missing SchemaRendererProvider. Shows correct data flow: provider → bind → useDataScope resolution.",
       "files": [],
       "assertions": {

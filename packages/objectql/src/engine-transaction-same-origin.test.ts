@@ -33,8 +33,11 @@
 // row is lost exactly as before — only now with a different log line.
 
 import { describe, it, expect } from 'vitest';
+import type { Hook } from '@objectstack/spec/data';
 import { ObjectQL, ScopedContext } from './engine.js';
+import { bindHooksToEngine } from './hook-binder.js';
 import { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+import { openTransactionKind } from './open-transaction.js';
 
 interface Recorded {
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -558,19 +561,305 @@ describe('the same-origin gate declines to judge a handle it cannot attribute (#
   it('does NOT cover a foreign handle passed in from outside — declared, not overlooked', async () => {
     const { engine, ledgerDb } = await splitEngine();
 
-    // The sandbox runner's discrete `beginTransaction`/`commit`/`rollback` trio
-    // threads its handle across `setImmediate` boundaries where
-    // AsyncLocalStorage does not survive, so it never populates txStore and the
-    // engine holds an opaque driver object with no back-reference to its owner.
-    // There is no honest comparison to make, and guessing would refuse
-    // legitimate single-datasource work. So the pre-#5351 behaviour stands on
-    // this path — pinned here so the limit is a recorded decision rather than a
-    // gap someone discovers. Closing it needs handle ownership to become
+    // A handle the engine never opened — not through `transaction()`, and not
+    // through `ScopedContext`'s discrete trio, whose handles it attributes by
+    // the owner recorded at `beginTransaction` (#35028, the describe below) —
+    // is an opaque driver object with no back-reference to its owner. There is
+    // no honest comparison to make, and guessing would refuse legitimate
+    // single-datasource work. So the pre-#5351 behaviour stands on this path —
+    // pinned here so the limit is a recorded decision rather than a gap
+    // someone discovers. Closing it needs handle ownership to become
     // discoverable on `IDataDriver`; filed separately.
     const foreign = { __trx: 'somebody elses handle' };
     await engine.insert('ledger', { name: 'unattributed' }, { context: { transaction: foreign } } as any);
 
     expect(ledgerDb.writes).toHaveLength(1);
     expect(ledgerDb.writes[0].transaction).toBe(foreign);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (f) The discrete trio — a handle the engine opened, attributed (#35028)
+// ---------------------------------------------------------------------------
+
+describe('a handle the ScopedContext trio opened is attributed to its owner (#35028)', () => {
+  /**
+   * The sandbox runner's `ctx.api.transaction` drives `beginTransaction` /
+   * `commitTransaction` / `rollbackTransaction` and threads the handle into
+   * every op explicitly; it never reaches `txStore`. The owner is known at
+   * `beginTransaction`, so the gate judges the handle as it judges one
+   * `transaction()` opened.
+   */
+  async function openTrio(engine: ObjectQL) {
+    const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+    const opened = await scoped.beginTransaction();
+    expect(opened, 'precondition: the default driver opens transactions').not.toBeNull();
+    return { scoped, ctx: opened!.ctx as any, handle: opened!.handle };
+  }
+
+  /** The platform audit writer's shape: an `afterInsert` hook writing the ledger through `ctx.api.sudo()`. */
+  function auditHook(engine: ObjectQL) {
+    const outcomes: string[] = [];
+    engine.registerHook('afterInsert', async (ctx: any) => {
+      if (ctx.object !== 'thing') return;
+      try {
+        await ctx.api.sudo().object('sys_audit_log').create({ action: 'create thing' });
+        await ctx.api.sudo().object('sys_activity').create({ action: 'created' });
+        outcomes.push('ok');
+      } catch (e) {
+        outcomes.push(`FAILED ${String((e as Error)?.message)}`);
+      }
+    }, { packageId: '__test__' } as any);
+    return outcomes;
+  }
+
+  it('lands the audit and activity rows on telemetry, outside the transaction, with no foreign handle', async () => {
+    const { engine, primary, telemetry } = await splitEngine();
+    const outcomes = auditHook(engine);
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await ctx.object('thing').insert({ name: 'business row' });
+    await scoped.commitTransaction(handle);
+
+    expect(outcomes).toEqual(['ok']);
+    expect(telemetry.writes.map((w: RecordedWrite) => w.object)).toEqual(['sys_audit_log', 'sys_activity']);
+    // Before #35028 both rows were handed `primary`'s handle — on a real SQL
+    // driver, a statement on the primary connection that has no such table.
+    expect(telemetry.writes.every((w: RecordedWrite) => w.transaction === undefined)).toBe(true);
+    // The business write still rides the trio's own handle.
+    expect(primary.writes).toHaveLength(1);
+    expect(primary.writes[0]).toMatchObject({ object: 'thing', op: 'create' });
+    expect(primary.writes[0].transaction).toBe(handle);
+  });
+
+  it('keeps the ledger rows when the trio rolls back — the decided orphan row', async () => {
+    const { engine, telemetry, primary } = await splitEngine();
+    let rolledBack: unknown;
+    primary.rollback = async (h: unknown) => { rolledBack = h; };
+    auditHook(engine);
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await ctx.object('thing').insert({ name: 'doomed' });
+    await scoped.rollbackTransaction(handle);
+
+    expect(rolledBack).toBe(handle);
+    expect(telemetry.writes.map((w: RecordedWrite) => w.object)).toEqual(['sys_audit_log', 'sys_activity']);
+    expect(telemetry.writes.every((w: RecordedWrite) => w.transaction === undefined)).toBe(true);
+  });
+
+  it('notes the carve-out at debug, once per trio transaction per datasource', async () => {
+    const { engine, carveOutNotes } = await splitEngine();
+    auditHook(engine);
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await ctx.object('thing').insert({ name: 'a' });
+    await ctx.object('thing').insert({ name: 'b' });
+    await scoped.commitTransaction(handle);
+
+    const notes = carveOutNotes();
+    expect(notes).toHaveLength(1);
+    expect(meta(notes[0])).toMatchObject({ datasource: 'telemetry', transactionDatasource: 'primary' });
+  });
+
+  it('refuses a cross-datasource business write under the trio handle, naming both datasources', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    const err = await rejection<CrossDatasourceTransactionWriteError>(ctx.object('ledger').insert({ name: 'NOT covered' }));
+    await scoped.rollbackTransaction(handle);
+
+    expect(err).toBeInstanceOf(CrossDatasourceTransactionWriteError);
+    expect(err.code).toBe('ERR_CROSS_DATASOURCE_TRANSACTION_WRITE');
+    expect(err).toMatchObject({ object: 'ledger', operation: 'insert', datasource: 'ledger_db', transactionDatasource: 'primary' });
+    // Refused before any driver ran: nothing on the other datasource, and no
+    // statement on the wrong connection.
+    expect(ledgerDb.writes).toHaveLength(0);
+  });
+
+  it('refuses update and delete under the trio handle too', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    const seeded = await engine.insert('ledger', { name: 'outside' });
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await expect(ctx.object('ledger').update(seeded.id, { name: 'x' })).rejects.toBeInstanceOf(CrossDatasourceTransactionWriteError);
+    await expect(ctx.object('ledger').delete(seeded.id)).rejects.toBeInstanceOf(CrossDatasourceTransactionWriteError);
+    await scoped.rollbackTransaction(handle);
+    expect(ledgerDb.writes.map((w: RecordedWrite) => w.op)).toEqual(['create']);
+  });
+
+  it('treats the handle as closed once the trio commits — a late cross-datasource write runs unenrolled', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.commitTransaction(handle);
+
+    // [#35149] A closed handle threaded back in is no handle, as a closed
+    // `transaction()` unit's is (#22855): the write is not refused, and it
+    // runs outside any transaction. Before #35149 the commit only dropped the
+    // owner record, so the handle read as an unattributed one and the dead
+    // `primary` handle was handed to `ledger_db`.
+    await engine.insert('ledger', { name: 'after commit' }, { context: { transaction: handle } } as any);
+    expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
+  });
+
+  it('treats the handle as closed once the trio rolls back, too', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.rollbackTransaction(handle);
+
+    await engine.insert('ledger', { name: 'after rollback' }, { context: { transaction: handle } } as any);
+    expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
+  });
+
+  it('lets an async afterFind run, detached from the open trio handle, write a business object on another datasource', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    // An `async: true` `afterFind` run starts at dispatch, outside every unit
+    // open then (`unit-detach.ts`): its `ctx.api` still carries the trio
+    // handle, and the engine treats that handle as closed for the run
+    // (`isClosedUnitHandle`). So its write is outside any transaction, as
+    // under `transaction(cb)`: it lands, on its own connection, and the gate
+    // does not judge it against the trio record.
+    let report!: (outcome: string) => void;
+    const outcome = new Promise<string>((r) => { report = r; });
+    bindHooksToEngine(engine, [{
+      name: 'mirror_read', object: 'thing', events: ['afterFind'], async: true, onError: 'log',
+      handler: async (ctx: any) => {
+        try {
+          await ctx.api.object('ledger').insert({ name: 'from a detached read hook' });
+          report('stored');
+        } catch (e) {
+          report(`FAILED ${(e as Error)?.name}: ${(e as Error)?.message}`);
+        }
+      },
+    } as unknown as Hook], { packageId: 'app:t' });
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await ctx.object('thing').find({});
+    // The trio is still open while the detached run writes.
+    expect(await outcome).toBe('stored');
+    await scoped.commitTransaction(handle);
+
+    expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0]).toMatchObject({ object: 'ledger', op: 'create' });
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
+  });
+
+  describe('single datasource: the trio still rides one handle (#35028 regression guard)', () => {
+    async function singleEngine() {
+      const engine = new ObjectQL({ logger: recordingLogger().logger } as any);
+      const primary = makeDriver('primary');
+      engine.registerDriver(primary, true);
+      await engine.init();
+      engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
+      for (const [name, cls] of [['sys_audit_log', 'audit'], ['sys_activity', 'telemetry']] as const) {
+        engine.registry.registerObject({
+          name,
+          lifecycle: { class: cls, retention: { maxAge: '90d' } },
+          fields: { action: { type: 'text' } },
+        } as any, '__test__');
+      }
+      return { engine, primary };
+    }
+
+    it('writes the business and ledger rows on the trio handle, and rolls them back together', async () => {
+      const { engine, primary } = await singleEngine();
+      const outcomes = auditHook(engine);
+      let rolledBack: unknown;
+      primary.rollback = async (h: unknown) => { rolledBack = h; };
+      const { scoped, ctx, handle } = await openTrio(engine);
+
+      await ctx.object('thing').insert({ name: 'a' });
+      await scoped.rollbackTransaction(handle);
+
+      expect(outcomes).toEqual(['ok']);
+      expect(primary.writes.map((w: RecordedWrite) => w.object)).toEqual(['thing', 'sys_audit_log', 'sys_activity']);
+      expect(primary.writes.every((w: RecordedWrite) => w.transaction === handle)).toBe(true);
+      expect(rolledBack).toBe(handle);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (g) A closed trio handle is no handle — as a closed transaction() unit's is (#35149)
+// ---------------------------------------------------------------------------
+
+describe('a trio handle closes as a transaction() unit handle does (#35149)', () => {
+  /** The engine's own reading of a threaded handle (`isClosedUnitHandle`), the one every write and read path acts on. */
+  const isClosed = (engine: ObjectQL, handle: unknown): boolean => (engine as any).isClosedUnitHandle(handle);
+
+  async function openTrio(engine: ObjectQL) {
+    const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+    const opened = await scoped.beginTransaction();
+    expect(opened, 'precondition: the default driver opens transactions').not.toBeNull();
+    expect(opened!.owned, 'precondition: the trio opened this handle, it did not join one').toBe(true);
+    return { scoped, ctx: opened!.ctx as any, handle: opened!.handle };
+  }
+
+  it('gives a late cross-datasource write the same answer under a committed trio handle as under a closed unit handle', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    let unitHandle: unknown;
+    await engine.transaction(async (trxCtx: any) => { unitHandle = trxCtx?.transaction; });
+    expect(unitHandle, 'precondition: transaction() threads its handle into the callback').toBeDefined();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.commitTransaction(handle);
+
+    expect(isClosed(engine, unitHandle)).toBe(true);
+    expect(isClosed(engine, handle)).toBe(true);
+    await engine.insert('ledger', { name: 'late, closed unit' }, { context: { transaction: unitHandle } } as any);
+    await engine.insert('ledger', { name: 'late, committed trio' }, { context: { transaction: handle } } as any);
+    expect(ledgerDb.writes.map((w: RecordedWrite) => w.transaction)).toEqual([undefined, undefined]);
+  });
+
+  it('runs a late same-datasource write unenrolled too, never on the dead handle', async () => {
+    const { engine, primary } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+    await scoped.rollbackTransaction(handle);
+
+    expect(isClosed(engine, handle)).toBe(true);
+    await engine.insert('thing', { name: 'after rollback' }, { context: { transaction: handle } } as any);
+    expect(primary.writes).toHaveLength(1);
+    expect(primary.writes[0].transaction).toBeUndefined();
+  });
+
+  it('CONTROL: an open trio handle still enrolls, and a cross-datasource business write under it is still refused', async () => {
+    const { engine, primary, ledgerDb } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+
+    expect(isClosed(engine, handle)).toBe(false);
+    await engine.insert('thing', { name: 'in the trio' }, { context: { transaction: handle } } as any);
+    expect(primary.writes[0].transaction).toBe(handle);
+    const err = await rejection<CrossDatasourceTransactionWriteError>(
+      engine.insert('ledger', { name: 'refused' }, { context: { transaction: handle } } as any),
+    );
+    expect(err.code).toBe('ERR_CROSS_DATASOURCE_TRANSACTION_WRITE');
+    expect(ledgerDb.writes).toHaveLength(0);
+    await scoped.commitTransaction(handle);
+    expect(isClosed(engine, handle)).toBe(true);
+  });
+
+  it('answers the body doors\' question the same way: separate while open, none once committed', async () => {
+    const { engine } = await splitEngine();
+    const { scoped, handle } = await openTrio(engine);
+
+    expect(openTransactionKind(engine, handle)).toBe('separate');
+    await scoped.commitTransaction(handle);
+    expect(openTransactionKind(engine, handle)).toBe('none');
+  });
+
+  it('reads a handle the driver hands out again as open on its next begin', async () => {
+    const { engine, primary } = await splitEngine();
+    const shared = { __trx: 'primary, reused' };
+    primary.beginTransaction = async () => shared;
+    const first = await openTrio(engine);
+    await first.scoped.commitTransaction(first.handle);
+    expect(isClosed(engine, shared)).toBe(true);
+
+    const second = await openTrio(engine);
+    expect(second.handle).toBe(shared);
+    expect(isClosed(engine, shared)).toBe(false);
+    await second.ctx.object('thing').insert({ name: 'on the reopened handle' });
+    expect(primary.writes[0].transaction).toBe(shared);
+    await second.scoped.commitTransaction(shared);
   });
 });

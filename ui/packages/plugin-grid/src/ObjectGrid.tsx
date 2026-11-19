@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -550,6 +550,19 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * review floor") governs nothing now. It was asking for the ruling to be taken
  * deliberately at that package's floor, and that is exactly how `bf97b98c8` took it.
  */
+/**
+ * The grid table's frame (objectstack#35548): every header cell 32px tall at
+ * 13px, and the row lines a shade off the background rather than a rule.
+ */
+export const OBJECT_GRID_TABLE_DENSITY = [
+  '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  // A referenced record (a lookup's link) is a small chip led by its name's
+  // first letter; an option label keeps its colour, less saturated.
+  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
+  '[&_td_a[data-record-link]]:before:flex [&_td_a[data-record-link]]:before:h-3.5 [&_td_a[data-record-link]]:before:w-3.5 [&_td_a[data-record-link]]:before:shrink-0 [&_td_a[data-record-link]]:before:items-center [&_td_a[data-record-link]]:before:justify-center [&_td_a[data-record-link]]:before:rounded-sm [&_td_a[data-record-link]]:before:bg-muted-foreground/20 [&_td_a[data-record-link]]:before:text-[10px] [&_td_a[data-record-link]]:before:font-medium [&_td_a[data-record-link]]:before:content-[attr(data-initial)]',
+  '[&_td_[data-select-badge]]:saturate-[.6]',
+].join(' ');
+
 type RemoveIndexSignature<T> = {
   [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
 };
@@ -1180,6 +1193,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // grouping refusals and the fetch window (`./objectGridGroupingDecisions`).
   const {
     unmaskedGroupingFields,
+    draftOnlyGroupingFields,
     groupingRefusesNothing,
     groupingKeyReadable,
     serverGroupedFetch,
@@ -1732,6 +1746,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   }
 
+  // objectstack#34898 — the grouping sentences' non-blocking sibling. A
+  // grouping entry on a field only the draft declares is dropped
+  // (`draftOnlyGroupingFields`) and the grid draws ungrouped, or grouped by the
+  // published entries left. Unlike the two refusals above nothing is withheld,
+  // so this is no panel replacing the grid: it is one line drawn above the
+  // rows, under the description, by every branch that draws them (the card
+  // view and the table), in the strip `ListView` draws its own draft-preview
+  // note in, so it is read before the rows it explains.
+  const groupingDraftOnlyNote = draftOnlyGroupingFields.length > 0 ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-draft-only"
+    >
+      {t('grid.grouping.draftOnly', {
+        fields: draftOnlyGroupingFields
+          .map((field) => {
+            const fallback = (objectFields?.[field] as { label?: string } | undefined)?.label || field;
+            return schema.objectName ? resolveFieldLabel(schema.objectName, field, fallback) : fallback;
+          })
+          .join(', '),
+      })}
+    </p>
+  ) : null;
+
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
   const { persistedColumns } = resolveObjectGridPersistedColumns({
@@ -1752,9 +1791,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
   // `h-*` enforces a minimum row height so the action-button column doesn't dictate it.
+  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and
+  // the row's 1px line.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-9 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-8 text-[13px] leading-tight'
       : rowHeightMode === 'short'
         ? 'px-3 py-1 h-9 text-[13px] leading-normal'
         : rowHeightMode === 'tall'
@@ -1926,24 +1967,49 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   const applyColumnChrome = (col: any) => withOneLineRichText(withSortability(applyDensity(col)));
 
-  const orderedColumns = hasPinnedColumns
-    ? [
-        ...pinnedLeftCols.map(applyColumnChrome),
-        ...unpinnedCols.map(applyColumnChrome),
-        ...pinnedRightCols.map((col: any) => ({
-          ...applyColumnChrome(col),
-          className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
-          cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
-        })),
-      ]
-    : columnsWithActions.map(applyColumnChrome);
-
   // Calculate frozenColumns: if the USER pinned columns, use their left-pinned
   // count; otherwise fall back to the schema default (freeze the first column).
   // The auto-pinned actions column is intentionally not counted here.
-  const effectiveFrozenColumns = hasUserPinnedColumns
+  const declaredFrozenColumns = hasUserPinnedColumns
     ? userLeftPinnedCount
     : (schema.frozenColumns ?? 1);
+
+  // objectstack#35446 — while the table overflows its box, the Actions column
+  // is drawn right after the frozen columns and frozen with them, instead of
+  // pinned to the right edge, where it sat over the data column reaching that
+  // edge at rest (`./objectGridInlineActionFold`). Every data column then
+  // scrolls and none is ever covered at rest. An author's own right pin is
+  // the author's layout and stays where it is.
+  const actionsColumn = pinnedRightCols.find((col: any) => col.accessorKey === '_actions');
+  const actionsInFrozenZone = inlineActionFold.actionsFrozen && !!actionsColumn;
+  const scrollingColumns = [...pinnedLeftCols, ...unpinnedCols].map(applyColumnChrome);
+  const actionsFrozenAt = Math.min(declaredFrozenColumns, scrollingColumns.length);
+  const rightPinned = (col: any) => ({
+    ...applyColumnChrome(col),
+    className: ['px-3', col.className, rightPinnedClasses].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName, rightPinnedCellClasses].filter(Boolean).join(' '),
+  });
+  // The same cell padding as at the right edge; the frozen zone's own sticky
+  // classes, offset and edge rule come from `data-table`.
+  const inFrozenZone = (col: any) => ({
+    ...applyColumnChrome(col),
+    pinned: undefined,
+    className: ['px-3', col.className].filter(Boolean).join(' '),
+    cellClassName: [rowHeightCellClass, col.cellClassName].filter(Boolean).join(' '),
+  });
+
+  const orderedColumns = actionsInFrozenZone
+    ? [
+        ...scrollingColumns.slice(0, actionsFrozenAt),
+        inFrozenZone(actionsColumn),
+        ...scrollingColumns.slice(actionsFrozenAt),
+        ...pinnedRightCols.filter((col: any) => col !== actionsColumn).map(rightPinned),
+      ]
+    : hasPinnedColumns
+      ? [...scrollingColumns, ...pinnedRightCols.map(rightPinned)]
+      : columnsWithActions.map(applyColumnChrome);
+
+  const effectiveFrozenColumns = actionsInFrozenZone ? actionsFrozenAt + 1 : declaredFrozenColumns;
 
   // The floor. With no query to replay there is no honest "all N matching", so
   // the escalation is not offered — the same answer as a match set that does not
@@ -2206,9 +2272,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     rows: Array<Record<string, unknown>>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<unknown> => {
     const source = def.actionDef as Record<string, any> | undefined;
-    if (!source) return;
+    if (!source) return undefined;
     const rest = stripCollectedActionKeys(source);
     const ids = rows.map((r) => (r.id != null ? String(r.id) : '')).filter(Boolean);
     // Publish the EXPANDED, eligibility-filtered rows the run actually covers
@@ -2230,6 +2296,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // The handler's own return value, one level below the action envelope:
+    // the executor reads a `BulkActionResult` (`{ succeeded, failed }`) in it
+    // per row.
+    return readActionPayload(res.data);
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
     setActiveBulkDef(null);
@@ -2243,11 +2313,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
-    } else if (result?.aggregateRejection) {
-      // A rejected aggregate run (objectstack#34173) is ONE call that may have
-      // written some rows before it stopped, so the grid re-reads them by the
-      // same path. The selection stays: re-running the whole action is the
-      // retry, as for a total failure.
+    } else if (result?.aggregateRejection || result?.aggregateUnreadable || result?.aggregateUnconfirmed?.length) {
+      // A rejected or unreadable aggregate run is ONE call that may have
+      // written rows nobody counted, as may one that left rows unconfirmed,
+      // so the grid re-reads them by the same path. The selection stays:
+      // re-running the whole action is the retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };
@@ -2753,6 +2823,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   };
 
+  // objectstack#35548 — the column summaries as the table's own last row, each
+  // under its column, led by the count of the records they summarise. A host
+  // that draws them itself (`onColumnSummaryChange`) gets no row here.
+  const summaryRow: ObjectGridDataTableSchema['summaryRow'] = hasSummary && !onColumnSummaryChange
+    ? {
+        lead: t('grid.summary.countLead', {
+          value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
+        }),
+        cells: Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
+      }
+    : undefined;
   const dataTableSchema: ObjectGridDataTableSchema = {
     type: 'data-table',
     // The deprecated `title` fallback resolves like `label` (objectui#10993):
@@ -2762,6 +2843,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       || resolveInlineI18nLabel(schema.title, displayLocale),
     columns: tableColumns,
     data,
+    summaryRow,
     pagination: paginationEnabled,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
     // Rows-per-page selector options sourced from view metadata
@@ -2905,7 +2987,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
-    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', schema.className].filter(Boolean).join(' '),
+    // objectstack#35548 — a 32px header at 13px over faint row lines.
+    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'
       : rowHeightMode === 'short'
@@ -3035,6 +3118,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     caption: undefined,
     data: rowGroups.flatMap((group) => group.rows),
     rowGroups,
+    // A grouped grid draws no summary row (its summaries are withheld).
+    summaryRow: undefined,
     // Pages are the grid's: whole groups (`groupedPager`), and on a
     // server-grouped grid each open group's own rows (its band footer).
     pagination: false,
@@ -3517,6 +3602,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           data-testid="object-grid-card-scroller"
         >
         {gridDescription}
+        {groupingDraftOnlyNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -3639,6 +3725,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `FooterSummaryReport` mounted where the row would be, what it would have
   // drawn. Mounted in the same place, so whatever withholds the row (a
   // grouped grid, the card view, a loading or error face) reports `null`.
+  // Without such a host the table draws them (`summaryRow`, objectstack#35548).
   const summaryColumnsShown: Array<{ accessorKey: string; header?: React.ReactNode }> = hasSummary
     ? orderedColumns.filter((col: { accessorKey: string }) => summaries.has(col.accessorKey))
     : [];
@@ -3651,19 +3738,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }))}
       onChange={onColumnSummaryChange}
     />
-  ) : hasSummary ? (
-    <div className="border-t bg-muted/30 px-2 py-1.5" data-testid="column-summary-footer">
-      <div className="flex gap-4 text-xs text-muted-foreground font-medium">
-        {summaryColumnsShown.map((col) => {
-          const summary = summaries.get(col.accessorKey)!;
-          return (
-            <span key={col.accessorKey} data-testid={`summary-${col.accessorKey}`}>
-              {col.header}: {summary.label}
-            </span>
-          );
-        })}
-      </div>
-    </div>
   ) : null;
 
   // Render grid content: grouped (recursive nested headers + leaf table) or
@@ -3944,6 +4018,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ref={inlineActionFold.hostRef}
         className="flex flex-col flex-1 min-h-0"
         data-row-actions-inline={inlineActionFold.folded ? 'folded' : undefined}
+        data-row-actions-column={inlineActionFold.actionsFrozen ? 'frozen' : undefined}
       >
         <SchemaRenderer schema={dataTableSchema} />
       </div>
@@ -4126,6 +4201,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
       )}
       {gridDescription}
+      {groupingDraftOnlyNote}
       {gridToolbar}
       {renderedGridContent}
       {isGrouped && onRowGroupsChange && (

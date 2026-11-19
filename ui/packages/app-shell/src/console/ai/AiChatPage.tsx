@@ -137,7 +137,7 @@ import {
   publishPlanApprovalPending,
   subscribeMetadataRefresh,
 } from '../../assistant/assistantBus.js';
-import { getRuntimeConfig, isAiStudioEnabled } from '../../runtime-config.js';
+import { getRuntimeConfig, getUpgradeUrl, isAiStudioEnabled } from '../../runtime-config.js';
 import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
@@ -1783,6 +1783,21 @@ interface ChatPaneProps {
   onDebug?: () => void;
   /** Show the Build Doctor button — true only for build-agent conversations. */
   showDebug?: boolean;
+  /**
+   * objectstack#34725 — the host draws the panel's one title bar itself (the
+   * Studio right slot: 属性 | AI 助手, History, widen, Close), so the pane
+   * omits its own header row: the agent switcher, the app chip, Share and the
+   * Build Doctor button. The host then offers Share where it chooses.
+   * @default false
+   */
+  hideHeader?: boolean;
+  /**
+   * objectstack#35445 — the host offers Share and the Build Doctor in its own
+   * title bar (the console drawer's 「···」 menu), so the pane's header row
+   * draws neither. The rest of the row (the agent switcher, the app chip) stays.
+   * @default false
+   */
+  actionsInHost?: boolean;
 }
 
 export function ChatPane({
@@ -1812,6 +1827,8 @@ export function ChatPane({
   onShare,
   onDebug,
   showDebug,
+  hideHeader = false,
+  actionsInHost = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -2050,6 +2067,10 @@ export function ChatPane({
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
+        // The language this console renders in, so a reply that names a card
+        // control names it as the card draws it. Only `Accept-Language` reaches
+        // the server otherwise; the server validates the value itself.
+        uiLocale: language,
       },
     },
     initialMessages: hydrated,
@@ -2847,6 +2868,7 @@ export function ChatPane({
           </DropdownMenu>
         ) : null}
       </div>
+      {actionsInHost ? null : (
       <div className="flex shrink-0 items-center gap-1">
         {showDebug && onDebug ? (
           <Button
@@ -2875,6 +2897,7 @@ export function ChatPane({
           <Share2 className="h-3.5 w-3.5" />
         </Button>
       </div>
+      )}
       {agentsError ? (
         <span
           className="basis-full text-[10px] text-amber-700 dark:text-amber-400"
@@ -2935,13 +2958,13 @@ export function ChatPane({
       >
       <ChatbotEnhanced
         className="min-h-0 flex-1 bg-background md:max-w-5xl"
-        // The paywall exit. Wired only when this runtime named an upstream
-        // cloud — an undefined `onUpgrade` renders NO upgrade button, which is
-        // the honest state for a runtime with no control plane behind it
-        // (objectui#7253).
+        // The paywall exit: the control plane's declared upgrade entry when
+        // served (objectstack#34622), else its origin. Neither ⇒ an undefined
+        // `onUpgrade` renders NO upgrade button, which is the honest state for
+        // a runtime with no control plane behind it (objectui#7253).
         onUpgrade={
-          cloudConsoleUrl()
-            ? () => window.open(cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
+          (getUpgradeUrl() ?? cloudConsoleUrl())
+            ? () => window.open(getUpgradeUrl() ?? cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
             : undefined
         }
         onOpenBuilder={openBuilder}
@@ -2985,7 +3008,7 @@ export function ChatPane({
         packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
-        headerSlot={headerSlot}
+        headerSlot={hideHeader ? undefined : headerSlot}
         // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
         // of the composer's own area, in
         // flow above the input. The bar used to float (`absolute bottom-20`)
@@ -3193,17 +3216,23 @@ export function ChatPane({
             }
             // Surface a seed-load problem (reported under `seedApplied`, never
             // thrown) so "Published!" can't hide silently empty tables.
+            //
+            // The toast says the pack's sentence, the one the chat's
+            // publish-health line says for the same failure (objectstack#32984:
+            // user-facing text is the customer sentence). The loader's `error`
+            // (engine text) and `errors[]` (structured rows) are for whoever
+            // repairs the seed: they go to the console whole, never the toast,
+            // and stay in the health line's technical details.
             const seedApplied = payload?.seedApplied;
             if (seedApplied && seedApplied.success === false) {
+              console.warn('[app-shell] Published, but the seed failed to load:', {
+                packageId,
+                error: seedApplied.error,
+                errors: seedApplied.errors,
+              });
               toast.warning(
                 t('console.ai.seedWarn', { defaultValue: 'Published, but some sample data failed to load.' }),
-                {
-                  description:
-                    seedApplied.error ??
-                    (Array.isArray(seedApplied.errors) && seedApplied.errors.length
-                      ? String(seedApplied.errors[0])
-                      : undefined),
-                },
+                { description: t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }) },
               );
             } else {
               toast.success(t('console.ai.publishOk', { defaultValue: 'Published — objects are now live.' }));
@@ -3276,7 +3305,7 @@ export function ChatPane({
         surfaceContextLabel={
           surfaceContext?.artifact
             ? t('console.ai.discussing', {
-                defaultValue: 'Discussing: {{target}}',
+                defaultValue: 'Viewing: {{target}}',
                 target:
                   surfaceArtifactLabel ||
                   `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`,

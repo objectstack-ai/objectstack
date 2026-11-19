@@ -286,3 +286,13 @@ export type McpToolInterceptor = (
   call: McpToolCallContext,
   next: () => Promise<McpToolCallResult>,
 ) => Promise<McpToolCallResult | McpToolCallRefusal>;
+
+/**
+ * `query_records`' one-row-per-group form (`latestPer`): the fields that form a
+ * group, and the order whose first record is each group's answer; ties are
+ * broken by the record `id`. The tool's input schema bounds both lists.
+ */
+export interface McpLatestPer {
+  by: string[];
+  orderBy: Array<{ field: string; order: 'asc' | 'desc' }>;
+}

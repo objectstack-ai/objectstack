@@ -97,6 +97,8 @@ describe('dogfood: removing an unstored field through PUT /meta/object/:name', (
       code: 'field_removed',
       field: 'notes',
       message: "Field 'notes' removed — existing data in this column will become inaccessible.",
+      // Computed from the served metadata: nothing shows this test's own field.
+      stillShownBy: [],
     }]);
   });
 

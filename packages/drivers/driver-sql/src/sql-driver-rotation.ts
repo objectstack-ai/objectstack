@@ -55,6 +55,7 @@ import { isInstantColumnType } from './date-on-instant-column.js';
 export interface RotationHost {
   assertSchemaMutable: SqlDriver['assertSchemaMutable'];
   readonly autoNumberFields: SqlDriver['autoNumberFields'];
+  backfillCanonicalBooleans: SqlDriver['backfillCanonicalBooleans'];
   backfillCanonicalDatetimes: SqlDriver['backfillCanonicalDatetimes'];
   backfillCanonicalJsonEncoding: SqlDriver['backfillCanonicalJsonEncoding'];
   backfillCanonicalTimes: SqlDriver['backfillCanonicalTimes'];
@@ -399,7 +400,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalBooleans' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure
@@ -664,6 +665,9 @@ export class RotationFacet {
       // Commit 4045b954d: converge this table's `Field.json` columns on the injective
       // JSON-text storage form the rewritten `formatInput` now writes.
       await this.backfillCanonicalJsonEncoding(tableName, exists);
+      // #34973: converge this table's boolean columns: legacy text 'true' /
+      // 'false' cells on SQLite become 1 / 0, the form every write now takes.
+      await this.backfillCanonicalBooleans(tableName, exists);
       // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
       if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
       // #3994: widen legacy MySQL `TIME` columns to `TIME(3)`.

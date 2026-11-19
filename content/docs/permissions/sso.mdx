@@ -748,6 +748,11 @@ and no user is created. These sign-ins are unchanged:
 - the first human of a deployment that has none yet;
 - every sign-in under the `email_domain` or `open` posture.
 
+Admission is not acceptance: accepting an organization invitation needs a
+verified email address, and an account an SSO sign-in creates counts as
+verified only when the provider verified the address
+([Self-hosting](/docs/deployment/self-hosting)).
+
 To let a provider create accounts for everyone its IdP authenticates, as it did
 before this rule, turn on `allowJit` for that provider. With
 [domain verification](#domain-verification-opt-in) on, a provider still creates
@@ -768,11 +773,13 @@ OS_AUTH_DIRECT_SIGN_IN_ENABLED=true
 # OS_AUTH_DIRECT_SIGN_IN_PROVIDER=okta
 # Optional: hidden (default) or off.
 # OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden
+# Optional: hold (default) or identity-provider.
+# OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT=hold
 ```
 
 ```ts
 new AuthPlugin({
-  directSignIn: { provider: 'okta', localSignIn: 'hidden' },
+  directSignIn: { provider: 'okta', localSignIn: 'hidden', afterSignOut: 'hold' },
 });
 ```
 
@@ -781,6 +788,7 @@ new AuthPlugin({
 | `OS_AUTH_DIRECT_SIGN_IN_ENABLED` | `true` / `false` | Turns it on or off, whatever the option says. |
 | `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` | a `providerId` | An [`oidcProviders`](#enterprise-sso-oidc) entry or a registered SSO provider. Unset, the only one configured is used; with none or several configured, the sign-in page is shown as before. |
 | `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the sign-in form offers no local way in. Any other value refuses to boot. |
+| `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` | `hold` (default) / `identity-provider` | Where an explicit sign-out returns when the identity provider ends its own session. `hold` returns to the sign-in page, which holds (see **No loops** below). `identity-provider` returns through the direct sign-in door, so the person lands on the identity provider's own sign-in page. Any other value refuses to boot. |
 
 With `off`, the sign-in form offers no local way in, in any of its states: no
 email or phone form, no sign-up link and no "use password" link, also on an
@@ -853,6 +861,20 @@ button (and the reason, where there is one), instead of starting again when:
   short note of the sign-out for that round trip (at most ten minutes) and
   reads it once, so a reload of the held page, or another tab, starts the
   sign-in as for a fresh visit.
+
+**Sign-out through the identity provider.** With `afterSignOut:
+'identity-provider'` (or `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT=identity-provider`),
+a sign-out that goes through the provider's logout comes back to
+`GET /api/v1/auth/sign-in/direct` instead of the sign-in page, so the person
+sees the identity provider's own sign-in page and no sign-in page of this
+deployment. Register that door's absolute address as a post-logout redirect URI
+at the provider. It cannot loop: the provider has just ended its own session,
+and the door starts a fresh sign-in without the browser's cookies, so the
+provider asks for credentials. A `state` the provider passes back from the
+sign-out is accepted once and ignored, since the door starts a new sign-in with
+its own. The Console uses the door only while
+`features.directSignIn` reads `true`; otherwise, and when the provider has no
+logout to go through, the sign-out ends on the held sign-in page as above.
 
 An OAuth client's authorization hand-off (`client_id` or `redirect_uri` on the
 sign-in URL) keeps today's sign-in page. API keys, bearer tokens, `/api/*` and

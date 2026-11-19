@@ -21,7 +21,6 @@ import {
 } from '@object-ui/plugin-chatbot/core';
 import {
   ChatPane,
-  isPlatformBuiltinApp,
   isThreadBoundToPackage,
   type PendingFirstMessage,
 } from '../console/ai/AiChatPage.js';
@@ -36,7 +35,9 @@ import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
+  ambientAppPackage,
   sameDockTarget,
+  type ChatDockConversationActions,
   type ChatDockHandoff,
   type ChatDockPresentation,
   type ChatDockTarget,
@@ -81,6 +82,18 @@ export interface ChatDockConversationProps {
   /** Rail and sheet only: the history list shown over the chat. */
   historyOpen?: boolean;
   onHistoryOpenChange?: (open: boolean) => void;
+  /**
+   * objectstack#35445 — the drawer's title bar offers Share and the Build
+   * Doctor in its 「···」 menu. A host that passes this receives what those
+   * two items act on, and the pane's own header row stops drawing them. The
+   * share dialog and the doctor's drawer stay here; the host opens them
+   * through the four props below, as it opens the history.
+   */
+  onActionsChange?: (actions: ChatDockConversationActions | undefined) => void;
+  shareOpen?: boolean;
+  onShareOpenChange?: (open: boolean) => void;
+  debugOpen?: boolean;
+  onDebugOpenChange?: (open: boolean) => void;
 }
 
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
@@ -108,6 +121,11 @@ const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
  * package or a fresh start, exactly as named — a target never infers the app.
  * A new build stays UNBOUND until the build creates its package (ADR-0057 A1),
  * and then re-keys to that app in place (A1.b bind-on-create).
+ *
+ * objectstack#35014 — a target belongs to the app it was opened in (or the app
+ * it names); the host withholds it everywhere else, so the drawer's thread
+ * follows the app with no prompt. `ask` stays ambient (A2): its key carries no
+ * app, so the ask thread is the same in every app.
  */
 export function ChatDockConversation({
   userId,
@@ -122,6 +140,11 @@ export function ChatDockConversation({
   presentation = 'rail',
   historyOpen = false,
   onHistoryOpenChange,
+  onActionsChange,
+  shareOpen: shareOpenProp,
+  onShareOpenChange,
+  debugOpen: debugOpenProp,
+  onDebugOpenChange,
 }: ChatDockConversationProps) {
   const { agents, isLoading, error } = useAgents({ apiBase });
   const catalogNames = React.useMemo(() => agents.map((a) => a.name), [agents]);
@@ -192,8 +215,11 @@ export function ChatDockConversation({
     ? `${apiBase}/agents/${encodeURIComponent(activeAgent)}/chat`
     : undefined;
   const product = chatProductOfAgent(activeAgent);
-  const ambientPackageId =
-    appPackageId && !isPlatformBuiltinApp({ _packageId: appPackageId }) ? appPackageId : undefined;
+  const ambientPackageId = ambientAppPackage(appPackageId);
+  // objectstack#35014 — a target reaches this body only in the app it belongs
+  // to: the host (`useConsoleChatDock`) hands it down there and nowhere else,
+  // so moving to another app arrives here as "no target" and the new app's
+  // ambient thread resolves below.
   const editPackageId =
     product === 'build' ? (target ? target.packageId : ambientPackageId) : undefined;
   const scope = activeAgent
@@ -335,18 +361,30 @@ export function ChatDockConversation({
     [conversationId],
   );
 
-  // Share and the Build Doctor, which the pane's header offers.
-  const [shareOpen, setShareOpen] = React.useState(false);
-  const [debugOpen, setDebugOpen] = React.useState(false);
+  // Share and the Build Doctor: the drawer's 「···」 menu offers them when its
+  // host takes them (objectstack#35445), else the pane's header does.
+  const [ownShareOpen, setOwnShareOpen] = React.useState(false);
+  const [ownDebugOpen, setOwnDebugOpen] = React.useState(false);
+  const shareOpen = shareOpenProp ?? ownShareOpen;
+  const debugOpen = debugOpenProp ?? ownDebugOpen;
+  const setShareOpen = onShareOpenChange ?? setOwnShareOpen;
+  const setDebugOpen = onDebugOpenChange ?? setOwnDebugOpen;
+  const actionsInHost = onActionsChange !== undefined;
   const restApiBase = React.useMemo(
     () => apiBase.replace(/\/v1\/ai$/, '').replace(/\/ai$/, '') || '/api',
     [apiBase],
   );
   const publicShareBase = React.useMemo(() => resolvePublicShareBase(), []);
-  const showDebug = agentHasCapability(agents, activeAgent, 'debug');
+  // objectstack#35445 — the Build Doctor reads a build's internals: offered
+  // only to a user who may build, whichever agent the thread runs.
+  const showDebug = agentHasCapability(agents, activeAgent, 'debug') && canAuthorMetadata;
+  const inert = !isLoading && agents.length === 0;
+  React.useEffect(() => {
+    onActionsChange?.(inert ? undefined : { conversationId, showDebug });
+  }, [onActionsChange, inert, conversationId, showDebug]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
-  if (!isLoading && agents.length === 0) return null;
+  if (inert) return null;
 
   const history = (
     <ConversationsSidebar
@@ -397,6 +435,7 @@ export function ChatDockConversation({
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
             showDebug={showDebug}
+            actionsInHost={actionsInHost}
           />
         </div>
         {/* Rail and sheet: the history covers the chat while open; the pane

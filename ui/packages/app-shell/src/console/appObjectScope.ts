@@ -32,9 +32,9 @@
  * same names by name once the package list has answered empty: the route's
  * object, its lookup targets and the app's `requiresObject` entries, never the
  * whole registry. Only the route's object holds the route. The app's ROOT in
- * such a package keeps the whole registry: measured on Setup's landing, asking
- * the entries' objects by name cost a request each and the landing loaded the
- * whole registry anyway (objectui#12811).
+ * such a package reads the same way (objectstack#34211): the objects its
+ * entries require, in the one presence read, those the entered app's bundle
+ * holds answered from it, and never the whole registry.
  *
  * A record route (`:objectName/record/:recordId`, and its named-page sibling)
  * whose record page is declared as a full page reads the objects that page
@@ -178,6 +178,51 @@ function matchObjectScopeRoute(
     recordId: match.params.recordId,
     dashboardName: match.params.dashboardName,
   };
+}
+
+/** The route paths whose element is `ObjectView`, the list page of an object. */
+const OBJECT_VIEW_ROUTES: readonly string[] = [':objectName', ':objectName/view/:viewId'];
+
+/**
+ * objectstack#35535 — the object whose list `ObjectView` draws on the route at
+ * `subPath` (below `/apps/:appName`), or `undefined` on every other route.
+ * Matched against the same table as the scope's routes, so a static or host
+ * route that shadows `:objectName` (`search`, `reports`) is not one.
+ */
+export function objectViewRouteObject(subPath: string, hostPaths: readonly string[] = []): string | undefined {
+  const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
+  const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
+  const match = matches?.[matches.length - 1];
+  if (!match || !OBJECT_VIEW_ROUTES.includes(match.route.path)) return undefined;
+  return match.params.objectName || undefined;
+}
+
+/** An adapter that reads an object's saved views (`ObjectStackAdapter`). */
+type ObjectViewRowsHost = {
+  listViews?: unknown;
+  listViewOverrides?: (objectName: string) => Promise<unknown>;
+};
+
+/**
+ * objectstack#35535 — start the read of `objectName`'s published views that
+ * `ObjectView` sends when its list mounts, so it runs while the list's lazy
+ * modules still load instead of after them.
+ *
+ * It is the reader's own call, never a second read: `ObjectView` asks
+ * `listViewOverrides(objectName)` and `listViews(objectName)`, and outside a
+ * draft preview the adapter answers both from one stored, shared one-object
+ * read (`GET /meta/view?object=OBJECT`, or the stored `/meta/view` list it
+ * narrows). A reader asking while this is on the wire joins it; one asking
+ * after it landed reads what it stored. A failure is not stored, so the
+ * reader that asks next asks again and sees it, as it did before.
+ *
+ * An adapter without both readers is left alone.
+ */
+export function prefetchObjectViewRows(dataSource: unknown, objectName: string): void {
+  const host = dataSource as ObjectViewRowsHost | null | undefined;
+  if (!host || typeof host.listViews !== 'function' || typeof host.listViewOverrides !== 'function') return;
+  // Nobody waits on it: a failure is the reader's to see when it asks.
+  host.listViewOverrides.call(host, objectName).catch(() => undefined);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -734,11 +779,9 @@ export function readAppObjectScope(
   const own = readObjectScope({ packageId });
   if (!own.settled) return { candidate, scope: own, ready: false, ...NOT_READ };
   // objectui#13046 — a package that holds no objects of its own: an object's
-  // route reads its names by name all the same, below; the app's root keeps the
-  // whole registry (the header says why).
-  if (!route.objectName && !own.served.some((o: any) => o?._packageId === packageId)) {
-    return { candidate, scope: null, ready: false, ...NOT_READ };
-  }
+  // route reads its names by name all the same, below, and so does the app's
+  // root (objectstack#34211): the objects its entries require, never the whole
+  // registry.
   return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId) };
 }
 
@@ -795,7 +838,10 @@ function readObjectRouteNames(
   // route's names: a lookup cell links and names its target and reads none of
   // its views, and a target outside the app bundle (`sys_user`) composed with
   // them read the whole `/meta/view` list (objectstack#29551). They join the
-  // scope's objects as they land; the route's names keep their views.
+  // scope's objects as they land; the route's names keep their views. A
+  // target the presence read answered served is answered with the definition
+  // that read carried, and costs no request of its own (objectstack#35306,
+  // `readObjectScope`).
   const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
   const readNames = (names: readonly string[]) =>
     packageId ? readWithoutViews({ packageId, names, views: false }) : readWithoutViews({ names, views: false });

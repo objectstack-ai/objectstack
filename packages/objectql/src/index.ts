@@ -87,7 +87,7 @@ export {
 } from './registry.js';
 
 // [#22371] The package half of the cold-boot check's holder reading (ADR-0048
-// N.3): every package-held position and permission-set name, with its holders.
+// N.3): every package-held position, permission-set and capability name, with its holders.
 // Exported for `os migrate security-catalog-overlays`, which boots the
 // deployment's composition without hydrating `sys_metadata` and meets this
 // list with the stored rows — the population the cold boot refuses — so the
@@ -269,6 +269,17 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// Groups ordered by an aggregated column, cut and counted in the driver's own
+// statement: the engine-internal read option a door carries to `aggregate`,
+// and the request it carries. Carriers that do not import this package spell
+// the key `Symbol.for`, as it does.
+export { AGGREGATE_ORDER_CUT } from './aggregate-order-cut.js';
+export type { AggregateOrderCutRequest, AggregateOrderKey, AggregateOrderCutOutcome } from './aggregate-order-cut.js';
+// "Each X with its latest Y": the engine-internal read option a door carries
+// to `find` for one row per group, and the request it carries. The carriers
+// that do not import this package spell the key `Symbol.for`, as it does.
+export { LATEST_PER, LATEST_PER_MAX_KEYS } from './latest-per.js';
+export type { LatestPerRequest, LatestPerOrder, LatestPerOutcome } from './latest-per.js';
 // [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
 // docblock tells a caller to identify it by `code` rather than `instanceof`
 // (the two-realm split #14936 measured: this package declares BOTH realms in
@@ -382,6 +393,9 @@ export {
   seedHookUserGrants,
   seedHookUnreadMembership,
 } from './hook-run-as.js';
+// The platform's own system api over a hook's api: the context elevated, with
+// no app-automation provenance. Read by plugin-audit's ledger writer.
+export { platformSystemApi } from './platform-system-api.js';
 // Whether a write runs inside a transaction a write beside it joins, or one it
 // cannot reach: read by the runtime's script-body doors.
 export { openTransactionKind } from './open-transaction.js';
@@ -591,6 +605,10 @@ export { evaluateFormulaField } from './engine.js';
 // asymmetry is #16260's question, deliberately not decided here.
 export { ValidationError, validateRecord, validateInsertValues, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// #34030 — the labels a refusal names are read through `messages.labelTranslation`
+// (a translation bundle and its resolve options), no longer through `translate`;
+// a direct caller of the validators writes against this type.
+export type { ValidationLabelTranslation } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation
 // (`@objectstack/platform-objects`) reads it before certifying anything: a

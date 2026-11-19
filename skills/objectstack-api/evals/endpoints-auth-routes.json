@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Add `src/api/lead-feed.endpoint.ts`: a GET endpoint that returns our `acme_lead` records for a partner integration, cached for 30 seconds. The stack's manifest namespace is `acme`.",
+      "prompt": "Add `src/api/lead-feed.endpoint.ts`: a GET endpoint that returns our `acme_lead` records for a partner integration, cached for 30 seconds. The stack's manifest namespace is `acme`. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "Emits a declarative `ApiEndpoint` (registered under `defineStack({ apis })`): `path: '/api/v1/apps/acme/leads'` (the ADR-0121 carve-out — only the subpath is free), `method: 'GET'`, `type: 'object_operation'`, `objectParams: { object: 'acme_lead', operation: 'find' }`, `cacheTtlSeconds: 30`. `authRequired` is omitted (defaults to true). No handler code, no `transform` in a mapping, and `manifest.namespace` is declared explicitly.",
       "files": [],
       "assertions": {
@@ -13,7 +13,7 @@
     },
     {
       "id": 2,
-      "prompt": "The partner can't send a session token — make the lead feed callable without login.",
+      "prompt": "Our `acme` stack ships a lead feed for a partner integration: a `GET` endpoint at `/api/v1/apps/acme/leads` of `type: 'object_operation'` over `acme_lead`, cached for 30 seconds. The partner can't send a session token — make the lead feed callable without login. None of the project's files are in this directory: write the change in your answer.",
       "expected_output": "Sets `authRequired: false` and, because ADR-0121 D6 pairs an anonymous entry point with an armed budget, adds `rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 }`. Points out that the gate's predicate is `rateLimit.enabled === true`, so writing only `windowMs` / `maxRequests` declares a budget that meters nothing, and that the endpoint budget is independent of `server.security.rateLimit`.",
       "files": [],
       "assertions": {
@@ -53,7 +53,7 @@
     },
     {
       "id": 6,
-      "prompt": "Our nightly CSV upsert of `supplier` rows by `tax_id` keeps resetting the `owner` column that sales reassigns by hand. Fix the import body.",
+      "prompt": "Our nightly CSV upsert of `supplier` rows by `tax_id` keeps resetting the `owner` column that sales reassigns by hand. Fix the import body. Today the job posts `{ format: 'csv', csv, mapping: { 'Tax ID': 'tax_id', Name: 'name', Owner: 'owner' }, writeMode: 'upsert', matchFields: ['tax_id'] }` to `POST /api/v1/data/supplier/import`. None of the project's files are in this directory: write the corrected body in your answer.",
       "expected_output": "Sends `mapping` as a `FieldMappingEntry[]` (the `{ Column: field }` shorthand cannot carry it) with `{ sourceField: 'Owner', targetField: 'owner', applyOn: 'create' }`: the column is written when the upsert creates the row and left out of the patch when it matches one; the other columns keep the default `applyOn: 'always'`. Keeps `writeMode: 'upsert'` and `matchFields: ['tax_id']`.",
       "files": [],
       "assertions": {
@@ -69,6 +69,16 @@
       "assertions": {
         "must_contain": ["?names=", "/api/v1/meta/object", "VALIDATION_ERROR"],
         "must_not_contain": ["object?ids=", "object?filter="]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Our admin page publishes a package with `POST /api/v1/packages/acme_crm/publish-drafts` and lists what the answer's `probes.issues` report. It prints each issue's `message`, and our Chinese-speaking admins cannot read lines like `widget 'open_tasks' on dashboard 'task_board': dataset query failed`. They want a translation table per `code` (`widget_query_failed`, `seed_not_applied`, ...). None of the project's files are in this directory: write the function that renders one issue for the admin in your answer.",
+      "expected_output": "Does not build a table of translated sentences keyed by `code`. Renders each `probes.issues[]` element's `userMessage` as received: `RuntimeBuildIssueSchema` (`api/protocol.zod.ts`) gives a finding two readers, and `userMessage` is the sentence for the person who published, composed by the server in the request's locale (this door reads `Accept-Language`; else the workspace default, else `en`), so the page sends the admin's locale in that header and keeps no translations of its own. `message` and `fix` are English for the agent that built the app: at most under a collapsed technical-details section, never the line the admin reads. When a finding has no `userMessage`, shows one generic sentence of the page's own, not `message`. `code` stays the stable id for grouping.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["userMessage"],
+        "must_not_contain": ["widget_query_failed:", "?? issue.message", "|| issue.message"]
       }
     }
   ]

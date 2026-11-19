@@ -82,6 +82,7 @@ import { FILE_REFERENCE_TYPES, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/sp
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
+import { pairTranslationBundleOf, patchTranslationBundlesOf } from './meta-item-read-gate.js';
 import type { TransportScopedMetaRequest } from './meta-collection-routes.js';
 import type { RestServer } from './rest-server.js';
 import { earnedAnswerLogged } from './stale-summary-answer.js';
@@ -380,9 +381,18 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // authored. The public form must not be the
                                     // one surface still serving the packaged
                                     // string back at a tenant who renamed it.
+                                    // [#33952] …and a field slot a code package's
+                                    // `fieldPatches` wrote reads that package's own
+                                    // translations, then its text. No pair `.custom`
+                                    // rank sits above it: an object is extended,
+                                    // never replaced (ADR-0146 D10), so it never
+                                    // answers `servedOverrideBaseOf` and this call
+                                    // passes no `pairBundle` (the view call below does).
+                                    const patchBundles = await patchTranslationBundlesOf(p, 'object', objectSchema?.name);
                                     objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
                                         ...this.translateOptionsFor(i18n, locale),
                                         packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
+                                        ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
                                     });
                                     // [#23497] The section headings. An anonymous
                                     // visitor cannot load the bundle client-side (the
@@ -416,9 +426,20 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // falls back to the view's machine name, which must
                                     // never shadow the form's title in the console's
                                     // `label ?? form.title ?? objectSchema.label`.
+                                    //
+                                    // A form view a `.custom` pair overrides (ADR-0146
+                                    // D2) is also handed the pair's own translations,
+                                    // the first rank of a string the override changed
+                                    // (ruling record 6631250894): the same
+                                    // `pairTranslationBundleOf` question the `/meta/view`
+                                    // reads ask, of the view as the protocol served it
+                                    // (its envelope names the base). `undefined` keeps
+                                    // the override's own text, as before.
+                                    const pairBundle = await pairTranslationBundleOf(p, 'view', match.view);
                                     const view = translateMetadataDocument('view', match.view, bundle, {
                                         ...this.translateOptionsFor(i18n, locale),
                                         packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
+                                        ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
                                     });
                                     if (match.form === match.view?.config) servedForm = view?.config;
                                     if (match.view?.label !== undefined && view?.label !== undefined) {

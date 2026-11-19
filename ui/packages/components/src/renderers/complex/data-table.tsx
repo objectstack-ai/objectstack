@@ -728,17 +728,28 @@ export const DataTableBuiltinRowActionItem: React.FC<{
     warnOnError: true,
     label: `builtin:${name}:disabledWhen`,
   });
-  if (!isVisible) return null;
   const disabled = predicates?.disabledWhen != null && isDisabled;
+  // The reason the record page gives for the same verdict (objectstack#35135,
+  // objectstack#35293): `userActions` declares no reason key, so the declared
+  // `disabledWhen` holding earns the generic `actions.notAvailableForRecord`
+  // sentence, as the item's second line and its accessible description — the
+  // shape `DataTableRowActionItem` above gives a custom action. Called ahead of
+  // the early return, with the other hooks.
+  const disabledReason = useDisabledReason(disabled);
+  if (!isVisible) return null;
   return (
     <DropdownMenuItem
       disabled={disabled}
       onClick={() => { if (!disabled) onSelect(row); }}
       data-testid={`row-action-builtin-${name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={className}
     >
       {icon}
-      {label}
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{label}</DisabledReasonMenuLabel>
+        : label}
     </DropdownMenuItem>
   );
 };
@@ -989,6 +1000,12 @@ function resolveSelectionMode(selectable: DataTableSchema['selectable'] | 'none'
  * Frozen so a consumer that mutates the array it was handed cannot corrupt the
  * shared instance for every other table on the page.
  */
+/**
+ * The last frozen column's edge while the rows are scrolled sideways under it
+ * (objectstack#35548): a shadow, never a rule, and none at rest.
+ */
+const FROZEN_EDGE_SHADOW = 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.18)] dark:shadow-[4px_0_6px_-4px_rgba(0,0,0,0.6)]';
+
 const EMPTY_COLUMNS = Object.freeze([]) as unknown as DataTableSchema['columns'];
 const EMPTY_ROWS = Object.freeze([]) as unknown as DataTableSchema['data'];
 
@@ -1108,6 +1125,17 @@ function keepsBrowserContextMenu(target: HTMLElement, row: HTMLElement): boolean
     || portalledFrom(target, row, '[role="alertdialog"]'),
   );
 }
+
+/**
+ * The scroll box's scrollbar while the table is wider than the box
+ * (objectstack#35446): drawn at rest in the theme's muted foreground, the
+ * colour the shared hover-only bar (`HOVER_SCROLLBAR_CLASSES`) turns on hover,
+ * and as thin. Marked important for the same reason that one is: a host may
+ * theme every scrollbar with an unlayered `*` rule. One complete literal:
+ * Tailwind builds only from scanned source text.
+ */
+const SIDEWAYS_SCROLLBAR_CLASSES =
+  '[scrollbar-width:thin]! [scrollbar-color:var(--color-muted-foreground)_transparent]!';
 
 /**
  * A right-pinned column: its sticky utilities arrive on `col.className` (the
@@ -1346,6 +1374,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     borderless = false,
     disableInnerScroll = false,
     rowGroups,
+    summaryRow,
     isRowEditable,
     // Read ONLY to diagnose it. `data-table` does not resolve `bind` and the
     // objectui#6575 ruling is explicit that it must not start — see
@@ -1374,6 +1403,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const fieldAuthoring = useGridFieldAuthoring();
   const addColumnEnabled = !!fieldAuthoring?.onAddColumn;
   const editColumnEnabled = !!fieldAuthoring?.onEditColumn;
+  // A host that takes the header click (Studio selects the field) asks for a
+  // visible caret onto the column menu, so sort and hide stay one click away.
+  const columnMenuLabel = fieldAuthoring?.columnMenuLabel;
   // The table already implements column drag-reorder; a design host enables it by
   // providing onReorderFields (to persist the order to the object's field metadata).
   const reorderEnabled = reorderableColumns || !!fieldAuthoring?.onReorderFields;
@@ -2868,6 +2900,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // (objectui#12708), the same one `ObjectGrid`'s grouped scroller and a
   // page's own table use. Only the shadow's PLACEMENT is this table's own.
   const overflowRight = useHorizontalOverflow(scrollBoxRef, { disabled: disableInnerScroll });
+  // objectstack#35548 — the frozen columns draw no rule of their own: their
+  // edge shadow shows only once the rows are scrolled sideways under them.
+  const [scrolledX, setScrolledX] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box || frozenColumns <= 0) {
+      setScrolledX(false);
+      return;
+    }
+    const read = () => setScrolledX(box.scrollLeft > 0);
+    read();
+    box.addEventListener('scroll', read, { passive: true });
+    return () => box.removeEventListener('scroll', read);
+  }, [disableInnerScroll, frozenColumns]);
   const [rightShadow, setRightShadow] = useState<{ right: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const box = scrollBoxRef.current;
@@ -2903,6 +2949,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     return () => observer?.disconnect();
   }, [overflowRight, columns, leadingCellCount, paginatedData.length]);
+
+  /**
+   * objectstack#35446 — while the table is wider than its box, the box draws
+   * its scrollbar at rest ({@link SIDEWAYS_SCROLLBAR_CLASSES}): columns out of
+   * view are announced by the bar itself, in a narrowed main area as anywhere,
+   * not only once the pointer is over the box. A table that fits keeps the
+   * shared hover-only bar (objectui#12708). A grouped sub-table
+   * (`disableInnerScroll`) scrolls in a shared ancestor and draws no bar.
+   */
+  const [scrollsSideways, setScrollsSideways] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box) {
+      setScrollsSideways(false);
+      return;
+    }
+    const read = () => setScrollsSideways(box.scrollWidth - box.clientWidth > 1);
+    read();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    if (tableRef.current) observer.observe(tableRef.current);
+    return () => observer.disconnect();
+  }, [disableInnerScroll, columns, paginatedData.length]);
 
   const [rovingCell, setRovingCell] = useState<{ rowIndex: number; colIndex: number }>({ rowIndex: 0, colIndex: 0 });
   const rovingRowIndex = Math.max(0, Math.min(rovingCell.rowIndex, paginatedData.length - 1));
@@ -3421,7 +3491,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         // sub-tables share one horizontal scrollbar with aligned columns.
         disableInnerScroll
           ? "overflow-visible"
-          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", HOVER_SCROLLBAR_CLASSES],
+          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", scrollsSideways ? SIDEWAYS_SCROLLBAR_CLASSES : HOVER_SCROLLBAR_CLASSES],
         !borderless && "rounded-md border",
       )}>
         {/* This div is already the (bounded) scroll container for BOTH axes —
@@ -3526,7 +3596,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       // keeps it, and bump above body pinned cells (z-10).
                       isPinnedRight && 'sticky right-0 z-20',
                       isFrozen && 'sticky z-20',
-                      isFrozen && index === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                      isFrozen && index === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                     )}
                     style={{ 
                       width: columnWidth,
@@ -3560,7 +3630,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         )}
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
-                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
                           <button
@@ -3577,6 +3648,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             <Edit className="h-3 w-3" />
                           </button>
                         )}
+                        {columnMenuLabel && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              // Not the header's own click (sort, or the host's
+                              // select), and not the document listener that
+                              // closes an open menu.
+                              e.stopPropagation();
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setContextMenu((open) =>
+                                open?.columnKey === col.accessorKey
+                                  ? null
+                                  : { x: r.left, y: r.bottom, columnKey: col.accessorKey },
+                              );
+                            }}
+                            title={columnMenuLabel}
+                            aria-label={columnMenuLabel}
+                            aria-expanded={contextMenu?.columnKey === col.accessorKey}
+                            data-testid={`grid-column-menu-${col.accessorKey}`}
+                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+                          >
+                            <ChevronDown className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                       {resizableColumns && col.resizable !== false && (
                         <div
@@ -3589,7 +3684,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   </TableHead>
                 );
               })}
-              {/* The label sits in the same `text-xs` muted span every data
+              {/* The label sits in the same 13px muted span every data
                   column's header label uses (objectui#11816): a bare string
                   here took the cell's larger default type. */}
               {rowActions && (rowActionsColumnIsEditOnly ? (
@@ -3603,7 +3698,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 </TableHead>
               ) : (
                 <TableHead className="w-24 text-right bg-background">
-                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
+                  <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
                 </TableHead>
               ))}
               {addColumnEnabled && (
@@ -4017,7 +4112,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             key={colIndex} 
                             className={cn(
                               col.cellClassName,
-                              col.align === 'right' && 'text-right',
+                              // Figures line up digit under digit (objectstack#35548).
+                              col.align === 'right' && 'text-right tabular-nums',
                               col.align === 'center' && 'text-center',
                               // `fitContent` cells must not clip their inline
                               // content (row-action buttons); every other column
@@ -4027,7 +4123,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
-                              isFrozen && colIndex === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                              isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                             )}
                             style={{
                               width: columnWidth,
@@ -4370,6 +4466,56 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               </>
             )}
           </TableBody>
+          {/* The summary row (objectstack#35548): the table's own last row,
+              held at the bottom of the scroll box, each figure in its
+              column's cell — so it lines up with its column at any width and
+              scrolls sideways with it; a frozen column's cell stays frozen. */}
+          {summaryRow && (
+            <tfoot className="sticky bottom-0 z-10 bg-background" data-testid="data-table-summary-row">
+              <TableRow className="border-t border-b-0 hover:bg-transparent">
+                {leadingCellCount > 0 && (
+                  <TableCell className={cn("w-10 h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
+                )}
+                {columns.map((col, colIndex) => {
+                  const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
+                  const isPinnedRight = isPinnedRightColumn(col);
+                  const pinnedRightOffset = isPinnedRight ? measuredStickyRights?.[col.accessorKey] : undefined;
+                  const figure = summaryRow.cells[col.accessorKey];
+                  const lead = colIndex === 0 ? summaryRow.lead : undefined;
+                  return (
+                    <TableCell
+                      key={col.accessorKey}
+                      data-column-key={col.accessorKey}
+                      data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
+                      className={cn(
+                        "h-8 px-3 py-0 whitespace-nowrap text-[13px] font-medium text-muted-foreground tabular-nums bg-background",
+                        col.align === 'right' && 'text-right',
+                        col.align === 'center' && 'text-center',
+                        isFrozen && 'sticky z-20',
+                        isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
+                        isPinnedRight && 'sticky right-0 z-20',
+                      )}
+                      style={{
+                        ...(isFrozen && { left: measuredStickyLefts?.[leadingCellCount + colIndex] }),
+                        ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
+                      }}
+                    >
+                      {lead != null && figure != null ? (
+                        <span className="flex items-center justify-between gap-3">
+                          <span data-testid="data-table-summary-lead">{lead}</span>
+                          <span>{figure}</span>
+                        </span>
+                      ) : lead != null ? (
+                        <span data-testid="data-table-summary-lead">{lead}</span>
+                      ) : figure}
+                    </TableCell>
+                  );
+                })}
+                {rowActions && <TableCell className="w-24 h-8 py-0 bg-background" />}
+                {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
+              </TableRow>
+            </tfoot>
+          )}
         </Table>
       </div>
       {rightShadow && (

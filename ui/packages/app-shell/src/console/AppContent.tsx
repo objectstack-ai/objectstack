@@ -23,13 +23,11 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { BUNDLE_MISS, useBundledReads } from '../providers/bundledReads.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
+import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
 import {
   ExpressionProvider,
-  createExpressionEvaluator,
-  isObjectFieldVisible,
-  useExpressionPermissions,
-  useExpressionSystemPermissions,
+  isObjectFieldListed,
 } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
@@ -69,9 +67,14 @@ import {
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
-import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
+import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
-import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
+import {
+  packagedActionsStudioPath,
+  packagedAutomationStudioPath,
+  setupMetadataRest,
+  setupMetadataStudioPath,
+} from '../views/studio-design/setupMetadataRedirect.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
@@ -361,6 +364,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // worse answer than the literal it replaced.
   const homePath = useHomePath();
   const previewDrafts = usePreviewDrafts();
+  // objectstack#34807 — the global New/Edit modal reads its object definition
+  // through the draft overlay under preview (a field only the draft declares is
+  // drawn disabled and left out of every write); outside preview this is
+  // `dataSource` itself.
+  const formDataSource = usePreviewFormDataSource(dataSource);
   const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
 
@@ -581,6 +589,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   ].join(',');
   const bucketsSettled = useLazyMetadataSettled(routeReadsKey, ensureType, getTypeStatus);
   const routeReadsSettled = bucketsSettled && (!objectScope || objectScopeReady);
+  // objectstack#35535 — an object's list reads its saved views when
+  // `ObjectView` mounts, which waits for the list's lazy modules. Its read
+  // starts here instead, in the commit where the route can render: the scope
+  // has settled with its views in hand (the app bundle, or the `/meta/view`
+  // list it waited for), so the read joins that and asks nothing new, and the
+  // route's object is one `ObjectView` draws. Only on an app the URL names, and
+  // outside a draft preview, whose list read is another request.
+  const viewReadObject = objectViewRouteObject(appSubPath, hostRoutePaths);
+  const viewReadReady =
+    !!viewReadObject && routeReadsSettled && allObjects.some((o) => o?.name === viewReadObject);
+  useEffect(() => {
+    if (!viewReadObject || !viewReadReady || !bundleAppName || previewDrafts) return;
+    prefetchObjectViewRows(dataSource, viewReadObject);
+  }, [dataSource, viewReadObject, viewReadReady, bundleAppName, previewDrafts]);
   // Set once the first frame past the splash has rendered. After it, a route
   // waiting on its buckets draws its skeleton inside the console chrome rather
   // than taking the whole console back to the splash.
@@ -1159,48 +1181,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     navigate(`/apps/${newAppName}`);
   };
 
-  // Evaluator for the ModalForm's field-visibility gates below, over the SAME
-  // bag the `ExpressionProvider` this component mounts publishes — one builder,
-  // called with the same inputs (objectui#6493). This one sits ABOVE that
-  // provider in its own tree, so it cannot read it back through the hook; what
-  // it can do is stop hand-writing a second, narrower bag.
-  //
-  // Two roots the private bag dropped, both of which fail OPEN when named:
-  // `current_user` (and the `ctx.user` / `os.user` spellings of the same
-  // object) and `features`. Its `user` was hand-rolled too, without
-  // `positions` — so `'sales' in current_user.positions`, the gate the server
-  // enforces on write, faulted here rather than hiding the field.
-  // objectui#4421 — the same `permissions` input the provider below reads, so
-  // `current_user.can(...)` in a field's `visibleWhen` answers here exactly as
-  // it does under the provider (one bag, objectui#6493).
-  // objectui#13083 — and the `systemPermissions` list beside it, so
-  // `current_user.hasCapability(name)` answers here as it does under the
-  // provider (objectui#13006) instead of faulting on an unbound list.
-  const expressionPermissions = useExpressionPermissions();
-  const expressionSystemPermissions = useExpressionSystemPermissions();
-  const expressionEvaluator = useMemo(
-    // ⛔ No `app`: objectui#8155 removed it from the predicate scope, because
-    // neither ADR-0068 nor the engine's `SCOPE_ROOTS` declares such a root.
-    //
-    // ⛔ No `data` either: objectui#8166. This site passed `editingRecord` under
-    // that root, and it was the ONE mount in the repo where the ambient `data`
-    // was not empty — so an authored `visibleWhen: "data.status == 'x'"`
-    // RESOLVED here, silently, against the record being edited, while the SAME
-    // predicate on the SAME modal's per-field rules (form.tsx, over the
-    // provider's `data={{}}`) faulted, and the same predicate in CREATE mode
-    // (`editingRecord` null) faulted too. One authored string, three answers,
-    // none of them the row's canonical `record.*` binding (`83fe6e741`).
-    // The row reaches field predicates as `record`, from the form's own
-    // `ruleRecord` — not from this bag, which is why nothing is lost here.
-    () => createExpressionEvaluator({
-      user: buildExpressionUser(user),
-      features,
-      permissions: expressionPermissions,
-      systemPermissions: expressionSystemPermissions,
-    }),
-    [user, features, expressionPermissions, expressionSystemPermissions],
-  );
-
   // objectui#5619 — `isWorkspaceAdminResolved` belongs in this readiness gate
   // for the same reason `metadataLoading` does: everything below branches on
   // the verdict. The guard at the "no active app" strand turns a `false` into a
@@ -1663,6 +1643,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                     Studio's Automations pillar. The static path outranks the
                     `:ns/:name` route below it. */}
                 <Route path="component/automation/packaged" element={<PackagedAutomationRedirect />} />
+                {/* objectstack#34724 (ADR-0146 D4, amended 2026-11-17) — the
+                    retired Setup › Packaged Actions page
+                    (`automation:packaged-actions`): a bookmark opens Studio,
+                    where a packaged action's switch is. */}
+                <Route path="component/automation/packaged-actions" element={<PackagedActionsRedirect />} />
                 <Route path="component/:ns/:name/*" element={<ComponentNavView />} />
                 {/* Legacy: old metadata routes built before the REST-style nesting
                     landed. Redirect to the new /metadata/:type/... shape. */}
@@ -1753,22 +1738,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
                 open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
-                // objectui#6514 — the same declared-key gate `RecordFormPage`
-                // runs, through the same helper. This read `f.visible`, a key
-                // `FieldSchema` refuses by name, so nothing an author could
-                // legally write ever reached it; `isObjectFieldVisible` reads the
-                // static `hidden` (INVERTED) and the `visibleWhen` predicate,
-                // and the dead read is deleted rather than kept beside them.
+                // The list the form may draw: `isObjectFieldListed`, the same
+                // gate `RecordFormPage` runs. It reads the static `hidden` only
+                // (objectui#6514's declared keys; the refused `visible` is not
+                // read). A field's `visibleWhen` is evaluated by the form, where
+                // the record is bound — evaluated here, with no record, a
+                // `has()`-guarded predicate dropped the field before the form
+                // could draw it, and a form laid out from `fieldGroups` draws
+                // only listed fields.
                 fields: formObjectDef.fields
                   ? (Array.isArray(formObjectDef.fields)
                       ? formObjectDef.fields
-                          .filter((f: any) => {
-                            if (typeof f === 'string') return true;
-                            return isObjectFieldVisible(f, expressionEvaluator);
-                          })
+                          .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
                           .map((f: any) => typeof f === 'string' ? f : f.name)
                       : Object.entries(formObjectDef.fields)
-                          .filter(([_, f]: [string, any]) => isObjectFieldVisible(f, expressionEvaluator))
+                          .filter(([_, f]: [string, any]) => isObjectFieldListed(f))
                           .map(([key]: [string, any]) => key))
                   : [],
                 onSuccess: handleRecordFormSuccess,
@@ -1794,7 +1778,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   },
                 ),
               }}
-              dataSource={dataSource}
+              dataSource={formDataSource ?? undefined}
             />
           )}
       </ConsoleLayout>
@@ -2100,6 +2084,16 @@ function SetupMetadataRoute({ children }: { children?: ReactNode }) {
 function PackagedAutomationRedirect() {
   const location = useLocation();
   return <Navigate to={packagedAutomationStudioPath(location.search, location.hash)} replace />;
+}
+
+/**
+ * A bookmark of the retired Setup › Packaged Actions page (objectstack#34724)
+ * opens Studio: the named app's Data pillar, else the Studio landing
+ * (`packagedActionsStudioPath`).
+ */
+function PackagedActionsRedirect() {
+  const location = useLocation();
+  return <Navigate to={packagedActionsStudioPath(location.search, location.hash)} replace />;
 }
 
 /**

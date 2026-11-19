@@ -75,6 +75,7 @@ vi.mock('../pwaManifestIcons', async (importOriginal) => ({
   resolveManifestIcons,
 }));
 vi.mock('../lib/auth-preflight', () => ({ preflightAuth: async () => undefined }));
+vi.mock('../lib/early-discovery', () => ({ readConsoleDiscovery: async () => null }));
 vi.mock('../register-plugins', () => ({}));
 vi.mock('../registerDeveloperComponents', () => ({}));
 vi.mock('../registerStudioComponents', () => ({}));

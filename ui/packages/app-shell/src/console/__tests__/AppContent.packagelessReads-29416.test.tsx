@@ -276,7 +276,9 @@ describe('a package-less app reads what its routes name, by name (objectstack#29
 
     expect(screen.getByTestId('object-view')).toHaveTextContent('note');
     expect(screen.getByTestId('object-view').getAttribute('data-views')).toContain('note.all');
-    expect(byNameCalls()).toEqual(expect.arrayContaining(['object/note', 'object/sys_user']));
+    expect(byNameCalls()).toContain('object/note');
+    // objectstack#35306 — the lookup target's presence read served it: no by-name read of it.
+    expect(byNameCalls()).not.toContain('object/sys_user');
     // objectstack#34244 — the entries' required objects are asked in the presence read, never by name.
     expect(byNameCalls()).not.toContain('object/gone_obj');
     expect(byNameCalls()).not.toContain('object/crm_account');
@@ -357,12 +359,14 @@ describe('objectstack#34244 — a requiresObject the host does not register is n
     expect(byNameCalls()).not.toContain('object/gone_obj');
   });
 
-  it('(e) CONTROL: in a packaged app a registered requiresObject outside the package is shown, and asked by name', async () => {
+  it('(e) CONTROL: in a packaged app a registered requiresObject outside the package is shown, and joins the scope from the presence read', async () => {
     boot('/apps/app.crm/crm_account');
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
     await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
 
     expect(screen.getByTestId('user-entry')).toHaveTextContent('true');
-    expect(byNameCalls()).toContain('object/sys_user');
+    // objectstack#35306 — the presence read served it, so it is not asked again by name.
+    expect(server.calls.filter((c) => c.startsWith('object?names=') && c.includes('sys_user')).length).toBeGreaterThan(0);
+    expect(byNameCalls()).not.toContain('object/sys_user');
   });
 });

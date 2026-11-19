@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "platform-core",
-  "axis": "devpath",
+  "axis": "package",
   "title": "Platform core — boot, health, console shell, metadata pipeline",
   "items": [
     {
@@ -640,7 +640,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 17,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -662,10 +662,10 @@
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
-        "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar to its icon rail, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B) to unfold it before expanding any group. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px). Folded, the sidebar is hidden, with no icon column (ruling 6973617688 on objectstack#35062): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B), or rest the pointer on the window's left edge, to float the full menu over the page before expanding any group. The float folds back after each chosen entry, so float it again for the next destination. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/access_policy/mail/sms/storage/ai/knowledge/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user's record page, /_console/apps/setup/sys_user/record/ID (a row click on the Users list opens a side panel at ?recordId=, which is not that page: take the id from the row or the panel), and confirm the user page's Preferences and Linked Accounts tabs (packages/platform-objects/src/pages/sys-user.page.ts#SysUserDetailPage) render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 48 Setup destinations for the admin on a stock single-org showcase boot, as QA runs #32953 (at 5fb79bc0) and #33087 (at 8e3d4a54) read them (GET /api/v1/meta/app leaves, which match the nav source minus its gates). QA run #29877 read 46 at 589049b0, before Access policy (nav_settings_access_policy, the access_policy namespace) joined the Configuration group. Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 47 Setup destinations for the admin on a stock single-org showcase boot, read from source after objectstack#34724 retired Setup › Packaged Actions (nav_packaged_actions; its switch moved onto the action in Studio); QA runs #32953 (at 5fb79bc0) and #33087 (at 8e3d4a54) read 48 before it (GET /api/v1/meta/app leaves, which match the nav source minus its gates). QA run #29877 read 46 at 589049b0, before Access policy (nav_settings_access_policy, the access_policy namespace) joined the Configuration group. Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785, itself retired by objectstack#34724), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -810,6 +810,18 @@
           "date": "2026-11-15",
           "change": "steps[3] names the user record URL (row 8 of ledger 6896511848 on #33761; QA run #33784 at a557fa38): a row click on the Setup Users list opens a side panel (?recordId=), and the Preferences and Linked Accounts tabs live on the record page (/apps/setup/sys_user/record/ID, the sys_user_detail page). No clause changed. Read from source at base 0ac112fc",
           "ref": "#34004"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-17",
+          "change": "steps[5]: the admin's Setup destinations are 47, not 48: Setup › Packaged Actions (nav_packaged_actions) retired, its switch moved onto the action in Studio (the ADR-0146 D4 amendment of 2026-11-17). Read from source; not yet re-measured by a QA run.",
+          "ref": "#34724"
+        },
+        {
+          "revision": 17,
+          "date": "2026-11-18",
+          "change": "steps[2]: below 1416 px the fold now hides the sidebar instead of leaving its icon rail (ruling 6973617688 on #35062): the walk floats the full menu with the toggle (Ctrl/⌘+B) or by resting the pointer on the window's left edge, and floats it again after each chosen entry, since the float folds back on navigation. The walk is unchanged in substance. No clause changed. Read from source, and measured on a CRM boot (at 1280×800 the toggle floated the menu with focus on its entry; at 1600×900 choosing an entry in the float folded it); not yet re-run by a QA run.",
+          "ref": "#35187"
         }
       ]
     },
@@ -3193,10 +3205,10 @@
     },
     {
       "id": "platform-core.seed-mode-matrix",
-      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` inserts and deletes nothing, DECLARED and IMPLEMENTED alike (no caller clears the table): its posture is scored as bare insert, never ticked as scoped deletion",
+      "title": "Seed mode matrix (update/upsert/ignore): each live mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and the retired `insert` and `replace` are refused at the draft save with SeedMode's own prescription, so neither can reach a load",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3204,12 +3216,11 @@
         "app": "showcase",
         "requires": [
           "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it). The seed BODY carries object, mode, records (and externalId when not the default) and NO `name` key — the URL names the seed, and SeedSchema is strict (packages/spec/src/data/seed.zod.ts#SeedSchema), so a body `name` answers 422 unrecognized_keys — and one that differs from the URL's name is refused even earlier, 400 VALIDATION_ERROR (measured at 756220c4)",
-          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
+          "a scratch target object in the same writable package (do NOT aim mode probes, least of all upsert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
         ],
         "knownGaps": [
           "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
-          "`insert` mode's schema comment says 'fail on duplicate', but the loader does NO matching in insert mode (no existing-records preload) — the failure only materializes where the object itself carries a unique constraint; on an unconstrained scratch object an insert replay simply duplicates rows. The matrix records both shapes honestly",
-          "after insert mode has duplicated a natural key (acceptance[3]'s unconstrained shape), upsert and update bind each key to ONE of the duplicates and leave the other unconverged, silently: loadExistingRecords (packages/metadata-protocol/src/seed-loader.ts) keys an unordered find by externalId, so the last row read wins — the NEWER duplicate on QA run #24779's SQLite boot, which upsert rewrote while the original kept its value. No clause scores it: record it beside acceptance[3] as an observation, never as a FAIL of acceptance[0] or negative[0]"
+          "the load's refusal of a STORED dataset that still declares a retired mode (refused alone, its error carrying SeedMode's own prescription, every other dataset landing) is not reachable from this item: the draft save refuses both modes first (steps[4] and [5]), so a retired mode never stores. It is scored from its unit pin, packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts, never by a live run"
         ]
       },
       "steps": [
@@ -3217,9 +3228,9 @@
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
-        "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
-        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything, which is what SeedMode now declares for replace ('deleting nothing: for a cache table the caller cleared'). Score F's survival as the declared posture; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
-        "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
+        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 …); nothing is stored under the seed's name",
+        "REPLACE (retired): the same draft with mode replace → the same 422 refusal at `mode`, carrying replace's own prescription (it inserted every record and left clearing the table to the caller); nothing is stored",
+        "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because the UPDATE step set A to a2, so it re-converges A to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
       ],
       "acceptance": [
@@ -3242,21 +3253,21 @@
           "evidence": "A's before/after read + E's read"
         },
         {
-          "clause": "insert never matches: a replay adds rows again on an unconstrained object (the duplication is the honest observation), and only an object-level unique constraint turns it into the schema comment's 'fail on duplicate' — record which shape this run's fixture produced",
+          "clause": "the retired `insert` (it matched no row, so every replay inserted each record again) is refused at the draft save: 422 INVALID_METADATA with SeedMode's own prescription at `mode`, and nothing is stored — no seed can duplicate rows by its mode",
           "oracle": "api",
-          "verify": "the duplicate A-named rows (or the constraint refusal) after step 4",
-          "evidence": "the post-insert row listing (or the refusal body)"
+          "verify": "the refusal body after step 4: code INVALID_METADATA, status 422, the issues[] entry at path mode whose message opens with the `seed.mode: 'insert'` was removed sentence; no seed stored under the name",
+          "evidence": "the refusal body"
         },
         {
-          "clause": "EXPECTED POSTURE (declared = implemented): `replace` inserts every record with no match and deletes nothing. SeedMode's replace member declares 'Insert every record, no match, deleting nothing: for a cache table the caller cleared', SeedSchema's mode description says replace 'does the same and deletes nothing: it is for a table the caller cleared', and writeRecord's replace arm is that bare insert (its comment 'caller should have cleared the table'; NO caller anywhere clears it), so pre-existing rows SURVIVE a replace-mode publish. F's survival is the declared behaviour: neither a gap to record nor data loss to file; the run must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements a clear (in the loader or in a caller), this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
+          "clause": "the retired `replace` (it inserted every record and deleted nothing, leaving the clear to a caller that never existed) is refused the same way with its own prescription — no mode deletes, so no run ticks a scoped deletion",
           "oracle": "api",
-          "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert in seed-loader.ts's writeRecord, and decideWriteAction (the batched mirror) routes replace to insert — cite the symbols, never a line number",
-          "evidence": "F's surviving read + G's read + the source excerpt"
+          "verify": "the refusal body after step 5, as acceptance[3] with replace; source: SEED_MODE_RETIRED in seed.zod.ts holds both prescriptions and SeedMode reads them through enumWithRetiredValues — cite the symbols, never a line number",
+          "evidence": "the refusal body + the source excerpt"
         },
         {
-          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
+          "clause": "the live mode vocabulary is the spec's own three (SEED_MODE_VALUES: update, upsert, ignore; insert and replace sit in SEED_MODE_RETIRED) and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a live mode lands or leaves",
           "oracle": "build",
-          "verify": "SeedMode members at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
+          "verify": "SEED_MODE_VALUES and SeedMode at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
           "evidence": "the three source excerpts"
         }
       ],
@@ -3265,21 +3276,19 @@
         "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL"
       ],
       "variants": [
-        "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
         "mode update — matched rows only; unmatched skipped, never created",
         "mode upsert — create-or-update on externalId with no-op-replay skip",
-        "mode replace — bare insert, no matching, nothing deleted: DECLARED and IMPLEMENTED alike (the expected-posture clause)",
         "mode ignore — insert-if-absent; existing rows never rewritten"
       ],
       "enumSource": {
         "file": "packages/spec/src/data/seed.zod.ts",
-        "export": "SeedMode",
-        "expect": 5
+        "export": "SEED_MODE_VALUES",
+        "expect": 3
       },
       "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
       "source": [
-        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Insert every record, no match, deleting nothing: for a cache table the caller cleared'), (SeedSchema's mode description — replace 'does the same and deletes nothing: it is for a table the caller cleared')",
-        "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
+        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — enumWithRetiredValues over SEED_MODE_VALUES, the three live modes, and SEED_MODE_RETIRED, the insert and replace prescriptions a parse answers)",
+        "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload — every live mode matches on externalId), (writeRecord per-mode switch), (decideWriteAction — the batched mirror),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
         "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode is SeedSchema.shape.mode, default 'ignore')",
         "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
         "packages/runtime/src/seed-loader.ts#SeedLoaderService (the MOVED shim — one SeedLoaderService for every path)",
@@ -3334,6 +3343,12 @@
           "date": "2026-11-08",
           "change": "steps[0], acceptance[0].clause and acceptance[5].clause re-pointed to the ignore default, plus variants[2] and source[2] (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-1, acceptance[5]): PR #30152 made a seed create-only by default, an omitted mode is ignore. Read at 4894cfe1: packages/spec/src/data/seed.zod.ts SeedSchema mode is SeedMode.default('ignore'); seed-loader.zod.ts SeedLoaderConfigSchema defaultMode is SeedSchema.shape.mode; the seam in packages/metadata-protocol/src/seed-loader.ts writeRecord is unchanged (dataset.mode || config.defaultMode). steps[0] also carries the run's note that an unprefixed draft fails the whole publish-drafts batch (outcome 'refused', publishedCount 0; protocol.ts publishPackageDrafts pre-flight). Every probe step declares its mode, so no verdict moves",
           "ref": "#31497"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-19",
+          "change": "title, fixtures, steps[4] to [6], acceptance[3] to [5], variants, enumSource and source[0] to [1] revised to the three live modes. #34791 (#34613) retired `insert` and `replace` at the schema: SeedMode became enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED), so the pin read 0 members and the watchdog went red; it now counts SEED_MODE_VALUES (3). steps[4] and [5] and acceptance[3] and [4] score the two retired modes as refused at the draft save, the answer measured in-process at base b65488a8 (the save door's own suite, protocol.seed-external-id-refusal.test.ts): 422 INVALID_METADATA, issue at mode, code invalid_value, message the mode's prescription. knownGaps[1] and [2] described insert-mode duplication and go with it; the stored-dataset refusal is recorded as scored from its unit pin. No live-mode verdict moves",
+          "ref": "#35297"
         }
       ]
     },

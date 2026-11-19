@@ -71,7 +71,13 @@ export interface HookDispatchHost {
   transaction: ObjectQL['transaction'];
 }
 
-/** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
+/**
+ * [#22782] The unit {@link opensAfterAbortUnit} asked for. `write` is the write
+ * door's engine body — the executor `insert`, `update` and `delete` each hand
+ * the middleware chain (#35142, #35167) — so the chain, the authorization gate
+ * included, runs before the unit opens and after it closes, and the `before*`
+ * hooks' `ctx.api` writes, the row and the `after*` chain run inside it.
+ */
 export async function inAfterAbortUnit<T>(
   this: Pick<HookDispatchHost, 'transaction'>,
   write: () => Promise<T>,

@@ -133,7 +133,10 @@ import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretable
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
-  objectFieldLabelKey,
+  translateObject,
+  type ObjectLike,
+  type ResolveOptions,
+  type TranslationBundle,
   type ValidationMessageTranslator,
 } from '@objectstack/spec/system';
 
@@ -291,6 +294,12 @@ interface FieldDef {
   required?: boolean;
   readonly?: boolean;
   system?: boolean;
+  /**
+   * The field's own visibility predicate (ADR-0036 B2). Read here for one
+   * question only — {@link requiredWhenShown}: does the engine judge this
+   * field's `required` against its visibility (ADR-0113 D1 as amended)?
+   */
+  visibleWhen?: unknown;
   multiple?: boolean;
   maxLength?: number;
   minLength?: number;
@@ -424,11 +433,27 @@ export interface ValidationMessageContext {
   /** BCP-47 locale of the principal performing the write. */
   locale?: string;
   /**
-   * `II18nService.t`-compatible lookup, used for two things: a deployment's
-   * `validation.field.*` message override, and the field's TRANSLATED label
-   * (the declared `label` is only the source language).
+   * `II18nService.t`-compatible lookup for MESSAGES: a deployment's
+   * `validation.field.*` message override and an authored rule message's
+   * catalog entry. A metadata LABEL is not asked through it — see
+   * {@link labelTranslation}.
    */
   translate?: ValidationMessageTranslator;
+  /**
+   * [#34030] How a metadata LABEL a refusal names — a field's, an option's, an
+   * object's — is put in the caller's language: the deployment's translations
+   * and the `ResolveOptions` the metadata route serves the same labels with
+   * (the request's locale, the declared fallback chain, and the authored
+   * language: `i18n.sourceLocale`, else `defaultLocale`). So a request in the
+   * authored language reads the label as written, never the `defaultLocale`
+   * row `t()` would fall to, and a refusal names a field with the word the
+   * form showed. A thunk, asked only when a refusal names something: building
+   * the bundle reads every locale the service holds.
+   *
+   * Absent, or answering `undefined` (no i18n service, no locale): the
+   * declared labels.
+   */
+  labelTranslation?: () => ValidationLabelTranslation | undefined;
   /** Object name — needed to address the field's label in the bundle. */
   objectName?: string;
   /**
@@ -449,30 +474,60 @@ export interface ValidationMessageContext {
 }
 
 /**
+ * [#34030] The deployment's translations, keyed by locale (`undefined` when it
+ * holds none), and the `ResolveOptions` a metadata label is resolved with —
+ * {@link ValidationMessageContext.labelTranslation}'s answer.
+ */
+export interface ValidationLabelTranslation {
+  bundle: TranslationBundle | undefined;
+  options: ResolveOptions;
+}
+
+/**
+ * [#34030] An object document with the labels a refusal names, put in the
+ * caller's language by `translateObject` (`@objectstack/spec/system`) — the
+ * translator `GET /meta/object/:name` serves the object with, so the rule that
+ * decides which language the inline label is lives in one place. ⛔ No key is
+ * spelled here.
+ *
+ * The declared document comes back when there is nothing to translate with,
+ * and when the translator throws: a misbehaving i18n service must not turn a
+ * refusal into a 500.
+ */
+export function translatedLabels<T extends ObjectLike>(
+  doc: T,
+  ctx: Pick<ValidationMessageContext, 'labelTranslation'> | undefined,
+): T {
+  if (typeof ctx?.labelTranslation !== 'function') return doc;
+  try {
+    const translation = ctx.labelTranslation();
+    if (!translation) return doc;
+    return translateObject(doc, translation.bundle, translation.options);
+  } catch {
+    return doc;
+  }
+}
+
+/**
  * The field's display name in the caller's locale: translation bundle →
  * declared `label` → API name. The API name is the last resort precisely
  * because surfacing it is the bug (#3957); it stays available to clients as
- * `FieldValidationError.field`.
+ * `FieldValidationError.field`. The bundle is read by the metadata route's
+ * rule ({@link translatedLabels}, #34030).
  */
 export function resolveFieldLabel(
   name: string,
   def: { label?: string } | undefined,
   ctx: ValidationMessageContext | undefined,
 ): string {
-  if (ctx?.translate && ctx.objectName && ctx.locale) {
-    const key = objectFieldLabelKey(ctx.objectName, name);
-    try {
-      const translated = ctx.translate(key, ctx.locale);
-      // II18nService echoes the key back on a miss.
-      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-        return translated;
-      }
-    } catch {
-      // A misbehaving i18n service must not turn a 400 into a 500.
-    }
-  }
   const declared = def?.label?.trim();
-  return declared && declared.length > 0 ? declared : name;
+  let label: string | undefined = declared;
+  if (ctx?.objectName && ctx.locale) {
+    const doc = translatedLabels({ name: ctx.objectName, fields: { [name]: { label: declared } } }, ctx);
+    const fields = doc.fields as Record<string, { label?: string }> | undefined;
+    label = fields?.[name]?.label;
+  }
+  return typeof label === 'string' && label.length > 0 ? label : name;
 }
 
 /**
@@ -1010,6 +1065,23 @@ function receivedObjectShape(value: object): string {
  * single-value field (refused) and every element that is not a number or a
  * boolean.
  *
+ * ## [#34916] The boolean arm's half: a string or a number on a boolean field
+ *
+ * The record validator's boolean arm admits more than a JS boolean: `0` / `1`,
+ * `'0'` / `'1'` and `'true'` / `'false'` pass it too. The write carried the
+ * reading as sent, so `'true'` reached the driver as the TEXT `'true'`. SQLite
+ * kept it as text beside rows holding the integer `1`, so a filter on
+ * `won = true` missed the row, and a `requiredWhen: record.won == true` read
+ * the string, judged `'true' == true` false and admitted the write the rule
+ * should refuse. The console's inline grid sends exactly these strings: it
+ * draws a boolean column as a select whose option values are `'true'` /
+ * `'false'`. This writes the boolean the arm judged ({@link BOOLEAN_READINGS}):
+ * `'true'`, `'1'` and `1` as `true`, `'false'`, `'0'` and `0` as `false`, on
+ * `boolean` / `toggle` fields. The accepted set does not move: a value outside
+ * those readings (`'yes'`, `'TRUE'`, `2`, an array) stays as sent, and the arm
+ * refuses it with `invalid_boolean` as before. ⛔ No driver copy: a row already
+ * stored as text is the read side's to present (driver-sql `formatOutput`).
+ *
  * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
  * them, pure — the same reference comes back when nothing changed, else a
  * shallow copy (per row, and a copied array).
@@ -1031,6 +1103,17 @@ export function normalizeNumericStringValues<T>(
   return normalizeNumericStringRow(fields, data) as T;
 }
 
+/**
+ * [#34916] The non-boolean values the record validator's boolean arm admits,
+ * and the boolean each one reads as. Exactly the arm's list (`validateOne`,
+ * the `boolean` / `toggle` branch): compared by `SameValueZero`, so `'TRUE'`,
+ * `' true'` and `2` are not here, and the arm refuses them.
+ */
+const BOOLEAN_READINGS: ReadonlyMap<unknown, boolean> = new Map<unknown, boolean>([
+  ['true', true], ['1', true], [1, true],
+  ['false', false], ['0', false], [0, false],
+]);
+
 function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknown): unknown {
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
@@ -1041,6 +1124,13 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
     if (!def || !isInReadonlyScope(name, def, 'include')) continue;
+    if (def.type === 'boolean' || def.type === 'toggle') {
+      // [#34916] The boolean arm's reading, written as the boolean it judged.
+      // Anything else is left as sent, for the arm to refuse.
+      const judged = BOOLEAN_READINGS.get(value);
+      if (judged !== undefined) (out ??= { ...row })[name] = judged;
+      continue;
+    }
     if (isString) {
       if (!isJudgedNumberType(def.type)) continue;
       const n = parseNumericString(value);
@@ -2236,6 +2326,31 @@ function keptOptionsFor(
 }
 
 /**
+ * [ADR-0113 D1, as amended] Is this field's `required` judged together with its
+ * own `visibleWhen`? A field that declares both is "required when shown": the
+ * engine waives the requirement for a write whose merged record the predicate
+ * cleanly hides, and judges the rest by the non-regression invariant against
+ * the prior record. That judgement needs the merged and prior records and the
+ * acting user, which this module never holds, so it lives in the rule
+ * validator (`evaluateValidationRules`) and the engine's write path asks this
+ * module to leave such a field's presence to it ({@link validateRecordInScope}'s
+ * `requiredVisibility: 'deferred'`).
+ *
+ * A `readonly` field is never required here (the engine owns its presence) and
+ * an `autonumber` is runtime-owned, so neither is in the set: the same two
+ * exemptions the `required` arm below makes.
+ */
+export function requiredWhenShown(
+  def: { required?: boolean; readonly?: boolean; type?: string; visibleWhen?: unknown } | undefined | null,
+): boolean {
+  return !!def
+    && def.required === true
+    && def.visibleWhen != null
+    && def.readonly !== true
+    && def.type !== 'autonumber';
+}
+
+/**
  * Validate a payload against a list of declared fields. `objectSchema`
  * comes from `ObjectQL.getRegistry().getObject(name)` and exposes a
  * `fields` map of `{ [fieldName]: FieldDef }`.
@@ -2320,6 +2435,12 @@ export function validateRecordInScope(
   mode: Mode,
   scope: ReadonlyValueScope,
   options: ValidateRecordOptions = {},
+  // [ADR-0113 D1, as amended] `'deferred'` leaves the presence of a field that
+  // is required when shown ({@link requiredWhenShown}) to the rule validator,
+  // which the engine's write path runs on the same write. ⛔ Only a caller that
+  // does run `evaluateValidationRules` afterwards may pass it; the default keeps
+  // such a field required unconditionally, the "counts as shown" answer.
+  requiredVisibility: 'enforced' | 'deferred' = 'enforced',
 ): void {
   if (!objectSchema?.fields || !data) return;
 
@@ -2339,7 +2460,8 @@ export function validateRecordInScope(
       // [#21663] A readonly value: its SHAPE, never required (the engine owns
       // its presence) and never a constraint — see ReadonlyValueScope.
       const shapeOnly = def.readonly === true;
-      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly, keptOptionsFor(kept, name));
+      const deferRequired = requiredVisibility === 'deferred' && requiredWhenShown(def);
+      const err = validateOne(name, def, data[name], shapeOnly || deferRequired, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly, keptOptionsFor(kept, name));
       if (err) errors.push(err);
     }
   } else {
@@ -2362,7 +2484,11 @@ export function validateRecordInScope(
       // write that does not touch the field never reaches this check. (The
       // one over-approximation — explicit null onto an already-null legacy
       // row — is rejected too; that write was a no-op plus a false claim.)
-      if (def.required && isEmptyForRequired(def, value) && def.type !== 'autonumber') {
+      // [ADR-0113 D1, as amended] …unless the field is required only when
+      // shown and the caller runs the rule validator, which judges the clear
+      // against the field's visibility and the prior record.
+      const deferRequired = requiredVisibility === 'deferred' && requiredWhenShown(def);
+      if (def.required && !deferRequired && isEmptyForRequired(def, value) && def.type !== 'autonumber') {
         // Same catalog as every other built-in message (#3957) — one wire code
         // (`required`), a distinct sentence for the clear-out case.
         errors.push(buildFieldError(

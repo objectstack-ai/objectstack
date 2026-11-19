@@ -59,7 +59,9 @@
  *
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
  * to the engine; this bridge is engine-only. So the HTTP tools additionally get
- * that layer's existence probes, its spec-shaped receipts and `expand`/`select`.
+ * that layer's existence probes, its spec-shaped receipts and `select`
+ * (`expand` is served here since #35145, built as that layer builds it:
+ * {@link stdioExpandMap}).
  * (That layer's create-side `readonly` strip used to head this list; since the
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the
@@ -132,13 +134,17 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+// [#35145] What a reference field points at, and whether that object serves
+// the read an expansion is (`get`): the spec's one arbiter of each, the pair
+// the data door's expand gate asks.
+import { REFERENCE_VALUE_TYPES, canServeApiOperation, referenceTargetOf } from '@objectstack/spec/data';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
 // a direct `@objectstack/core` dependency (`plugin.ts` imports from it too),
 // and `@objectstack/core` is the lowest package that carries the factory, so
 // there is no reason to add a second import path to the same function.
-import { recordNotFoundError } from '@objectstack/core';
+import { recordNotFoundError, userTextLocalesOf } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule every data door
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
@@ -146,7 +152,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
-import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
+import type { McpDataBridge, McpFieldVisibility, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
 import {
   authoredDescription,
@@ -263,9 +269,10 @@ export interface StdioDataBridgeDeps {
    */
   datasetTools?: StdioDatasetToolsService;
   /**
-   * [ADR-0149 D2] The `i18n` service the saved datasets are localized with,
-   * resolved at each use. `undefined`, or a resolver that throws, means none:
-   * the datasets are then served untranslated, as on the HTTP door.
+   * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
+   * object tools' labels and descriptions are localized with, resolved at each
+   * use. `undefined`, or a resolver that throws, means none: they are then
+   * served untranslated, as on the HTTP door.
    */
   i18n?: () => unknown;
 }
@@ -299,6 +306,74 @@ interface ObjectDef {
   description?: string;
   fields?: Record<string, { type?: string; label?: string; required?: boolean }>;
   enable?: Record<string, unknown>;
+}
+
+/**
+ * The engine's order-cut-count read option for `aggregate`
+ * (`@objectstack/objectql`, `aggregate-order-cut.ts`), spelled `Symbol.for`
+ * because this package does not depend on the engine at runtime. A symbol, so
+ * no tool argument can carry it.
+ */
+const STDIO_AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+/**
+ * The engine's one-row-per-group read option (`@objectstack/objectql`,
+ * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
+ * on the engine at runtime. A symbol, so no tool argument can carry it.
+ */
+const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
+/**
+ * [#35145] `query_records`' `expand` on this transport, as the data door
+ * builds it (`assertExpandTargetsExist`, then `servedExpand`): each name is a
+ * reference field of the object as the caller is served it (`served`), else
+ * the door's `400 INVALID_FIELD`; a target whose declaration does not serve
+ * `get` is withheld, and its field answers as the stored id. The map is the
+ * engine's own `expand`, which reads each target in one batched `id IN (...)`
+ * read under the target's permissions, row and field security.
+ */
+async function stdioExpandMap(
+  reads: StdioObjectReads,
+  object: string,
+  served: ObjectDef | undefined,
+  names: readonly string[],
+): Promise<Record<string, { object: string }> | undefined> {
+  const out: Record<string, { object: string }> = {};
+  for (const name of names) {
+    const def = served?.fields && Object.prototype.hasOwnProperty.call(served.fields, name)
+      ? served.fields[name]
+      : undefined;
+    let target: string | undefined;
+    try {
+      target = def && typeof def.type === 'string' && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
+    } catch {
+      target = undefined;
+    }
+    if (!target) {
+      const err = new Error(
+        def === undefined
+          ? `Unknown field '${name}' on object '${object}'. 'expand' resolves a reference field into the related record.`
+          : `Field '${name}' on object '${object}' is not a relationship: only lookup / master_detail / user / tree `
+            + 'fields can be expanded.',
+      ) as Error & { code: string; status: number; field: string; object: string; param: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = name;
+      err.object = object;
+      err.param = 'expand';
+      throw err;
+    }
+    let declared: ObjectDef | undefined;
+    try {
+      declared = await readObjectDeclaration(reads, target);
+    } catch (err) {
+      // A target whose package is disabled serves nothing: withheld.
+      if (isObjectPackageDisabledRefusal(err)) continue;
+      throw err;
+    }
+    if (!canServeApiOperation(declared?.enable as EnableLike | undefined, 'get')) continue;
+    out[name] = { object: target };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -641,6 +716,85 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
   };
   setDeclaredObjectRead(served, readWithDeclaration);
   return served;
+}
+
+/** What {@link servedLocaleObjectView} localizes with: the host's `i18n` service and `protocol`. */
+export interface ServedLocaleSources {
+  /** The `i18n` service, resolved at each use ({@link StdioDataBridgeDeps.i18n}); a resolver that throws is none. */
+  i18n?: () => unknown;
+  /** The `protocol` service: an object's packaged base and a declared override's pair translations. */
+  protocol?: () => StdioProtocolObjectReads | undefined;
+}
+
+/**
+ * [ADR-0149 D2 · #34872] What the HTTP door's `/meta` translation reads, on a
+ * transport that carries no request: the i18n service (a resolver that throws
+ * is none) and, for the locale, `metaRequestLocale` with no request — the i18n
+ * service's default, the workspace default the stdio principal speaks.
+ * `resolveProtocol` answers the protocol the read was served from (an object's
+ * packaged base, a declared override's pair translations), or none.
+ */
+function defaultLocaleSources(i18n: (() => unknown) | undefined, resolveProtocol: () => Promise<unknown>) {
+  return {
+    resolveI18nService: async () => {
+      try {
+        return i18n?.();
+      } catch {
+        return undefined;
+      }
+    },
+    resolveProtocol,
+    requestLocale: (service?: unknown) => metaRequestLocale(undefined, service),
+  };
+}
+
+/**
+ * [#34872] Served objects in the locale this transport speaks: the HTTP door's
+ * `/meta` object translation (`translateMetaList`), ⛔ never a second routine,
+ * over the objects AS THE PRINCIPAL IS SERVED THEM ({@link callerObjectView}):
+ * the translator rewrites the text of the fields it is given and adds none, so
+ * a masked field stays absent, its translated text with it (ADR-0106 D3/D5).
+ * No locale, or a key the bundle does not carry, leaves the authored text;
+ * names never change.
+ */
+async function inServedLocale(sources: ServedLocaleSources, served: readonly ObjectDef[]): Promise<ObjectDef[]> {
+  if (served.length === 0) return [...served];
+  const translated = await translateMetaList(
+    defaultLocaleSources(sources.i18n, async () => sources.protocol?.()),
+    'object',
+    [...served],
+  );
+  return Array.isArray(translated) ? (translated as ObjectDef[]) : [...served];
+}
+
+/**
+ * [#34872 · #34995] `view` in the locale this transport speaks
+ * ({@link inServedLocale}): what the object tools (`list_objects`,
+ * `describe_object`) and the `objectstack://objects` resources read, so a
+ * resource and a tool describe one object with one set of labels. Wrap the
+ * view the principal is served ({@link callerObjectView}): the served object
+ * is what is translated, never the declaration, so a masked field stays absent
+ * (ADR-0106 D3/D5). The declaration that object was projected from is handed
+ * on untranslated ({@link readObjectWithDeclaration}): only `readonly` is read
+ * off it.
+ */
+export function servedLocaleObjectView(view: McpObjectView, sources: ServedLocaleSources): McpObjectView {
+  const readWithDeclaration = async (name: string) => {
+    const { served, declared } = await readObjectWithDeclaration(view, name);
+    if (!served) return { served, declared };
+    const [def] = await inServedLocale(sources, [served as ObjectDef]);
+    return { served: def, declared };
+  };
+  const localized: McpObjectView = {
+    async listObjects() {
+      return inServedLocale(sources, ((await view.listObjects()) ?? []) as ObjectDef[]);
+    },
+    async getObject(name) {
+      return (await readWithDeclaration(name)).served;
+    },
+  };
+  setDeclaredObjectRead(localized, readWithDeclaration);
+  return localized;
 }
 
 /**
@@ -1153,6 +1307,18 @@ function enforceApiKeyManagementCredential(object: string, action: string): void
 }
 
 /**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The HTTP twin is
+ * `describedFieldNames` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+  const fields = described.fields;
+  return Array.isArray(fields)
+    ? fields.map((f) => String((f as { name?: unknown } | null)?.name ?? '')).filter(Boolean)
+    : [];
+}
+
+/**
  * Build the stdio transport's principal-bound data bridge.
  *
  * `aggregate` is attached only when the engine implements it, so a partial
@@ -1171,13 +1337,41 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // the view discovery answers from. The gates below read `objectView` whole.
   const servedView = callerObjectView(objectView, { resolvePrincipal, security, schemaReadDelegates });
 
+  // [#34872 · #34995] …and in the locale this transport speaks
+  // ({@link servedLocaleObjectView}): the view the object tools describe
+  // from, through the wrapper `plugin.ts` puts on the view the
+  // `objectstack://objects` resources read, so the two answer alike.
+  const localizedView = servedLocaleObjectView(servedView, { i18n: deps.i18n, protocol });
+
+  /**
+   * `describe_object`'s answer for the principal: the object as they are
+   * served it ({@link callerObjectView}), [#34872] in the locale this
+   * transport speaks ({@link servedLocaleObjectView}), [#32435] each field and
+   * rule carrying what a write needs ({@link describeServedObject}), with
+   * `readonly` judged on the declaration that view masked
+   * ({@link readObjectWithDeclaration}; `declared` is read for that verdict
+   * alone). `null` for an object not served. [#35137] Also the served-schema
+   * half of `fieldVisibilityOf`, so the fields `withheldFields` may name are
+   * exactly the ones this answer lists.
+   */
+  const describeForPrincipal = async (name: string): Promise<Record<string, unknown> | null> => {
+    const { served: def, declared } = await readObjectWithDeclaration(localizedView, name);
+    if (!def) return null;
+    // The field list is an ARRAY here, not the stored map: `validate_expression`
+    // reads `Array.isArray(def.fields)` off this very value, and the HTTP
+    // bridge projects the same shape. A map would type-check and silently
+    // leave that tool with zero fields in scope.
+    return describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
+  };
+
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
       // [#25138] The protocol's merged listing ({@link readMergedObjects}),
       // [ADR-0106] as the principal is served it, so `fieldCount` counts the
       // fields that exist for them ({@link callerObjectView}).
       // [#34721] …and the object's authored `description`, as the HTTP twin serves it.
-      return ((await servedView.listObjects()) as ObjectDef[]).map((o) => ({
+      // [#34872] …in the locale this transport speaks ({@link servedLocaleObjectView}).
+      return ((await localizedView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
         ...authoredDescription(o),
@@ -1219,15 +1413,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // twin judges it ({@link readObjectWithDeclaration}): only that boolean
     // is read off the declaration.
     async describeObject(name: string): Promise<unknown | null> {
-      const { served, declared } = await readObjectWithDeclaration(servedView, name);
-      const def = served as ObjectDef | undefined;
-      if (!def) return null;
-      // The field list is an ARRAY here, not the stored map: `validate_expression`
-      // reads `Array.isArray(def.fields)` off this very value, and the HTTP
-      // bridge projects the same shape. A map would type-check and silently
-      // leave that tool with zero fields in scope.
-      // [#32435] …each field and rule carrying what a write needs.
-      return describeServedObject(def, declared as ServedObjectDef);
+      return describeForPrincipal(name);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served
@@ -1257,17 +1443,26 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       await enforceApiExposure(reads, object, GATED_ACTIONS.query, context);
       // [#22777] …and each nested-relation condition's target, before the engine reads it.
       await enforceRelationTargetExposure(reads, object, opts?.where, context);
+      // [latest per group] The partition and order fields are sort keys to
+      // every sort verdict below, as the engine judges them.
+      const latestPerKeys = opts?.latestPer
+        ? [
+          ...opts.latestPer.by.map((field) => ({ field, order: 'asc' as const })),
+          ...opts.latestPer.orderBy,
+        ]
+        : [];
+      const judgedOrderBy = latestPerKeys.length > 0 ? [...(opts?.orderBy ?? []), ...latestPerKeys] : opts?.orderBy;
       // [#21207] After the exposure gate, before the engine: a filter or sort
       // on a stored metadata body is refused rather than evaluated.
-      const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: judgedOrderBy });
       if (bodyRefusal) throw bodyRefusal;
       // [#21207] …and the same for a stored content-hash column.
-      const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: judgedOrderBy });
       if (hashRefusal) throw hashRefusal;
       // [#29896] …and a sort on a field its author declared `sortable: false`,
       // the list door's fourth sort verdict, judged by the served projection.
-      if (opts?.orderBy && opts.orderBy.length > 0) {
-        const sortRefusal = unofferedSortRefusal(object, await objectView.getObject(object), opts.orderBy);
+      if (judgedOrderBy && judgedOrderBy.length > 0) {
+        const sortRefusal = unofferedSortRefusal(object, await objectView.getObject(object), judgedOrderBy);
         if (sortRefusal) throw sortRefusal;
       }
       // A filter or sort on an `internal: true` field is refused by the engine
@@ -1280,14 +1475,80 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       if (opts?.orderBy) query.orderBy = opts.orderBy;
       if (typeof opts?.limit === 'number') query.limit = opts.limit;
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
+      // [#35145] `expand`, built as the data door builds it (`stdioExpandMap`).
+      if (Array.isArray(opts?.expand) && opts.expand.length > 0) {
+        const expand = await stdioExpandMap(reads, object, (await servedView.getObject(object)) as ObjectDef | undefined, opts.expand);
+        if (expand) query.expand = expand;
+      }
       // [#21207] The content-hash columns are served keyed, or not at all.
       const digest = keyedDigest?.();
+      if (opts?.latestPer) {
+        // [latest per group] One row per group, on the engine's own read
+        // option: at most `limit` groups, read with one row more so the answer
+        // says whether more groups exist; no `total`, since a row count is no
+        // group count. The engine sets the outcome when its driver served the
+        // window; a read that comes back without it is no answer.
+        const limit = typeof opts.limit === 'number' ? opts.limit : undefined;
+        if (limit === undefined) throw new Error(`query_records on '${object}' with latestPer needs a limit.`);
+        const latestPer: { by: string[]; orderBy: Array<{ field: string; order: 'asc' | 'desc' }>; outcome?: { kind?: unknown } } = {
+          by: opts.latestPer.by,
+          orderBy: opts.latestPer.orderBy,
+        };
+        const found = unwrapRows(await engine.find(object, { ...query, limit: limit + 1 }, {
+          context,
+          [STDIO_LATEST_PER]: latestPer,
+        } as Parameters<IDataEngine['find']>[2]));
+        if (latestPer.outcome?.kind !== 'served') {
+          throw new Error(`query_records on '${object}' with latestPer: the read was not served as one row per group.`);
+        }
+        const page = found.slice(0, limit);
+        const latestRecords = await Promise.all(
+          serveStoredMetadataRows(object, page, { dropType: read.addedType }).map((row) => serveStoredMetadataHashes(object, row, digest)),
+        );
+        return { object, records: latestRecords, hasMore: found.length > limit };
+      }
       const records = await Promise.all(
         serveStoredMetadataRows(object, unwrapRows(await engine.find(object, query, { context })), {
           dropType: read.addedType,
         }).map((row) => serveStoredMetadataHashes(object, row, digest)),
       );
-      return { object, records, total: records.length };
+      // [#35138] The page facts the data door answers (`findData`): a paged
+      // read is counted under the same filter, as the caller, so `total` is
+      // the match total and `hasMore` says whether rows remain past this page.
+      // Before, a capped page answered `total: records.length` and claimed to
+      // be the whole set. ⛔ A total this bridge did not count is never stated:
+      // a count that fails leaves `total` out, and `hasMore` answers from the
+      // page alone, the door's `$count=false` arm (a full page may have more).
+      const limit = typeof opts?.limit === 'number' ? opts.limit : undefined;
+      const offset = typeof opts?.offset === 'number' && opts.offset > 0 ? opts.offset : 0;
+      if (limit === undefined && offset === 0) return { object, records, total: records.length, hasMore: false };
+      let counted: number;
+      try {
+        counted = await engine.count(object, opts?.where ? { where: opts.where } : {}, { context });
+      } catch {
+        return { object, records, hasMore: limit !== undefined && records.length >= limit };
+      }
+      return { object, records, total: counted, hasMore: offset + records.length < counted };
+    },
+
+    /**
+     * [#35137] The two answers `query_records` and `get_record` name withheld
+     * fields from ({@link McpFieldVisibility}), both asked as the principal:
+     * the field names `describe_object` lists for them, read off the very
+     * answer it serves ({@link describeForPrincipal}, so whatever it leaves
+     * out is left out here too), and the security service's readable answer.
+     * No security service, an object not served, or no readable answer:
+     * `undefined`, and nothing is named.
+     */
+    async fieldVisibilityOf(object: string): Promise<McpFieldVisibility | undefined> {
+      const surface = security?.();
+      if (typeof surface?.getReadableFields !== 'function') return undefined;
+      const context = await resolvePrincipal();
+      const described = await describeForPrincipal(object);
+      if (!described) return undefined;
+      const readable = await surface.getReadableFields(object, context);
+      if (!Array.isArray(readable)) return undefined;
+      return { served: describedFieldNames(described), readable };
     },
 
     async get(object, id) {
@@ -1303,6 +1564,23 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         serveStoredMetadataRow(object, await findById(engine, object, id, context)),
         keyedDigest?.(),
       );
+    },
+
+    // [#35138] The locale ladder for a sentence the record tools compose
+    // (`ifNotRecorded`): the principal's, the ladder the dataset tools'
+    // `nextStep` reads on this door (`userTextLocalesOf`), then the i18n
+    // service's default, the locale this transport's `/meta` translation
+    // speaks ({@link defaultLocaleSources}). An i18n service this host cannot
+    // resolve, or whose default read throws, adds no rung.
+    async userTextLocales(): Promise<readonly string[]> {
+      const ladder = userTextLocalesOf(await resolvePrincipal());
+      let fallback: string | undefined;
+      try {
+        fallback = metaRequestLocale(undefined, deps.i18n?.());
+      } catch {
+        fallback = undefined;
+      }
+      return fallback !== undefined ? [...ladder, fallback] : ladder;
     },
 
     async create(object, data) {
@@ -1440,21 +1718,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       } else {
         items = (await metadataService.list('dataset')) ?? [];
       }
-      const translated = await translateMetaList(
-        {
-          resolveI18nService: async () => {
-            try {
-              return deps.i18n?.();
-            } catch {
-              return undefined;
-            }
-          },
-          resolveProtocol: async () => merged,
-          requestLocale: (i18n?: unknown) => metaRequestLocale(undefined, i18n),
-        },
-        'dataset',
-        items,
-      );
+      const translated = await translateMetaList(defaultLocaleSources(deps.i18n, async () => merged), 'dataset', items);
       return Array.isArray(translated) ? translated : items;
     };
     const executor = (maxQueryLimit?: number) =>
@@ -1465,7 +1729,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   }
 
   if (typeof engine.aggregate === 'function') {
-    bridge.aggregate = async (object, opts) => {
+    // [aggregate order and cut] `orderCut`, when set, is the engine's
+    // order-cut-count request, handed on its read option after every gate
+    // below; the caller reads the engine's outcome off it.
+    const runAggregate = async (
+      object: string,
+      opts: Parameters<NonNullable<McpDataBridge['aggregate']>>[1],
+      orderCut?: object,
+    ): Promise<unknown[]> => {
       const context = await resolvePrincipal();
       // `aggregate` is a list-class read: an object whose whitelist excludes
       // `list` must not leak row statistics through GROUP BY either. The
@@ -1496,14 +1767,45 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // compiles — the two `as unknown as` casts this line used to carry
       // existed only because the engine option declared `groupBy: string[]`
       // while reading structured buckets.
-      const rows = await engine.aggregate(object, {
-        ...(opts?.where ? { where: opts.where } : {}),
-        ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
-        aggregations: opts.aggregations,
-        ...(opts?.timezone ? { timezone: opts.timezone } : {}),
-        context,
-      });
+      const rows = await engine.aggregate(
+        object,
+        {
+          ...(opts?.where ? { where: opts.where } : {}),
+          ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
+          aggregations: opts.aggregations,
+          ...(opts?.timezone ? { timezone: opts.timezone } : {}),
+          context,
+        },
+        ...(orderCut !== undefined
+          ? [{ [STDIO_AGGREGATE_ORDER_CUT]: orderCut } as Parameters<IDataEngine['aggregate']>[2]] as const
+          : [] as const),
+      );
       return rows ?? [];
+    };
+    bridge.aggregate = (object, opts) => runAggregate(object, opts);
+    // [aggregate order and cut] The same read, through the same gates, ordered,
+    // cut and counted by the driver's own statement; the engine's outcome slot
+    // is read back — a read that comes back without it was not served by the
+    // driver's statement, and its rows are no answer.
+    bridge.aggregateGroups = async (object, opts) => {
+      const orderCut: {
+        orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
+        limit?: number;
+        outcome?: { kind?: unknown; totalGroups?: unknown };
+      } = {
+        orderBy: opts.orderBy,
+        ...(typeof opts.limit === 'number' ? { limit: opts.limit } : {}),
+      };
+      const { orderBy: _orderBy, limit: _limit, ...read } = opts;
+      const rows = await runAggregate(object, read, orderCut);
+      const totalGroups = orderCut.outcome?.totalGroups;
+      if (orderCut.outcome?.kind !== 'served' || typeof totalGroups !== 'number') {
+        throw new Error(
+          `aggregate_records on '${object}': the ordered and cut aggregate came back without being served by the `
+          + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+        );
+      }
+      return { rows, totalGroups };
     };
   }
 

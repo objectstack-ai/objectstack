@@ -47,6 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
+import { declaresFieldRule, useObjectFormulaPlan, withoutUnservableVisibleWhen } from './objectFormulas';
 import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
 import { FormSectionNavContext, type FormSectionNavItem, type FormSectionNavSink } from './section-nav-context';
 
@@ -1396,6 +1397,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     emptyHint,
     onInvalidInputChange,
     onAutofill,
+    openingValue,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1443,6 +1445,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     (CREATE_AUTOFILL_WIDGET_TYPES.has(normalizedType) && onAutofill)
       ? { onAutofill }
       : {}),
+    // The opening value rides with the lookup's writer: only a lookup fills
+    // from the value a create form opened with (objectstack#35050).
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) && openingValue !== undefined ? { openingValue } : {}),
   };
 }
 
@@ -1879,12 +1884,27 @@ ComponentRegistry.register('form',
         ),
       [rawFields],
     );
-    const fields = React.useMemo(
+    const declaredFields = React.useMemo(
       () =>
         specVocabularyFields.length === 0
           ? rawFields
           : (rawFields as any[]).filter((f) => !specVocabularyFields.includes(f)),
       [rawFields, specVocabularyFields],
+    );
+    // The object's `formula` fields, recomputed from the live inputs into
+    // `ruleRecord` below (objectstack#35033): read once per object, and only
+    // when some field declares a rule a formula could feed. A field whose
+    // `visibleWhen` reads a formula the form cannot compute loses that
+    // `visibleWhen` here — shown and still required, as the server judges it,
+    // and never a submit refusal (`objectFormulas.ts`).
+    const formulaPlan = useObjectFormulaPlan(
+      React.useContext(SchemaRendererContext)?.dataSource ?? null,
+      schema.objectName,
+      declaresFieldRule(declaredFields as unknown[]),
+    );
+    const fields = React.useMemo(
+      () => withoutUnservableVisibleWhen(declaredFields, formulaPlan) as typeof declaredFields,
+      [declaredFields, formulaPlan],
     );
     React.useEffect(() => {
       for (const f of specVocabularyFields) {
@@ -2126,9 +2146,13 @@ ComponentRegistry.register('form',
         for (const k of Object.keys(previousRecord)) out[k] = previousRecord[k];
       }
       for (const k of Object.keys(watched)) if (watched[k] !== undefined) out[k] = watched[k];
-      return out;
+      // The object's formulas over that record, each after the formulas it
+      // reads (objectstack#35033): a rule reading one is judged on the value
+      // the written record would serve, not the one last read. Rules only —
+      // the submit payload is built from the form values, never from here.
+      return formulaPlan ? formulaPlan.compute(out) : out;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fields, previousRecord, JSON.stringify(watched)]);
+    }, [fields, previousRecord, formulaPlan, JSON.stringify(watched)]);
 
     // Fields this form has resolved to READ-ONLY for the record as it now
     // stands — the exact set an UPDATE must not carry (objectui#3484).
@@ -2586,10 +2610,12 @@ ComponentRegistry.register('form',
         ) {
           continue;
         }
-        out.push({ label: action.label, record: { ...ruleRecord, ...action.patch } });
+        // The patch moves formula inputs too: recompute over the patched record.
+        const patched = { ...ruleRecord, ...action.patch };
+        out.push({ label: action.label, record: formulaPlan ? formulaPlan.compute(patched) : patched });
       }
       return out;
-    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope]);
+    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope, formulaPlan]);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -2739,8 +2765,16 @@ ComponentRegistry.register('form',
     // offending tab can each select a trigger scrolled out of view. Only the
     // strip's own `scrollLeft` moves, never an outer scroller, and a strip
     // that fits (every desktop strip) is left untouched.
+    //
+    // A LAYOUT effect, so the scroll lands in the same commit that marks the
+    // new trigger active. As a passive effect it ran a task later whenever the
+    // activation came from a non-discrete update — the failed-submit jump is
+    // one: react-hook-form validates asynchronously — so for that window the
+    // active tab was painted, and observable, while still scrolled out of the
+    // strip (objectstack#34782). It measures layout and writes `scrollLeft`
+    // before paint, which is what a layout effect is for.
     const fieldTabListRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       const list = fieldTabListRef.current;
       if (!list || activeFieldTab === undefined || list.scrollWidth <= list.clientWidth) return;
       const trigger = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
@@ -4271,17 +4305,27 @@ ComponentRegistry.register('form',
                   // error is re-validated, so a filled required field clears.
                   // A create-only writer (objectstack#32770) gets none on an
                   // edit form: see `CREATE_AUTOFILL_WIDGET_TYPES`.
+                  //
+                  // A fill made by the value a create form OPENED with
+                  // (`opening`, objectstack#35050) joins the opening values:
+                  // the dirty baseline takes it first, so a form nobody has
+                  // touched yet still closes without the discard prompt.
                   onAutofill:
                     !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
                       ? undefined
-                      : (patch: Record<string, unknown>) => {
+                      : (patch: Record<string, unknown>, options?: { opening?: boolean }) => {
+                          if (options?.opening) baselineRef.current = { ...baselineRef.current, ...patch };
                           for (const [target, filled] of Object.entries(patch)) {
                             form.setValue(target, filled, {
-                              shouldDirty: true,
+                              shouldDirty: !options?.opening,
                               shouldValidate: !!form.getFieldState(target).error,
                             });
                           }
                         },
+                  // The value a create form opened with, for a lookup to fill
+                  // its declared targets from (objectstack#35050). An edit
+                  // form's value is the stored record's and fills nothing.
+                  openingValue: isCreateForm ? defaultValues?.[name] : undefined,
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —

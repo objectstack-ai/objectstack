@@ -6,7 +6,7 @@ import type {
     MetadataProtocol,
     PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
@@ -266,11 +266,14 @@ import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishJudgement,
+    type DraftPublishJudgement,
     draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
+    sealedFlowNodeTypeVocabulary,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1235,6 +1238,7 @@ export class ObjectStackProtocolImplementation implements
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
             discardDraftInItsScope: (...a) => protocol.discardDraftInItsScope(...a),
+            draftPublishJudgement: (...a) => protocol.draftPublishJudgement(...a),
             draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             dropObjectStorage: (...a) => protocol.dropObjectStorage(...a),
             dropStorageRemainingRowsRefusal: (...a) => ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(...a),
@@ -1262,6 +1266,8 @@ export class ObjectStackProtocolImplementation implements
             getMetaItem: (...a) => protocol.getMetaItem(...a),
             getMetaItems: (...a) => protocol.getMetaItems(...a),
             getOverlayRepo: (...a) => protocol.getOverlayRepo(...a),
+            getPackageTranslationBundle: (...a) => protocol.getPackageTranslationBundle(...a),
+            getPackagedFieldPatchBases: (...a) => protocol.getPackagedFieldPatchBases(...a),
             getPackagedObjectBase: (...a) => protocol.getPackagedObjectBase(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),
@@ -1853,20 +1859,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof assertRuntimeAuthoringRules> = {
-            get authoringChannel() { return readAuthoringChannel(); },
-            get engine() { return readEngine(); },
-            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
-            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
-            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
-            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
-            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
-            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
-            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-        };
-        return assertRuntimeAuthoringRules.call(host, evt);
+        // [#34776] Its host is the draft verdicts' (a superset of the members it reads), so the two cannot drift.
+        return assertRuntimeAuthoringRules.call(this.draftVerdictHost(), evt);
     }
 
     /**
@@ -1904,9 +1898,23 @@ export class ObjectStackProtocolImplementation implements
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
     }): Promise<RuntimeAuthoringIssue[]> {
+        return draftPublishVerdict.call(this.draftVerdictHost(), draft);
+    }
+
+    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    draftPublishJudgement(draft: {
+        type: string; name: string; body?: unknown; packageId: string | null; member?: string;
+        userTextLocales?: readonly (string | undefined)[];
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
+    }): Promise<DraftPublishJudgement> {
+        return draftPublishJudgement.call(this.draftVerdictHost(), draft);
+    }
+
+    /** The host both draft verdict bodies read: the promotion's own collaborators. */
+    private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
         const readAuthoringChannel = () => this.authoringChannel;
         const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof draftPublishVerdict> = {
+        const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
@@ -1920,9 +1928,10 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
-        return draftPublishVerdict.call(host, draft);
+        return host;
     }
 
     /**
@@ -2215,6 +2224,15 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
+    }
+
+    /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
+    private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return sealedFlowNodeTypeVocabulary.call(host);
     }
 
     /**
@@ -2969,66 +2987,65 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#30062] The PACKAGED (code-layer) declaration of a PAGE — the page a
-     * code package ships, before a `.custom` pair's declared override replaces
-     * it (ADR-0146 D2). The page twin of {@link getPackagedDashboardBase},
-     * answered the same way, and the fact `translatePage`
-     * (`@objectstack/spec/system`) compares against as its `packagedBase`: the
-     * i18n catalog (`pages.<name>`) is the packaged translation of exactly
-     * this body, so it may only replace a string the served page still carries
-     * unchanged from it (ruling record 6631250894: a translation in the pair,
-     * then the override's own label, then the base's translation).
+     * [#30062] The PACKAGED (code-layer) declarations of a PAGE, DATASET, APP,
+     * BOOK and IMPORT MAPPING — the item a code package ships, before a
+     * `.custom` pair's declared override replaces it (ADR-0146 D2). One
+     * contract for the five accessors below: the page is the twin of
+     * {@link getPackagedDashboardBase}, the other four are twins of the page
+     * (and of each other), all answered the same way, and each is the fact its
+     * translator (`@objectstack/spec/system`) compares against as its
+     * `packagedBase`: the i18n catalog entry is the packaged translation of
+     * exactly this body, so it may only replace a string the served item still
+     * carries unchanged from it (ruling record 6631250894: a translation in the
+     * pair, then the override's own label, then the base's translation).
      *
-     * Measured before this existed: a pair's override of the CRM's
-     * `crm_welcome` labelled `OVpage` was served, and a `zh-CN` reader got the
-     * base's `欢迎页`, because the translation of the served page had no base to
-     * compare with.
+     * - `getPackagedPageBase`: `translatePage`, `pages.<name>`. Measured before
+     *   this existed: a pair's override of the CRM's `crm_welcome` labelled
+     *   `OVpage` was served, and a `zh-CN` reader got the base's `欢迎页`,
+     *   because the translation of the served page had no base to compare
+     *   with. A page has no extension fold, so the artifact item IS the
+     *   packaged declaration.
+     * - `getPackagedDatasetBase`: `translateDataset`, each string of
+     *   `datasets.<name>` (label, description, dimension and measure labels),
+     *   for the page's reason: a pair's dataset override kept the base's
+     *   translated label and measure labels over its own.
+     * - `getPackagedAppBase`: `translateApp`, each string of `apps.<name>`
+     *   (label, description and navigation labels, a node judged against the
+     *   base's node of the same `id`).
+     * - `getPackagedBookBase`: `translateBook`, each string of `books.<name>`
+     *   (label, description and group labels, a group judged against the
+     *   base's group of the same `key`).
+     * - `getPackagedMappingBase` (#34939): `translateMapping`, the served
+     *   label only (`mappings.<name>.label`).
      *
      * Shadow-immune for the dashboard's reason: the override is served from its
-     * row, never as the artifact, so the body returned is the base's own. A
-     * page has no extension fold, so the artifact item IS the packaged
-     * declaration. Returns `undefined` for a page no code package ships, an
-     * unknown or empty name, and a registry double without the lookup — "no
-     * packaged baseline", read by the translator as the catalog applying
-     * unchanged.
+     * row, never as the artifact, so the body returned is the base's own. Each
+     * returns `undefined` for an item no code package ships, an unknown or
+     * empty name, and a registry double without the lookup — "no packaged
+     * baseline", read by the translator as the catalog applying unchanged.
      */
     getPackagedPageBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedPageBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of a DATASET, the fact
-     * `translateDataset` compares each string against (`datasets.<name>`: its
-     * label, description, dimension and measure labels). The dataset twin of
-     * {@link getPackagedPageBase}, answered the same way and for the same
-     * reason: a pair's dataset override kept the base's translated label and
-     * measure labels over its own. Returns `undefined` on the same
-     * uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedDatasetBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedDatasetBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of an APP, the fact
-     * `translateApp` compares each string against (`apps.<name>`: its label,
-     * description and navigation labels, a node judged against the base's node
-     * of the same `id`). The app twin of {@link getPackagedPageBase}, answered
-     * the same way. Returns `undefined` on the same uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedAppBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedAppBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of a BOOK, the fact
-     * `translateBook` compares each string against (`books.<name>`: its label,
-     * description and group labels, a group judged against the base's group of
-     * the same `key`). The book twin of {@link getPackagedPageBase}, answered
-     * the same way. Returns `undefined` on the same uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedBookBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedBookBase(protocolHost(this), name);
+    }
+
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
+    getPackagedMappingBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
     }
 
     /**
@@ -3066,6 +3083,15 @@ export class ObjectStackProtocolImplementation implements
      */
     getPairTranslationBundle(basePackageId: string): Promise<TranslationBundle | undefined> {
         return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
+    }
+
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
+    }
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
+        return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -4103,6 +4129,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItem(protocolHost(this), request);
@@ -4156,7 +4184,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, face: 'served' | 'execution') {
         // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
         const readEngine = () => this.engine;
@@ -4195,7 +4223,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
@@ -4244,11 +4272,11 @@ export class ObjectStackProtocolImplementation implements
      * (`rowHeldBaseAddressOf`) are no ambiguity here, as the registry names
      * the base the one holder there; {@link getMetaItemLayered} reads the
      * base's stack, as the plain read serves the base's row. Beside a
-     * package-less row they are still refused (#33210). The writes naming no
-     * package are not moved: the save, delete, publish, draft and history
-     * doors still refuse the same rows naming base and dependent, so here the
-     * view loads where the save it then sends is refused (a follow-up card
-     * judges whether the writes follow the base).
+     * package-less row they are still refused (#33210). [#34681] The writes
+     * naming no package follow the same base
+     * (`packagelessRowHeldBaseAddress`): the save, delete, draft discard,
+     * publish, history, diff and rollback doors act on the base's row, so the
+     * view loads where the save it then sends lands.
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;
@@ -5341,12 +5369,12 @@ export class ObjectStackProtocolImplementation implements
      * context carries no explicit `transaction`, so the probe rides the same
      * connection as the writes it guards.
      */
-    private assertRecordExists(object: string, id: string): Promise<void> {
+    private assertRecordExists(object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
         // [#25467 cut 4] The body moved to `protocol-record-reads.ts` (see `RecordReadHost`).
         const host: ThisParameterType<typeof assertRecordExists> = {
             probeRecord: (...a) => this.probeRecord(...a),
         };
-        return assertRecordExists.call(host, object, id);
+        return assertRecordExists.call(host, object, id, caller);
     }
 
     /**
@@ -7842,13 +7870,13 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#23165, ADR-0048] THE package-less write address: which row of an item a
-     * write that names no package addresses, read from the item's stored rows
-     * at `state`. The item's own package when those rows are bound to exactly
-     * one, else the package-unbound row. `candidates` is every distinct
-     * binding, sorted; two or more is a name several packages hold, which the
-     * doors refuse ({@link packagelessAddressAmbiguityRefusal}) and for which
-     * `packageId` is `null`. `unbound` says whether a package-unbound row sits
+     * [#23165, ADR-0048] THE package-less write address: which row of an item a write that
+     * names no package addresses, read from the item's stored rows at `state`. The item's
+     * own package when those rows are bound to exactly one, else the package-unbound row.
+     * `candidates` is every distinct binding, sorted; two or more is a name several
+     * packages hold, which the doors refuse ({@link packagelessAddressAmbiguityRefusal})
+     * and for which `packageId` is `null`, unless the bare read serves the row-held base,
+     * whose row they address (#34681). `unbound` says whether a package-unbound row sits
      * beside them, which is what a delete of a package's row leaves served.
      *
      * The one resolution its three readers take, so they cannot disagree:
@@ -7936,9 +7964,9 @@ export class ObjectStackProtocolImplementation implements
      *    next. Neither present: no draft (`none`), whatever other packages'
      *    drafts are stored; the strict draft read answers `404 NO_DRAFT` here
      *    too, and those drafts are addressed by naming their package.
-     *  - bound to two or more packages: `ambiguous`, refused by both doors
-     *    with the refusal the draft save answers
-     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`).
+     *  - bound to two or more packages: `ambiguous`, refused by both doors with
+     *    the draft save's {@link packagelessAddressAmbiguityRefusal} (`409`),
+     *    unless the bare read serves the row-held base, whose draft they address (#34681).
      *  - bound to none (an item never published into a package): the
      *    package-unbound draft. With no such draft, the one package's draft
      *    when exactly one package holds a draft (the only draft the read
@@ -9036,10 +9064,9 @@ export class ObjectStackProtocolImplementation implements
      * same package batch (`pending` as the batch's object declarations), else
      * the engine's registered definition, whose fields include extension
      * fields; the columns the registry injects (`id`, the audit and tenant
-     * columns) count. Not refused when the object cannot be resolved: on a
-     * draft save, an object that is itself still a draft (`pending` as
-     * `'drafts'`) is judged at the seed's publish; an object resolved by
-     * neither is reported by the load.
+     * columns) count; on a draft save, an object itself still a draft (`pending`
+     * as `'drafts'`) is judged at the seed's publish. [#34864] One nothing resolves is
+     * refused by the save door alone (`door`): `unknownSeedObjectRefusal`'s docblock.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -9050,9 +9077,9 @@ export class ObjectStackProtocolImplementation implements
      * Answered as the schema gate answers, with the envelope of
      * {@link unknownDatasourceSaveRefusal}: `422 INVALID_METADATA`, one finding
      * per missing member at `externalId` (`externalId.N` for a composite
-     * member), naming the field and the object. The boot loader
-     * never refuses; it warns once for a keyed dataset whose every record
-     * keys empty ({@link SeedLoaderService}).
+     * member), naming the field and the object. The boot loader refuses
+     * each keyed record that leaves a key field blank, one error per
+     * record, and loads the rest ({@link SeedLoaderService}).
      */
     private seedExternalIdSaveRefusal(
         singularType: string,
@@ -9060,13 +9087,15 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         pending?: 'drafts' | ReadonlyArray<unknown>,
         writeFace?: MetadataWriteFace,
+        door?: 'save',
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
             get engine() { return readEngine(); },
             listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
     }
 
     /**
@@ -9590,11 +9619,11 @@ export class ObjectStackProtocolImplementation implements
      * on a control-plane kernel — appends no `sys_metadata_history` row.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold, or one the bare plain read refuses, is refused
-     * `409` naming every holder when no package is named, and `packageId`
-     * reads that holder's versions alone: its own, plus those attributed to
-     * no package or to the environment while it is the name's only slot
-     * (`protocol-history-slots.ts`). A name one holder holds reads as before.
+     * name two row slots hold, or one the bare plain read refuses, is refused `409` naming
+     * every holder when no package is named (but the row-held base the bare read serves is
+     * read as named, #34681), and `packageId` reads that holder's versions alone: its own,
+     * plus those attributed to no package or to the environment while it is the name's
+     * only slot (`protocol-history-slots.ts`). A name one holder holds reads as before.
      * `packageId` on any other type is refused `400 VALIDATION_ERROR`.
      */
     async historyMetaItem(request: {
@@ -11030,16 +11059,16 @@ export class ObjectStackProtocolImplementation implements
      * declared override over a row bound to its read-only base.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold is refused `409` naming every holder when no
-     * package is named, with nothing written (so is a name the bare plain
-     * read refuses); `packageId` restores into that holder's row (its own,
-     * its pair's declared override, or the package-less row its read falls
-     * back to), and the version must be that holder's: another holder's, or
-     * one attributed to no package or to the environment while another slot
-     * holds the name, answers 404 `VERSION_NOT_FOUND`. A name one holder
-     * holds, named bare, restores any of its versions as before.
-     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and
-     * one naming no installed package where no row is stored is refused
+     * name two row slots hold is refused `409` naming every holder when no package is
+     * named, with nothing written (so is a name the bare plain read refuses), but the
+     * row-held base the bare read serves is restored as named (#34681); `packageId`
+     * restores into that holder's row (its own, its pair's declared override, or the
+     * package-less row its read falls back to), and the version must be that
+     * holder's: another holder's, or one attributed to no package or to the
+     * environment while another slot holds the name, answers 404 `VERSION_NOT_FOUND`.
+     * A name one holder holds, named bare, restores any of its versions as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and one naming
+     * no installed package where no row is stored is refused
      * `422 WRITABLE_PACKAGE_REQUIRED` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is

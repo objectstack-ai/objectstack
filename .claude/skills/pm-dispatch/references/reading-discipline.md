@@ -3,7 +3,7 @@
 任一座位在取读数、引读数或核验 main 的那一刻读本文,所有 fire、所有阶段。
 
 - 判据取命令输出,⛔ 不取 API 字段字面值、不取本地工作树、不取看着相邻的日志。
-- GitHub/工具实测事实表 `references/platform-readings.md`:操作时 grep 小节只读命中段,⛔ 不整读。
+- GitHub/工具实测事实表分主题文件,索引 `references/platform-readings.md`:只读该主题,⛔ 不整读。
 - 核验 main 用 `origin/main`:先 fetch,再 `git grep PAT origin/main -- PATHS` 或 `git show origin/main:PATH`。
 - 零命中须配同主体必中词,否则该零作废;同主体 = 同语料/路径形/包界/引法/失效形态。
 - 同仪器的控制词双零是仪器坏,⛔ 不读作缺席:换法重画再报;哑火仪器与干净结果同值。

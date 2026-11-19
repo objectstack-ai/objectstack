@@ -18,7 +18,7 @@ import {
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext, RelatedListEnlargedContext } from './relatedListCompact';
-import { DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
+import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
 import { RecordTimelinePanel } from './RecordTimelinePanel';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
@@ -210,6 +210,27 @@ function drawNodes(nodes: any[]): React.ReactNode {
   return nodes.map((node, index) => (
     <SchemaRenderer key={(node && typeof node === 'object' && node.id) || index} schema={toRenderableSchema(node)} />
   ));
+}
+
+/**
+ * The details column's nodes (objectstack#35253): the synthesized page splits
+ * its details around a body table, one `record:details` per run of sections,
+ * and the record's approval band is drawn by the FIRST part alone — above the
+ * table — so the page shows one band, not one per part. A context provider
+ * adds no DOM, so the column's siblings stay siblings (`drawNodes`).
+ */
+function drawDetailsNodes(nodes: any[]): React.ReactNode {
+  const firstDetails = nodes.findIndex((node) => node?.type === 'record:details');
+  return nodes.map((node, index) => {
+    const key = (node && typeof node === 'object' && node.id) || index;
+    const drawn = <SchemaRenderer key={key} schema={toRenderableSchema(node)} />;
+    if (node?.type !== 'record:details' || index === firstDetails) return drawn;
+    return (
+      <ApprovalBandContext.Provider key={key} value={false}>
+        {drawn}
+      </ApprovalBandContext.Provider>
+    );
+  });
 }
 
 /**
@@ -406,7 +427,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   // (objectstack#27055): it describes the record the details show.
   const detailsColumn = (
     <div className={COLUMN_STACK} data-record-column="details">
-      {drawNodes(columns.details)}
+      {drawDetailsNodes(columns.details)}
       {footer}
     </div>
   );

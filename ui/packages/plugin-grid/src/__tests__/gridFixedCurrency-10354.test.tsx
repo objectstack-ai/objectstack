@@ -165,6 +165,22 @@ const PATHS: Array<[string, Record<string, unknown>]> = [
   ['inline rows + fields projection', { fields: ['name', ...CURRENCY_FIELDS] }],
 ];
 
+
+/**
+ * A column's footer figure, read as 「HEADER: FIGURE」. Since objectstack#35548
+ * the figure is a cell of the table's own last row (`data-table-summary-*`),
+ * under its column; the header is read off the same column's `<th>`, so the
+ * pairing is the table's, not a label the footer spells.
+ */
+const footerText = (field: string) => {
+  const cell = screen.getByTestId(`data-table-summary-${field}`);
+  const index = Array.from(cell.parentElement!.children).indexOf(cell);
+  const header = cell.closest('table')!.querySelectorAll('thead tr:first-child th')[index]?.textContent?.trim() ?? '';
+  // The first column's cell also holds the row's lead (「Count N」): not its figure.
+  const lead = cell.querySelector('[data-testid="data-table-summary-lead"]')?.textContent ?? '';
+  return `${header}: ${(cell.textContent ?? '').replace(lead, '')}`;
+};
+
 describe('a JPY-fixed field reads `¥` on the grid cell under a USD tenant (objectui#10354)', () => {
   it.each(PATHS)('%s: the JPY-fixed field reads ¥', async (_path, schemaExtra) => {
     const { container } = await renderGrid(schemaExtra);
@@ -210,20 +226,20 @@ describe('the reference the configured paths now match (objectui#10354)', () => 
 describe('the summary footer resolves the same currency as the cell above it (objectui#10354)', () => {
   it('through ObjectGrid: the JPY-fixed footer reads ¥', async () => {
     await renderGrid(PATHS[0][1]);
-    expect(screen.getByTestId('summary-amount').textContent).toBe('Yen Amount: Sum: ¥1,234');
+    expect(footerText('amount')).toBe('Yen Amount: Sum: ¥1,234');
   });
 
   it('through ObjectGrid: control, a footer with no currencyConfig reads the tenant $', async () => {
     await renderGrid(PATHS[0][1]);
     // The `.00` moved on purpose when objectui#11444 retired the whole-amount
     // trimming (triage comment 5946462862).
-    expect(screen.getByTestId('summary-plain').textContent).toBe('Plain Amount: Sum: $5,678.00');
+    expect(footerText('plain')).toBe('Plain Amount: Sum: $5,678.00');
   });
 
   it('through ObjectGrid: every currency footer reads `Sum: ` plus the whole-def cell', async () => {
     await renderGrid(PATHS[0][1]);
     const footers = Object.fromEntries(
-      CURRENCY_FIELDS.map((field) => [field, screen.getByTestId(`summary-${field}`).textContent ?? '']),
+      CURRENCY_FIELDS.map((field) => [field, footerText(field)]),
     );
     cleanup();
     for (const field of CURRENCY_FIELDS) {

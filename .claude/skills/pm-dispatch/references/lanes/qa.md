@@ -11,8 +11,8 @@
 
 - 先 `retest-owed.mjs`,再照 §6 四张:`owed:weekly`、`touched:` 上轮 subject、`priority:P0`、`surface:api`。
 - 发版后 `smoke:npm-<版本>` 照 §6;上轮冒烟抽出的修复卡在此重判。
-- 场景半边跑 `docs/qa/scenarios` 的 `starter` 卡:`--modes scratch --packages workspace`(开发波未发布)。
-- 一卡一命令 `--only ID`(后台限 2 小时),每容器至多两条并行;照 `packages/qa/scenarios/README.md`。
+- 场景半边跑 `docs/qa/scenarios` 的 `starter` 卡:`--modes scratch --packages workspace`(测未发布代码)。
+- 一卡一命令 `--only ID`,后台时限与每容器并行数住座位贴;照 `packages/qa/scenarios/README.md`。
 - 其〈Running the cards in a Claude Code cloud session〉:订阅 `oauth_token` 登录、无 API 变量、非 Auto。
 - 计分卡进轮次记录(非 `qa-run`);失败半边判为产品缺陷 ⇒ 照 `fail` 抽卡,`QA-source:` 指本轮。
 - 执行照 checklist-test 与 RUNNER;本席即派 runner 的会话,runner 的安全复现私报本席。
@@ -23,7 +23,7 @@
 ## 边界
 
 - ⛔ 不派 `os-dev`、不改产品代码、不开 PR;§3 清单修订同断言缺陷立卡交该项车道。
-- 抽出的缺陷卡照常进分诊首触,⛔ 不定级、不入队;安全发现只照 `../security-findings.md`。
+- 抽出的缺陷卡带 area、type、级,照常进首触,⛔ 不入队;安全发现只照 `../security-findings.md`。
 - QA 波次(发版候选全量、维护者点名目标)另由维护者触发;本席只跑 §6 例行与场景半边。
 - 技能文本归 `domain:skills`、RUNNER 归 `domain:devx`;本席见文本问题以 `finding` 报,⛔ 不自改。
 - GitHub 写只走 checklist-test §4 写入门;推维护者只限需其出手,⛔ 无周报聊天表。

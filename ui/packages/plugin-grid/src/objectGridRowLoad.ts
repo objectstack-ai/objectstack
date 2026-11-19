@@ -12,7 +12,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
-import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry } from '@object-ui/core';
+import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
 import { normalizeColumns } from './objectGridColumns';
@@ -54,6 +54,34 @@ function toOrderByClause(sort: QuerySortEntry[] | undefined | null): string | un
   const ordered = normalizeSortEntries(sort);
   if (!ordered) return undefined;
   return ordered.map((s) => `${s.field} ${s.order}`).join(', ');
+}
+
+/**
+ * The field names an object definition marks `_draftOnly` (objectstack#34898):
+ * under the console's draft preview (`?preview=draft`) `getObjectSchema`
+ * answers the published definition plus each field only the draft adds,
+ * carrying that marker (`@object-ui/app-shell`'s preview data source sets it).
+ * An underscore-private convention, never an authoring key: outside the
+ * preview no field carries it and the set is empty. Either field-map shape.
+ */
+function draftOnlyFieldNames(objectDef: unknown): ReadonlySet<string> {
+  const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
+  if (!raw || typeof raw !== 'object') return NO_DRAFT_ONLY_FIELDS;
+  const entries: Array<[unknown, unknown]> = Array.isArray(raw)
+    ? raw.map((f) => [(f as { name?: unknown } | null)?.name, f])
+    : Object.entries(raw as Record<string, unknown>);
+  const names = new Set<string>();
+  for (const [name, def] of entries) {
+    if (typeof name === 'string' && !!def && typeof def === 'object'
+        && (def as Record<string, unknown>)._draftOnly === true) names.add(name);
+  }
+  return names.size > 0 ? names : NO_DRAFT_ONLY_FIELDS;
+}
+const NO_DRAFT_ONLY_FIELDS: ReadonlySet<string> = new Set<string>();
+
+/** Whether a field reference (`owner`, or a dotted `owner.name`) starts at a draft-only field. */
+function refersToDraftOnly(ref: unknown, draftOnly: ReadonlySet<string>): boolean {
+  return typeof ref === 'string' && draftOnly.size > 0 && draftOnly.has(ref.split('.')[0]);
 }
 
 export function useObjectGridRowLoad({
@@ -153,6 +181,10 @@ export function useObjectGridRowLoad({
           throw new Error('DataSource required');
         }
 
+        // objectstack#34901 — read before the definition is handed on, so the
+        // grouping decisions find the names beside its field map on the
+        // render it causes (`withheldFieldNamesOfFieldMap`).
+        const withheld = readWithheldFieldNames(resolvedSchema);
         if (!cancelled) {
           setObjectSchema(resolvedSchema);
         }
@@ -175,6 +207,17 @@ export function useObjectGridRowLoad({
           // backends that reject rather than ignore it), while `$expand` is
           // gated structurally by `buildExpandFields` itself.
           const groupingFieldRefs = collectGroupingFieldRefs(schema.grouping);
+          // objectstack#34898 — the names the definition marks draft-only (see
+          // `draftOnlyFieldNames`); empty outside the draft preview.
+          const draftOnly = draftOnlyFieldNames(resolvedSchema);
+          // objectstack#34901 — `withheld` (read above) are the names a disabled
+          // package withholds from the served object: the door refuses each on
+          // every axis, so no `$select`, `$orderby` or `$searchFields` below
+          // names one.
+          const withoutDraftOnly = (list: any[]): any[] => (draftOnly.size === 0 && withheld.size === 0
+            ? list
+            : list.filter((f: any) => !refersToDraftOnly(columnIdentity(f), draftOnly)
+              && !refersToWithheldField(columnIdentity(f), withheld)));
           const getSelectFields = () => {
             // Always include 'id' so row click / navigation handlers can resolve
             // the record key — without it `record.id` is undefined and the
@@ -496,11 +539,21 @@ export function useObjectGridRowLoad({
                 .filter(passesProjectionGate)
                 .map((entry) => columnIdentity(entry))
                 .filter((v): v is string => !!v);
+            // objectstack#34898 — a field only the DRAFT declares is never
+            // asked of the door. Under the console's draft preview the object
+            // definition carries it (marked `_draftOnly`), while the door judges
+            // every `$select` name against the PUBLISHED object and answers
+            // INVALID_FIELD for one it does not know — every group's row page
+            // carried it, so every group showed the error. Applied to the WHOLE
+            // projection, last, so a column, a grouping key and every harvested
+            // operand pass the same rule; the column still draws, empty, under
+            // its draft label. Outside the preview nothing is marked and the
+            // projection is unchanged.
             if (schemaFields) {
-              return withHarvestedFields(ensureId(projectFieldNames(schemaFields as unknown[])));
+              return withoutDraftOnly(withHarvestedFields(ensureId(projectFieldNames(schemaFields as unknown[]))));
             }
             if (schemaColumns && Array.isArray(schemaColumns)) {
-              return withHarvestedFields(ensureId(projectFieldNames(schemaColumns)));
+              return withoutDraftOnly(withHarvestedFields(ensureId(projectFieldNames(schemaColumns))));
             }
             return undefined;
           };
@@ -564,7 +617,12 @@ export function useObjectGridRowLoad({
               // interpolated unconditionally, so `[{ field: 'name' }]` went out
               // as `'name undefined'` and `[]` as `''`. The join, and only the
               // join, stays this block's (see {@link toOrderByClause}).
-              const orderBy = toOrderByClause(schemaSort as unknown as QuerySortEntry[]);
+              // A header click can only name a drawn column, and a withheld
+              // one is not drawn (`useObjectGridGenerateColumns`); a declared
+              // entry on one is left out here.
+              const orderBy = toOrderByClause((withheld.size > 0
+                ? schemaSort.filter((s) => !refersToWithheldField((s as { field?: unknown } | null)?.field, withheld))
+                : schemaSort) as unknown as QuerySortEntry[]);
               if (orderBy !== undefined) {
                 params.$orderby = orderBy;
               }
@@ -587,8 +645,11 @@ export function useObjectGridRowLoad({
           const trimmedSearch = querySearchTerm.trim();
           if (trimmedSearch) {
             params.$search = trimmedSearch;
-            if (schema.searchableFields && schema.searchableFields.length > 0) {
-              params.$searchFields = schema.searchableFields;
+            const searchFields = withheld.size > 0 && schema.searchableFields
+              ? schema.searchableFields.filter((f) => !refersToWithheldField(f, withheld))
+              : schema.searchableFields;
+            if (searchFields && searchFields.length > 0) {
+              params.$searchFields = searchFields;
             }
           }
 
@@ -663,10 +724,12 @@ export function useObjectGridRowLoad({
                 .filter((read) => read.expand)
                 .map((read) => read.field)
             : [];
+          // objectstack#34898: a draft-only relation is not expanded either —
+          // the door judges `$expand` names against the published object too.
           const expand = buildExpandFields(
             resolvedSchema?.fields,
             expandColumns ? [...(expandColumns as any[]), ...groupingFieldRefs, ...parentCurrencyRoots] : undefined,
-          ).filter(expandReadable);
+          ).filter(expandReadable).filter((f) => !refersToDraftOnly(f, draftOnly));
           if (expand.length > 0) {
             params.$expand = expand;
           }

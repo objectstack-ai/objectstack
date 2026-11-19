@@ -52,7 +52,68 @@ import type { IDataDriver } from '@objectstack/core';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
 import { pickDeclaredDriverOptions } from './engine-driver-options.js';
+import type { TransactionScope } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
+
+/**
+ * [#35028] The owner of every transaction `ScopedContext`'s discrete
+ * `beginTransaction` / `commitTransaction` / `rollbackTransaction` trio opened
+ * and has not yet closed, keyed by the handle.
+ *
+ * The trio cannot publish into the engine's `txStore`: its caller (the sandbox
+ * runner's `ctx.api.transaction`) threads the handle across event-loop turns
+ * that `AsyncLocalStorage` does not survive. But `beginTransaction` is the one
+ * place the owning driver IS known, so it records the same
+ * {@link TransactionScope} `runOpenedUnit` publishes, here, and the same-origin
+ * gate (`enforceTransactionOrigin`, `transactionCoversDriverFor`) reads it for
+ * an explicitly-threaded handle when the store holds no scope for it. Without
+ * it, a trio handle reached a driver that does not own it: a ledger row routed
+ * to the `telemetry` datasource ran on the primary's connection and was lost,
+ * and a cross-datasource business write ran on the wrong connection.
+ *
+ * Weak, so a handle that is never closed is never kept alive. Module-level
+ * because a handle is one driver connection's object, owned by one engine;
+ * the scope it maps to names that engine's driver and datasource.
+ */
+const trioTransactionScopes = new WeakMap<object, TransactionScope>();
+
+/**
+ * [#35149] The handles the trio opened and has since committed or rolled back.
+ * The engine's `isClosedUnitHandle` answers `true` for them, as it does for a
+ * `transaction()` unit whose callback settled (#22855), so every reader of a
+ * threaded handle treats one as absent: work that still carries it runs
+ * unenrolled. Dropping the owner record alone left such a handle unattributed,
+ * and a late write routed to another datasource was handed the dead handle.
+ * Weak, for the reason the owner record is.
+ */
+const closedTrioHandles = new WeakSet<object>();
+
+/** [#35028] Record the owner of a handle the trio just opened. A primitive handle cannot key it and stays unattributed. */
+export function recordTrioTransactionScope(handle: unknown, scope: TransactionScope): void {
+  if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) {
+    trioTransactionScopes.set(handle, scope);
+    // [#35149] A driver that hands the same object out again opened it again.
+    closedTrioHandles.delete(handle);
+  }
+}
+
+/** [#35149] Close a handle the trio opened: its commit or rollback ended it. A handle it never opened is left as it was. */
+export function closeTrioTransactionScope(handle: unknown): void {
+  if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) {
+    if (trioTransactionScopes.delete(handle)) closedTrioHandles.add(handle);
+  }
+}
+
+/** [#35149] Did the trio open `handle` and since commit or roll it back? */
+export function isClosedTrioHandle(handle: unknown): boolean {
+  return handle !== null && (typeof handle === 'object' || typeof handle === 'function') && closedTrioHandles.has(handle);
+}
+
+/** [#35028] The owner of an open trio handle, or `undefined` for any other handle. */
+export function trioTransactionScopeOf(handle: unknown): TransactionScope | undefined {
+  if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return undefined;
+  return trioTransactionScopes.get(handle);
+}
 
 /**
  * The `ObjectQL` members the functions below read — every one of them, and no
@@ -71,6 +132,7 @@ export interface ExecuteTransactionsHost {
   getDriver: ObjectQL['getDriver'];
   datasourceNameOf: ObjectQL['datasourceNameOf'];
   isSystemLedgerObject: ObjectQL['isSystemLedgerObject'];
+  isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
 }
 
 /** The body of `ObjectQL#execute`; the method's docblock there is its contract. */
@@ -247,15 +309,25 @@ export function warnTransactionUnsupported(
  * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
  */
 export function enforceTransactionOrigin(
-  this: Pick<ExecuteTransactionsHost, 'txStore' | 'datasourceNameOf' | 'isSystemLedgerObject' | 'logger'>,
+  this: Pick<ExecuteTransactionsHost, 'txStore' | 'datasourceNameOf' | 'isSystemLedgerObject' | 'isClosedUnitHandle' | 'logger'>,
   objectName: string,
   driver: IDataDriver,
   operation: 'insert' | 'update' | 'delete',
+  explicitTransaction?: unknown,
 ): void {
-  const scope = this.txStore.getStore()?.scope;
-  // No engine-owned transaction in scope (or a handle threaded explicitly by
-  // the sandbox trio, which this store never sees) — nothing to be outside
-  // of. See `transactionCoversDriverFor` for why that limit is declared.
+  // [#35028] The store holds no scope for a handle the `ScopedContext` trio
+  // opened (it threads the handle explicitly, across turns the store does not
+  // survive), so the trio's own record of the owner answers for it. A handle
+  // the current run was detached from (an `async` hook's run, `unit-detach.ts`)
+  // is no handle, exactly as `buildDriverOptions` reads it: the write runs
+  // outside any transaction, on its own connection, and is not judged.
+  const explicit = explicitTransaction !== undefined && !this.isClosedUnitHandle(explicitTransaction)
+    ? explicitTransaction
+    : undefined;
+  const scope = this.txStore.getStore()?.scope ?? trioTransactionScopeOf(explicit);
+  // No engine-owned transaction in scope (or a handle the engine never opened
+  // and cannot attribute) — nothing to be outside of. See
+  // `transactionCoversDriverFor` for why that limit is declared.
   if (!scope) return;
   // Identity, not name: this is about riding the same connection.
   if (driver === scope.driver) return;

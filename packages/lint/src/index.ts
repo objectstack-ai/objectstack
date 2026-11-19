@@ -73,6 +73,16 @@ export {
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-dataset-measure-aggregates.js';
 
+// ADR-0149 D1 — a dataset measure or dimension that declares neither
+// `synonyms` nor a `description` is advised: a question asked in a user's own
+// words will not find it. The rule id is published for `--json` consumers
+// (`rule-id-barrel-exports.test.ts`).
+export {
+  validateDatasetMemberVocabulary,
+  DATASET_MEMBER_NO_VOCABULARY,
+} from './validate-dataset-member-vocabulary.js';
+export type { DatasetMemberVocabularyFinding } from './validate-dataset-member-vocabulary.js';
+
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 // [#32872] The gate's verdict on one validation rule, formula field or
@@ -348,12 +358,6 @@ export {
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
 } from './validate-assignment-rules.js';
 export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
-
-export {
-  validateSeedReplaySafety,
-  SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
-} from './validate-seed-replay-safety.js';
-export type { SeedReplaySafetyFinding, SeedReplaySafetySeverity } from './validate-seed-replay-safety.js';
 
 export {
   validateSeedStateMachine,
@@ -671,6 +675,15 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
+export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
+export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
+export type { FlowNodeExecutorFinding } from './validate-flow-node-executors.js';
+export {
+  validateInertObjectDeclarations,
+  STATE_MACHINE_NO_INITIAL_STATES,
+} from './validate-inert-object-declarations.js';
+export type { InertObjectDeclarationFinding } from './validate-inert-object-declarations.js';
 
 export {
   validatePageFieldBindings,
@@ -1010,6 +1023,17 @@ export type {
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
 
+// An action body must compile in the wrapper the runtime runs it in, which the
+// runtime builds from `actionBodyFunctionExpression` — the same function the
+// rule compiles inside, so the two cannot disagree about the wrapper.
+export {
+  validateActionBodyCompiles,
+  hostCompileFailure,
+  ACTION_BODY_DOES_NOT_COMPILE,
+} from './validate-action-body-compiles.js';
+export type { ActionBodyCompileFinding, HostCompileFailure } from './validate-action-body-compiles.js';
+export { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
+
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and
 // implicit-field set so all three agree on what is writable without being
@@ -1091,6 +1115,8 @@ export {
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
   FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_DECISION_UNROUTED,
+  FLOW_HTTP_TIMEOUT_MISSING,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,
@@ -1215,6 +1241,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';

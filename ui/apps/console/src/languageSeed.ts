@@ -97,12 +97,24 @@
  * goes out, and the server answers it only when the app lists that language;
  * otherwise the organization's setting decides, then the app's declared
  * default, then the server's floor.
+ *
+ * ## The request leaves at parse time (objectstack#35534)
+ *
+ * Asked from here, the first visit's request waited for the eager bundle to
+ * download and evaluate, though it needs only discovery's `locale.supported`.
+ * `index.html`'s `startEarlyLanguageSeed` script asks the same question the
+ * moment its parse-time discovery answers, under the same gates, and leaves
+ * the pending response for {@link takeEarlySeedRequest}. The seed takes it
+ * once, only when it is the request the seed would send, through the same
+ * `sharedGetJson` call, so the race, the in-flight sharing with
+ * `LocalizationFetchProvider` and the hand-off of the settled answer are
+ * unchanged.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
-import { getSharedDiscovery } from '@object-ui/data-objectstack';
-import { sharedGetJson } from '@object-ui/types';
+import { inflightGetKey, sharedGetJson } from '@object-ui/types';
 import { resolveLocaleAmong } from '@objectstack/spec/system';
+import { readConsoleDiscovery } from './lib/early-discovery';
 
 /**
  * How long a true first visit will wait for the resolved locale before booting
@@ -117,36 +129,74 @@ interface MeLocalizationResponse {
   locale?: string | null;
 }
 
-/**
- * How long the console's discovery request may run before it is abandoned.
- * The request is shared with the data adapter's `connect()`, so this bound is
- * the adapter's too; it matches the shell's own discovery bound.
- */
-const DISCOVERY_TIMEOUT_MS = 10_000;
-
 /** This page-load's read of the language a choice-less read states, once started. */
 let preferredLocale: Promise<string | undefined> | null = null;
 
-/** The discovery document, through the console's one shared request. */
-async function fetchDiscovery(serverBase: string): Promise<unknown> {
-  return getSharedDiscovery(serverBase, async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), DISCOVERY_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${serverBase}/api/v1/discovery`, {
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      if (!res.ok) {
-        throw Object.assign(new Error(`discovery ${res.status}`), { status: res.status });
-      }
-      const body = await res.json();
-      return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
-    } finally {
-      clearTimeout(timer);
-    }
-  });
+/**
+ * The seed's settled answer, held for `LocalizationFetchProvider`'s boot read
+ * (objectstack#35455): the request it answered, as `inflightGetKey` spells it,
+ * and the session owner it was asked for. See {@link takeSettledSeedAnswer}.
+ */
+let settledSeed: { key: string; owner: number; body: object } | null = null;
+/** Whether the boot read has already been offered the seed's answer. */
+let settledSeedSpent = false;
+
+/** Where `index.html`'s parse-time request leaves its pending response. */
+const EARLY_SEED_KEY = Symbol.for('objectui.earlyLanguageSeed');
+
+/**
+ * The slot `index.html`'s `startEarlyLanguageSeed` script fills: the URL it
+ * asks, and once discovery has answered, the `init` it sent and the pending
+ * `Response`. Spelled by hand on both sides: a classic inline script cannot
+ * import.
+ */
+interface EarlySeedSlot {
+  url: string;
+  init: RequestInit | null;
+  response: Promise<Response> | null;
+  taken: boolean;
+}
+
+/**
+ * The parse-time request (objectstack#35534), once per page load, when it is
+ * the request this seed would send: the same in-flight key, so the same URL,
+ * credentials and headers, `Accept-Language` included. The first look spends
+ * the slot whatever it finds, and the script sends nothing after it, so a
+ * mismatch or a script that has not asked yet leaves exactly one request: the
+ * seed's own.
+ */
+function takeEarlySeedRequest(url: string, init: RequestInit): Promise<Response> | null {
+  const slot = (globalThis as unknown as Record<symbol, EarlySeedSlot | undefined>)[EARLY_SEED_KEY];
+  if (!slot || slot.taken) return null;
+  slot.taken = true;
+  if (!slot.init || !slot.response) return null;
+  return inflightGetKey(slot.url, slot.init) === inflightGetKey(url, init) ? slot.response : null;
+}
+
+/**
+ * Hand the seed's settled answer to the boot read that asks the SAME request,
+ * once per page load (objectstack#35455), or `null`.
+ *
+ * On a true first visit the seed's request usually settles inside its race,
+ * before React mounts; the provider mounts later and, since the in-flight
+ * registry holds only pending requests, used to ask the endpoint a second
+ * time. This is the request it would make, answered moments ago in this page
+ * load, so it takes that answer instead.
+ *
+ * Only an answer about the caller who still owns the browser is handed over:
+ * an unauthenticated one is never held, and a change of owner since the seed
+ * asked (objectui#10193) answers `null`. The first call spends the hand-off
+ * whatever it finds, so a later read — a remount, or the re-read after a write
+ * to the user's own row — asks the server, and an answer that settles after
+ * the boot read started (which joined it in flight instead) is never held.
+ */
+export function takeSettledSeedAnswer(url: string, init: RequestInit): object | null {
+  const held = settledSeed;
+  settledSeed = null;
+  settledSeedSpent = true;
+  if (!held || held.key !== inflightGetKey(url, init)) return null;
+  if (held.owner !== getSessionOwnerChangeCount()) return null;
+  return structuredClone(held.body);
 }
 
 /**
@@ -196,7 +246,7 @@ function readSupportedLocales(discovery: unknown): string[] {
  */
 export function loadPreferredLocale(serverBase: string): Promise<string | undefined> {
   if (!preferredLocale) {
-    preferredLocale = fetchDiscovery(serverBase).then(
+    preferredLocale = readConsoleDiscovery(serverBase).then(
       (discovery) => {
         const browser = typeof navigator === 'undefined' ? undefined : navigator.language;
         return pickPreferredLocale(browser, readSupportedLocales(discovery));
@@ -216,9 +266,14 @@ export function startedPreferredLocale(): Promise<string | undefined> | null {
   return preferredLocale;
 }
 
-/** Test seam: forget this page-load's read of the stated language. Not public. */
+/**
+ * Test seam: forget this page-load's read of the stated language, and the
+ * seed's held answer. Not public.
+ */
 export function __resetPreferredLocaleForTests(): void {
   preferredLocale = null;
+  settledSeed = null;
+  settledSeedSpent = false;
 }
 
 /**
@@ -248,23 +303,31 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     // overlap by construction: this one keeps running past the 500 ms race, and
     // the provider mounts as soon as the race resolves. Sharing is in-flight
     // only, so on the boots where they do NOT overlap each still fetches.
-    const json = await sharedGetJson<MeLocalizationResponse>(
-      `${serverBase}/api/v1/auth/me/localization`,
-      {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          // A supported browser language decides the rung below the user's
-          // own locale (objectstack#33985); otherwise the browser's own header
-          // goes, and the server's deployment default decides
-          // (objectstack#34392).
-          ...(preferred ? { 'Accept-Language': preferred } : {}),
-        },
+    const url = `${serverBase}/api/v1/auth/me/localization`;
+    const init: RequestInit = {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        // A supported browser language decides the rung below the user's
+        // own locale (objectstack#33985); otherwise the browser's own header
+        // goes, and the server's deployment default decides
+        // (objectstack#34392).
+        ...(preferred ? { 'Accept-Language': preferred } : {}),
       },
-    );
+    };
+    // `index.html` usually sent this very request at parse time
+    // (objectstack#35534): it is taken here as this read's transport, so the
+    // provider still joins it in flight and a failure is this read's own.
+    const early = takeEarlySeedRequest(url, init);
+    const json = await sharedGetJson<MeLocalizationResponse>(url, init, early ? () => early : undefined);
     if (json?.authenticated === false) return;
     if (getSessionOwnerChangeCount() !== ownerAtRequest) return;
     cacheLanguageSeed(json?.locale);
+    // Held for the provider's boot read (objectstack#35455), unless that read
+    // has already started: it then joined this request in flight.
+    if (!settledSeedSpent && json && typeof json === 'object') {
+      settledSeed = { key: inflightGetKey(url, init), owner: ownerAtRequest, body: json };
+    }
   } catch {
     // Offline, blocked, malformed — the boot simply goes unseeded.
   }

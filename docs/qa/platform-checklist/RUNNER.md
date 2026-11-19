@@ -552,22 +552,21 @@ contradicts it, and correct it here when it does.
      bearer seam. So a session driven with the localStorage token alone gets **401
      `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
      `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
-     upload is broken". The Setup app's **Packaged Actions** page (component ref
-     `automation:packaged-actions`) is built the same way: its `GET /api/v1/meta/object`
-     and `GET /api/v1/data/sys_metadata_activation` loads and its
+     upload is broken". Studio's packaged-action switch (`action-ledger-switch`, on a
+     read-only app's vendor action) is built the same way: its
+     `GET /api/v1/data/sys_metadata_activation` load and its
      `POST /api/v1/actions/_activation/<object>/<action>` toggle are bare `fetch`es with
      `credentials: 'include'` and no `Authorization` header
-     (`ui/packages/app-shell/src/views/setup/PackagedActionsSection.tsx`), so a token-only
-     session should expect a load failure ending `HTTP 401` (`object metadata HTTP 401` or
-     `activation ledger HTTP 401`) in the page's `role="alert"` box instead of the action
-     list. That is read from source; QA run #27409 measured the shape on the Packaged
-     Automation page (`automation:packaged`), which retired with ADR-0146 D11: a bookmark of
-     `/apps/<app>/component/automation/packaged` now opens Studio's Automations pillar
-     (`packagedAutomationStudioPath`,
-     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where a
-     packaged flow's switch and its New similar are. ⛔ Do not drive any storage/upload
-     surface or the Packaged Actions page from an injected token: **sign in through the
-     form** so both halves exist.
+     (`ui/packages/app-shell/src/views/setup/packagedActionLedger.ts`), so a token-only
+     session should expect no switch and a `role="alert"` line ending
+     `activation ledger HTTP 401` instead. That is read from source; QA run #27409 measured
+     the shape on the Packaged Automation page (`automation:packaged`), which retired with
+     ADR-0146 D11, and Setup's Packaged Actions page (`automation:packaged-actions`) retired
+     with objectstack#34724: a bookmark of either now opens Studio
+     (`packagedAutomationStudioPath` / `packagedActionsStudioPath`,
+     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where each
+     packaged item's switch is. ⛔ Do not drive any storage/upload surface or the action
+     switch from an injected token: **sign in through the form** so both halves exist.
 
 - **A stock showcase boot refuses self-registration — no item can mint a member by
   "fresh sign-up".** The showcase declares no `auth.audience`, so its posture is the
@@ -586,21 +585,22 @@ contradicts it, and correct it here when it does.
      unexpired and addressed to that email
      (`packages/plugins/plugin-auth/src/presented-invitation.ts`); the address alone answers
      the same 403.
-     ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
-     Default Organization as `member` whatever role was invited, and leaves the invitation
-     `pending` (`reconcileMembership` in
-     `packages/plugins/plugin-auth/src/reconcile-membership.ts` writes `role: 'member'`). For
-     any other role (`admin`, `owner`), the persona — signed in as itself — then sends
-     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the
-     `id` the invite-member call answered, or the row its own
-     `GET /api/v1/auth/organization/list-user-invitations` lists). Acceptance writes the
-     invitation's role onto that membership and the invitation reads `accepted`
-     (`adoptExistingMembership` in `packages/plugins/plugin-auth/src/adopt-membership.ts`,
-     which never lowers a grade; pinned by `accept-invitation-adopt-membership.test.ts`
-     beside it, 6 passed at `bfc1539fe0`). The invitee's email need not be verified: the
-     deployment declares `requireEmailVerificationOnInvitation: false`. QA run #24616 met it:
-     an `admin` invitation signed up as `member`, and the persona held `org_admin` only after
-     the accept. **Check:** read the persona's `sys_member` row (`role`) before scoring a
+     ⚠️ **The sign-up joins no organization.** A sign-up admitted by the invitation it
+     presents is not bound to the Default Organization while its address is unverified
+     (`settleMembership` in `packages/plugins/plugin-auth/src/auth-manager-membership-admission.ts`),
+     and the invitation stays `pending`. The persona joins by accepting it, and accepting,
+     declining and listing need a verified address on every deployment
+     (`packages/plugins/plugin-auth/src/invitation-accept-verified-email.ts`): an unverified
+     persona's accept and decline answer `403
+     EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`, its
+     `list-user-invitations` answers `403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`, and
+     `get-invitation` answers. So verify the persona first through the verification mail
+     (`POST /api/v1/auth/send-verification-email`, then open its link; the mail transport has to
+     be live), then, signed in as itself, send
+     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the `id`
+     the invite-member call answered). Acceptance writes the membership with the invitation's
+     role and the invitation reads `accepted`. Without a live mail transport this door mints no
+     member: use door 2. **Check:** read the persona's `sys_member` row (`role`) before scoring a
      role-gated clause, never the invitation you sent.
   2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
      `mustChangePassword: true` by default

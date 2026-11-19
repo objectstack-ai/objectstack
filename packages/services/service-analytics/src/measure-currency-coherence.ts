@@ -53,6 +53,16 @@
  * measure that resolves to one `fixed` code carries that code on the wire
  * (`enrichResultColumns`, through {@link measureCurrencyResolver}).
  *
+ * A derived measure whose operands are ALL in the tenant's currency carries
+ * the request's tenant currency on its column, as a plain sum of one of them
+ * does (seat ruling record 7000265215, item 2). That reading is stricter than
+ * the resolved one above, which compares only monetary operands and lets the
+ * first operand name the kind: `tenant + usd` resolves to the tenant's, and
+ * `tenant + count` too, and neither is a number in the tenant's currency. So
+ * the column asks `inTenantCurrency`: a `sum` / `difference` whose every
+ * operand is a tenant-currency amount aggregate, or such a derived measure in
+ * turn. A `ratio` or `product` of two amounts is no amount, and stays bare.
+ *
  * ## Not judged
  *
  * - No `declaredCurrency` hook (no data engine), or a field it cannot resolve.
@@ -158,7 +168,24 @@ export function measureCurrencyResolver(dataset: Dataset, declaredCurrency: Decl
     const r = resolvedOf(m);
     return r?.kind === 'code' && r.fixed ? r.code : undefined;
   };
-  return { fieldOf, resolvedOf, monetaryOperands, fixedCodeOf };
+  /**
+   * Whether a DERIVED measure is an amount in the tenant's currency (module
+   * header): a `sum` / `difference` whose every operand, monetary or not, is
+   * an amount aggregate resolving to the tenant's currency or such a derived
+   * measure in turn. Any other operand (a `fixed` or explicit code, a
+   * record-mode amount, a `count`, a `ratio`, a missing or cyclic name) makes
+   * it `false`, so the column keeps today's answer.
+   */
+  const inTenantCurrency = (m: DatasetMeasure, seen: ReadonlySet<string> = new Set()): boolean => {
+    if (!m.derived || (m.derived.op !== 'sum' && m.derived.op !== 'difference')) return false;
+    const path = new Set(seen).add(m.name);
+    return m.derived.of.length > 0 && m.derived.of.every((name) => {
+      const operand = byName.get(name);
+      if (!operand || path.has(name)) return false;
+      return operand.derived ? inTenantCurrency(operand, path) : resolvedOf(operand)?.kind === 'tenant';
+    });
+  };
+  return { fieldOf, resolvedOf, monetaryOperands, fixedCodeOf, inTenantCurrency };
 }
 
 /**

@@ -17,10 +17,23 @@
 //
 // Posture: development / in-memory. `NODE_ENV` is forced to `development` so the
 // auth plugin's dev-admin bootstrap provisions a known, loginable admin (mirrors
-// `objectstack dev`). This is a verification harness — it never touches a real
-// database or production data, and it never touches the host's key custody
+// `objectstack dev`). This is a verification harness: its own database is the
+// in-memory one it creates here, and it never touches the host's key custody
 // either: it seals under a data key held in this process's memory only (see
 // `harnessCryptoProvider`).
+//
+// Datasources the app DECLARES are connected the way `objectstack dev`
+// connects them (ADR-0062 D1/D2, the datasource-connection service below), so
+// a read of an object bound to one reaches that datasource, and so does a
+// write the APP makes there: its seed, or a hook or flow of its own that
+// writes such an object when one of verify's writes fires it. Verify's own
+// writes never reach an object on an EXTERNAL datasource: every derived write
+// family leaves it out and reports it "not exercised", whatever its write gate
+// says (`deriveCrudCases`, `derive.ts`). An object bound to a declared MANAGED
+// datasource (or one that declares no `schemaMode`) is written through that
+// datasource, as under `objectstack dev`; only the local flow run refuses a
+// write to any object routed away from this database (`flow-run.ts`).
+// `verify.external-datasource-no-writes.test.ts` pins the external half.
 
 import { randomBytes } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
@@ -35,7 +48,7 @@ import {
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
@@ -1482,7 +1495,10 @@ async function bootClaimed(
    *
    * Under `invite_only` a sign-up is admitted only by the invitation it
    * presents, so the helper answers the row's id and `signUp` sends it as
-   * `invitationId`, the way a real invitee's accept link carries it.
+   * `invitationId`, the way a real invitee's accept link carries it. That is
+   * now `signUp`'s fallback lane only, for a stack whose auth service offers no
+   * operator door: an account it admits joins no organization until it
+   * verifies its address and accepts (see `signUp`).
    *
    * Best-effort: a stack whose engine or `sys_invitation` object is not
    * reachable simply signs up without the row and lets the gate answer.
@@ -1558,25 +1574,51 @@ async function bootClaimed(
       // in this function.)
       //
       // Posture, load-bearing for all of the above: `@objectstack/verify`
-      // boots in-process against in-memory SQLite and "never touches a real
-      // database or production data" (this file's header). There is no
+      // boots in-process against in-memory SQLite, and "its own database is
+      // the in-memory one it creates" (this file's header): a sign-up's rows
+      // land there, not in any datasource the app declares. There is no
       // deployed plane here that could go on looking healthy while something
       // it claims is persisted did not land.
     }
     return id;
   };
 
+  /**
+   * Mint a fixture MEMBER: a signed-in account bound to the deployment's
+   * organization at creation, as the membership reconciler binds every
+   * account it may bind.
+   *
+   * It enters through the operator door — the ticket the stack's own
+   * `AuthManager` stages for exactly this address
+   * (`stageOperatorProvisioning`, the door the deployment's boot command and
+   * the demo staff use), cleared whatever the sign-up answers. Not the
+   * invitation lane: a sign-up admitted by the invitation it presents joins no
+   * organization while its address is unverified, and joins by accepting the
+   * invitation once verified, so it would mint an invitee, not a member. A
+   * stack whose auth service offers no operator door falls back to that lane
+   * ({@link inviteForAudienceGate}).
+   */
   const signUp = async (
     email: string,
     password = 'Member-Pass-123',
     name?: string,
   ): Promise<string> => {
-    const invitationId = await inviteForAudienceGate(email);
-    const res = await api('/auth/sign-up/email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name: name ?? email.split('@')[0], invitationId }),
-    });
+    const auth = await kernel.getServiceAsync<any>('auth').catch(() => undefined);
+    const canProvision =
+      typeof auth?.stageOperatorProvisioning === 'function' && typeof auth?.clearOperatorProvisioning === 'function';
+    const admission: Record<string, string> = canProvision
+      ? { [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: auth.stageOperatorProvisioning(email) }
+      : { invitationId: await inviteForAudienceGate(email) };
+    let res: Response;
+    try {
+      res = await api('/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name: name ?? email.split('@')[0], ...admission }),
+      });
+    } finally {
+      if (canProvision) auth.clearOperatorProvisioning(email);
+    }
     if (!res.ok) {
       throw new Error(`verify signUp failed: ${res.status} ${await res.text()}`);
     }

@@ -469,12 +469,15 @@ const BRIDGE_MEMBERS: Record<string, string> = {
   aiReadExposed: 'no row body — a boolean read off one object definition (isAiReadExposed)',
   optionFieldsOf: 'no row body — field names from the same object definition describeObject reads',
   servedObjectDefinitionOf: 'no row body — the same object definition describeObject reads, judged by the gate and rendered to nobody',
+  fieldVisibilityOf: 'no row body — field names from the object definition describeObject reads, and the security service\'s readable answer',
   query: 'seam — serveStoredMetadataRows; filter / sort on the body column refused',
   get: 'seam — serveStoredMetadataRow',
   aggregate: 'refuses — group / filter / aggregate member on the body column',
+  aggregateGroups: 'refuses — the same gates as aggregate, which it runs through (an order key names an aggregated column, never the body)',
   create: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   update: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   remove: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
+  userTextLocales: 'no row body — the principal\'s locale codes and the i18n default',
 };
 
 /**
@@ -490,8 +493,12 @@ const BRIDGE_MEMBERS: Record<string, string> = {
  * call at all.
  */
 const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
-  // findById (get, and the update / remove existence probes) and query; aggregate.
-  'stdio-data-bridge.ts': { 'find(object)': 2, 'aggregate(object)': 1 },
+  // findById (get, and the update / remove existence probes) and query; the
+  // query's one-row-per-group read (`latestPer`), behind the same stored-body,
+  // hash and sort refusals with its partition and order fields judged; aggregate.
+  // [#35138] `count(object)`: `query`'s page total, a number and never a row,
+  // counted under the `where` the stored-body and hash refusals already judged.
+  'stdio-data-bridge.ts': { 'find(object)': 3, 'aggregate(object)': 1, 'count(object)': 1 },
   // The ADR-0101 record resource reader.
   'plugin.ts': { 'find(objectName)': 1 },
   // [#30891] NOT an engine read: `delete_records` counting its selection

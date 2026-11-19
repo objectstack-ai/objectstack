@@ -1405,3 +1405,64 @@ describe('DatasetReportRenderer — the report\'s package as the reader\'s packa
     expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
   });
 });
+
+// objectstack#34907 — a dimension whose `field` is a `relationship.field` path
+// drills with one nested-relation condition beneath the relationship field
+// (objectstack#34990: no related id is read); the data API refuses the dotted
+// path itself.
+describe('DatasetReportRenderer — drilling a relationship-path dimension (objectstack#34907)', () => {
+  const relationshipSource = (field: string, accounts: Array<{ id: string }>) => ({
+    ...makeSource({
+      sales: {
+        rows: [{ owner: 'Zhang Wei', amount: 300 }],
+        object: 'crm_order',
+        drillScopes: { amount: {} },
+        dimensionFields: { owner: field },
+        drillRawRows: [{ owner: 'user_zhang' }],
+      },
+    }),
+    find: vi.fn(async (_object: string, _params: unknown) => ({ data: accounts })),
+    getObjectSchema: vi.fn(async (object: string) => (object === 'crm_order'
+      ? { fields: { crm_account: { type: 'lookup', reference: 'crm_account' } } }
+      : { fields: { owner_id: { type: 'user' } } })),
+  });
+
+  it('emits an objectFilter with the nested condition beneath the lookup field, reading no related record', async () => {
+    const src = relationshipSource('crm_account.owner_id', [{ id: 'acc1' }]);
+    const onDrill = vi.fn();
+    render(
+      <DatasetReportRenderer
+        report={{ name: 'r', type: 'summary', dataset: 'sales', rows: ['owner'], values: ['amount'] }}
+        dataSource={src}
+        onDrill={onDrill}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('dataset-drill-row')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('dataset-drill-row'));
+    await waitFor(() => expect(onDrill).toHaveBeenCalled());
+    expect(src.find).not.toHaveBeenCalled();
+    expect(onDrill).toHaveBeenCalledWith(expect.objectContaining({
+      object: 'crm_order',
+      objectFilter: { crm_account: { owner_id: 'user_zhang' } },
+    }));
+  });
+
+  it('emits no drill when the relationship cannot be resolved', async () => {
+    const src = relationshipSource('status.label', []);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onDrill = vi.fn();
+    render(
+      <DatasetReportRenderer
+        report={{ name: 'r', type: 'summary', dataset: 'sales', rows: ['owner'], values: ['amount'] }}
+        dataSource={src}
+        onDrill={onDrill}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('dataset-drill-row')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('dataset-drill-row'));
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(onDrill).not.toHaveBeenCalled();
+    expect(src.find).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});

@@ -92,9 +92,13 @@ describe('ChatbotEnhanced — the model picker shows each model’s cost multipl
     expect(options.map(multiplierOf)).toEqual(['×1', '×5', '×20', null]);
   });
 
-  it('the trigger shows the multiplier of the model in force', () => {
+  // objectstack#35445 — the closed trigger names the model in force and draws no
+  // multiplier (and no provider); the list, where the choice is made, keeps them.
+  it('the trigger names the model in force alone, with no multiplier; its full name is its title', () => {
     const { trigger } = mount({ selectedModelId: 'sonnet' });
-    expect(multiplierOf(trigger())).toBe('×5');
+    expect(multiplierOf(trigger())).toBeNull();
+    expect(trigger().textContent).toBe('Advanced');
+    expect(trigger()).toHaveAttribute('title', 'Advanced');
   });
 
   it('a fractional multiplier is drawn as the number it is', async () => {

@@ -55,10 +55,7 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import {
   ExpressionProvider,
-  createExpressionEvaluator,
-  isObjectFieldVisible,
-  useExpressionPermissions,
-  useExpressionSystemPermissions,
+  isObjectFieldListed,
 } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
@@ -66,6 +63,7 @@ import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
+import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -91,6 +89,12 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const dataSource = useAdapter();
+  // objectstack#34807 — under draft preview the form reads its object
+  // definition through the draft overlay: a field only the draft declares is
+  // drawn disabled, and the proxy leaves it out of every create and update.
+  // Outside preview this is `dataSource` itself. The answer-warning claim below
+  // keeps the raw adapter.
+  const formDataSource = usePreviewFormDataSource(dataSource);
   const { objects, loading: metadataLoading } = useMetadata();
   const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
@@ -281,72 +285,24 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // beside the provider is what makes the shared normaliser reachable here.
   const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
 
-  // Evaluator for the field-visibility expressions below, over the SAME bag
-  // the `ExpressionProvider` at the bottom of this file publishes to the form's
-  // descendants — one builder, called with the same four inputs (objectui#6493).
-  //
-  // It cannot simply READ that provider: the provider is mounted in this
-  // component's own returned tree, so `useExpressionContext()` here would
-  // resolve to whatever provider sits ABOVE this page (today `AppContent`'s,
-  // with a different `app`; nothing at all if the page is ever mounted
-  // elsewhere, which would silently unbind `user` too). Building the same scope
-  // from the same inputs is the fix that needs no new wiring.
-  //
-  // The private bag this replaced bound `user` alone, so an authored
-  // `current_user` / `ctx.user` / `os.user` / `features` gate on a field
-  // faulted here and failed OPEN while resolving normally on a nav item.
-  // objectui#4421 — the `permissions` input the `ExpressionProvider` below
-  // reads for itself, so `current_user.can(...)` answers the same on both.
-  // objectui#13083 — and its `systemPermissions` beside it, so
-  // `current_user.hasCapability(name)` answers here too (objectui#13006).
-  const expressionPermissions = useExpressionPermissions();
-  const expressionSystemPermissions = useExpressionSystemPermissions();
-  const expressionEvaluator = useMemo(
-    () =>
-      // ⛔ No `app`: objectui#8155 removed it from the predicate scope, because
-      // neither ADR-0068 nor the engine's `SCOPE_ROOTS` declares such a root.
-      // ⛔ No `data`: objectui#8166 removed that one too. It was `{}` here, so
-      // a `data.*` field predicate faulted with `No such key` and fell back
-      // fail-open; it now faults with the engine's own `Unknown variable: data`,
-      // the verdict the server gives the same string.
-      createExpressionEvaluator({
-        // expressionUser already handles the anonymous fallback, so we can
-        // pass it through unconditionally.
-        user: expressionUser,
-        features,
-        permissions: expressionPermissions,
-        systemPermissions: expressionSystemPermissions,
-      }),
-    [expressionUser, features, expressionPermissions, expressionSystemPermissions],
-  );
-
-  // Resolve the field list using the same visibility-aware logic as the
-  // ModalForm in AppContent so page-mode and modal-mode show the same
-  // fields for a given user — one helper, called from both, so the two
-  // surfaces cannot drift on the polarity below.
-  //
-  // objectui#6514 — this gated on `f.visible`, a key `@objectstack/spec`'s
-  // `FieldSchema` REFUSES (it is prose in `FIELD_KEY_GUIDANCE`, deliberately
-  // not an alias). The gate was therefore unreachable through the authoring
-  // surface: metadata carrying a field-level `visible` never validates, and a
-  // census over the framework's 113 `*.object.*` files found zero of them.
-  // `isObjectFieldVisible` reads the DECLARED keys instead — the static `hidden`
-  // (INVERTED: `visible: false` is `hidden: true`) and the `visibleWhen`
-  // predicate — and the dead read is gone rather than kept alongside.
+  // The list the form may draw: `isObjectFieldListed`, the same gate as the
+  // console's global record-form modal, so page mode and modal mode list the
+  // same fields. It reads the static `hidden` only (objectui#6514's declared
+  // keys; the refused `visible` is not read). A field's `visibleWhen` is
+  // evaluated by the form under the `ExpressionProvider` below, where the
+  // record is bound — evaluated here, with no record, a `has()`-guarded
+  // predicate dropped the field before the form could draw it.
   const fields = useMemo(() => {
     if (!objectDef?.fields) return [];
     if (Array.isArray(objectDef.fields)) {
       return (objectDef.fields as any[])
-        .filter((f: any) => {
-          if (typeof f === 'string') return true;
-          return isObjectFieldVisible(f, expressionEvaluator);
-        })
+        .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
         .map((f: any) => (typeof f === 'string' ? f : f.name));
     }
     return Object.entries(objectDef.fields as Record<string, any>)
-      .filter(([, f]) => isObjectFieldVisible(f, expressionEvaluator))
+      .filter(([, f]) => isObjectFieldListed(f))
       .map(([key]) => key);
-  }, [objectDef, expressionEvaluator]);
+  }, [objectDef]);
 
   // Show skeleton while metadata is still loading rather than the
   // "Object Not Found" empty state — otherwise direct/refreshed loads of
@@ -357,14 +313,14 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   if (!objectDef) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
+      <div className="flex h-full items-center justify-center p-4" data-testid="object-not-found">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Database className="h-6 w-6 text-muted-foreground" />
           </div>
           <EmptyTitle>{t('empty.objectNotFound')}</EmptyTitle>
           <EmptyDescription>
-            {t('empty.objectNotFoundDescription', { name: objectName })}
+            {t('console.objectView.objectNotFoundDescription', { objectName })}
           </EmptyDescription>
           <div className="mt-4">
             <Button variant="outline" onClick={() => navigate(baseUrl)}>
@@ -511,7 +467,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                     onCancel: handleCancel,
                     ...formChrome,
                   }}
-                  dataSource={dataSource ?? undefined}
+                  dataSource={formDataSource ?? undefined}
                 />
               </SuggestedFieldsContext.Provider>
             </SuggestedFieldChangesContext.Provider>

@@ -49,7 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { packagelessRowWithheld } from './protocol-meta-item-face.js';
+import { packagelessRowWithheld, withWithheldFieldsDecoration } from './protocol-meta-item-face.js';
 import {
     declinesPackageLessRowAt,
     disabledExactAddressHolder,
@@ -1098,7 +1098,18 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // Execution: the stored bodies — see `getMetaItemsForExecution`.
         // [#31399] An item served its row's `name` (a body that states none)
         // is judged as stored, without it, then served with it.
-        items: audience === 'served' ? governed.map((it) => decorateListedItem(request.type, it)) : governed,
+        //
+        // [#34901] …and, on the EFFECTIVE served list of objects only, the
+        // fields a disabled package withholds ({@link withWithheldFieldsDecoration});
+        // never the per-package layer (a package's export) or the execution face.
+        items: audience === 'served'
+            ? governed.map((it) => {
+                const listed = decorateListedItem(request.type, it);
+                return request.type === 'object' && layer === 'effective'
+                    ? withWithheldFieldsDecoration(host.engine?.registry, listed)
+                    : listed;
+            })
+            : governed,
         // [#23316] Served only: the engine's verdict on each listed flow —
         // see {@link flowRegistrationsOf}. The execution face is the
         // engine's own read, so it carries none.

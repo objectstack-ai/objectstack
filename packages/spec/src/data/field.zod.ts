@@ -716,11 +716,13 @@ function refuseSummaryWithoutField(
  * amount resolves the roll-up the same way and no key is added. Whether the
  * child amount it rolls up follows that very code through that very
  * `master_detail` is a question about two objects, answered where both are
- * held, never by this one-config shape. A roll-up of a stored home amount (a
- * child field some `homeAmount.field` names) declares `currencyMode: 'dynamic'`
- * with no `defaultCurrency`: the home field is a `dynamic` field in the
- * organization's home currency (ADR-0144 D8 rule 5), so its total is too, and
- * the Console draws it in that currency without metadata naming it (#33659).
+ * held, never by this one-config shape. A roll-up of an amount in the home
+ * currency (a child `currency` field in `dynamic` mode, a stored home amount
+ * included) declares `currencyMode: 'dynamic'` with no `defaultCurrency`: a
+ * `dynamic` amount is in the organization's home currency (ADR-0144 D8 rule 5,
+ * `localization.currency`), so its total is too, and the Console draws it in
+ * that currency without metadata naming it (#33659; widened to every `dynamic`
+ * child amount by seat ruling record 7000258793).
  * Outside those two roll-ups a `summary` may declare only `fixed` (read by the
  * analytics layer); a `count` roll-up, every other `dynamic` config and every
  * other `record` roll-up are refused at the object door
@@ -1512,7 +1514,7 @@ export const FieldSchema = lazySchema(() => {
    * fail it. The describe is form help in Studio and carries the rule, not the
    * ruling date (#22093).
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. With the field\'s own `visibleWhen` it is required WHEN SHOWN: a write whose record the predicate hides does not need it, a write that reveals the field empty is refused, and a predicate the server cannot evaluate counts as shown. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -1677,7 +1679,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it — a `formula` whose `returnType` is `percent` counts the places of its displayed percentage, as a `percent` field does, so a fraction result is rounded to `scale + 2` places. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1744,7 +1746,7 @@ export const FieldSchema = lazySchema(() => {
    * header chips. The liveness row is `live` and names the relay sites that
    * carry the key to that renderer.
    */
-  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field, or a `formula` whose `returnType` is `percent`, is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -2370,7 +2372,8 @@ export const FieldSchema = lazySchema(() => {
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
-   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   * absent when the type can't be proven (an ambiguous/`dyn` expression),
+   * except that a declared `percent` or `currency` stays (below).
    *
    * `currency` (#22727): the result is an amount of money. It carries its
    * currency exactly the way a `currency` field does — through the formula's
@@ -2380,9 +2383,24 @@ export const FieldSchema = lazySchema(() => {
    * at AUTHORING, where `@objectstack/formula`'s `inferFormulaReturn` proves the
    * result is money and answers the source's currency for the stamp to copy.
    * The value itself is a bare number, as a currency field's is.
+   *
+   * `percent` (#35047): the result is a ratio, read exactly as a `percent`
+   * field reads its stored value — one convention, never a second one. The
+   * value is a FRACTION (`0.25` reads `25%`), unless the formula declares a
+   * `max` above 1, the percent field's own whole-percent statement
+   * (`percentScaleOf`), when it is percentage points. Its `scale` counts the
+   * decimal places of the displayed percentage, as on a `percent` field
+   * (absent ⇒ 0), so the engine rounds a fraction to `scale + 2` places and a
+   * whole percentage to `scale`. It is DECLARED, never inferred: no CEL type
+   * proves a quotient is a percentage, so authoring keeps a declared `percent`
+   * under every verdict that proves no other type — where it would stamp
+   * `number`, and where the type is unproven (a field-over-field quotient such
+   * as `record.spent / record.budget` types `dyn`), which would otherwise
+   * clear it. A declared `currency` is kept the same way. A verdict that
+   * proves `text`, `boolean` or `date` still stamps.
    */
-  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date/currency). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency).'),
+  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `currency` and `percent` are declared by the author, and a verdict that proves no other type (`number`, or none) keeps them. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
@@ -2444,7 +2462,7 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up a stored home amount (a child field some `homeAmount.field` names) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up an amount in the home currency (a child `currency` field in `dynamic` mode, a stored home amount included) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
@@ -2515,8 +2533,17 @@ export const FieldSchema = lazySchema(() => {
    * ADR-0137 D2 refuses the write. `objectstack validate` refuses it (#20078);
    * a `validations[]` `script` rule is the seam that reads one hop through a
    * reference.
+   *
+   * `visibleWhen` is display only, except on a `required` field: there the
+   * write path reads it too (ADR-0113 D1, as amended), and the field is
+   * required only on a write whose record the predicate shows: a clean TRUE,
+   * as the form reads it, with `formula` fields computed over the record being
+   * written. The form computes the same formulas over the record being edited
+   * (`planObjectFormulas`, `@object-ui/core`); where it cannot compute one (a
+   * hop, `label()`, `can()`, `os`, or no signed-in user) it shows the field,
+   * keeps it required, and the server decides.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`. On a `required` field the server reads it on every write: where it is not TRUE (FALSE, or null such as an unset boolean) the field is not required for that write, and a predicate the server cannot evaluate counts as shown, so the field stays required. Reads the record's own columns, with `formula` fields computed over the record being written, as the form computes them over the record being edited; a read THROUGH a reference field, or a formula that reads through one, calls label(), calls can() on a write that picks no permission-gated option, or reads current_user on a system write with no user, cannot be evaluated there."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 

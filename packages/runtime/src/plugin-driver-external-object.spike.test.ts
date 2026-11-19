@@ -42,7 +42,7 @@ import type { DriverQuery, IDataDriver, IExternalDatasourceService } from '@obje
 import { ObjectQLPlugin, EXTERNAL_ROW_CAP, unwrapExternalDriverFloor } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions, RLS_DENY_FILTER } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
@@ -369,28 +369,25 @@ async function signIn(email: string, password: string): Promise<string> {
 }
 
 /**
- * A second human under the default `invite_only` audience posture enters
- * through a pending invitation, as `@objectstack/verify`'s `signUp` does.
+ * A second human under the default `invite_only` audience posture, bound to
+ * the organization at creation: the operator door — the ticket the stack's
+ * own auth manager stages for exactly this address — as `@objectstack/verify`'s
+ * `signUp` mints its member. A sign-up admitted by the invitation it presents
+ * joins no organization until it verifies its address and accepts.
  */
 async function signUp(email: string): Promise<string> {
-  await engine.insert(
-    'sys_invitation',
-    {
-      id: `inv_spike_${email.split('@')[0]}`,
-      email,
-      status: 'pending',
-      organization_id: 'org_spike_audience_gate',
-      role: 'member',
-      inviter_id: 'usr_spike_audience_gate',
-      expires_at: new Date(Date.now() + 3_600_000),
-    },
-    { context: { isSystem: true } },
-  );
-  const res = await req('/auth/sign-up/email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0], invitationId: `inv_spike_${email.split('@')[0]}` }),
-  });
+  const auth: any = await kernel.getServiceAsync('auth');
+  const ticket = auth.stageOperatorProvisioning(email);
+  let res: Response;
+  try {
+    res = await req('/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0], [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket }),
+    });
+  } finally {
+    auth.clearOperatorProvisioning(email);
+  }
   if (!res.ok) throw new Error(`spike signUp failed: ${res.status} ${await res.text()}`);
   return ((await res.json()) as any).token;
 }

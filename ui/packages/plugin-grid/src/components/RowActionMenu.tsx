@@ -498,18 +498,30 @@ export const BuiltinRowActionItem: React.FC<{
     label: `builtin:${name}:disabledWhen`,
     fields: objectFields,
   });
+  // The declared `disabledWhen` verdict alone — never the OR below, so a
+  // pending record-grained verdict greys the item without earning a reason.
+  const disabledByPredicate = predicates?.disabledWhen != null && isDisabled;
+  // The reason the record page gives for the same verdict (objectstack#35135):
+  // `userActions` declares no reason key, so the generic
+  // `actions.notAvailableForRecord` sentence, as the item's second line and its
+  // accessible description. Called ahead of the early return.
+  const disabledReason = useDisabledReason(disabledByPredicate);
   if (!isVisible) return null;
-  const disabled = verdictPending || (predicates?.disabledWhen != null && isDisabled);
+  const disabled = verdictPending || disabledByPredicate;
   return (
     <DropdownMenuItem
       disabled={disabled}
       aria-busy={verdictPending || undefined}
       onClick={() => { if (!disabled) onSelect(row); }}
       data-testid={`row-action-builtin-${name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={className}
     >
       {icon}
-      {label}
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{label}</DisabledReasonMenuLabel>
+        : label}
     </DropdownMenuItem>
   );
 };
@@ -567,7 +579,7 @@ const RowActionInlineButton: React.FC<{
     <Button
       variant={toButtonVariant(def.variant)}
       size="sm"
-      className="h-8"
+      className="h-6"
       data-testid={`row-action-inline-${def.name}`}
       disabled={isDisabled}
       aria-describedby={disabledReason?.id}
@@ -796,7 +808,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
               // pointer, where no hover will ever lift it. The tone
               // is a text colour, never an opacity, so the resting glyph keeps
               // the muted-foreground contrast every other secondary icon has.
-              className="h-8 w-8 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
+              className="h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
               data-testid="row-action-trigger"
             >
               <MoreVertical className="h-4 w-4" />

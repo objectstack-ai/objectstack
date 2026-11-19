@@ -100,6 +100,11 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// Which filter operator fits which declared field type: one row per
+// declared-type door that judges an operator class (today the text-operator
+// door above, by reference), read through `filterOperatorFieldTypeFit` by every
+// door that reports a filter a type change leaves unfit.
+export * from './filter-operator-field-type-fit';
 // [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
 // off a field DEFINITION (text-like, multi-value, null only) plus the
 // value-level predicate for the faces with no declaration. The operator is
@@ -408,6 +413,13 @@ export * from './record-surface';
 // `applySystemFields` and by author-time tooling that must resolve a reference
 // to one but cannot load a runtime.
 export * from './injected-system-columns';
+
+// [ruling 7000907189 point 1] Which objects offer the Change Owner action: the
+// structural test (`isTransferEligible`) and the switch `userActions.transfer`
+// resolved onto its sharingModel default (`resolveUserActionTransfer`) — the one
+// answer the server's Change Owner endpoint (#35402) and the console's action
+// (#35403) will read; neither exists yet.
+export * from './user-action-transfer';
 
 // injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
 // WHAT each injected column looks like, and whether storage actually backs it

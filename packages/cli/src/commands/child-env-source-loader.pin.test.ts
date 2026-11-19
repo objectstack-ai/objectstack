@@ -19,7 +19,7 @@
  *     Cannot find module './registry'
  *     Require stack:
  *     - packages/formula/src/index.ts
- *     ✗ Compile failed — fix errors above before starting dev server
+ *     ✗ objectstack.config did not load or compile — the reason is printed above; fix it before starting dev server
  *
  * A **type-resolution directive leaking into runtime resolution**. Measured on
  * the three example apps, the failures map 1:1 onto each app's `paths` entries:

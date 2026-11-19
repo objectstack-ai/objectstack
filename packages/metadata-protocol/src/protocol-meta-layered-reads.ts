@@ -43,7 +43,7 @@ import {
     storedRowDocument,
     withItemLockFamily,
 } from './item-lock.js';
-import { type MetadataDiagnostics, computeMetadataDiagnostics, withViewLintWarnings } from './metadata-diagnostics.js';
+import { type MetadataDiagnostics, computeMetadataDiagnostics, viewLintObjectLookup, withViewLintWarnings } from './metadata-diagnostics.js';
 import { redactMetadataItem } from './metadata-redaction.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
@@ -410,14 +410,16 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // [#26699] Each lookup is asked for the addressed member, exactly
         // as {@link getMetaItem}'s are: the artifact at the member (the
         // canonical one when none was named), and the registry for the
-        // member named. The registry's bare-name read still answers a
-        // bundle that ships no canonical member; a registry that does not
-        // narrow by member can answer another one for a NAMED member, and
-        // that answer is not this member's layer.
+        // member named. A registry that does not narrow by member can answer
+        // another one for a NAMED member, and that answer is not this
+        // member's layer. [#34682] Nor, naming none, is the member the
+        // registry's bare-name read answers for a bundle with no canonical
+        // member: this read addresses the canonical member, as
+        // `?member=<canonical>` does, and that bundle has no layer of it.
         const runtimeOnly = (item: unknown): unknown =>
             item !== undefined && isTenantAuthored(item) ? undefined : item;
         const namedMemberOnly = (item: unknown): unknown =>
-            member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
+            wantedMember !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
         // [#32365] The bare action read's judged answer: the one enabled
         // holder's artifact (looked up at that holder), or the environment's
         // own item (a runtime registration; a stored row is the overlay layer).
@@ -447,22 +449,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // now refused naming the holders (ruling 6917064203 on #34398).
         if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember, { refuse: true })));
         if (regItem !== undefined) code = regItem;
-
-        // [#34441 cell 1, #21059] Naming no member, the bare-name read answers
-        // a bundle that ships no canonical member with the member it ships,
-        // until a stored row is hydrated into that bare slot: the hydrated
-        // row is no artifact read (dropped above), and the shipped member it
-        // displaced is the artifact the bare name reads. Without this the same
-        // read answered `code` = the base's `fr-FR` before a restart and
-        // `null` after it (404 on `/layers`), with a dependent's `en-US` row
-        // stored. A named member is never answered here (its own lookups ran).
-        // [#34248] Nor is a bare doc read's environment entry: beside two
-        // enabled holders that entry is the read's answer, and the artifact
-        // lookup's first composite is the holder registered first, which the
-        // read never serves (as for the bare action read's judged answer).
-        if (code === null && member === undefined && bareActionAnswer === undefined && bareDocEnvironmentEntry === undefined) {
-            code = host.lookupArtifactItem(request.type, request.name, request.packageId) ?? null;
-        }
+        // [#34682] Naming no member, the code layer is the canonical member's
+        // artifact (asked above) or none: no lookup by name alone follows.
     }
 
     // [#5840] The code half of the rule #5707 wrote for the overlay half,
@@ -661,14 +649,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // package's in id order.
     let orphaned = false;
     // [#34441 cell 1] …and only over a code layer of the member this read
-    // addresses. Naming no member, a bundle whose base ships no canonical
-    // member takes the base's other member as its code layer (the registry's
-    // bare-name read, above); a dependent's row of the canonical member is
-    // then no row the base's document shadows but the dependent's addition
-    // (#28802 R2), and reported as an orphan it became `/published`'s
-    // document, before a restart only. FROM (`main` 31096af83d): A ships
-    // `fr-FR` only, D stores `en-US`: `/published` served D's row (200), where
-    // with no D row it answers 404.
+    // addresses: a dependent's row of a member the base does not ship is no
+    // row the base's document shadows but the dependent's addition (#28802
+    // R2), and reported as an orphan it became `/published`'s document.
+    // FROM (`main` 31096af83d): A ships `fr-FR` only, D stores `en-US`:
+    // `/published` served D's row (200), where with no D row it answers 404.
+    // [#34682] Naming no member, the code layer is the canonical member's
+    // alone (above), so this guard now also holds by that construction.
     if (overlay === null && code !== null && isWantedMember(code) && typeof contentPackageId === 'string' && contentPackageId !== '') {
         const base = contentPackageId;
         let rows: readonly StoredOverlayRow[] = [];
@@ -895,12 +882,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // `?layers=true` authoring read, the one Studio's item editor takes when
     // no draft is pending, so the pass runs unconditionally here. [#31866]
     // The list-view field warnings ({@link withListViewFieldWarnings}) ride
-    // the same pass, as `getMetaItem` serves them.
+    // the same pass, as `getMetaItem` serves them, [#34901] over the same
+    // disabled-package fold ({@link viewLintObjectLookup}).
     const _diagnostics = effective !== null && typeof effective === 'object' && !Array.isArray(effective)
         ? (await withViewLintWarnings(
             request.type,
             { ...(effective as Record<string, unknown>), _diagnostics: schemaDiagnostics },
-            (name) => host.engine?.registry?.getObject?.(name),
+            viewLintObjectLookup(host.engine?.registry),
         ))._diagnostics as MetadataDiagnostics | undefined
         : schemaDiagnostics;
 

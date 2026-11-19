@@ -30,6 +30,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { DraftChangesPanel, draftAgentSources } from '../DraftChangesPanel';
 
 const PKG = 'com.x';
@@ -78,7 +81,7 @@ describe('objectstack#27176 — the drill-in names the AI tools that drafted the
     await renderConfirm();
     expect(agentLines()).toEqual([
       'Includes changes drafted by the MCP client “Claude”',
-      'Includes changes drafted by the AI copilot',
+      'Includes changes drafted by the AI assistant',
     ]);
   });
 

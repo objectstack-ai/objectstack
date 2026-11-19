@@ -46,11 +46,11 @@ import { externalBindingDatasourceRefusal } from './data/external-binding-dataso
 import { InlineGridColumnSchema, summaryFunctionReadsField } from './data/field.zod';
 import {
   isRecordCurrencyCodeField,
+  isTenantCurrencyAmount,
   recordCurrencyDynamicRollupNotHomeError,
   recordCurrencyFollowedCodeError,
   recordCurrencyRecordRollupError,
   recordCurrencyUnfollowedRollupError,
-  storedHomeAmountSourceOf,
 } from './data/record-currency-path';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
@@ -4551,7 +4551,7 @@ const LOOKUP_AUTOFILL_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(['lookup
 const LOOKUP_AUTOFILL_INHERENTLY_MULTI_TYPES: ReadonlySet<string> = new Set(['multiselect', 'checkboxes', 'tags']);
 /** A `formula` source's value type, from its `returnType`. */
 const LOOKUP_AUTOFILL_FORMULA_VALUE_TYPE: Readonly<Record<string, string>> = {
-  number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date',
+  number: 'number', currency: 'currency', text: 'text', boolean: 'boolean', date: 'date', percent: 'percent',
 };
 
 /**
@@ -4743,19 +4743,19 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
  *
  * (d) A `summary` (`sum`, `min`, `max`, `avg`) declaring
  * `currencyMode: 'dynamic'` (or a `currencyConfig` with no `currencyMode`,
- * which is `dynamic`) is admitted only when the child field it rolls up is a
- * stored home amount: a field that some `currencyConfig.homeAmount.field` on
- * the child object names (#33659), where that `homeAmount` is valid as declared
- * (`storedHomeAmountSourceOf`: a field merged in from an extension never had
- * the object door's reading, so a `homeAmount` naming a plain number, a `fixed`
- * amount or a writable field does not make it a home amount). ADR-0144 D6 has consolidated totals read
- * that home field, and D8 rule 5 makes it "a `dynamic`-mode currency field",
- * displayed in the organization's home currency (`localization.currency`);
- * every row of it is in that one currency, so its total is too, and declaring
- * `dynamic` on the roll-up says so without naming the code (D8 rule 5:
- * "Metadata never names the home currency"). Any other `dynamic` roll-up is
- * refused: the faces would draw it in the home currency, which the amounts it
- * reads are not known to be in. The object door has already refused a
+ * which is `dynamic`) is admitted only when the child field it rolls up is an
+ * amount in the organization's home currency by declaration: a stored
+ * `currency` field in `dynamic` mode (`isTenantCurrencyAmount`). A `dynamic`
+ * amount displays in the tenant default currency, `localization.currency`,
+ * the one setting ADR-0144 D4 names the home currency, so every row of it is
+ * in that currency and its total is too (seat ruling record 7000258793, which
+ * widened #33659's admission of a stored home amount alone: D8 rule 5 makes
+ * the home field "a `dynamic`-mode currency field", one such amount).
+ * Declaring `dynamic` on the roll-up says so without naming the code (D8
+ * rule 5: "Metadata never names the home currency"). Any other `dynamic`
+ * roll-up is refused: over a `record` or `fixed` amount, a plain number, a
+ * formula or another summary, the faces would draw it in the home currency,
+ * which the amounts it reads are not known to be in. The object door has already refused a
  * `dynamic` summary that names no child field or carries a `defaultCurrency`,
  * and a `count` (`refuseUnadmittedSummaryCurrency`).
  *
@@ -4810,15 +4810,16 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
       const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
       const rollup = { object: objectName, field: fieldName, fn: String(ops.function), childObject: ops.object, childField: ops.field };
-      // (d) A `dynamic` roll-up is admitted over a stored home amount only
-      // (#33659), judged against a child this stack declares and a child field
-      // it holds, as (c) is; a home field is admitted whatever else it is, so
-      // nothing below judges it again.
+      // (d) A `dynamic` roll-up is admitted over an amount in the home
+      // currency only (a `dynamic` `currency` field, a stored home amount
+      // included), judged against a child this stack declares and a child
+      // field it holds, as (c) is; such an amount is admitted whatever else it
+      // is, so nothing below judges it again.
       if (
         summaryCurrency !== undefined && (summaryCurrency.currencyMode ?? 'dynamic') === 'dynamic'
         && declared.has(ops.object) && childField !== undefined
       ) {
-        if (storedHomeAmountSourceOf(child, ops.field) === undefined) {
+        if (!isTenantCurrencyAmount(childField)) {
           errors.push(recordCurrencyDynamicRollupNotHomeError(rollup, child, childField));
         }
         continue;

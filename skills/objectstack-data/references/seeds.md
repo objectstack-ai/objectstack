@@ -37,7 +37,7 @@ export const categorySeed = defineSeed(Category, {
   ],
 });
 
-export const SeedData = [statusSeed, categorySeed];   // parents first
+export const SeedData = [statusSeed, categorySeed];
 ```
 
 ### `Seed` fields
@@ -45,10 +45,13 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key every keyed mode matches on |
+| `externalId` | `'name'` | Stable business key (or field list) every mode matches on |
 | `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
+| `locale` | — (every locale) | BCP-47 tags it loads for; a locale no set of the object names gets none |
+| `fallback` | — | `true` on ONE `locale` set per object: also loads for a locale no set names |
+| `dependsOn` | — | Objects it loads after when no lookup links them (below) |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
 Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
@@ -59,9 +62,11 @@ Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 |:-----|:---------|:--------|
 | `ignore` (default) | Create-only: insert a missing row, leave a matched row as is. | Data the customer owns |
 | `upsert` | Insert if missing; every replay writes declared columns back. | Reference data kept current |
-| `insert` | Insert every record, no match: duplicates on each replay. | Rows loaded once |
 | `update` | Update only existing rows; never create. | Patching existing config |
-| `replace` ⚠️ | Insert with no match; deletes nothing, the caller clears the table. | Cache / lookup tables only |
+
+`insert` / `replace` are refused (every replay re-inserted each record). With
+no single natural key, keep the default mode and set a composite `externalId`
+(`['team', 'project']`), or `'id'` when the records carry their own ids.
 
 A seed replays on each boot, install and re-publish. AppPlugin's boot and organization
 replays (not a publish or package install) do not re-insert a keyed row a
@@ -69,11 +74,9 @@ person deleted; `seed-replayer` with `{ reseed: true }` restores it.
 
 ### Columns the app owns after the first load — `columns.FIELD.applyOn`
 
-An `upsert` replay re-asserts every column on the row it matched — wrong for
-a column a job or an admin advances after the first load. Declare it
+For a column a job or an admin advances after the first load, declare
 `applyOn: 'create'`: written when the seed creates the row, left as the row
-holds it on every replay (`update` never writes it; no other mode updates a
-matched row).
+holds it on every replay (`update` never writes it).
 Each key must be a field of the object or an injected system column —
 `defineSeed` refuses one that is not. Same values and meaning as an import
 mapping entry's `applyOn` (objectstack-api).
@@ -89,8 +92,8 @@ defineSeed(Invoice, {
 
 ### `externalId` selection
 
-Pick a stable natural key. **Never use `id`** — UUIDs differ across
-environments.
+Pick a stable natural key. **Never use `id`** for generated UUIDs — they
+differ across environments.
 
 | Scenario | Key |
 |:---------|:----|
@@ -102,14 +105,14 @@ environments.
 ### Relationship references
 
 For `lookup` fields, supply the **natural key** of the target record (not
-its UUID). The seed runner resolves at load time. Order seeds so parents
-appear before children in the exported array:
+its UUID). The loader resolves it at load time, and lookups order the load:
+a child loads after its parent however the array lists them (array order
+only breaks ties).
 
 > If a lookup value matches no natural key, the loader falls back to
 > resolving it as the target's `id` — so a reference to an existing record
-> by internal id resolves instead of dangling to null. Natural keys remain
-> the portable default; rely on the id fallback only for records you didn't
-> seed (e.g. a system user).
+> by internal id resolves instead of dangling to null. Rely on it only for
+> records you didn't seed (e.g. a system user).
 
 ```typescript
 const contacts = defineSeed(Contact, {
@@ -121,6 +124,11 @@ const contacts = defineSeed(Contact, {
   }],
 });
 ```
+
+A `beforeInsert` hook reading a seeded object no lookup links to needs
+`dependsOn: ['crm_rating_band']` (object names). Naming the dataset's own
+object, one no dataset of the load seeds (misspelt, or `env`/`locale`-scoped
+out), or a cycle refuses the whole load; nothing is written.
 
 ### Dynamic values (CEL)
 
@@ -155,12 +163,7 @@ produce byte-identical `dist/objectstack.json`.
 
 | Practice | Why |
 |:---------|:----|
-| Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
-| Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
-| Leave `mode` unset; `upsert` only for reference data | Replays keep customer edits |
-| Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
-| Order seeds parent → child in the exported array | References resolve at load time |
-| `replace` only on cache tables the caller clears | It never deletes: duplicates otherwise |
+| TypeScript: `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checks otherwise |
 
 **Fictional is fine; malformed is not.** A seed row is written through the same
 field validation as a user's insert, and a value the field type refuses never

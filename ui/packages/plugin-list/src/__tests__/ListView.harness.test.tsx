@@ -1851,6 +1851,223 @@ describe('ListView.refusedSortNotSent-30024', () => {
   });
 });
 
+// ── ListView.draftOnlyColumn-34807 ───────────────────────────────────────────
+
+/**
+ * objectstack#34807 (ruling 6946403206) — under the console's draft preview a
+ * list column on a field that exists only in the draft made the data door
+ * refuse the whole list query (`400 INVALID_FIELD`): it validates every
+ * `$select`, `$filter` and `$orderby` name against the PUBLISHED object.
+ *
+ * In the preview the host's data source answers `getObjectSchema` with the
+ * published document plus each draft-only field, marked with the
+ * underscore-private `_draftOnly` key (`@object-ui/app-shell`'s
+ * `preview/unpublishedObjectReads.ts` sets it; the literal is pinned here and
+ * there). `ListView` keeps such a name out of every request and out of the
+ * Filter and Sort pickers, draws the column empty under the draft label, and
+ * says in one line that a filter or sort on it was left out.
+ *
+ * The data source below answers as the data door does: any request that names
+ * `priority` is refused with `400 INVALID_FIELD`. CONTROL: the same view with
+ * `priority` published (no marker) asks for it exactly as before, with no note.
+ */
+describe('ListView.draftOnlyColumn-34807', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'tracker_task';
+  const PUBLISHED_FIELDS = {
+    title: { name: 'title', type: 'text', label: 'Title' },
+    status: { name: 'status', type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
+  };
+  /** The field the draft adds: its draft definition, marked by the preview's data source. */
+  const DRAFT_PRIORITY = {
+    name: 'priority',
+    type: 'select',
+    label: 'Priority (draft)',
+    options: [{ label: 'High', value: 'high' }],
+    _draftOnly: true,
+  };
+
+  function makeDataSource(opts: { draft: boolean; servesSignal?: boolean }) {
+    const published = opts.draft
+      ? PUBLISHED_FIELDS
+      : { ...PUBLISHED_FIELDS, priority: { name: 'priority', type: 'select', label: 'Priority', options: DRAFT_PRIORITY.options } };
+    return {
+      find: vi.fn(async (_object: string, params: Record<string, unknown>) => {
+        if (opts.draft && JSON.stringify(params ?? {}).includes('"priority')) {
+          throw Object.assign(new Error(`Unknown field 'priority' on object '${OBJECT}'`), {
+            status: 400,
+            code: 'INVALID_FIELD',
+          });
+        }
+        return { data: [{ id: 't1', title: 'Write the spec', status: 'open' }], total: 1 };
+      }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => {
+        const schema = {
+          name: OBJECT,
+          label: 'Task',
+          fields: opts.draft ? { ...published, priority: { ...DRAFT_PRIORITY } } : published,
+        };
+        // The published projection: it names no draft-only field.
+        if (opts.servesSignal) attachObjectSortability(schema, resolveObjectSortability({ name: OBJECT, fields: published } as any));
+        return schema;
+      }),
+    };
+  }
+
+  async function mountList(
+    opts: { draft: boolean; servesSignal?: boolean },
+    schemaExtra: Record<string, unknown> = {},
+    props: Record<string, unknown> = {},
+  ) {
+    const dataSource = makeDataSource(opts);
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['title', 'priority'],
+      compactToolbar: false,
+      ...schemaExtra,
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as any}>
+        <ListView schema={schema} dataSource={dataSource as any} {...props} />
+      </SchemaRendererProvider>,
+    );
+    await screen.findByText('Write the spec');
+    await Promise.allSettled(dataSource.find.mock.results.map((r: any) => r.value));
+    const lastParams = () => (dataSource.find.mock.calls.at(-1)?.[1] ?? {}) as Record<string, any>;
+    return { dataSource, lastParams };
+  }
+
+  const notice = () => screen.queryByTestId('list-draft-only-query-notice');
+  const everyRequestOmitsPriority = (dataSource: ReturnType<typeof makeDataSource>) => {
+    expect(dataSource.find).toHaveBeenCalled();
+    for (const [, params] of dataSource.find.mock.calls) {
+      expect(JSON.stringify(params ?? {})).not.toContain('"priority');
+    }
+  };
+
+  const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+  async function comboboxOptions(trigger: HTMLElement): Promise<string[]> {
+    fireEvent.click(trigger);
+    const listbox = await screen.findByRole('listbox');
+    const labels = within(listbox).getAllByRole('option').map(text);
+    fireEvent.keyDown(listbox, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    return labels;
+  }
+  async function popoverFirstComboboxOptions(name: RegExp): Promise<string[]> {
+    const trigger = screen.getByRole('button', { name });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'true'));
+    const content = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
+    if (!content) throw new Error(`no popover content for "${text(trigger)}"`);
+    try {
+      return await comboboxOptions(within(content).getAllByRole('combobox')[0]);
+    } finally {
+      fireEvent.click(trigger);
+      await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+    }
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it('draws the draft-only column empty under its draft label, and never asks for it', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    expect(screen.getAllByText('Priority (draft)').length).toBeGreaterThan(0);
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$select).toEqual(['id', 'title']);
+    expect(notice()).toBeNull();
+  });
+
+  it('leaves a viewer filter on it out of $filter, keeps the rest, and says so', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, {}, {
+      initialFilters: {
+        id: 'root',
+        logic: 'and',
+        conditions: [
+          { id: 'c1', field: 'priority', operator: 'equals', value: 'high' },
+          { id: 'c2', field: 'title', operator: 'contains', value: 'spec' },
+        ],
+      },
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(JSON.stringify(lastParams().$filter)).toContain('"title"');
+    expect(notice()).not.toBeNull();
+    expect(text(notice())).toContain('Priority (draft)');
+  });
+
+  it('leaves a sort on it out of $orderby with no projection served, and says so', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, {
+      sort: [{ field: 'priority', order: 'desc' }, { field: 'title', order: 'asc' }],
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$orderby).toEqual([{ field: 'title', order: 'asc' }]);
+    expect(text(notice())).toContain('Priority (draft)');
+  });
+
+  it('the served published projection refuses it too: the sort leaves it out (readObjectSortability)', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true, servesSignal: true }, {
+      sort: [{ field: 'priority', order: 'desc' }, { field: 'title', order: 'asc' }],
+    });
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$orderby).toEqual([{ field: 'title', order: 'asc' }]);
+  });
+
+  it('offers it in neither the Filter panel nor the Sort picker', async () => {
+    await mountList({ draft: true }, { sort: [{ field: 'title', order: 'asc' }] }, {
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'title', operator: 'contains', value: 'a' }] },
+    });
+    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    expect(filterOptions).toContain('Title');
+    expect(filterOptions).not.toContain('Priority (draft)');
+    const sortOptions = await popoverFirstComboboxOptions(/^sort/i);
+    expect(sortOptions).toContain('Title');
+    expect(sortOptions).not.toContain('Priority (draft)');
+  });
+
+  it('leaves it out of $searchFields, keeping the search and the rest of the declared fields', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title']);
+  });
+
+  it('CONTROL: with the field published, $searchFields carries it as declared', async () => {
+    const { lastParams } = await mountList({ draft: false }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title', 'priority']);
+  });
+
+  it('CONTROL: the same view with the field published asks for it as before, with no note', async () => {
+    const { lastParams } = await mountList({ draft: false }, {
+      sort: [{ field: 'priority', order: 'desc' }],
+    }, {
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'priority', operator: 'equals', value: 'high' }] },
+    });
+    expect(lastParams().$select).toEqual(['id', 'title', 'priority']);
+    expect(lastParams().$orderby).toEqual([{ field: 'priority', order: 'desc' }]);
+    expect(JSON.stringify(lastParams().$filter)).toContain('"priority"');
+    expect(notice()).toBeNull();
+    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    expect(filterOptions).toContain('Priority');
+  });
+});
+
 // ── ListView.switcherChrome-7547 ─────────────────────────────────────────────
 
 /**
@@ -2481,12 +2698,15 @@ describe('ListView.recordDrawerCount-27545', () => {
       await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
     });
 
-    it('a record open in the drawer: the column summaries are drawn beside the count', async () => {
+    // objectstack#35548 — the column summaries left this bar: the grid draws
+    // them as its table's own last row, each under its column, so the list
+    // hands it no `onColumnSummaryChange` and the bar holds the count alone.
+    it('a record open in the drawer: the bar holds the count alone; the summaries are the grid\'s own row', async () => {
       renderList('a1');
       (await screen.findByTestId('grid-probe')).click();
       const bar = await screen.findByTestId('record-count-bar');
-      await waitFor(() => expect(within(bar).getByTestId('record-count-summaries')).toHaveTextContent('Number of Employees: Avg: 10'));
-      expect(within(bar).getByText('4 records')).toBeInTheDocument();
+      await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
+      expect(within(bar).queryByTestId('record-count-summaries')).toBeNull();
     });
   });
 });

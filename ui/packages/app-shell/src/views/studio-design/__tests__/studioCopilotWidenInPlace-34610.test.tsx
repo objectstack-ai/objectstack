@@ -4,7 +4,8 @@
  *
  * objectstack#34610 (ui ADR-0057 Amendment A3) — the Studio copilot's expand
  * control widens its slot IN PLACE and the same control narrows it again; the
- * Studio page stays where it is.
+ * Studio page stays where it is. objectstack#34725 moved the control into the
+ * slot's one header row, so the pin mounts the slot around the copilot.
  *
  * It used to open `/ai/build?package=PKG` (objectui#12842). After
  * objectstack#34608 that address opens the console's drawer full window over
@@ -37,6 +38,7 @@ vi.mock('../../../hooks/useChatConversation', () => ({
 }));
 
 import { StudioChatDock } from '../StudioAiCopilot';
+import { StudioRightSlot } from '../StudioRightSlot';
 
 function Where() {
   const location = useLocation();
@@ -48,7 +50,20 @@ function Slot() {
   return (
     <>
       <div data-testid="slot-wide">{String(wide)}</div>
-      <StudioChatDock packageId="app.crm" wide={wide} onWideChange={setWide} />
+      <StudioRightSlot
+        open
+        mode="copilot"
+        onModeChange={() => {}}
+        hasProps={false}
+        copilotAvailable
+        planPendingCount={0}
+        propsTargetRef={() => {}}
+        wideWidth={wide ? 900 : undefined}
+        wide={wide}
+        onWideChange={setWide}
+        locale="en"
+        copilot={<StudioChatDock packageId="app.crm" />}
+      />
       <Where />
     </>
   );
@@ -72,6 +87,7 @@ describe("the Studio copilot's expand control (objectstack#34610)", () => {
     expect(button).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(button);
     expect(screen.getByTestId('slot-wide')).toHaveTextContent('true');
+    expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: '900px' });
     expect(screen.getByTestId('studio-copilot-maximize')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('where')).toHaveTextContent('/studio/app.crm/interfaces?surface=nav_dash');
     expect(screen.queryByTestId('left-studio')).not.toBeInTheDocument();

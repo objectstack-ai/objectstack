@@ -145,10 +145,18 @@
       URL and the token it sent; the preflight takes it once, and only when
       both match what it would send itself.
 
-      Every safety of the preflight is kept. No token, or blocked storage,
-      sends nothing, exactly as the preflight returns early. A request that
-      fails or answers non-OK hands over a rejection, so the preflight fetches
-      as it always did and the stale-token purge reads its own answer.
+      With no stored token the question is the cookie session's, the one
+      `AuthProvider` would otherwise ask only after React mounts, behind the
+      first visit's language-seed race (objectstack#35455): the same request
+      without the `Authorization` header, and the slot carries a null token.
+      The preflight hands that answer on, a signed-out one (the server's 401
+      UNAUTHENTICATED) included, so the page still sends one `get-session`
+      either way.
+
+      Every safety of the preflight is kept. Blocked storage sends nothing,
+      exactly as the preflight returns early. A request that fails or answers
+      non-OK hands over a rejection, so the preflight fetches as it always did
+      and the stale-token purge reads its own answer.
 
       `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
       text against the real `preflightAuth()`, so a drift between the two
@@ -159,11 +167,10 @@
       (function startEarlySessionCheck() {
         let token;
         try {
-          token = localStorage.getItem('auth-session-token');
+          token = localStorage.getItem('auth-session-token') || null;
         } catch (_) {
           return; // storage blocked: the preflight has nothing to validate either
         }
-        if (!token) return;
 
         // `src/main.tsx`: AUTH_URL = (VITE_SERVER_URL or '') + '/api/v1/auth'.
         // An unsubstituted token reads as same-origin '', as in the script above.
@@ -173,14 +180,184 @@
         const body = fetch(authUrl + '/get-session', {
           method: 'GET',
           credentials: 'include',
-          headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+          // No token: the cookie session's question, asked without the header.
+          headers: token
+            ? { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+            : { Accept: 'application/json' },
         }).then(function (res) {
+          // The cookie question's 401 is the server's "no session" (ADR-0112
+          // UNAUTHENTICATED): a signed-out answer, handed on as one.
+          if (!token && res.status === 401) return null;
           if (!res.ok) throw new Error('get-session ' + res.status);
           return res.json().catch(function () { return null; });
         });
         // The preflight reads a failure as "ask again"; it is never unhandled.
         body.catch(function () {});
         globalThis[Symbol.for('objectui.earlySessionCheck')] = { authUrl: authUrl, token: token, body: body };
+      })();
+    </script>
+    <!--
+      The page's ONE `GET /api/v1/discovery`, started during parse beside
+      `get-session` above (objectstack#34211).
+
+      The data adapter's `connect()` waits for discovery before the metadata
+      tree mounts, and the console asked for it from the bundle
+      (`src/lib/early-discovery.ts`), after the main chunk had downloaded and
+      evaluated: a round trip of its own between the session check and the
+      boot's permission and app reads, though it needs nothing from the bundle
+      or from the session's answer. This script asks the same question at parse
+      time and hands the pending answer to `readConsoleDiscovery()`, which
+      takes it once, when the URL matches, as the request behind the console's
+      one shared discovery read.
+
+      The request is that reader's byte for byte: the same URL (the server
+      origin through the same Vite HTML env substitution as the scripts above),
+      `credentials: 'include'`, the same `Accept`, and the stored Bearer from
+      the same `localStorage` key when there is one; the slot carries the URL
+      and the token, and the reader takes it only when both match. It keeps
+      the reader's 10 s bound: a request still open then is aborted and
+      rejects as a timeout, which the reader reports. A request that fails
+      otherwise or answers non-OK hands over a rejection, and the reader asks
+      the server itself.
+
+      `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
+      text against the real `readConsoleDiscovery()`, so a drift between the
+      two spellings of the slot fails a test rather than silently restoring the
+      second request.
+    -->
+    <script>
+      (function startEarlyDiscovery() {
+        const injected = '%VITE_SERVER_URL%';
+        const base = (injected.charAt(0) === '%' ? '' : injected).replace(/\/+$/, '');
+        const url = base + '/api/v1/discovery';
+        // The stored Bearer rides along, as on every console request; blocked
+        // storage sends none, exactly as the reader then does.
+        let token = '';
+        try {
+          token = localStorage.getItem('auth-session-token') || '';
+        } catch (_) { /* storage blocked */ }
+        const headers = { Accept: 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        // The reader's 10 s bound: a hung request rejects as a timeout, which
+        // the reader reports instead of asking again.
+        const ctrl = new AbortController();
+        const timer = setTimeout(function () { ctrl.abort(); }, 10000);
+        const body = fetch(url, { credentials: 'include', headers: headers, signal: ctrl.signal })
+          .then(
+            function (res) {
+              if (!res.ok) throw new Error('discovery ' + res.status);
+              return res.json();
+            },
+            function (err) {
+              throw err && err.name === 'AbortError' ? new Error('discovery timeout') : err;
+            },
+          )
+          .finally(function () { clearTimeout(timer); });
+        // The reader treats any other failure as "ask again"; it is never unhandled.
+        body.catch(function () {});
+        globalThis[Symbol.for('objectui.earlyDiscovery')] = { url: url, token: token, body: body };
+      })();
+    </script>
+    <!--
+      The language seed's `GET /api/v1/auth/me/localization`, started during
+      parse as soon as `discovery` above answers (objectstack#35534).
+
+      On a device's true first visit `seedTenantLanguage()` in
+      `src/languageSeed.ts` asks this endpoint before React mounts. Asked from
+      the bundle, it waited for the eager module graph to download and
+      evaluate, though it needs nothing from the bundle: only discovery's
+      `locale.supported`, which the script above has already asked for. This
+      script asks the seed's question the moment discovery answers and leaves
+      the pending response for the seed, which takes it once, as its one
+      request. The seed's 500 ms race and its fallback are unchanged.
+
+      It asks only when the seed would: no explicit language choice
+      (`objectui-locale`) and no cached seed (`objectui-locale-seed`). Blocked
+      storage reads as neither, as it does in the seed. Like the seed it does
+      not wait for the session: signed out, the server answers
+      `{ authenticated: false }` and the seed caches nothing.
+
+      The request is the seed's byte for byte: the same URL (the server origin
+      through the same Vite HTML env substitution as the scripts above),
+      `credentials: 'include'`, the same `Accept`, and the same
+      `Accept-Language`: the browser's language in the app's own spelling when
+      discovery `locale.supported` lists it, else none (ruling 6915665005,
+      objectstack#34392). "Lists it" is the platform's one locale ladder,
+      `resolveLocaleAmong` over the platform locale table in
+      `@objectstack/spec/system`, spelled again here because a classic inline
+      script cannot import. The seed takes the response only when its own
+      request would be the same one (the in-flight key: URL, credentials and
+      headers), so a drift between the two spellings costs a request and never
+      changes the language. A failed discovery sends nothing here, and nothing
+      is sent once the seed has looked: the seed then asks itself, as before.
+
+      `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
+      text against the real `seedTenantLanguage()` and `pickPreferredLocale()`,
+      the latter over every tag and alias of the platform table, so a drift
+      fails a test rather than silently adding the request back.
+    -->
+    <script>
+      (function startEarlyLanguageSeed() {
+        try {
+          if (localStorage.getItem('objectui-locale')) return; // the user's choice outranks a seed
+          if (localStorage.getItem('objectui-locale-seed')) return; // a cached seed applies at once
+        } catch (_) { /* storage blocked: the seed reads neither, and asks */ }
+        const discovery = globalThis[Symbol.for('objectui.earlyDiscovery')];
+        if (!discovery) return;
+
+        const injected = '%VITE_SERVER_URL%';
+        const base = (injected.charAt(0) === '%' ? '' : injected).replace(/\/+$/, '');
+        const slot = { url: base + '/api/v1/auth/me/localization', init: null, response: null, taken: false };
+        globalThis[Symbol.for('objectui.earlyLanguageSeed')] = slot;
+
+        // The platform locale table: its tags, and its read aliases, case-folded.
+        const TAGS = ['en', 'zh-Hans', 'zh-Hant', 'es', 'ar', 'fr', 'pt-BR', 'ru', 'de', 'ja', 'ko'];
+        const ALIASES = {
+          zh: 'zh-Hans', 'zh-CN': 'zh-Hans', 'zh-SG': 'zh-Hans',
+          'zh-TW': 'zh-Hant', 'zh-HK': 'zh-Hant', 'zh-MO': 'zh-Hant',
+          'zh-Hans-CN': 'zh-Hans', 'zh-Hans-SG': 'zh-Hans',
+          'zh-Hant-TW': 'zh-Hant', 'zh-Hant-HK': 'zh-Hant', 'zh-Hant-MO': 'zh-Hant',
+          'ja-JP': 'ja', 'es-ES': 'es', pt: 'pt-BR', 'en-US': 'en',
+        };
+        const TAG_BY_FOLDED = new Map();
+        TAGS.forEach(function (tag) { TAG_BY_FOLDED.set(tag.toLowerCase(), tag); });
+        Object.keys(ALIASES).forEach(function (code) { TAG_BY_FOLDED.set(code.toLowerCase(), ALIASES[code]); });
+        const fold = function (code) { return code.toLowerCase(); };
+        const tagOf = function (code) { return TAG_BY_FOLDED.get(fold(code)); };
+        // `resolveLocaleAmong`: exact, case, table language, base language, first variant.
+        function resolveAmong(requested, available) {
+          if (available.indexOf(requested) !== -1) return requested;
+          const lower = fold(requested);
+          const caseMatch = available.find(function (code) { return fold(code) === lower; });
+          if (caseMatch) return caseMatch;
+          const tag = tagOf(requested);
+          const tagMatch = tag === undefined ? undefined
+            : available.find(function (code) { return fold(code) === fold(tag); })
+              || available.find(function (code) { return tagOf(code) === tag; });
+          if (tagMatch) return tagMatch;
+          const lang = lower.split('-')[0];
+          return available.find(function (code) { return fold(code) === lang; })
+            || available.find(function (code) { return fold(code).split('-')[0] === lang; });
+        }
+
+        discovery.body.then(function (doc) {
+          if (slot.taken) return;
+          // `early-discovery.ts` unwraps the envelope; `languageSeed.ts` reads the list.
+          if (doc && typeof doc === 'object' && typeof doc.success === 'boolean' && 'data' in doc) doc = doc.data;
+          const listed = doc && doc.locale ? doc.locale.supported : undefined;
+          const supported = Array.isArray(listed)
+            ? listed.filter(function (entry) { return typeof entry === 'string' && entry.length > 0; })
+            : [];
+          const browser = typeof navigator === 'undefined' || typeof navigator.language !== 'string'
+            ? '' : navigator.language.trim();
+          const preferred = browser ? resolveAmong(browser, supported) : undefined;
+          const headers = { Accept: 'application/json' };
+          if (preferred) headers['Accept-Language'] = preferred;
+          slot.init = { credentials: 'include', headers: headers };
+          slot.response = fetch(slot.url, slot.init);
+          // The seed reads a failure as its own request's; it is never unhandled.
+          slot.response.catch(function () {});
+        }, function () { /* discovery failed: the seed asks for it, then the server, itself */ });
       })();
     </script>
     <script>

@@ -51,6 +51,7 @@ import {
   // `ListViewPageProps`.
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   VIEW_METADATA_MEMBERS,
 } from './view.zod';
 // [#22444] The one prescription both tiers refuse a list view's retired
@@ -1411,12 +1412,15 @@ export const RecordDetailsProps = strictObject({
      * fold a partly-filled section uses — instead of a column of empty rows;
      * edit mode is unchanged and renders every row, editable. No key, shape or
      * default changed, and the describe() states the ruled rendering, which
-     * objectui's `DetailSection` follows. The key governs only the ALL-empty
+     * objectui's `DetailSection` follows. Read-only, the details body first
+     * names every such section in the one line that closes it, and expanding
+     * that line draws them so — one line for all the empty groups instead of a
+     * card for each (objectstack#35019). The key governs only the ALL-empty
      * case: a partly-filled section's empty rows follow the renderer's own
      * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
      * section's empty fields" no longer told the two values apart.
      */
-    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
@@ -6953,7 +6957,7 @@ function buildObjectFormRuntimeField() {
     minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
     maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
     pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
-    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency)'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency / percent)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
     // [#21768] The `grid` widget's eight field-level keys, camelCase since
@@ -8552,8 +8556,9 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
  * ## Built from the list view, by reference
  *
  * Every member is {@link ListViewSchema}'s own schema object (its `shape`
- * spread), and both of its object-level checks are attached
- * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * spread), and each of its object-level checks is attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding},
+ * {@link checkListViewTimesheetBinding}),
  * so a key or value the authoring door refuses on a list view is refused here
  * with the same issue. So `kanban.groupField` is an unknown key of the kanban
  * block, and the list kind is the bag's own `type` (the node's `type` is the
@@ -8605,7 +8610,7 @@ const ListViewPageProps = lazySchema(() => strictObject({
   ...ListViewSchema.shape,
   columns: ListViewSchema.shape.columns.optional(),
   options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
-}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding).superRefine(checkListViewTimesheetBinding));
 
 /**
  * ----------------------------------------------------------------------

@@ -40,6 +40,7 @@ import {
   runDirectSignIn,
   type DirectSignInHost,
 } from './direct-sign-in';
+import type { DirectSignInOptions } from './direct-sign-in';
 // better-auth's first module load is paid at module load, never inside a
 // clocked case (AGENTS.md, Build & Test): `AuthManager` reaches these through
 // a lazy `await import()`.
@@ -86,12 +87,13 @@ describe('resolveDirectSignIn: the setting in force', () => {
     expect(resolveDirectSignIn(undefined, {})).toEqual({ enabled: false });
   });
 
-  it('is on with the option, the local sign-in path hidden by default', () => {
-    expect(resolveDirectSignIn({}, {})).toEqual({ enabled: true, localSignIn: 'hidden' });
-    expect(resolveDirectSignIn({ provider: PLATFORM_IDP, localSignIn: 'off' }, {})).toEqual({
+  it('is on with the option, the local sign-in path hidden and the sign-out return held by default', () => {
+    expect(resolveDirectSignIn({}, {})).toEqual({ enabled: true, localSignIn: 'hidden', afterSignOut: 'hold' });
+    expect(resolveDirectSignIn({ provider: PLATFORM_IDP, localSignIn: 'off', afterSignOut: 'identity-provider' }, {})).toEqual({
       enabled: true,
       provider: PLATFORM_IDP,
       localSignIn: 'off',
+      afterSignOut: 'identity-provider',
     });
   });
 
@@ -101,7 +103,7 @@ describe('resolveDirectSignIn: the setting in force', () => {
       [DIRECT_SIGN_IN_ENV.provider]: 'corp-oidc',
       [DIRECT_SIGN_IN_ENV.localSignIn]: 'off',
     };
-    expect(resolveDirectSignIn(undefined, env)).toEqual({ enabled: true, provider: 'corp-oidc', localSignIn: 'off' });
+    expect(resolveDirectSignIn(undefined, env)).toEqual({ enabled: true, provider: 'corp-oidc', localSignIn: 'off', afterSignOut: 'hold' });
     expect(resolveDirectSignIn({ provider: PLATFORM_IDP }, { [DIRECT_SIGN_IN_ENV.enabled]: 'false' })).toEqual({
       enabled: false,
     });
@@ -109,12 +111,24 @@ describe('resolveDirectSignIn: the setting in force', () => {
       enabled: true,
       provider: 'corp-oidc',
       localSignIn: 'off',
+      afterSignOut: 'hold',
     });
+    expect(
+      resolveDirectSignIn({ afterSignOut: 'hold' }, { [DIRECT_SIGN_IN_ENV.afterSignOut]: 'identity-provider' }),
+    ).toEqual({ enabled: true, localSignIn: 'hidden', afterSignOut: 'identity-provider' });
+    expect(
+      resolveDirectSignIn({ afterSignOut: 'identity-provider' }, { [DIRECT_SIGN_IN_ENV.afterSignOut]: 'hold' }),
+    ).toEqual({ enabled: true, localSignIn: 'hidden', afterSignOut: 'hold' });
   });
 
   it('refuses an off-vocabulary local sign-in path loudly, from the option or the environment', () => {
     expect(() => resolveDirectSignIn({ localSignIn: 'of' as never }, {})).toThrow(/OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH/);
     expect(() => resolveDirectSignIn(undefined, { [DIRECT_SIGN_IN_ENV.localSignIn]: 'none' })).toThrow(/hidden/);
+  });
+
+  it('refuses an off-vocabulary sign-out return loudly, from the option or the environment', () => {
+    expect(() => resolveDirectSignIn({ afterSignOut: 'idp' as never }, {})).toThrow(/OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT/);
+    expect(() => resolveDirectSignIn(undefined, { [DIRECT_SIGN_IN_ENV.afterSignOut]: 'login' })).toThrow(/identity-provider/);
   });
 });
 
@@ -171,7 +185,7 @@ describe('chooseDirectSignInProvider: which identity provider a visit goes to', 
 const fakeHost = (overrides: Partial<DirectSignInHost> = {}) => {
   const dispatched: Array<{ url: string; body: any; headers: Headers }> = [];
   const host: DirectSignInHost = {
-    setting: () => ({ enabled: true, provider: PLATFORM_IDP, localSignIn: 'hidden' }),
+    setting: () => ({ enabled: true, provider: PLATFORM_IDP, localSignIn: 'hidden', afterSignOut: 'hold' }),
     chooseProvider: async () => ({ kind: 'oauth', providerId: PLATFORM_IDP }),
     origin: () => ORIGIN,
     consolePageUrl: (path) => `${ORIGIN}/_console${path}`,
@@ -359,7 +373,7 @@ afterEach(() => {
   }
 });
 
-function mount(directSignIn?: { provider?: string; localSignIn?: 'hidden' | 'off' }, extra: Record<string, unknown> = {}) {
+function mount(directSignIn?: DirectSignInOptions, extra: Record<string, unknown> = {}) {
   const app = new Hono();
   const ctx = {
     registerService: vi.fn(),
@@ -421,6 +435,7 @@ describe('the mounted start door (setting on)', () => {
     const data = await config(app);
     expect(data.features.directSignIn).toBe(true);
     expect(data.features.localSignIn).toBe('hidden');
+    expect(data.features.afterSignOut).toBe('hold');
   });
 
   it('advertises false when the named provider is not configured, and the door lands on the sign-in page', async () => {
@@ -434,6 +449,29 @@ describe('the mounted start door (setting on)', () => {
   it('serves localSignIn off when the deployment closes the local path', async () => {
     const { app } = mount({ provider: PLATFORM_IDP, localSignIn: 'off' });
     expect((await config(app)).features.localSignIn).toBe('off');
+  });
+
+  it('serves afterSignOut identity-provider when the deployment returns sign-out through the identity provider', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP, afterSignOut: 'identity-provider' });
+    expect((await config(app)).features.afterSignOut).toBe('identity-provider');
+    process.env[DIRECT_SIGN_IN_ENV.afterSignOut] = 'hold';
+    expect((await config(mount({ provider: PLATFORM_IDP, afterSignOut: 'identity-provider' }).app)).features.afterSignOut).toBe('hold');
+  });
+
+  it('a sign-out return through the door starts a fresh identity provider sign-in: never the door again, never the sign-in page', async () => {
+    // The return the Console sends under `identity-provider` is the bare door,
+    // with no cookie (the session has ended) and no query. The door asks the
+    // identity provider to start a new sign-in; the provider, whose session
+    // the sign-out has just ended, shows its own sign-in page.
+    const { app } = mount({ provider: PLATFORM_IDP, afterSignOut: 'identity-provider' });
+    const res = await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
+    // Off this origin: neither the door again nor the sign-in page.
+    expect(location.origin).not.toBe(new URL(ORIGIN).origin);
+    expect(res.headers.get('location')).not.toContain('/sign-in/direct');
+    expect(res.headers.get('location')).not.toContain('/login');
   });
 
   it('CONTROL: the API, /mcp, API-key and bearer requests are never redirected', async () => {
@@ -534,9 +572,10 @@ describe('CONTROL: with the setting off, the door and /auth/config are what they
     const off = await config(mount().app);
     expect(off.features.directSignIn).toBe(false);
     expect('localSignIn' in off.features).toBe(false);
+    expect('afterSignOut' in off.features).toBe(false);
     const on = await config(mount({ provider: PLATFORM_IDP }).app);
     const strip = (data: any) => {
-      const { directSignIn: _d, localSignIn: _l, ...features } = data.features;
+      const { directSignIn: _d, localSignIn: _l, afterSignOut: _a, ...features } = data.features;
       return { ...data, features };
     };
     expect(strip(on)).toEqual(strip(off));
@@ -617,5 +656,49 @@ describe('one source: the door is mounted exactly when /auth/config advertises i
     process.env[DIRECT_SIGN_IN_ENV.provider] = PLATFORM_IDP;
     expect((await config(app)).features.directSignIn).toBe(false);
     expect((await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`)).status).toBe(404);
+  });
+});
+
+describe('the post-logout return: the state an identity provider echoes on the door is accepted and never read', () => {
+  // Under `afterSignOut: 'identity-provider'` the door is the post-logout
+  // redirect URI, and the provider appends the `state` the `/sign-out` body
+  // carried to its logout (OpenID Connect RP-Initiated Logout 1.0 §3).
+  it('starts the same sign-in with or without the echoed state, and forwards none of it', async () => {
+    const plain = fakeHost();
+    const echoed = fakeHost();
+    const without = await runDirectSignIn(door('?callbackURL=%2Fx'), plain.host);
+    const withState = await runDirectSignIn(door('?callbackURL=%2Fx&state=rp-opaque-abc'), echoed.host);
+    expect(withState.status).toBe(302);
+    expect(withState.headers.get('location')).toBe(without.headers.get('location'));
+    expect(echoed.dispatched).toHaveLength(1);
+    expect(echoed.dispatched[0].body).toEqual(plain.dispatched[0].body);
+    expect(JSON.stringify(echoed.dispatched[0].body)).not.toContain('rp-opaque-abc');
+  });
+
+  it('the bare return the Console registers, with only the echoed state, starts the identity provider', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP, afterSignOut: 'identity-provider' });
+    const res = await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct?state=rp-opaque-abc`);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
+    // A fresh start carries the vendor's own state, never the echoed one.
+    expect(location.searchParams.get('state')).toBeTruthy();
+    expect(res.headers.get('location')).not.toContain('rp-opaque-abc');
+  });
+
+  it('refuses a repeated state with 400 VALIDATION_ERROR, starting nothing', async () => {
+    const { host, dispatched } = fakeHost();
+    const res = await runDirectSignIn(door('?callbackURL=%2Fx&state=a&state=b'), host);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toEqual({ code: 'VALIDATION_ERROR', message: repeatedQueryParamMessage('state', 2) });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it('CONTROL: an unknown name beside the state is still refused 400, starting nothing', async () => {
+    const { host, dispatched } = fakeHost();
+    const res = await runDirectSignIn(door('?state=a&next=%2F'), host);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('VALIDATION_ERROR');
+    expect(dispatched).toHaveLength(0);
   });
 });
