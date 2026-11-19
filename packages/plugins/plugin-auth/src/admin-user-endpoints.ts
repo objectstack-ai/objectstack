@@ -548,6 +548,15 @@ export type AdminAuditDecisions =
       organizationId?: string;
     }
   | {
+      /**
+       * A pending person was removed (`pending-sso-users.ts`, `admin/remove-sso-user`).
+       * `hostNotified`: the environment-user host took the cancellation of their
+       * invitation (false when no host is wired; a host that failed refused the removal).
+       */
+      event: 'user.admin_removed_pending';
+      hostNotified: boolean;
+    }
+  | {
       event: 'user.admin_password_set';
       passwordGenerated: boolean;
       /** [#23287] Whether the administrator asked for the forced reset's revocation. */
@@ -618,7 +627,7 @@ export type AdminAuditDecisions =
 export async function writeAdminAudit(
   deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   entry: {
-    action: 'create' | 'update';
+    action: 'create' | 'update' | 'delete';
     actor: AdminActor;
     recordId: string;
     metadata: AdminAuditDecisions;

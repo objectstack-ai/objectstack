@@ -72,6 +72,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "비밀번호 변경 필요",
         help: "켜져 있으면 사용자가 계속하기 전에 비밀번호를 변경해야 합니다. 관리자가 계정을 만들거나 가져오거나 비밀번호를 재설정하면 켜집니다. 시스템이 관리합니다."
       },
+      dev_seed_credential: {
+        label: "개발 시드 자격 증명",
+        help: "개발 시드가 만든 계정에 설정됩니다. 비밀번호가 아직 시드 비밀번호인 동안 프로덕션 서버는 해당 계정의 로그인과 모든 새 세션을 거부합니다. os user set-password로 새 비밀번호를 설정하면 지워집니다. 시스템에서 관리하며 읽기 결과로 반환되지 않습니다."
+      },
       mfa_required_at: {
         label: "MFA 필수 적용 시각",
         help: "이 사용자에게 MFA 강제가 처음 적용된 시각(유예 기간 기준)입니다. mfa_required의 기준이 되며 시스템이 관리합니다."
@@ -279,6 +283,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "비밀번호 설정",

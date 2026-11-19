@@ -1277,6 +1277,7 @@ function KanbanCardSection({
 export function ObjectListViewInspector({
   listView,
   readOnly,
+  readOnlyNote = null,
   locale,
   selection,
   onSelectionChange,
@@ -1284,6 +1285,12 @@ export function ObjectListViewInspector({
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
+  /**
+   * objectstack#35600 — why a read-only panel is read-only, when it is not
+   * the package's being read-only (a view the base does not ship): shown in
+   * that sentence's place, with its reason on the note.
+   */
+  readOnlyNote?: { reason: string; text: string } | null;
   locale: string;
   /**
    * objectui#12725 — the column selection, held by the host so a click on a
@@ -1440,8 +1447,12 @@ export function ObjectListViewInspector({
           panel names the view by its label alone; the name stays an attribute. */}
       <div data-testid="studio-list-view-inspector" data-view-id={target.viewId} className="space-y-3">
         {readOnly ? (
-          <p className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-read-only">
-            {t('engine.studio.inspector.listView.readOnly', locale)}
+          <p
+            className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground"
+            data-testid="list-view-read-only"
+            data-reason={readOnlyNote?.reason}
+          >
+            {readOnlyNote?.text ?? t('engine.studio.inspector.listView.readOnly', locale)}
           </p>
         ) : (
           <p className="text-[11px] leading-snug text-muted-foreground">

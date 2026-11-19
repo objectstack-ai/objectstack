@@ -72,6 +72,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Требуется смена пароля",
         help: "Если включено, пользователь должен сменить пароль, прежде чем продолжить. Включается, когда администратор создаёт или импортирует учётную запись либо сбрасывает её пароль; управляется системой."
       },
+      dev_seed_credential: {
+        label: "Учётные данные начального заполнения для разработки",
+        help: "Устанавливается для учётной записи, созданной начальным заполнением для разработки. Пока её пароль остаётся паролем заполнения, рабочий сервер отклоняет её вход и любой новый сеанс; os user set-password задаёт новый пароль и очищает значение. Управляется системой; никогда не возвращается при чтении."
+      },
       mfa_required_at: {
         label: "MFA требуется с",
         help: "Когда к этому пользователю впервые применили обязательную MFA (отсчёт льготного периода). Используется для mfa_required; управляется системой."
@@ -279,6 +283,11 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "Задать пароль",

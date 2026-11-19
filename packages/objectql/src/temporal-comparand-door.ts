@@ -841,7 +841,8 @@ export type ResolvedTokenJudge = (written: unknown, resolved: unknown) => void;
  * the four-digit years, so year 0 (`0000-…`) reads as it does for a literal.
  * A literal comparand was judged by the door before resolution, and a context
  * placeholder (`{current_user_id}`) names no year, so neither is this
- * judgement's.
+ * judgement's. [#34938] Nor is a period key (`{current_iso_week}`): core's
+ * predicate judges it as written, so the door refused it before resolution.
  */
 function judgeResolvedToken(
   kind: TemporalComparandKind,

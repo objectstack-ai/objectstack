@@ -20,11 +20,22 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
-import { MCP_FILE_TOOL_NAMES } from '@objectstack/spec/system';
+import {
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+} from '@objectstack/spec/ai';
+import { MCP_DOOR_TOOL_NAMES, MCP_FILE_TOOL_NAMES, PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
 import { validateAiToolReferences } from '@objectstack/lint';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import { registerFileTools, type McpDataBridge } from './mcp-http-tools.js';
+import {
+  registerFileTools,
+  wireBridgeTools,
+  type McpActionBridge,
+  type McpDataBridge,
+  type McpFederationBridge,
+} from './mcp-http-tools.js';
 import {
   READ_FILE_CPU_BUDGET_MS_DEFAULT,
   READ_FILE_CPU_BUDGET_MS_ENV,
@@ -307,6 +318,73 @@ describe('the file tools the door registers are the ones a skill may bind', () =
     // The control: on a bridge with no file member the door registers nothing,
     // so the equality above is read from the registration sites, not assumed.
     expect(registerFileTools(new McpServer({ name: 'file-tools', version: '0.0.0' }), makeBridge(null))).toEqual([]);
+  });
+});
+
+/**
+ * [#35036] Every tool the door registers, and the names a skill may bind. The
+ * door serves its record, action, federation and dataset tools beside the file
+ * pair, and a skill offered over MCP is offered where they are listed, so
+ * `os lint` resolves every name in `MCP_DOOR_TOOL_NAMES` for such a skill.
+ * Held equal here to `wireBridgeTools`, the one composition both transports
+ * call, on a bridge carrying every optional member under a grant naming every
+ * scope: a tool added to or renamed at the door fails this case until the list
+ * follows it, and with it the lint rule.
+ */
+describe('the tools the door registers are the ones a skill offered over MCP may bind', () => {
+  const unused = async (): Promise<never> => {
+    throw new Error('not called: this pin reads the registration only');
+  };
+  /** Every optional member the door wires a tool for, on top of the file members. */
+  function everyMemberBridge(): McpDataBridge & McpActionBridge & McpFederationBridge & McpFileBridge {
+    return Object.assign(fullBridge(), {
+      aggregate: unused,
+      listActions: unused,
+      runAction: unused,
+      resumeRun: unused,
+      listRemoteTables: unused,
+      importObject: unused,
+      listDatasets: unused,
+      queryDataset: unused,
+      datasetToolDefinitions: () => [
+        { name: 'list_datasets', description: 'List the datasets.' },
+        { name: 'query_dataset', description: 'Query one metric of a dataset.' },
+      ],
+      searchPackageDocs: unused,
+      readPackageDoc: unused,
+    });
+  }
+  const everyScope = [
+    MCP_OAUTH_SCOPE_DATA_READ,
+    MCP_OAUTH_SCOPE_DATA_WRITE,
+    MCP_OAUTH_SCOPE_ACTIONS,
+    MCP_OAUTH_SCOPE_METADATA_WRITE,
+  ];
+  const door = () => new McpServer({ name: 'door-tools', version: '0.0.0' });
+
+  it('wireBridgeTools registers exactly MCP_DOOR_TOOL_NAMES, and the lint rule resolves each', () => {
+    const registered = wireBridgeTools(door(), everyMemberBridge(), { grantedScopes: everyScope });
+    expect([...registered].sort()).toEqual([...MCP_DOOR_TOOL_NAMES]);
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: registered }] })).toEqual([]);
+    // The control: a bridge with only the data members and a grant without
+    // the action and metadata scopes registers fewer, so the equality above is
+    // read from the registration sites, not assumed.
+    const fewer = wireBridgeTools(door(), makeBridge(null), {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE],
+    });
+    expect(fewer.length).toBeGreaterThan(0);
+    expect(fewer.length).toBeLessThan(registered.length);
+    expect(fewer).not.toContain('run_action');
+    expect(fewer).not.toContain('import_object');
+  });
+
+  it('on a skill kept out of MCP, each name only the door serves is reported as resolving over MCP only', () => {
+    const registered = wireBridgeTools(door(), everyMemberBridge(), { grantedScopes: everyScope });
+    const doorOnly = registered.filter((name) => !PLATFORM_PROVIDED_TOOL_NAMES.has(name));
+    expect(doorOnly).toEqual(expect.arrayContaining(['run_action', 'read_file', 'aggregate_records']));
+    const findings = validateAiToolReferences({ skills: [{ name: 'ops', mcpPrompt: false, tools: registered }] });
+    expect(findings.map((f) => f.path)).toEqual(doorOnly.map((name) => `skills[0].tools[${registered.indexOf(name)}]`));
+    for (const f of findings) expect(f.message, f.path).toContain('resolves only for a skill offered over MCP');
   });
 });
 

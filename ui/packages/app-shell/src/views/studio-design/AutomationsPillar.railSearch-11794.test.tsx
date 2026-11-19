@@ -22,9 +22,13 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
+// Pays the dynamic `@objectstack/lint` load the pillar's source reaches at collection, not inside a case (check:test-source-alias).
+import '@objectstack/lint';
 
 const PKG = 'com.acme.app';
 const LONG_LABEL = 'Escalate overdue high-priority support cases to the regional on-call manager';
@@ -100,16 +104,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The rail (the `nav` holding the search box) once every row has rendered. */
-async function renderRail(): Promise<HTMLElement> {
-  render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
-    </MemoryRouter>,
-  );
-  const search = await screen.findByPlaceholderText(t('engine.studio.designer.search', 'en'), undefined, { timeout: 8000 });
+/** The rail (the `nav` holding the search box) once every row has rendered; `wrap` puts a provider around the pillar. */
+async function renderRail(wrap: (pillar: React.ReactElement) => React.ReactElement = (pillar) => pillar): Promise<HTMLElement> {
+  render(<MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>{wrap(<AutomationsPillar packageId={PKG} />)}</MemoryRouter>);
+  const search = await screen.findByTestId('auto-rail-search', undefined, { timeout: 8000 });
   const rail = search.closest('nav') as HTMLElement;
-  await waitFor(() => expect(within(rail).getByRole('button', { name: /welcome_new_member/ })).toBeInTheDocument(), {
+  await waitFor(() => expect(rail.querySelector('[data-testid="auto-rail-row-welcome_new_member"]')).toBeInTheDocument(), {
     timeout: 8000,
   });
   return rail;
@@ -171,5 +171,52 @@ describe('a flow’s name in the Automations rail is not cut to a stub (objectui
     expect(label).toHaveTextContent(new RegExp(`^${LONG_LABEL}$`));
     // The whole name is still on the row, where hovering it reads it.
     expect(row.getAttribute('title') ?? '').toMatch(new RegExp(`^${LONG_LABEL} · `));
+  });
+});
+
+describe('a rail row names its flow by the package’s translated label (objectstack#35319)', () => {
+  // The package's zh-CN pack: a label for two of the four flows. The other two keep their authored copy.
+  const ZH_CN = {
+    flows: {
+      nightly_digest: { label: '夜间摘要' },
+      welcome_new_member: { label: '欢迎新成员' },
+    },
+  };
+  /** The console's i18n with the pack loaded under zh-CN, speaking `language`. */
+  const withPack = (language: string) => (pillar: React.ReactElement) => {
+    const instance = createI18n({ defaultLanguage: language, detectBrowserLanguage: false });
+    instance.addResourceBundle('zh-CN', 'translation', transformSpecTranslations(ZH_CN), true, true);
+    return (
+      <I18nProvider instance={instance} persistLanguage={false}>
+        {pillar}
+      </I18nProvider>
+    );
+  };
+  // By its test id: under a zh-CN provider the box's placeholder is the Chinese one.
+  const search = (rail: HTMLElement, value: string) =>
+    fireEvent.change(within(rail).getByTestId('auto-rail-search'), { target: { value } });
+
+  it('zh-CN: a flow the pack labels reads by that label, on the row and in its title; the rest stay authored', async () => {
+    const rail = await renderRail(withPack('zh-CN'));
+    expect(rowNames(rail)).toEqual(['夜间摘要', 'Approve order', LONG_LABEL, '欢迎新成员']);
+    const row = rail.querySelector('[data-testid="auto-rail-row-nightly_digest"]') as HTMLElement;
+    expect(row.getAttribute('title') ?? '').toMatch(/^夜间摘要 · /);
+  });
+
+  it('zh-CN: the search matches the label the row shows, and still the authored label and the machine name', async () => {
+    const rail = await renderRail(withPack('zh-CN'));
+    search(rail, '夜间');
+    expect(rowNames(rail)).toEqual(['夜间摘要']);
+    search(rail, 'DIGEST');
+    expect(rowNames(rail)).toEqual(['夜间摘要']);
+    search(rail, 'welcome_new');
+    expect(rowNames(rail)).toEqual(['欢迎新成员']);
+  });
+
+  it('en: the zh-CN pack does not speak for English, so every row reads as authored', async () => {
+    const rail = await renderRail(withPack('en'));
+    expect(rowNames(rail)).toEqual(['Nightly digest', 'Approve order', LONG_LABEL, 'welcome_new_member']);
+    search(rail, '夜间');
+    expect(rowNames(rail)).toEqual([]);
   });
 });

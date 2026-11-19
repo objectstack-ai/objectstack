@@ -53,7 +53,8 @@
       "glob": "**/*.js"
     },
     "hooks": {
-      "preparse": "./dist/hooks/preparse/strip-arg-separator.js"
+      "preparse": "./dist/hooks/preparse/strip-arg-separator.js",
+      "command_not_found": "./dist/hooks/command-not-found/point-at-help.js"
     },
     "topicSeparator": " ",
     "topics": {
@@ -101,6 +102,9 @@
       },
       "storage": {
         "description": "Inspect stored files: report orphaned attachments"
+      },
+      "user": {
+        "description": "Maintain user accounts on the server: set a password"
       }
     }
   },

@@ -172,6 +172,7 @@ async function boot(dir: string) {
         purge: (id: string) => route(`POST ${ROUTE}/:manifestId/purge-sample-data`)(makeC({}, id)),
         count: (id: string) => route(`GET ${ROUTE}/:manifestId/sample-data`)(makeC({}, id)),
         list: () => route(`GET ${ROUTE}`)(makeC({})),
+        uninstall: (id: string) => route(`DELETE ${ROUTE}/:manifestId`)(makeC({}, id)),
         /** The kernel's shared `seed-datasets` list — what the per-organization replay seeds a new organization from. */
         sharedSeedDatasets: () => services['seed-datasets'] as any[] | undefined,
     };
@@ -256,6 +257,26 @@ describe('a composed bundle: every seed door reads each package body, in package
         // Single-tenant, every seeded object empty: the heal seeds the package bodies.
         expect(loadCalls).toHaveLength(1);
         expect(shape(loadCalls[0].seeds)).toEqual([CORE, O2C]);
+    });
+});
+
+describe('#35375 — uninstalling a composed bundle takes every package body\'s datasets off the shared list', () => {
+    it('the entry\'s uninstall withdraws the sets it merged for all its package bodies, and keeps another package\'s', async () => {
+        const other = {
+            id: 'com.example.notes',
+            version: '1.0.0',
+            objects: [{ name: 'note_item', label: 'Note', fields: { name: { type: 'text', label: 'Name' } } }],
+            data: [{ object: 'note_item', records: [{ name: 'N-1' }] }],
+        };
+        const rt = await boot(dir);
+        expect((await rt.install(composed('6.3.0'))).status).toBe(200);
+        expect((await rt.install(other)).status).toBe(200);
+        expect(shape(rt.sharedSeedDatasets())).toEqual([CORE, O2C, 'note_item:N-1']);
+
+        const res = await rt.uninstall(SUITE);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+
+        expect(shape(rt.sharedSeedDatasets())).toEqual(['note_item:N-1']);
     });
 });
 

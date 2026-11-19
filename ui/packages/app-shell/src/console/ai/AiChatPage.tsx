@@ -1791,6 +1791,13 @@ interface ChatPaneProps {
    * @default false
    */
   hideHeader?: boolean;
+  /**
+   * objectstack#35445 — the host offers Share and the Build Doctor in its own
+   * title bar (the console drawer's 「···」 menu), so the pane's header row
+   * draws neither. The rest of the row (the agent switcher, the app chip) stays.
+   * @default false
+   */
+  actionsInHost?: boolean;
 }
 
 export function ChatPane({
@@ -1821,6 +1828,7 @@ export function ChatPane({
   onDebug,
   showDebug,
   hideHeader = false,
+  actionsInHost = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -2860,6 +2868,7 @@ export function ChatPane({
           </DropdownMenu>
         ) : null}
       </div>
+      {actionsInHost ? null : (
       <div className="flex shrink-0 items-center gap-1">
         {showDebug && onDebug ? (
           <Button
@@ -2888,6 +2897,7 @@ export function ChatPane({
           <Share2 className="h-3.5 w-3.5" />
         </Button>
       </div>
+      )}
       {agentsError ? (
         <span
           className="basis-full text-[10px] text-amber-700 dark:text-amber-400"
@@ -3206,17 +3216,23 @@ export function ChatPane({
             }
             // Surface a seed-load problem (reported under `seedApplied`, never
             // thrown) so "Published!" can't hide silently empty tables.
+            //
+            // The toast says the pack's sentence, the one the chat's
+            // publish-health line says for the same failure (objectstack#32984:
+            // user-facing text is the customer sentence). The loader's `error`
+            // (engine text) and `errors[]` (structured rows) are for whoever
+            // repairs the seed: they go to the console whole, never the toast,
+            // and stay in the health line's technical details.
             const seedApplied = payload?.seedApplied;
             if (seedApplied && seedApplied.success === false) {
+              console.warn('[app-shell] Published, but the seed failed to load:', {
+                packageId,
+                error: seedApplied.error,
+                errors: seedApplied.errors,
+              });
               toast.warning(
                 t('console.ai.seedWarn', { defaultValue: 'Published, but some sample data failed to load.' }),
-                {
-                  description:
-                    seedApplied.error ??
-                    (Array.isArray(seedApplied.errors) && seedApplied.errors.length
-                      ? String(seedApplied.errors[0])
-                      : undefined),
-                },
+                { description: t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }) },
               );
             } else {
               toast.success(t('console.ai.publishOk', { defaultValue: 'Published — objects are now live.' }));

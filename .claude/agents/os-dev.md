@@ -39,7 +39,7 @@ model: opus
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
-3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
+3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡,标签归代立席:
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
    - (a) 含用户可见的体验缺陷(截断、遮挡、白占首屏、误导文案),须复现且落点具名。
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
@@ -61,7 +61,7 @@ model: opus
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
    - 写预算三笔:`git push`、`pr_create`(draft,含 labels/assignees)、`os-dev-report`;卡线程另改正文。
-   - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
+   - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 readings-page)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文子代理只在 `pr_create` 写、⛔ 不 PATCH 由席代写;卡线程照 `dispatch-runbook.md` 自改。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
@@ -281,11 +281,14 @@ model: opus
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 声明行后 `## 维护者速读` 六行,受管与否都带,中文、业务角度,不写席位意见。
-- 六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
-- 先看 ≤3 文件按风险排,点名风险 hunk;两分钟验证 = 一条命令或一次点击,写预期所见。
-- 需要你做的恰一个动作,非受管面写「无,席位落地」;席位定稿成评论。
+- 声明行后 `## 维护者速读` 至多四行,每行一句中文业务话,受管与否都带,不写席位意见。
+- 四行固定:用户能看到什么变化/为什么做/出错会怎样/要你做什么。
+- 首行写谁、在哪、前后,内部工具写「用户无感」;次行写所属 epic 中文名或替谁解决。
+- 三行写谁碰到什么、能否直接撤回;末行恰一件事或「无」;席位定稿成评论。
+- ⛔ 速读不写代码名、文件路径、命令、裁决字母、裸卡号;点到的卡配一句中文说明。
 - 英文节序:What changes/Tests/Acceptance notes/Verification;日志读数每子题折进 details/summary 块。
+- 先读文件与两分钟验证归英文部分,⛔ 不删:先读 ≤3 个按风险排,点名风险 hunk。
+- 两分钟验证 = 一条命令或一次点击,写预期所见。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
@@ -352,10 +355,12 @@ model: opus
 - 同 PR 改,正文点名裁决 id,落地欠达档 L2 记录;⛔ 永不自行翻转裁决,与之相左仍停手。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
+- 需维护者裁的事 dev ⛔ 不直接问他:报 `needs_decision`,席位转天花板档决策线程。
 - 派发词标只读读数 ⇒ 不 commit、不开 PR,`status: "reading"` 贴决策卡;要实测才建闭包跑测。
 - 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
+- 报 `blocked` 须写明卡的哪部分不等阻塞可先做;只挡一部分 ⇒ 席位把等待部分拆成单卡。
 
 ## 终报消息 —— 恰好这段 JSON,不带任何环绕散文
 

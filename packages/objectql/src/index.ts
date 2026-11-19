@@ -87,7 +87,7 @@ export {
 } from './registry.js';
 
 // [#22371] The package half of the cold-boot check's holder reading (ADR-0048
-// N.3): every package-held position and permission-set name, with its holders.
+// N.3): every package-held position, permission-set and capability name, with its holders.
 // Exported for `os migrate security-catalog-overlays`, which boots the
 // deployment's composition without hydrating `sys_metadata` and meets this
 // list with the stored rows — the population the cold boot refuses — so the
@@ -605,6 +605,10 @@ export { evaluateFormulaField } from './engine.js';
 // asymmetry is #16260's question, deliberately not decided here.
 export { ValidationError, validateRecord, validateInsertValues, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// #34030 — the labels a refusal names are read through `messages.labelTranslation`
+// (a translation bundle and its resolve options), no longer through `translate`;
+// a direct caller of the validators writes against this type.
+export type { ValidationLabelTranslation } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation
 // (`@objectstack/platform-objects`) reads it before certifying anything: a

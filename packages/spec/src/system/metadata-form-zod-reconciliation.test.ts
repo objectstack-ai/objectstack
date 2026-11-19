@@ -464,17 +464,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'homeAmount',
     why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
   },
-  // #34374 — a hook's declared texts land in the hook's source first. The
-  // Studio row (a key-only record beside `refusals`, with its help text in
-  // the eleven metadata-forms bundles) is a follow-up, so this row records
-  // why the key is not offered yet.
-  {
-    kind: 'omit',
-    type: 'hook',
-    path: ROOT_PATH,
-    key: 'texts',
-    why: "live, not yet offered in the Studio — the sentences a hook writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the hook does not declare refused at save) and read at run time, and they are declared in the hook's package source beside the code that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then a hook authored in the Studio declares `texts` through the metadata API or its package source",
-  },
   // #34273 — an action's refusal catalogue lands in the action's source
   // first, as a hook's declared texts did (#34374). The Studio row (a
   // key-only record, with its help text in the eleven metadata-forms

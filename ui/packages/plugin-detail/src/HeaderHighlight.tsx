@@ -33,6 +33,7 @@ import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
+import { dropFieldPredicateHidden, lazyPredicateRecord } from './fieldPredicateVisibility';
 
 export interface HeaderHighlightProps {
   fields: HighlightField[];
@@ -100,13 +101,25 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
 
   if (!fields.length || !data) return null;
 
+  // A highlight whose field's own `visibleWhen` is false for this record is
+  // not drawn, in either mode: the strip judges it as the form and the details
+  // body do (`../fieldPredicateVisibility`, fail-open), against the SAVED
+  // record, as the details body does, so a draft edit reveals a gated field
+  // after save, not while typing.
+  const drawnFields = dropFieldPredicateHidden(fields, {
+    objectFields: objectSchema?.fields,
+    record: lazyPredicateRecord(data, objectSchema?.fields),
+    scope: predicateScope,
+    where: (n) => `field '${n}' of the highlights strip on object '${objectName ?? ''}'`,
+  });
+
   // In read mode we hide value-less fields to keep the strip dense; WHILE
   // EDITING we keep them so the user can fill an empty highlight in place.
   const hasValue = (f: HighlightField) => {
     const val = data?.[f.name];
     return val !== null && val !== undefined && val !== '';
   };
-  const visibleFields = editing ? fields : fields.filter(hasValue);
+  const visibleFields = editing ? drawnFields : drawnFields.filter(hasValue);
 
   if (visibleFields.length === 0) return null;
 
