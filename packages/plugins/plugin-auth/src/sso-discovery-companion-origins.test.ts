@@ -79,6 +79,50 @@ function stubDiscovery(documents: Record<string, Record<string, unknown>>) {
   };
 }
 
+/**
+ * Name resolution for a case: each listed host answers its addresses, and
+ * every other name answers ENOTFOUND, so no case leans on the runner's own
+ * resolver. The vendor and plugin-auth load `node:dns/promises` natively, so
+ * the double goes on the builtin's exports and is published to ES importers
+ * (as `sso-domain-verification-instructed-record.test.ts` does for TXT
+ * records). `asked` lists every name looked up.
+ */
+function stubNameResolution(addresses: Record<string, readonly string[]>): { asked: string[]; restore: () => void } {
+  const exportsObject = dnsPromises as unknown as { lookup: typeof dnsPromises.lookup };
+  const original = exportsObject.lookup;
+  const asked: string[] = [];
+  exportsObject.lookup = (async (name: string) => {
+    asked.push(name);
+    const answer = Object.prototype.hasOwnProperty.call(addresses, name) ? addresses[name] : undefined;
+    if (answer) return answer.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));
+    throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${name}`), { code: 'ENOTFOUND', hostname: name });
+  }) as unknown as typeof dnsPromises.lookup;
+  syncBuiltinESMExports();
+  return {
+    asked,
+    restore: () => {
+      exportsObject.lookup = original;
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+/** Records the URL of every fetch made while it is installed, then hands the fetch on. */
+function recordFetches(): { fetched: string[]; restore: () => void } {
+  const inner = globalThis.fetch;
+  const fetched: string[] = [];
+  globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+    fetched.push(typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url);
+    return inner(input as never, init);
+  }) as typeof globalThis.fetch;
+  return {
+    fetched,
+    restore: () => {
+      globalThis.fetch = inner;
+    },
+  };
+}
+
 interface Rp {
   manager: AuthManager;
   engine: ReturnType<typeof createMemoryEngine>;
@@ -455,27 +499,16 @@ describe('an origin a register or update body names is trusted for that provider
 
   /**
    * The identity provider's environment for a switch-on case: its discovery
-   * documents over `fetch`, and name resolution. The vendor loads
-   * `node:dns/promises` natively, so the double goes on the builtin's exports
-   * and is published to ES importers (as
-   * `sso-domain-verification-instructed-record.test.ts` does for TXT records).
-   * `privateHost` resolves to a private address; every other name answers
-   * ENOTFOUND, which the vendor's check passes, so no case leans on the
-   * runner's own resolver.
+   * documents over `fetch`, and name resolution ({@link stubNameResolution}):
+   * `privateHost` resolves to a private address, every other name answers
+   * ENOTFOUND.
    */
   function stubIdp(documents: Record<string, Record<string, unknown>>, privateHost?: string): () => void {
-    const exportsObject = dnsPromises as unknown as { lookup: typeof dnsPromises.lookup };
-    const original = exportsObject.lookup;
-    exportsObject.lookup = (async (name: string) => {
-      if (privateHost !== undefined && name === privateHost) return [{ address: '10.0.0.5', family: 4 }];
-      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${name}`), { code: 'ENOTFOUND', hostname: name });
-    }) as unknown as typeof dnsPromises.lookup;
-    syncBuiltinESMExports();
+    const names = stubNameResolution(privateHost === undefined ? {} : { [privateHost]: ['10.0.0.5'] });
     const undoDiscovery = stubDiscovery(documents);
     return () => {
       undoDiscovery();
-      exportsObject.lookup = original;
-      syncBuiltinESMExports();
+      names.restore();
     };
   }
 
@@ -566,5 +599,124 @@ describe('an origin a register or update body names is trusted for that provider
     await expectOriginRefused(await postAs(rp, '/sign-out', { issuer: BODY_HOST }, BODY_HOST));
     const fromSelf = await postAs(rp, '/sign-out', {}, BASE);
     expect(fromSelf.status, await fromSelf.clone().text()).toBe(200);
+  });
+});
+
+// ── SSO discovery reads only hosts that resolve to public addresses ─────────
+
+/** An address no non-public range holds. */
+const PUBLIC_ADDRESS = '93.184.215.14';
+const RESOLVED_ISSUER = 'https://idp.resolved-corp.example';
+const RESOLVED_HOST = new URL(RESOLVED_ISSUER).hostname;
+const RESOLVED_DISCOVERY = `${RESOLVED_ISSUER}/.well-known/openid-configuration`;
+/** A discovery host other than the issuer's, named by `oidcConfig.discoveryEndpoint`. */
+const DISCOVERY_ORIGIN = 'https://discovery.resolved-corp.example';
+const DISCOVERY_HOST = new URL(DISCOVERY_ORIGIN).hostname;
+
+describe('SSO discovery reads only hosts that resolve to public addresses', () => {
+  let undo: Array<() => void> = [];
+  afterEach(() => {
+    for (const step of undo.reverse()) step();
+    undo = [];
+    vi.restoreAllMocks();
+  });
+
+  /** The IdP's discovery documents over `fetch` and its name resolution, with a record of both. */
+  function idp(documents: Record<string, Record<string, unknown>>, addresses: Record<string, readonly string[]>) {
+    const undoDiscovery = stubDiscovery(documents);
+    const reads = recordFetches();
+    const names = stubNameResolution(addresses);
+    undo.push(undoDiscovery, reads.restore, names.restore);
+    return { fetched: reads.fetched, asked: names.asked };
+  }
+
+  const readFrom = (fetched: readonly string[], host: string) => fetched.filter((url) => new URL(url).hostname === host);
+
+  it.each(['10.0.0.5', '127.0.0.1', '169.254.169.254'])(
+    'a registration whose discovery host resolves to %s is refused on issuer, and nothing is read from that host',
+    async (address) => {
+      const io = idp({ [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) }, { [RESOLVED_HOST]: [address] });
+      const rp = await makeRp();
+      const res = await register(rp, registration('resolved-oidc', RESOLVED_ISSUER));
+      expect(res.status, await res.clone().text()).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'issuer' });
+      expect(io.asked).toContain(RESOLVED_HOST);
+      expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+      expect(storedRows(rp)).toEqual([]);
+    },
+  );
+
+  it('a discovery host with one public and one private address is refused: every address must be public', async () => {
+    const io = idp(
+      { [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) },
+      { [RESOLVED_HOST]: [PUBLIC_ADDRESS, '10.0.0.5'] },
+    );
+    const rp = await makeRp();
+    const res = await register(rp, registration('resolved-oidc', RESOLVED_ISSUER));
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'issuer' });
+    expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('an explicit discovery endpoint on a host that resolves to a private address is refused on that member', async () => {
+    const io = idp(
+      { [DISCOVERY_ORIGIN]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) },
+      { [RESOLVED_HOST]: [PUBLIC_ADDRESS], [DISCOVERY_HOST]: ['10.0.0.5'] },
+    );
+    const rp = await makeRp();
+    const body = registration('resolved-oidc', RESOLVED_ISSUER, { discoveryEndpoint: `${DISCOVERY_ORIGIN}/.well-known/openid-configuration` });
+    const res = await register(rp, body);
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'oidcConfig.discoveryEndpoint' });
+    expect(readFrom(io.fetched, DISCOVERY_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('the Register SSO Provider bridge answers the same rule, and nothing is read from the host', async () => {
+    const io = idp({ [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) }, { [RESOLVED_HOST]: ['127.0.0.1'] });
+    const rp = await makeRp();
+    const res = await registerThroughBridge(rp, { ...GOOGLE_FORM, providerId: 'resolved-oidc', issuer: RESOLVED_ISSUER });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.error?.code).toBe('SSO_REGISTER_FAILED');
+    expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('CONTROL: a discovery host that resolves to public addresses registers, reading its discovery document alone, and the endpoints the body names stay trusted for the discovery checks', async () => {
+    const io = idp(
+      { [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${BODY_HOST}/userinfo`) },
+      { [RESOLVED_HOST]: [PUBLIC_ADDRESS], [new URL(BODY_HOST).hostname]: [PUBLIC_ADDRESS] },
+    );
+    const rp = await makeRp();
+    const res = await register(rp, registration('resolved-oidc', RESOLVED_ISSUER, { userInfoEndpoint: `${BODY_HOST}/userinfo` }));
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(io.asked).toContain(RESOLVED_HOST);
+    expect(io.fetched).toEqual([RESOLVED_DISCOVERY]);
+    expect((await storedConfig(rp, 'resolved-oidc')).userInfoEndpoint).toBe(`${BODY_HOST}/userinfo`);
+  });
+
+  it('CONTROL: an origin the deployment lists registers though its host resolves to a private address', async () => {
+    idp({ [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) }, { [RESOLVED_HOST]: ['10.0.0.5'] });
+    const rp = await makeRp([BASE, RESOLVED_ISSUER]);
+    const res = await register(rp, registration('resolved-oidc', RESOLVED_ISSUER));
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await storedConfig(rp, 'resolved-oidc')).issuer).toBe(RESOLVED_ISSUER);
+  });
+
+  it('CONTROL: a registration with no session resolves no name and is answered 401', async () => {
+    const io = idp({ [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) }, { [RESOLVED_HOST]: ['10.0.0.5'] });
+    const rp = await makeRp();
+    const res = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sso/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify(registration('resolved-oidc', RESOLVED_ISSUER)),
+      }),
+    );
+    expect(res.status, await res.clone().text()).toBe(401);
+    expect(io.asked).toEqual([]);
+    expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
   });
 });

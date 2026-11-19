@@ -87,7 +87,7 @@ import { isPendingSsoSource, PENDING_SSO_MESSAGES } from './pending-sso-marker.j
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
-import { ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
+import { refuseSsoDiscoveryHostNotPublic, ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
@@ -592,6 +592,10 @@ export async function globalBeforeHook(
   // answered `200` and the provider row landed, in every held state.
   if (ctx?.path === '/sso/register') {
     const actor = await this.resolveActor(ctx);
+    // The origins the body names reach the vendor's register endpoint only
+    // for an actor these gates admitted, and only after the host its
+    // discovery reads was resolved (below).
+    let bodyOrigins: string[] = [];
     if (actor?.userId) {
       await this.assertActorNotHeld(actor);
       const ok = await this.isPlatformAdminUserId(actor.userId);
@@ -607,6 +611,26 @@ export async function globalBeforeHook(
       await this.assertSsoProviderDomainFree(ctx);
       // Ruling record 6866334319: the sign-out switch, as on update-provider.
       await this.assertSsoSignOutOfIdpSupported(ctx);
+      // SSO discovery fetches only hosts that resolve to public addresses:
+      // the host this registration's discovery reads is resolved before the
+      // vendor's endpoint runs, and every address must be public, unless the
+      // deployment's configured trusted origins (read here, before any
+      // body-named origin joins them) list it
+      // (`refuseSsoDiscoveryHostNotPublic`).
+      const notPublic = await refuseSsoDiscoveryHostNotPublic({
+        body: ctx?.body,
+        isConfiguredTrusted: (url) =>
+          typeof ctx?.context?.isTrustedOrigin === 'function' && ctx.context.isTrustedOrigin(url) === true,
+      });
+      if (notPublic) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError(notPublic.status, {
+          code: notPublic.code,
+          message: notPublic.message,
+          field: notPublic.field,
+        });
+      }
+      bodyOrigins = await this.ssoDiscoveryTrustedOrigins(ctx?.body);
     }
     // The origins the body names (its issuer and any explicit `oidcConfig`
     // endpoint) and a known IdP's companion origins (Microsoft Entra ID's
@@ -614,7 +638,7 @@ export async function globalBeforeHook(
     // fetch and validation only: the router's origin check has already run
     // against the configured trusted origins alone, and never sees them
     // (`sso-discovery-companion-origins.ts`).
-    return ssoDiscoveryCompanionContext(ctx, await this.ssoDiscoveryTrustedOrigins(ctx?.body));
+    return ssoDiscoveryCompanionContext(ctx, bodyOrigins);
   }
 
   // ── D5.1: cloud-as-IdP authorization gate ───────────────────
