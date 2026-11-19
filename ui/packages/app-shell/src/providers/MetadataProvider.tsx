@@ -1963,6 +1963,11 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       const presence = batched ? undefined : scopesRef.current.get(NAMES_BATCH_SCOPE);
       const presentDefinition = (name: string): unknown =>
         presence?.names.get(name) === 'answered' ? presence.items.find((it: any) => it?.name === name) : undefined;
+      // A reader that asks a name for its side effect and reads the scope
+      // through an earlier read (a route's lookup targets) learns of a name
+      // answered here only on the render this bump causes, as it would of a
+      // by-name answer landing.
+      let answeredFromPresence = false;
       let namesSettled = true;
       const failedNames: string[] = [];
       const toBatch: string[] = [];
@@ -2022,6 +2027,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
                 entry.names.set(name, 'answered');
                 entry.items = [...entry.items, present];
                 if (entry.missing.includes(name)) entry.missing = entry.missing.filter((n) => n !== name);
+                answeredFromPresence = true;
                 continue;
               }
             }
@@ -2032,6 +2038,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         }
       }
       if (toBatch.length > 0) void fetchScopeNames(entry, toBatch);
+      if (answeredFromPresence) bump();
       // objectui#13052 — `settled` stays false while a name's read has
       // failed (a failure is not an answer, objectui#13009); `failed` names
       // those reads once nothing else is still in flight, so a reader can stop
@@ -2078,7 +2085,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         views: scopeViews.views,
       };
     },
-    [fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readBundledItem, readType, viewsForObjects],
+    [bump, fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readBundledItem, readType, viewsForObjects],
   );
 
   const value = useMemo<MetadataContextValue>(() => {
