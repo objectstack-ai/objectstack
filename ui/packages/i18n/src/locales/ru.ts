@@ -4246,6 +4246,7 @@ const ru = {
     composer: {
       queued: "Отправится, когда закончится текущий ответ",
       queuedCancel: "Отмена",
+      fileTooLarge: "Слишком большой файл для вложения (лимит {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Показать ответ полностью',

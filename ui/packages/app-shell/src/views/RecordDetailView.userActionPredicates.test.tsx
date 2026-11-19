@@ -278,10 +278,9 @@ describe('console record header — `userActions` predicates (objectui#4213)', (
     const items = screen.queryAllByRole('menuitem');
     expect(items).toHaveLength(0); // menu not open yet
     await openHeaderOverflow();
-    const del = screen
-      .getAllByRole('menuitem')
-      .find((el) => (el.textContent ?? '').trim() === 'Delete')!;
-    expect(del).toBeTruthy();
+    // By accessible name: the entry's reason rides a second line, and its
+    // name stays the label (objectstack#35135).
+    const del = screen.getByRole('menuitem', { name: 'Delete' });
     expect(del).toHaveAttribute('data-disabled');
   });
 

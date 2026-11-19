@@ -238,6 +238,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-ef
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
+pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -314,12 +315,29 @@ it. The arm is part of the driver's record (`env.driver.door`), and `summary` ne
   reader and closed front-matter key set as `--ask-skills`). `--door-skill-omit NAME[,NAME]` leaves named skills of
   `DIR` out: with and without one skill is the same directory with and without that omission. The record names each
   skill given, with its version and sha256, and each omitted.
-- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, given to
-  the client as its directory's `CLAUDE.md`. The file lives outside this repository; one inside the checkout is
-  refused. `--door-rules-omit A[,B]` leaves out rule ids or named sets. The record names the file (its name, not its
-  path), its sha256, and the ids active and omitted, never a text.
+- `--door-rules builtin` (or `OS_SCENARIOS_DOOR_RULES=builtin`): the **built-in corpus**, given to the client as its
+  directory's `CLAUDE.md`. It is the authoring rules the hosted product's MCP build door hands its client, ported as
+  data (`src/runner/door-rules-corpus.ts`, which names the source files and the revision they were rendered from):
+  54 rules and the two corpora's preambles, 56 entries. Its named sets, for `--door-rules-omit`:
 
-The rules file is one JSON object (`src/runner/door.ts` holds the whole contract):
+  | Set | Holds |
+  |:---|:---|
+  | `metadata-authoring`, `solution-design` | each corpus, its preamble included |
+  | `inline` | what the hosted door hands its client up front: both preambles and every always-on rule |
+  | `ondemand` | what the hosted door serves only when the client asks for a rule by id |
+  | `names-build-door-tools` | the rules whose own text names a tool the hosted build door registers (`apply_blueprint`, `verify_build`, …), most of which the open draft door does not serve |
+
+  The arm gives every active rule up front, so `--door-rules-omit ondemand` is the closest it comes to the hosted
+  delivery. The whole corpus is about 115,000 characters of `CLAUDE.md`; the `inline` set alone, about 21,000.
+- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, in place
+  of the built-in corpus. The file lives outside this repository; one inside the checkout is refused. A file named
+  `builtin` is given with a path (`./builtin`).
+
+`--door-rules-omit A[,B]` leaves out rule ids or named sets of either. The record names the rules (a file by its name,
+not its path; the built-in corpus as `builtin`), their sha256 (the built-in corpus's: of its JSON), and the ids active
+and omitted, never a text.
+
+The rules file is one JSON object, the built-in corpus's shape too (`src/runner/door.ts` holds the whole contract):
 
 ```json
 {
@@ -346,7 +364,7 @@ otherwise). Codex and an external driver are refused.
 **One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
 
 ```bash
-RULES=/abs/path/outside/the/repo/rules.json   # the maintainer's file
+RULES=builtin   # the built-in corpus; or /abs/path/outside/the/repo/rules.json, a file of the maintainer's
 for arm in bare skills rules both; do
   case $arm in
     bare)   flags=() ;;
@@ -533,17 +551,20 @@ npx @objectstack/scenarios help                                      # the comma
   (`rowDrift`: every column but `created_at`, `updated_at`, `updated_by` and the fields the build computes — formula,
   summary, autonumber). When an earlier turn moved them (the agent's write, a probe's, a confirmed one, or a question
   turn that wrote), the operation starts from the seeded rows all the same, in one of two ways:
-  - **Scratch and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots the same
-    app again (scratch: the same project; ask: the same blank host with the same build installed the same way), signs
-    the personas in, loads the seed and reads the seeded state there, and that operation and every later turn of the
-    half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no validation rule,
-    hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved never goes back
-    to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
-    `object/id`). A copy that does not boot, or whose seed does not load as the run's did (other rows loaded or
+  - **Scratch, template and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots
+    the same app again (scratch: the same project; ask: the same blank host with the same build installed the same way;
+    template: the same blank host with what the iterated app serves installed unmanaged, `iteratedManifest`: the run's
+    install manifest with each served collection replaced by the items served after the iterate, their read
+    decorations such as `_diagnostics` stripped, so the copy holds the agent's iterate made live through the app's
+    doors), signs the personas in, loads the seed and reads the seeded state there, and that operation and every later
+    turn of the half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no
+    validation rule, hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved
+    never goes back to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
+    `object/id`). A copy that does not boot or install, or whose seed does not load as the run's did (other rows loaded or
     refused, a permission set not assigned alike), makes the operation NOT MEASURED (`restore: no fresh copy of the
     app could be seeded for it (…)`, naming what had moved). Each copy costs one boot, the sign-ins and a seed load.
-  - **Template mode writes the rows back** (`restoreSeededRows`), because its app holds the agent's iterate, made live,
-    which a host booted again would not: a row a turn added is deleted, a seeded row a turn removed is inserted again
+  - **Door mode writes the rows back** (`restoreSeededRows`), as does any Run half given no fresh copy: a row a turn
+    added is deleted, a seeded row a turn removed is inserted again
     with the body the seed sent, and a changed column is set back to the value the seed left, in up to three rounds so
     a cascade settles, all through the app's own doors, which its rules judge. The result carries `restored`
     (`deleted`, `reinserted`, `setBack`). Rows that still differ after the rounds make the operation NOT MEASURED

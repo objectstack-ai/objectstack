@@ -308,9 +308,17 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
 
                 // Validate the request against the spec contract (Zod-First).
                 const { CrossObjectBatchRequestSchema } = await import('@objectstack/spec/api');
-                const parsed = (CrossObjectBatchRequestSchema as any).safeParse(req.body ?? {});
+                const batchInput = req.body ?? {};
+                const parsed = (CrossObjectBatchRequestSchema as any).safeParse(batchInput);
                 if (!parsed.success) {
-                    res.status(400).json({ error: 'Invalid batch request', code: 'VALIDATION_FAILED', issues: parsed.error?.issues });
+                    // ADR-0114 D3: Zod is mapped at the boundary, never passed
+                    // through — the same `fields[]` every per-object batch door
+                    // below answers, so a client reads one refusal shape.
+                    res.status(400).json({
+                        error: 'Invalid batch request',
+                        code: 'VALIDATION_FAILED',
+                        fields: zodIssuesToFields(parsed.error?.issues, batchInput),
+                    });
                     return;
                 }
                 const ops: CrossObjectBatchOp[] = parsed.data.operations;

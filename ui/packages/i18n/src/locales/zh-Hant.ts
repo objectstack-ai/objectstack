@@ -4318,6 +4318,7 @@ const zhHant = {
     composer: {
       queued: '當前回覆結束後傳送',
       queuedCancel: '取消',
+      fileTooLarge: '檔案過大，無法新增（上限 {{limit}}）：{{files}}',
     },
     answer: {
       showFull: '展開全文',

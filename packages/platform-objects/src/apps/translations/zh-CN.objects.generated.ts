@@ -155,7 +155,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -261,7 +261,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             "summary.added": "已添加",
-            "summary.alreadyPending": "已在待激活中，已再次通知",
+            "summary.alreadyPending": "已在待激活中",
             "summary.failed": "未添加",
             rows: "逐行结果"
           },
@@ -270,7 +270,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               row: "行",
               email: "邮箱",
               ok: "成功",
-              alreadyPending: "已在待激活中，已再次通知",
+              alreadyPending: "已在待激活中",
               "host.notified": "已通知托管组织",
               "host.reason": "未通知的原因",
               "error.message": "未添加的原因",
@@ -705,7 +705,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -811,7 +811,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -963,7 +963,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 发送邀请",
-          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         },
         params: {
           role: {
@@ -990,7 +990,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "邀请已重新发送",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 重新发送邀请",
-          link_only: "已为 {{ result.email }} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          link_only: "已为 {{ result.email }} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。接受邀请需要已验证的邮箱地址：没有邮件时，只有通过社交或 SSO 登录且地址已被验证的受邀人才能接受。其他人请由平台管理员为其创建账号。"
         }
       },
       copy_invitation_link: {

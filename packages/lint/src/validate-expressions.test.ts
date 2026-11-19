@@ -32,6 +32,8 @@ import {
   FIELD_RULE_JUDGED_ROOTS,
 } from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
+// [#34662] The rule id a flow condition's finding is reported under (bottom of this file).
+import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 // [#8405] Cross-site pin only — see the describe block at the bottom of this
 // file. Not otherwise used here; validate-semantic-roles.test.ts owns the
 // rest of this rule's coverage.
@@ -6831,6 +6833,89 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
         ],
       };
       expect(validateStackExpressions(stack), slot).toEqual([]);
+    }
+  });
+});
+
+// [#34662] A flow CONDITION (start, edge, `decision` branch) reads the run's
+// row through `record.<field>` / `previous.<field>` as well as through the
+// flattened bare name, and the date-text family judged only the bare name:
+// `timestamp(record.borrow_date) < now()` got zero findings and fails every
+// run on the `YYYY-MM-DD` text, while `timestamp(borrow_date) < now()` was
+// refused. The root read now takes the same finding, under the same rule.
+describe('validateStackExpressions — a flow condition\'s record. / previous. read takes the date-text family (#34662)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { borrow_date: { type: 'date' }, picked_up_at: { type: 'datetime' } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_overdue',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Overdue', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const dateTextOf = (issues: ExprIssue[]) => issues.filter((i) => /is a date field, and the runtime holds/.test(i.message));
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses timestamp() over a date field through record. and previous. in a %s condition, as its bare name is',
+    (site) => {
+      const bare = dateTextOf(validateStackExpressions(stackWith(site, 'timestamp(borrow_date) < now()')));
+      expect(bare.map((i) => i.severity)).toEqual(['error']);
+      for (const root of ['record', 'previous']) {
+        const source = `timestamp(${root}.borrow_date) < now()`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(issues.map((i) => [i.severity, i.path ?? i.where]), source).toEqual([['error', bare[0].path ?? bare[0].where]]);
+        expect(issues[0].message).toContain(`\`timestamp(${root}.borrow_date)\` — \`${root}.borrow_date\` is a date field`);
+        expect(issues[0].message).toContain(`\`isoDate(addDays(${root}.borrow_date, N))\``);
+      }
+    },
+  );
+
+  it('reports it under the expression rule id, as the bare name is', () => {
+    for (const source of ['timestamp(borrow_date) < now()', 'timestamp(record.borrow_date) < now()', 'timestamp(previous.borrow_date) < now()']) {
+      const stack = stackWith('start', source);
+      // The minimal fixture draws other rules' findings (region shape, sharing); this one's is the date text's.
+      const findings = runAuthoringRules('build', { normalized: stack, parsed: stack } as never)
+        .filter((f) => /is a date field, and the runtime holds/.test(f.message));
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[EXPRESSION_INVALID, 'error']]);
+    }
+  });
+
+  it('takes the run-may-fail sentence where the run is not proven to hold the row, as the bare name does', () => {
+    // No trigger: the start names the object but no entrance binds its row, so no outcome is declared.
+    const untriggered = (condition: string) => {
+      const stack = stackWith('start', condition);
+      const start = stack.flows[0].nodes[0] as { config: Record<string, unknown> };
+      delete start.config.triggerType;
+      return stack;
+    };
+    for (const read of ['borrow_date', 'record.borrow_date', 'previous.borrow_date']) {
+      const issues = dateTextOf(validateStackExpressions(untriggered(`timestamp(${read}) < now()`)));
+      expect(issues.map((i) => i.severity), read).toEqual(['error']);
+      expect(issues[0].message, read).toContain(`this faults wherever \`${read}\` holds that text when the condition runs`);
+    }
+  });
+
+  it('CONTROL: a datetime field under timestamp() stays clean through either root', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      for (const root of ['record', 'previous']) {
+        const source = `timestamp(${root}.picked_up_at) < now()`;
+        expect(validateStackExpressions(stackWith(site, source)), `${site}: ${source}`).toEqual([]);
+      }
     }
   });
 });
