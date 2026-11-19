@@ -27,6 +27,7 @@ import {
   resolveEffectiveApiMethods,
   type AggregationFunction,
 } from '@objectstack/spec/data';
+import { VALUE_DOMAIN_FIELD_NAMES, type ValueDomain } from '@objectstack/spec/shared';
 
 export type Severity = 'error' | 'warning' | 'suggestion';
 
@@ -280,6 +281,16 @@ export const RELATIONSHIP_MASTER_DETAIL_REQUIRED = 'relationship/master-detail-r
 
 /** The rule id R3 reports under (`master_detail` without `deleteBehavior`). */
 export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
+
+/** The rule id R15 reports under (a code-named `text` field without `valueDomain`). */
+export const FIELD_MISSING_VALUE_DOMAIN = 'field/missing-value-domain';
+
+/** Lowercased field name → the domain its name reads as, from the spec's one word list. */
+const VALUE_DOMAIN_BY_FIELD_NAME: ReadonlyMap<string, ValueDomain> = new Map(
+  (Object.entries(VALUE_DOMAIN_FIELD_NAMES) as Array<[ValueDomain, readonly string[]]>).flatMap(
+    ([domain, names]) => names.map((name) => [name, domain] as const),
+  ),
+);
 
 /** The rule id {@link lintInlineEditBulk} reports under. */
 export const RELATIONSHIP_INLINE_EDIT_NEEDS_BULK = 'relationship/inline-edit-needs-bulk';
@@ -1099,6 +1110,29 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             fix:
               'Make the typed list a child object whose `master_detail` field points back here ' +
               "(`inlineEdit: 'grid'` edits it inline), and remove the key.",
+          });
+        }
+      }
+
+      // R15 — a `text` field named like a currency, country or time-zone code
+      // declares no `valueDomain`, so any free text is stored where a code
+      // belongs. The whole name is compared, case-insensitively: no namespace
+      // prefix is part of a field name (the namespace rule reads object names
+      // only, ADR-0146 D3). A warning only — a false hit must never push an
+      // author to rename a correct field.
+      if (type === 'text' && def.valueDomain === undefined) {
+        const domain = VALUE_DOMAIN_BY_FIELD_NAME.get(fieldName.toLowerCase());
+        if (domain) {
+          issues.push({
+            severity: 'warning',
+            rule: FIELD_MISSING_VALUE_DOMAIN,
+            message:
+              `text field "${obj.name}.${fieldName}" is named like a ${domain} code but declares no ` +
+              'valueDomain, so any free text is stored in it',
+            path: `${fieldPath}.valueDomain`,
+            fix:
+              `Add \`valueDomain: '${domain}'\` if the field holds that code; ` +
+              'if it holds something else, keep it as it is.',
           });
         }
       }

@@ -3575,8 +3575,8 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
 
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
-// registry entries and on `os lint` through `lintDataModel`; the other three
-// are `lintDataModel`'s own sweep.
+// registry entries and on `os lint` through `lintDataModel`; the sweep ids
+// below are `lintDataModel`'s own.
 
 /** The ADR-0120 scope words, as the two uniqueness spellings read them (both write it out). */
 const UNIQUE_SCOPE_WORDS =
@@ -3585,7 +3585,7 @@ const UNIQUE_SCOPE_WORDS =
   '`\'organization\'` and stays valid; on a declared INDEX the same spelling states no scope, and ' +
   'is judged as `\'global\'`.';
 
-/** Where the three `lintDataModel` sweep ids are reported (all three write it out). */
+/** Where the `lintDataModel` sweep ids are reported (each entry writes it out). */
 const DATA_MODEL_SWEEP_REACH =
   'Reach: `os lint` and the metadata-generation rubric run this rule, and nothing else does — it ' +
   'is not an `os validate` / `os build` rule and does not run at the metadata save door, so its ' +
@@ -3758,6 +3758,26 @@ const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
       'to this rule. It fires only on the doors that never parse — `os lint` on a raw object-literal ' +
       'config, `defineStack(x, { strict: false })`, and the metadata-generation rubric beside its own ' +
       'schema verdict — where without it the key would ride unnamed to `os build`.',
+  ],
+};
+
+const FIELD_MISSING_VALUE_DOMAIN_EXPLANATION: RuleExplanation = {
+  rule: 'field/missing-value-domain',
+  covers: 'which field names read as a standard code',
+  paragraphs: [
+    'A `text` field declares `valueDomain` to hold one standard code, and the record write path then ' +
+      'refuses any value outside it: `iso_4217_currency` admits `USD` but not `Dollar`, ' +
+      '`iso_3166_alpha2` admits `CN` but not `China`, `iana_time_zone` admits `Asia/Shanghai` but ' +
+      'not `Beijing time`. Without it the field stores any text, and every later match, join or ' +
+      'conversion across apps starts with cleaning that text.',
+    'Names judged, as the whole field name compared case-insensitively: `currency`, `currency_code` ' +
+      '(`iso_4217_currency`); `country`, `country_code` (`iso_3166_alpha2`); `time_zone`, `timezone`, ' +
+      '`tz` (`iana_time_zone`). Not judged: any other name, a field that already declares a ' +
+      '`valueDomain`, and any type but `text` — a `select` takes its values from its options, and ' +
+      '`valueDomain` is declared on `text` only.',
+    'A warning, never an error: the name is only a hint. A field with one of these names that holds ' +
+      'something else is correct as it is and keeps its name.',
+    DATA_MODEL_SWEEP_REACH,
   ],
 };
 
@@ -6469,6 +6489,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
+  [FIELD_MISSING_VALUE_DOMAIN_EXPLANATION.rule]: FIELD_MISSING_VALUE_DOMAIN_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,
