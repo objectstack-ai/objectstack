@@ -82,6 +82,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();
