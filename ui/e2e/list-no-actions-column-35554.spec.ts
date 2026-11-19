@@ -25,7 +25,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * ## What is real here and what is a fixture
  *
  * REAL: the Console list page header (`ObjectViewPageHeader` with its chrome
- * hook), plugin-list's `ListView` (its fetch, its windows and its handoff to
+ * hook), the view bar's switcher (`ObjectViewTitleSwitcher`, handed the list's
+ * own count as the console hands it), plugin-list's `ListView` (its fetch, its windows and its handoff to
  * the grid), plugin-grid's `ObjectGrid`, the `data-table`, the selection bar,
  * the menus, the zh-Hans pack through the real `I18nProvider`, all bundled by
  * Vite from their source files and mounted in Chromium; the stylesheet is real
@@ -59,6 +60,7 @@ const REACT_BINDINGS = source('packages/react/src/index.ts');
 const I18N = source('packages/i18n/src/index.ts');
 const PAGE_HEADER = source('packages/app-shell/src/views/objectViewPageHeader.tsx');
 const HEADER_CHROME = source('packages/app-shell/src/views/objectViewHeaderChrome.tsx');
+const TITLE_SWITCHER = source('packages/app-shell/src/views/objectViewTitleSwitcher.tsx');
 
 /** The two windows the card accepts at. */
 const VIEWPORTS = [
@@ -109,6 +111,7 @@ import { ActionProvider, SchemaRendererProvider } from ${JSON.stringify(REACT_BI
 import { I18nProvider, useObjectTranslation } from ${JSON.stringify(I18N)};
 import { ObjectViewPageHeader } from ${JSON.stringify(PAGE_HEADER)};
 import { useObjectViewHeaderChrome } from ${JSON.stringify(HEADER_CHROME)};
+import { ObjectViewTitleSwitcher, ListRecordCountContext } from ${JSON.stringify(TITLE_SWITCHER)};
 
 registerAllFields();
 const h = React.createElement;
@@ -183,9 +186,6 @@ function Header() {
   });
   return h(ObjectViewPageHeader, {
     objectDef: { name: 'opportunity', label: '商机', pluralLabel: '商机', icon: 'briefcase' },
-    titleSwitcher: h('span', { 'data-testid': 'view-switcher' }, '进行中商机'),
-    titleLabel: '进行中商机',
-    objectListHref: '/apps/sales/opportunity',
     objectPluralLabel: () => '商机',
     objectDesc: () => undefined,
     createButton: chrome.createButton,
@@ -199,9 +199,22 @@ function Header() {
     environmentEntitlements: undefined,
     toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
     listFavorite: null,
-    personalizedMarker: null,
     foldedHeaderActions: chrome.foldedHeaderActions,
   });
+}
+
+// The view bar's lead, as the console draws it (objectstack#35548): the real
+// switcher, fed the list's own count through ListRecordCountContext.
+function ViewBarLead({ recordCount, layout }) {
+  const { t } = useObjectTranslation();
+  return h(ListRecordCountContext.Provider, { value: { count: recordCount, layout } },
+    h(ObjectViewTitleSwitcher, {
+      views: [{ id: 'open', label: '进行中商机', type: 'grid', authored: true }],
+      activeViewId: 'open',
+      activeLabel: '进行中商机',
+      onViewChange: () => {},
+      t,
+    }));
 }
 
 const root = createRoot(document.getElementById('root'));
@@ -214,7 +227,7 @@ window.__remount = () => root.render(
           h('div', { id: 'page-column', className: 'h-screen flex flex-col bg-background min-w-0 overflow-hidden' },
             h(Header),
             h('div', { className: 'flex-1 min-h-0 flex flex-col' },
-              h(ListView, { schema, dataSource, onEdit: () => window.__dispatched.push('edit'), onDelete: () => window.__dispatched.push('delete') }))))))),
+              h(ListView, { schema, dataSource, toolbarLeading: (state) => h(ViewBarLead, state), onEdit: () => window.__dispatched.push('edit'), onDelete: () => window.__dispatched.push('delete') }))))))),
 );
 window.__unmount = () => root.render(null);
 window.__remount();
@@ -438,7 +451,7 @@ for (const viewport of VIEWPORTS) {
     test('no pager; scrolling to the end loads more; header select-all offers 「选择全部 120 条」', async ({ page }) => {
       await mount(page, viewport);
       await expect(page.getByRole('button', { name: /下一页|Next page/ })).toHaveCount(0);
-      await expect(page.getByTestId('list-total-count')).toHaveText('120');
+      await expect(page.getByTestId('list-view-switcher-count')).toHaveText('120');
       expect(await loadedRows(page)).toBe(50);
       await page.evaluate(() => {
         const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
