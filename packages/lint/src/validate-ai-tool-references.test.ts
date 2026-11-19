@@ -319,7 +319,7 @@ describe('validate-ai-tool-references', () => {
     expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: eight }] })).toEqual([]);
     expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: [...MCP_DOOR_TOOL_NAMES] }] })).toEqual([]);
     // A family the door alone serves resolves too.
-    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: ['delete_*'] }] })).toEqual([]);
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: ['resume_*'] }] })).toEqual([]);
 
     // The control: a name shaped like the door's and registered by nobody is
     // still reported, so this pin fails on a universe widened too far.
@@ -341,7 +341,7 @@ describe('validate-ai-tool-references', () => {
       skills: [{
         name: 'ops',
         mcpPrompt: false,
-        tools: ['get_record', 'run_action', 'delete_*', 'nope_tool'],
+        tools: ['get_record', 'run_action', 'resume_*', 'nope_tool'],
       }],
     });
     expect(findings.map((f) => f.path)).toEqual(['skills[0].tools[1]', 'skills[0].tools[2]', 'skills[0].tools[3]']);
@@ -353,7 +353,7 @@ describe('validate-ai-tool-references', () => {
       'Drop `mcpPrompt: false` if the skill is written for MCP clients, or remove "run_action" and the '
         + 'instructions that mention it',
     );
-    expect(findings[1].message).toMatch(/^Tool family "delete_\*" resolves only for a skill offered over MCP/);
+    expect(findings[1].message).toMatch(/^Tool family "resume_\*" resolves only for a skill offered over MCP/);
     // The control: a name nobody registers keeps the fictional-name verdict.
     expect(findings[2].message).toContain('"nope_tool" resolves to no stack, platform or materialised action tool');
   });
