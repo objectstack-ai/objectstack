@@ -19,10 +19,12 @@ import { recordsOf } from './object-graph.js';
  *
  *     { owner_id: '{current_user_id}', created_at: { $gte: '{week_start}' } }
  *
- * Exactly two vocabularies resolve inside a filter value: context tokens
- * (`{current_user_id}`, `{current_org_id}` — see `context-tokens.zod.ts`) and
- * date macros (`{today}`, `{30_days_ago}` — see `date-macros.zod.ts`).
- * Anything else does not resolve: the data engine refuses a query that carries
+ * Three vocabularies resolve inside a filter value: context tokens
+ * (`{current_user_id}`, `{current_org_id}` — see `context-tokens.zod.ts`),
+ * date macros (`{today}`, `{30_days_ago}` — see `date-macros.zod.ts`) and
+ * period keys (`{current_iso_week}`, `PERIOD_KEY_TOKENS` in the same file).
+ * Every one of them is known to `classifyFilterToken`, which is all this rule
+ * asks. Anything else does not resolve: the data engine refuses a query that carries
  * it (`FILTER_TOKEN_UNKNOWN`, 400 — `UnknownFilterTokenError` in
  * `@objectstack/core`'s `filter-tokens.ts`), so the surface never shows the
  * data the filter meant.

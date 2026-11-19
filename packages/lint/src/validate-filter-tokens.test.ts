@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { PageSchema } from '@objectstack/spec/ui';
 
-import { CONTEXT_TOKENS } from '@objectstack/spec/data';
+import { CONTEXT_TOKENS, PERIOD_KEY_TOKENS } from '@objectstack/spec/data';
 
 import { walkAuthoredFilters } from './filter-walk';
 import { explainRule } from './rule-explanations';
@@ -510,8 +510,34 @@ describe('[#22161] one-line fix — filter-token-unknown', () => {
     const text = explainRule(FILTER_TOKEN_UNKNOWN)!.paragraphs.join('\n');
     // Held to the spec's own vocabulary: the module that holds the text imports nothing.
     expect(text).toContain(`The context tokens: ${CONTEXT_TOKENS.map((t) => `\`{${t}}\``).join(', ')}.`);
+    expect(text).toContain(`The period keys: ${PERIOD_KEY_TOKENS.map((t) => `\`{${t}}\``).join(', ')},`);
     for (const fact of ['{week_start}', 'rename the value', '`{record_id}`', 'FILTER_TOKEN_UNKNOWN']) {
       expect(text, fact).toContain(fact);
     }
+  });
+});
+
+// The period key `{current_iso_week}` (`PERIOD_KEY_TOKENS`) is a known filter
+// placeholder: the server resolves it to the current ISO week's key. It is no
+// finding on any surface this rule walks, and a near spelling of it still is.
+describe('the period key {current_iso_week} is a resolvable placeholder', () => {
+  it.each(PERIOD_KEY_TOKENS.map((t) => [t]))('{%s} raises no finding in a widget, view, dataset or page filter', (token) => {
+    const findings = validateFilterTokens({
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { cost_week: `{${token}}` } }] }],
+      views: [{ name: 'v', filter: [['cost_week', '=', `\${${token}}`]] }],
+      datasets: [{ name: 'ds', object: 'cost', filter: { cost_week: { $eq: `{${token}}` } } }],
+      pages: [{ name: 'p', type: 'app', regions: [{ components: [{ filter: { cost_week: `{${token}}` } }] }] }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('a near spelling is still refused, as an unknown placeholder', () => {
+    const findings = validateFilterTokens({
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { a: '{currentIsoWeek}', b: '{current_week}' } }] }],
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [FILTER_TOKEN_UNKNOWN, 'dashboards[0].widgets[0].filter.a'],
+      [FILTER_TOKEN_UNKNOWN, 'dashboards[0].widgets[0].filter.b'],
+    ]);
   });
 });

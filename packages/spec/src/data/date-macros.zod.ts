@@ -59,6 +59,40 @@ import { z } from 'zod';
  *    `DATE_MACRO_PARAM_RE`. Units: `minute(s)`, `hour(s)`, `day(s)`,
  *    `week(s)`, `month(s)`, `year(s)`. Directions: `ago`, `from_now`.
  *
+ * # A sibling list: period keys, which are not dates
+ *
+ * One more placeholder reads the clock, and resolves to a period KEY rather
+ * than to a day: `{current_iso_week}` → `2026-W47`. It is enumerated by
+ * `PERIOD_KEY_TOKENS`, a list of its own, never a member of
+ * `DATE_MACRO_TOKENS`.
+ *
+ * The key is the ISO-8601 week of today, written `YYYY-Www`: weeks start on
+ * Monday, week 1 is the week holding the year's first Thursday, and the
+ * year is the ISO week-numbering year, which differs from the calendar year
+ * on a few days at the year's edges (Friday 2027-01-01 is `2026-W53`,
+ * Monday 2027-01-04 is `2027-W01`). "Today" is the calendar day in the
+ * workspace time zone, as for every date macro. It is the label an
+ * analytics `week` bucket groups by, so a text column that stores the same
+ * key, as weekly master data often does, filters to the current week:
+ *
+ *     { cost_week: '{current_iso_week}' }
+ *
+ * The value is TEXT. That is why it is a separate list: everything that
+ * reads `DATE_MACRO_TOKENS` takes its members as dates — a `type: 'date'`
+ * dashboard filter's `defaultValue` and a calendar view's `initialDate`
+ * accept any of them — and a week key is not a date. So
+ * `isDateMacroToken('current_iso_week')` is `false`, and those two surfaces
+ * refuse it. Every door that asks whether a filter placeholder is KNOWN
+ * (`isKnownFilterToken` and `classifyFilterToken` in `./context-tokens.zod.ts`,
+ * which lint, the flow filter operand and the server resolver read) knows
+ * it, with its own `period-key` kind. A dashboard text filter may default to
+ * it: the filter bar shows the resolved key, which the user can then edit.
+ *
+ * It is resolved on both sides of the wire like the date macros, by the same
+ * week rule: the server's `bucketDateKey(now, 'week', timezone)` in
+ * `@objectstack/core`, and the client resolver in `@object-ui/core`, which
+ * a shared table of year-edge days holds equal to it.
+ *
  * # Out of scope
  *
  * - CEL expressions (`cel\`daysAgo(30)\``) run **server-side** in the
@@ -130,6 +164,30 @@ export const DATE_MACRO_TOKENS = [
 ] as const;
 
 export type DateMacroToken = (typeof DATE_MACRO_TOKENS)[number];
+
+/**
+ * Period-key tokens — clock-based placeholders whose value is a period KEY
+ * (text), not a day. See "A sibling list: period keys" in the module doc.
+ *
+ * Deliberately NOT spread into {@link DATE_MACRO_TOKENS}: a date-only
+ * surface accepts every member of that list as a date. Deliberately tiny,
+ * like the context tokens: each member is a contract that the client
+ * resolver, the server resolver and lint must all honour.
+ */
+export const PERIOD_KEY_TOKENS = [
+  'current_iso_week',
+] as const;
+
+export type PeriodKeyToken = (typeof PERIOD_KEY_TOKENS)[number];
+
+/**
+ * Is `token` (without braces) a period-key token? A period key is a known
+ * filter placeholder and never a date macro: {@link isDateMacroToken}
+ * answers `false` for every member.
+ */
+export function isPeriodKeyToken(token: string): boolean {
+  return (PERIOD_KEY_TOKENS as readonly string[]).includes(token);
+}
 
 /**
  * Parameterised token grammar.
@@ -275,4 +333,14 @@ export const DATE_MACRO_DESCRIPTIONS: Record<DateMacroToken, string> = {
   quarter_end:   'Alias for current_quarter_end.',
   year_start:    'Alias for current_year_start.',
   year_end:      'Alias for current_year_end.',
+};
+
+/**
+ * Description table for {@link PERIOD_KEY_TOKENS} — feeds skill / docs
+ * generation, like {@link DATE_MACRO_DESCRIPTIONS}. Pure data.
+ */
+export const PERIOD_KEY_TOKEN_DESCRIPTIONS: Record<PeriodKeyToken, string> = {
+  current_iso_week:
+    'ISO-8601 week key of today in the workspace time zone (YYYY-Www, e.g. 2026-W47): Monday-start weeks, ' +
+    'the ISO week-numbering year at the year edges. Text, not a date.',
 };

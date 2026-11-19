@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import type { PeriodKeyToken } from '@objectstack/spec/data';
 import { getDisplayTimeZone } from './date-display.js';
 
 /**
@@ -219,6 +220,82 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
   };
 
   return walk(filter) as T;
+}
+
+/**
+ * Resolve the period-key placeholders inside a filter: the sibling vocabulary
+ * of the date macros whose value is a KEY, not a day (`PERIOD_KEY_TOKENS` in
+ * `@objectstack/spec/data`).
+ *
+ *   - `{current_iso_week}` → `2026-W47`, the ISO-8601 week of today
+ *
+ * "Today" is the workspace zone's calendar day, read exactly as the date
+ * macros read it (see "Which clock decides today" above), so the key is the
+ * one the server's resolver answers for the same instant in the same zone.
+ *
+ * Kept apart from {@link resolveDateMacros} on purpose: a caller of that
+ * function treats whatever it resolved as a date (a date filter's
+ * `isUsableDateString`, a calendar's `initialDate`), and a week key is not
+ * one. Only a WHOLE-string placeholder (`{token}` or `${token}`) is resolved,
+ * as on the server: a key embedded in a longer string is left as written.
+ * Any other value, an unknown token included, passes through untouched.
+ */
+export function resolvePeriodKeyTokens<T = any>(filter: T, now: Date = new Date()): T {
+  if (filter == null) return filter;
+  const today = calendarDayIn(now, getDisplayTimeZone());
+  // `satisfies` keeps the table exhaustive: a token added to the spec's list
+  // without a resolver here fails to compile instead of passing through.
+  const keys: Record<string, () => string> = {
+    current_iso_week: () => isoWeekKey(today.getFullYear(), today.getMonth() + 1, today.getDate()),
+  } satisfies Record<PeriodKeyToken, () => string>;
+
+  const walk = (value: any): any => {
+    if (value == null) return value;
+    if (typeof value === 'string') {
+      const m = value.match(/^\$?\{([a-zA-Z0-9_]+)\}$/);
+      if (!m || !Object.prototype.hasOwnProperty.call(keys, m[1])) return value;
+      return keys[m[1]]();
+    }
+    if (Array.isArray(value)) return value.map(walk);
+    // Only a PLAIN object is walked; a `Date` or any other instance is a leaf.
+    if (typeof value === 'object') {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return value;
+      const out: Record<string, any> = {};
+      for (const k of Object.keys(value)) out[k] = walk((value as any)[k]);
+      return out;
+    }
+    return value;
+  };
+
+  return walk(filter) as T;
+}
+
+/**
+ * The ISO-8601 week key (`YYYY-Www`) of a calendar day, `month` 1-12: weeks
+ * start on Monday, week 1 is the week holding the year's first Thursday, and
+ * the year is the ISO week-numbering year, the calendar year of that week's
+ * Thursday (Friday 2027-01-01 is `2026-W53`). The year is spelled with four
+ * digits.
+ *
+ * The same rule as `@objectstack/core`'s `bucketDateKey(value, 'week')`, the
+ * label an analytics `week` bucket groups by. That package is not a
+ * dependency here, so the rule is written twice, and one table of year-edge
+ * days pins both copies: the `resolvePeriodKeyTokens` block of
+ * `date-macros.test.ts` here, and the period-key block of
+ * `filter-tokens.test.ts` in `@objectstack/core`.
+ */
+function isoWeekKey(year: number, month: number, day: number): string {
+  // A UTC day built with `setUTCFullYear`, which keeps a year below 100 as
+  // written (`Date.UTC` would read it as 19xx).
+  const thursday = new Date(0);
+  thursday.setUTCFullYear(year, month - 1, day);
+  thursday.setUTCDate(thursday.getUTCDate() - ((thursday.getUTCDay() + 6) % 7) + 3);
+  const isoYear = thursday.getUTCFullYear();
+  const jan1 = new Date(0);
+  jan1.setUTCFullYear(isoYear, 0, 1);
+  const week = Math.floor((thursday.getTime() - jan1.getTime()) / 86_400_000 / 7) + 1;
+  return `${String(isoYear).padStart(4, '0')}-W${String(week).padStart(2, '0')}`;
 }
 
 const dayPartsFormats = new Map<string, Intl.DateTimeFormat>();
