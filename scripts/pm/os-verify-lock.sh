@@ -2636,33 +2636,59 @@ readonly LOCK_DEPTH_HOLD=2
 # nobody. Exit 0 go (depth below the hold), 1 wait, 3 when the liveness probe
 # that decides which tickets are live is not lit, or the lock cannot operate
 # on this host: ⛔ an unread depth is never read as 1.
+#
+# ⭐ IT COUNTS WITHOUT PRUNING. `queue_live` deletes every ticket it judges
+# dead, and `--status` takes `liveness_snapshot` first for exactly that reason:
+# a dev whose turn ended while waiting leaves its evidence in a dead ticket.
+# This mode runs before every dispatch, so pruning here would delete that
+# evidence where no seat ever reads it. It judges each ticket with the same
+# `ticket_state`, leaves the dead ones in place, and names them, so the next
+# `--status` still prints their liveness verdicts.
 mode_depth() {
-  local q=0 p=0 file
+  local q=0 p=0 d=0 file pid start stamp label
   if ! liveness_control; then
-    printf '%s
-' "$LIVENESS_CONTROL_LINE"
-    printf 'depth: CANNOT READ — the probe that decides which tickets are live is not lit; ⛔ never read as depth 1.
-'
+    printf '%s\n' "$LIVENESS_CONTROL_LINE"
+    printf 'depth: CANNOT READ — the probe that decides which tickets are live is not lit; ⛔ never read as depth 1.\n'
     return "$LIVENESS_REFUSAL_EXIT"
   fi
   if ! preflight; then
-    printf 'depth: CANNOT READ — this host cannot operate the lock (`--status` names why); ⛔ never read as depth 1.
-'
+    printf 'depth: CANNOT READ — this host cannot operate the lock (`--status` names why); ⛔ never read as depth 1.\n'
     return "$LIVENESS_REFUSAL_EXIT"
   fi
+  local dead_lines=''
   if [[ -d "$QUEUE_DIR" ]]; then
-    while IFS= read -r file; do
-      [[ -n "$file" ]] && q=$((q + 1))
-    done < <(queue_live)
-    while IFS= read -r file; do
-      [[ -n "$file" ]] && p=$((p + 1))
-    done < <(queue_parked)
+    shopt -s nullglob
+    for file in "$QUEUE_DIR"/*; do
+      [[ -f "$file" ]] || continue
+      case "$(ticket_state "$file")" in
+        active) q=$((q + 1)) ;;
+        parked) p=$((p + 1)) ;;
+        *)
+          d=$((d + 1))
+          pid=''
+          start=''
+          stamp=''
+          label=''
+          read -r pid start stamp label < "$file" 2> /dev/null || true
+          dead_lines="${dead_lines}dead ${d}: ticket ${file##*/}, pid ${pid:--} — ${label:-?}"$'\n'
+          ;;
+      esac
+    done
+    shopt -u nullglob
   fi
   local depth=$((q + 1)) verdict=go
   ((depth >= LOCK_DEPTH_HOLD)) && verdict=wait
-  printf 'depth %d (queue %d + 1) · hold at %d → %s · not counted: the holder, %d parked slot(s)
-' \
-    "$depth" "$q" "$LOCK_DEPTH_HOLD" "$verdict" "$p"
+  printf 'depth %d (queue %d + 1) · hold at %d → %s · not counted: the holder, %d parked slot(s), %d dead ticket(s)\n' \
+    "$depth" "$q" "$LOCK_DEPTH_HOLD" "$verdict" "$p" "$d"
+  if ((d > 0)); then
+    printf 'dead tickets LEFT IN PLACE, not pruned — `--status` prints their liveness verdicts and then prunes them:\n'
+    printf '%s' "$dead_lines"
+  fi
+  if ((PREFLIGHT_NO_FLOCK == 1)); then
+    printf 'host: NO USABLE flock — a run here takes no ticket and runs in DECLARED UNLOCKED MODE, with no\n'
+    printf '      mutual exclusion, so this depth counts nothing a run on this host waits behind.\n'
+    printf '  · %s\n' "$PREFLIGHT_NO_FLOCK_NOTE"
+  fi
   [[ "$verdict" == go ]] && return 0
   return 1
 }
@@ -4394,6 +4420,10 @@ FAKEDATE
   dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
   st_case '--depth on an empty queue reads depth 1 (the dev about to be dispatched) and goes' \
     "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 1 (queue 0 + 1) · hold at 2 → go')" '0|1'
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth on a host with no usable flock still reads, and discloses DECLARED UNLOCKED MODE as --status does' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c 'DECLARED UNLOCKED MODE')" '0|1'
   dstart="$(proc_starttime "$$")"
   printf '%s %s %s depth-holder\n' "$$" "$dstart" "$(now_s)" > "${dl}.holder"
   printf '0 %s %s depth-parked\n' "$(now_s)" "$(now_s)" > "${dq}/00000000000000000001-sdepthslot"
@@ -4406,6 +4436,18 @@ FAKEDATE
   dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
   st_case '--depth counts a live waiter: depth 2 reaches the hold and exits 1 (wait)' \
     "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 2 (queue 1 + 1) · hold at 2 → wait')" '1|1'
+  # ⭐ A dead ticket is the evidence a dev whose turn ended while waiting
+  # leaves behind. `--depth` runs before every dispatch, so it must neither
+  # count that ticket nor delete it: it names it and leaves it for `--status`.
+  local ddead="${dq}/00000000000000000003-999999"
+  printf '%s %s %s depth-dead-waiter\n' 999999 12345 "$(now_s)" > "$ddead"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth does not count a dead ticket, names it, and leaves it in place' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 2 (queue 1 + 1) .* 1 dead ticket')|$(printf '%s\n' "$dout" | grep -c '^dead 1: ticket 00000000000000000003-999999, pid 999999')|$([[ -f "$ddead" ]] && printf kept)" \
+    '1|1|1|kept'
+  st_case '…so the next --status still prints that dead ticket'"'"'s liveness verdict' \
+    "$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --status 2>&1 | grep -c '^liveness waiter ticket 00000000000000000003-999999: pid 999999 DOES NOT EXIST')" 1
   drc=0
   dout="$(OS_VERIFY_LOCK_FILE="$dl" OS_VERIFY_LOCK_SIM_LIVENESS=alive bash "$SELF" --depth 2>&1)" || drc=$?
   st_case '--depth with an unlit probe exits 3 and is never read as depth 1' \
