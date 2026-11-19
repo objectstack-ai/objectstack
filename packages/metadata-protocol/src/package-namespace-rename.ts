@@ -144,7 +144,10 @@ function isCapabilityType(type: string): boolean {
  * (`requiredPermissions` — on an object, a field, an app and its navigation, an
  * action, a flow, a list view, a dashboard, a record block; a `string[]`, or on
  * an object a `{ read, create, update, delete }` map of them). Their values are
- * capability names and nothing else, so the object-name pass never reads them.
+ * capability names and nothing else, so each entry goes to the capability
+ * rename, never to the generic walk: a name the package declares takes the
+ * capability rename alone, and any other name takes the object-name pass, so
+ * an undeclared token spelled with a renamed object's name follows the object.
  */
 const CAPABILITY_REFERENCE_KEYS: ReadonlySet<string> = new Set(['systemPermissions', 'requiredPermissions']);
 
@@ -359,8 +362,10 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
     // require it ({@link CAPABILITY_REFERENCE_KEYS}). A capability the
     // package declares without its prefix keeps its name — no rule says what
     // its prefix is. A name the package does NOT declare (a platform
-    // capability, another package's) is never touched: the copy grants and
-    // requires exactly what the source did.
+    // capability, another package's) never takes the capability rename: it
+    // takes the object-name pass, as every string did before #35157, so it
+    // keeps its name unless it is spelled with a renamed object's name, and
+    // then it follows the object.
     //
     // The name is rewritten in the three places a body names a capability —
     // the two keys above, and a `hasCapability('<name>')` predicate
@@ -456,8 +461,10 @@ export function planNamespaceRename(input: NamespaceRenameInput): NamespaceRenam
             const viewItem = viewItemRenames.get(v);
             if (viewItem !== undefined) return viewItem;
             const objectPass = (text: string): string => (re ? text.replace(re, (m) => renameMap.get(m) ?? m) : text);
-            // A `hasCapability('<name>')` argument is a capability name: the
-            // capability rename decides it, and the object pass skips it.
+            // A `hasCapability('<name>')` argument is a capability name and
+            // goes to `renameCapability`: a name the package declares takes the
+            // capability rename alone, never the object pass; any other name
+            // takes the object pass there.
             let out = '';
             let last = 0;
             for (const m of v.matchAll(HAS_CAPABILITY_CALL)) {

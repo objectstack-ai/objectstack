@@ -250,8 +250,8 @@ Every such write is judged before anything is stored:
 At the `everyone` anchor, a token a package's declaration names is the app's
 own and is excused (ADR-0090 D5): one an app ships, one an unmanaged copy
 writes, and one saved into a package the environment can write (a copy, a
-duplicate, a base you author). A capability saved with no package is not:
-binding a permission set that grants it to `everyone` is judged as for any
+duplicate, a base you author). A capability saved with no package is not,
+whatever package its own `packageId` names: binding a permission set that grants it to `everyone` is judged as for any
 undeclared token, and refused as high-privilege. The two refusals above are
 what bounds this. No declaration can take a platform capability's name, so a
 platform power is never excused, and none can take a name a package already
@@ -278,12 +278,16 @@ under a `targetNamespace`, a capability the package names with its namespace
 (`demoasset.manage_assets`, or `demoasset_manage_assets`) takes the target's
 (`trial1.manage_assets`), and every `systemPermissions` grant and
 `requiredPermissions` requirement of it in the copy follows. So two copies of
-one app never share a gate. A name the package does not declare — a platform
-capability it grants or requires — is copied as written. The name follows into
-a component's `visibleWhen` too, where `current_user.hasCapability('<name>')`
-gates it with a quoted name. A capability named after an object the copy
-renames (`crm.crm_invoice.void`) keeps one name in the copy, the
-declaration's (`shop.crm_invoice.void`), in every place that names it.
+one app never share a gate. The name follows into a component's `visibleWhen`
+too, where `current_user.hasCapability('<name>')` gates it with a quoted name.
+A capability named after an object the copy renames (`crm.crm_invoice.void`)
+keeps one name in the copy, the declaration's (`shop.crm_invoice.void`), in
+every place that names it. A name the package does not declare — a platform
+capability it grants or requires, or another package's — is not renamed as a
+capability. It keeps its name, unless it is spelled with the name of an object
+the copy renames: then it follows the object, as other text does, in the
+grant, the requirement and the predicate alike (`crm_invoice.void` copies as
+`shop_invoice.void`).
 
 A capability the package declares without its namespace prefix keeps its name.
 An unmanaged install keeps it; a second holder of that name refuses the whole

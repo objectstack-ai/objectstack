@@ -100,11 +100,20 @@ export async function readDeclaredCapabilityContext(
   // once, by a `manage_metadata` holder, inside a writable package.
   // Dropping a declaration errs toward refusing a binding, never toward
   // granting one.
-  // The registry stamps `_packageId`; the metadata service may name the
-  // package under `packageId` or `package` too.
-  const packageOf = (c: any): unknown => c?._packageId ?? c?.packageId ?? c?.package;
+  //
+  // ⛔ The binding is `_packageId` and nothing else, on both lists. It is the
+  // row's binding as the server states it: the save door strips it from every
+  // body (`stripDerivedProvenance`) and the stored-row reads restate it from
+  // the row's `package_id` column alone (`withRowBinding`). `packageId` is an
+  // author-written key of `CapabilityDeclarationSchema`, which an environment
+  // save keeps: a body saved with no package that names any package there,
+  // existing or not, is still a save with no package. The metadata service
+  // states no package key of its own either: `register` stores the body as
+  // written and `list` serves it as stored, so its `packageId` / `package`
+  // is the same author-written key. An item that service holds for a package
+  // under `packageId` alone is therefore dropped, which refuses a binding.
   const withPackage = (list: any[]): any[] => list.filter((c) => {
-    const pkg = packageOf(c);
+    const pkg = c?._packageId;
     return typeof pkg === 'string' && pkg.length > 0;
   });
   const registered: any[] = readDeclared(ql, 'capability');
@@ -113,7 +122,7 @@ export async function readDeclaredCapabilityContext(
     try {
       const listed = metadataService?.list?.('capability');
       const answered = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
-      // The fallback is judged by the same provenance test.
+      // The fallback is judged by the same provenance test, `_packageId` alone.
       caps = Array.isArray(answered) ? withPackage(answered) : answered;
     } catch { caps = []; }
   }

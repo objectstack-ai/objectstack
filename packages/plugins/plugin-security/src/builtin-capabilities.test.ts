@@ -107,4 +107,30 @@ describe('readDeclaredCapabilityContext, beside the curated declarations', () =>
     const onlySaved = { list: async () => [ENV_SAVED] };
     expect(await readDeclaredCapabilityContext(engineWith([]), onlySaved)).toBeUndefined();
   });
+
+  // [ADR-0090 D5, #35157] `packageId` is an author-written key of the strict
+  // declaration schema, so an environment save with no package may carry it and
+  // registers `{ name, packageId, _provenance }` with no `_packageId`. The row's
+  // binding is still empty: it excuses nothing, whatever package it names.
+  const AUTHORED = { name: 'envcap.claim', label: 'Names a package', packageId: 'com.example.anyone' };
+  const NAMING_A_PACKAGE = { ...AUTHORED, _provenance: 'org' };
+
+  it('an environment-saved body naming a package under `packageId` excuses nothing at the `everyone` anchor', async () => {
+    // The key is authorable: the body an environment author saves parses.
+    expect(CapabilityDeclarationSchema.safeParse(AUTHORED).success).toBe(true);
+    const context = await readDeclaredCapabilityContext(engineWith([OWN, APP, NAMING_A_PACKAGE]), undefined);
+    expect(context).toEqual({ declaredCapabilities: [OWN, APP] });
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context))
+      .toEqual(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), undefined));
+  });
+
+  it('the metadata-service fallback reads no body key either: `packageId` or `package` excuses nothing there', async () => {
+    const naming = { list: async () => [NAMING_A_PACKAGE, { name: 'envcap.legacy', package: 'com.example.anyone' }] };
+    expect(await readDeclaredCapabilityContext(engineWith([]), naming)).toBeUndefined();
+    const beside = { list: async () => [NAMING_A_PACKAGE, APP] };
+    const context = await readDeclaredCapabilityContext(engineWith([]), beside);
+    expect(context).toEqual({ declaredCapabilities: [APP] });
+    expect(describeHighPrivilegeBits(setGranting(NAMING_A_PACKAGE.name), context)).not.toBeNull();
+  });
 });

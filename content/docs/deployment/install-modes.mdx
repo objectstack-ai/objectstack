@@ -254,7 +254,9 @@ The copy is renamed by the same rules as duplicating a package:
   `acme_approve_deal`), and every permission set's `systemPermissions` grant and
   every `requiredPermissions` requirement of it in the copy follows, so the copy
   never shares a gate with the package or another copy. A capability the package
-  does not declare, a platform one among them, keeps its name.
+  does not declare, a platform one among them, keeps its name, unless it is
+  spelled with the name of an object the copy renames: then it follows the
+  object (`crm_lead.convert` copies as `acme_lead.convert`).
 - **An object of another package keeps its name**, and so do its view items.
 
 `targetNamespace` follows the rule for a manifest `namespace`, and the
