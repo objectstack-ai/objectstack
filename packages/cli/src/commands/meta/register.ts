@@ -2,7 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import type { SaveMetaItemOptions } from '@objectstack/client';
-import { printError, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
+import { printError, printInfo, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -72,12 +72,18 @@ export function metaRegisterRefusalHint(
  *    member, so the SDK sends no `force` at all rather than an opt-out
  *    spelling.
  *
- * `SaveMetaItemOptions` also carries `ifMatch` and `mode`; this command
- * declares no flag for them, and adding one is a separate widening.
+ *  - `--mode draft` → `mode: 'draft'` (`?mode=draft`), [#34777]: the save
+ *    stages a pending draft instead of publishing. Mapped only for `draft`:
+ *    `--mode publish` is the default said out loud and, like the SDK's own
+ *    `'publish'`, adds no member, so its request is the unflagged one.
+ *
+ * `SaveMetaItemOptions` also carries `ifMatch`; this command declares no flag
+ * for it, and adding one is a separate widening.
  */
 export function metaRegisterOptions(flags: {
   package?: string;
   force?: boolean;
+  mode?: string;
 }): SaveMetaItemOptions | undefined {
   const options: SaveMetaItemOptions = {};
   const packageId = flags.package;
@@ -90,7 +96,45 @@ export function metaRegisterOptions(flags: {
   }
   // The opt-in only, as the SDK spells it: `force: true` → `?force=true`.
   if (flags.force === true) options.force = true;
+  // [#34777] The draft opt-in only, as the SDK spells it: `mode: 'draft'` →
+  // `?mode=draft`. `publish` (or no flag) adds nothing.
+  if (flags.mode === 'draft') options.mode = 'draft';
   return Object.keys(options).length > 0 ? options : undefined;
+}
+
+/**
+ * [#34777] What a `--mode draft` save prints, line by line, after the door
+ * answered 2xx — the draft is stored and is NOT live. Exported so the text is
+ * measured on this value.
+ *
+ * The door's 2xx says only that the draft was stored (`state: 'draft'`, its
+ * `version`) and carries the save's own advisories. It does not carry what a
+ * publish of the draft would answer: a draft save runs no publish rule
+ * (`AUTHORING_SURFACES`, #4463 D1), and the REST door serves that judgement
+ * on the strict draft read's `_diagnostics`, which the SDK this command calls
+ * cannot request today. So the lines name where the verdict is read instead
+ * of inventing one, and name where a person reviews the draft: Studio's
+ * Changes, which lists a package's drafts, so a draft saved without
+ * `--package` is named as reviewable only under the package that holds it.
+ */
+export function draftSaveLines(args: {
+  type: string;
+  name: string;
+  packageId?: string;
+  version?: unknown;
+}): string[] {
+  const lines = [
+    `Draft saved: ${args.type}/${args.name} — staged for review, not published`
+      + `${typeof args.version === 'string' ? ` (version ${args.version})` : ''}.`,
+  ];
+  lines.push(
+    args.packageId
+      ? `Review and publish it in Studio's Changes for package ${args.packageId} `
+        + `(/studio/${encodeURIComponent(args.packageId)}/interfaces?changes=review).`
+      : 'Review and publish it in Studio\'s Changes of the package that holds it; Studio lists '
+        + 'drafts per package, so name the package with --package to stage it into that package\'s Changes.',
+  );
+  return lines;
 }
 
 export default class MetaRegister extends Command {
@@ -101,6 +145,7 @@ export default class MetaRegister extends Command {
     '$ os meta register plugin --data plugin-manifest.json',
     '$ os meta register view --data view-def.json --package com.acme.crm',
     '$ os meta register object --data object-def.json --force',
+    '$ os meta register view --data view-def.json --package com.acme.crm --mode draft',
   ];
 
   static override args = {
@@ -153,6 +198,16 @@ export default class MetaRegister extends Command {
         + '409 DESTRUCTIVE_CHANGE and writes nothing.',
       default: false,
     }),
+    // [#34777] The lifecycle the save writes into, forwarded as
+    // `SaveMetaItemOptions.mode` (`?mode=draft`) only for `draft`. No default,
+    // so an unflagged run hands the SDK no `mode` and its request is
+    // byte-identical to the one this command always sent: an active save.
+    mode: Flags.string({
+      description:
+        'draft stages the item as a pending draft for review (?mode=draft): nothing is published '
+        + 'until a person publishes it in Studio\'s Changes. publish, the default, saves it live.',
+      options: ['draft', 'publish'],
+    }),
   };
 
   async run(): Promise<void> {
@@ -195,6 +250,15 @@ export default class MetaRegister extends Command {
         await formatOutput(result, 'json');
       } else if (flags.format === 'yaml') {
         await formatOutput(result, 'yaml');
+      } else if (options?.mode === 'draft') {
+        const [head, ...rest] = draftSaveLines({ type: args.type, name, packageId: options.packageId, version: result?.version });
+        printSuccess(head);
+        for (const line of rest) printInfo(line);
+        // The save's own advisories (a draft hears no publish rule; these are
+        // what the door said about the stored row), one line each.
+        for (const advisory of result?.advisories ?? []) {
+          printWarning(`${advisory.rule}: ${advisory.message}`);
+        }
       } else {
         printSuccess(`Metadata registered: ${args.type}/${name}`);
       }
