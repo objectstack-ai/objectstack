@@ -1250,7 +1250,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
-  '⚖️ the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19)': 35,
+  '⚖️ the guard instruments and the `.claude/**` declaration split (ruled 2026-11-19)': 36,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3131,18 +3131,22 @@ export function ruleChangeVerifiedReading(recordBody) {
   return { state: 'unreadable', reason: read.reason };
 }
 
-/** The record stage's one conjunct: the record on this head verifies the body's value. Pure. */
+/**
+ * Where the split leaves the record to the record leg, or null when it read one: a record that was not read,
+ * or none found signed on this head. Tier S on Tier S's own terms — it lands only on a PASS record on this head,
+ * which the record leg reads off the SAME locator and the SAME threads, and an absent, unsigned or unread record
+ * is that leg's refusal. ⛔ So the split never clears anything by itself: it can only move the row to H. Pure.
+ */
+function ruleChangeDeferral(record) {
+  if (!record || record.measured !== true) return `its contract-review record was not read (${record?.reason ?? 'no reading'}): the record leg refuses an unread record`;
+  if (record.located !== 'found') return `no signed contract-review record names this head yet: the record leg refuses until one does, and its \`${RULE_CHANGE_VERIFIED_KEY}:\` line is read then`;
+  return null;
+}
+
+/** The record stage's one conjunct: the record found on this head verifies the body's value. Pure. */
 function ruleChangeRecordReasons(record, declared) {
   const key = RULE_CHANGE_VERIFIED_KEY;
-  const want = `${key}: ${declared}`;
-  if (!record || record.measured !== true) {
-    return [`its contract-review record was not read (${record?.reason ?? 'no reading'}), so no \`${want}\` line is established`];
-  }
-  if (record.located !== 'found') {
-    return [record.located === 'unsigned'
-      ? `its contract-review record on this head names no reviewer, so its \`${key}:\` line does not count`
-      : `no contract-review record names this head, so no \`${want}\` line is established`];
-  }
+  if (ruleChangeDeferral(record) !== null) return [];
   const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
   // A record carried from an older head stands only when the hops moved no `.claude/` path: the reviewer
   // verified the declaration against the diff it read, never against one written after it.
@@ -3160,7 +3164,9 @@ function ruleChangeRecordReasons(record, declared) {
  * record on this head, the shape `lowRiskRecordStage` builds, with its `ruleChangeVerified` line).
  * Tier S only when the body carries one bare `Rule-change: none` or `Rule-change: ruled` (with a
  * `Ruling-ref:` line) AND the record found on this head carries the SAME value on its
- * `Rule-change-verified:` line. `recordStage` says how far it got, as the low-risk arm's does:
+ * `Rule-change-verified:` line. A record absent, unsigned or unread is `deferred` (`ruleChangeDeferral`):
+ * the row stays S and the record leg, which lands Tier S only on a PASS record it reads off the same
+ * locator, refuses it. `recordStage` says how far it got, as the low-risk arm's does:
  * `not-reached` (the body already failed and no record was handed in), `pending` (the body holds and
  * no record was handed in — Tier H, the caller reads the record and asks again), `read`.
  * ⛔ Fail closed: no reading, or one not measured, is Tier H with its reason; `pending` is never S.
@@ -3180,14 +3186,18 @@ export function ruleChangeSplitVerdict(reading) {
   const declared = ruleChangeDeclaration(reading.body);
   if (!declared.ok) reasons.push(`the PR body: ${declared.reason}`);
   let recordStage = LOW_RISK_RECORD_STAGE.notReached;
+  let deferred = null;
   if (reading.record != null) {
     recordStage = LOW_RISK_RECORD_STAGE.read;
-    if (declared.ok) reasons.push(...ruleChangeRecordReasons(reading.record, declared.value));
+    if (declared.ok) {
+      reasons.push(...ruleChangeRecordReasons(reading.record, declared.value));
+      deferred = ruleChangeDeferral(reading.record);
+    }
   } else if (reasons.length === 0) {
     recordStage = LOW_RISK_RECORD_STAGE.pending;
     reasons.push(RULE_CHANGE_PENDING_REASON);
   }
-  return { tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, reasons, declared: declared.ok ? declared.value : null, recordStage };
+  return { tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, reasons, declared: declared.ok ? declared.value : null, recordStage, deferred };
 }
 
 /** Does this row carry the declaration split in `repo`? Pure; the only reader of `ruleChange`. */
@@ -3218,7 +3228,9 @@ export function renderRuleChangeLines(matched) {
   const head = `      ⚖️ \`.claude/**\` declaration split (${RULE_CHANGE_RULING})`;
   if (!v.measured) return `${head}: NOT MEASURED — ${v.reason}.\n         Tier H, fail closed.\n`;
   if (v.tier === GOVERNED_TIER_S) {
-    return `${head}: Tier S — the body declares one bare \`${RULE_CHANGE_KEY}: ${v.declared}\`${v.declared === 'ruled' ? ` beside a \`${RULING_REF_KEY}:\` line` : ''} and the record on this head verifies it (\`${RULE_CHANGE_VERIFIED_KEY}: ${v.declared}\`).\n`;
+    const body = `the body declares one bare \`${RULE_CHANGE_KEY}: ${v.declared}\`${v.declared === 'ruled' ? ` beside a \`${RULING_REF_KEY}:\` line` : ''}`;
+    if (v.deferred) return `${head}: Tier S on the declaration — ${body}; ${v.deferred}.\n`;
+    return `${head}: Tier S — ${body} and the record on this head verifies it (\`${RULE_CHANGE_VERIFIED_KEY}: ${v.declared}\`).\n`;
   }
   return `${head}: Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
@@ -8118,12 +8130,9 @@ async function selfTest() {
     const unverified = verdictOf(READ(NONE, REC(undefined)));
     assert('a-record-with-no-Rule-change-verified-line-is-Tier-H', unverified?.tier === GOVERNED_TIER_H && /carries no `Rule-change-verified:` line/.test(unverified.reasons.join()), JSON.stringify(unverified));
     assert('a-record-verifying-the-other-value-or-yes-is-Tier-H', tierWith([SKILL], READ(NONE, REC('ruled'))) === GOVERNED_TIER_H && tierWith([SKILL], READ(RULED, REC('none'))) === GOVERNED_TIER_H && tierWith([SKILL], READ(NONE, REC('yes'))) === GOVERNED_TIER_H);
-    assert('an-unreadable-line-an-unsigned-an-absent-or-an-unread-record-is-Tier-H', [
-      REC('none', { ruleChangeVerified: { state: 'unreadable', reason: '2 lines' } }),
-      REC('none', { located: 'unsigned' }),
-      { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null },
-      { measured: false, reason: 'the threads could not be read' },
-    ].every((record) => tierWith([SKILL], READ(NONE, record)) === GOVERNED_TIER_H));
+    assert('an-unreadable-line-is-Tier-H', tierWith([SKILL], READ(NONE, REC('none', { ruleChangeVerified: { state: 'unreadable', reason: '2 lines' } }))) === GOVERNED_TIER_H);
+    const deferrals = [REC('none', { located: 'unsigned' }), { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null }, { measured: false, reason: 'the threads could not be read' }].map((record) => verdictOf(READ(NONE, record)));
+    assert('an-unsigned-absent-or-unread-record-is-DEFERRED-to-the-record-leg-which-refuses-it-never-a-clear-of-its-own', deferrals.every((v) => v?.tier === GOVERNED_TIER_S && typeof v.deferred === 'string' && /record leg refuses/.test(v.deferred)) && /Tier S on the declaration/.test(renderRuleChangeLines(applyRuleChangeSplit(governedPathsIn([SKILL], 'objectstack'), 'objectstack', READ(NONE, { measured: false, reason: 'x' })))) && verdictOf(S_NONE).deferred === null, JSON.stringify(deferrals));
     assert('a-record-carried-over-hops-that-moved-a-claude-path-is-Tier-H-and-a-standing-carry-is-S', tierWith([SKILL], READ(NONE, REC('none', { carried: { from: 'abc', ok: false, reason: 'was carried from `abc` over hops that moved .claude/x' } }))) === GOVERNED_TIER_H && tierWith([SKILL], READ(NONE, REC('none', { carried: { from: 'abc', ok: true, reason: null } }))) === GOVERNED_TIER_S);
     const pending = verdictOf(READ(NONE));
     assert('the-body-alone-with-no-record-is-pending-and-Tier-H', pending?.tier === GOVERNED_TIER_H && pending.recordStage === LOW_RISK_RECORD_STAGE.pending && pending.reasons.join() === RULE_CHANGE_PENDING_REASON, JSON.stringify(pending));

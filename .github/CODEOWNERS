@@ -19,7 +19,9 @@
 # `node scripts/pm/check-governed-queue-guard.mjs --self-test` reads this file
 # (`codeownersMirrorVerdict`) and reds when a Tier H row has no line here, when
 # any line names fewer or other owners than that constant, or when a Tier S row
-# (`.claude/**`, which lands on a seat's review of record) is routed here. A
+# (`.claude/**`, which lands on a seat's review of record and a verified
+# `Rule-change:` declaration) is routed here. Its hooks and settings files are
+# Tier H rows of their own (maintainer ruling 2026-11-19) and are routed. A
 # Tier H row carrying the register's low-risk arm (`lowRisk`: the two skills
 # catalogs and the root ADR tree) has NO line here and reds if one is added:
 # the relay's per-pull review plan reads the arm and decides who is asked
@@ -48,7 +50,9 @@
 # The enforcement chain is routed the same way, deliberately: a PR that edits
 # the audit script, the approver constant or this file is a governance change —
 # without these entries the rule could be lifted by editing the enforcers
-# instead of the surfaces.
+# instead of the surfaces. Since 2026-11-19 the four guard instruments (the two
+# scripts below, the record recognisers and the dispatch-gates derivation) are
+# register rows themselves, Tier H, so the mirror check reads their lines too.
 
 # Tier H governed surfaces — the register's rows with tier H, less the
 # low-risk arm's `/docs/adr/` and `/skills/` rows (see the header)
@@ -56,6 +60,9 @@
 /CLAUDE.md @os-zhuang
 /docs/NORTH-STAR.md @os-zhuang
 /.github/workflows/ @os-zhuang
+/.claude/hooks/ @os-zhuang
+/.claude/settings.json @os-zhuang
+/.claude/settings.local.json @os-zhuang
 
 # Tier H governed surfaces of the nested `ui/` workspace (#25712) — the same
 # register rows, under `ui/`; `ui/.claude/` is Tier H, unlike the root tree;
@@ -70,3 +77,5 @@
 /.github/CODEOWNERS @os-zhuang
 /scripts/pm/check-governed-merges.mjs @os-zhuang
 /scripts/pm/check-governed-queue-guard.mjs @os-zhuang
+/scripts/pm/record-recognisers.mjs @os-zhuang
+/scripts/pm/dispatch-gates.mjs @os-zhuang

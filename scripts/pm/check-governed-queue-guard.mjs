@@ -604,13 +604,21 @@
  *                 pull read failed, or the object carries no pair), or the merge
  *                 group names no pull request to read it from. Split from 8 the
  *                 way 4 is split from 3.
+ *  10  REFUSED  — a queued pull request declares a narrowed spec change
+ *                 (`Metadata-protocol: narrowed`, or a `Clause-②:` `(narrowing)`
+ *                 arm, in its body or a changeset it adds or modifies) and lacks
+ *                 an authorized APPROVED review or a PASS review of record on its
+ *                 head (maintainer ruling 2026-11-19). The NARROWING leg.
+ *  11  REFUSED  — the NARROWING leg could not read whether a queued pull request
+ *                 declares a narrowing, or could not read one of its two halves.
+ *                 Split from 10 the way 4 is split from 3.
  *   1  CANNOT RUN — unusable event payload, unsupported event, unreadable git.
  *                 Still non-zero, still red: this file has no green that means
  *                 "did not look".
  *
- *   ⭐ TWO legs, ONE exit, and the precedence is pinned: every leg's block is
+ *   ⭐ THREE legs, ONE exit, and the precedence is pinned: every leg's block is
  *   always printed, and the code is the GOVERNED leg's when it refuses, else
- *   the SIZE leg's (`groupExitCode`). The governed refusal sits on top because
+ *   the NARROWING leg's when it refuses, else the SIZE leg's (`groupExitCode`). The governed refusal sits on top because
  *   its remedy is the stricter one; the size refusal's remedy (an authorized
  *   approval, or a human merge) is the same terminal as Tier H — a group that
  *   is both governed-unsatisfied and oversized prints both limbs and exits 3.
@@ -643,11 +651,13 @@ import {
   LOW_RISK_ARM_RULING,
   LOW_RISK_CHANGESET_PATH,
   LOW_RISK_RECORD_STAGE,
+  RULE_CHANGE_RULING,
   SELF_REPO_ID,
   WORKFLOWS_PREFIX,
   addOnlyDiffArgv,
   applyGeneratedExceptions,
   applyLowRiskArm,
+  applyRuleChangeSplit,
   applyWorkflowSplit,
   assertGovernedRepo,
   forkVerdict,
@@ -656,6 +666,7 @@ import {
   governedSurfacesFor,
   governedTierFor,
   groupHitsByException,
+  landingTierOf,
   landsByHumanMerge,
   lowRiskArmVerdict,
   mergeWorkflowReadings,
@@ -665,10 +676,14 @@ import {
   readWorkflowDiff,
   renderLiftApprovals,
   renderLowRiskLines,
+  renderRuleChangeLines,
   renderWorkflowSplitLines,
   repoIdForSlug,
+  ruleChangeSplitIn,
+  ruleChangeVerifiedReading,
   testVerdict,
 } from './check-governed-merges.mjs';
+import { quoteLine, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -732,6 +747,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 12 → 13 with the arm's record stage on the ADR leg: a record without the line, a `security`-labelled card;
   // 13 → 14 with a second card the note names.
   '⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)': 14,
+  '⚖️ the `.claude/**` declaration split at the queue (ruled 2026-11-19)': 18,
+  '⚖️ the NARROWING leg: a narrowed spec change waits on an authorized approval AND a PASS record (ruled 2026-11-19)': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -746,7 +763,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 29 → 30 with the workflows split battery (ruling record 6722205630): one battery, one row.
 // Raised 30 → 31 with the low-risk skills arm battery (#33501): one battery, one row.
 // Raised 31 → 32 with its ADR leg battery (#33539): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 32;
+// Raised 32 → 34 with the `.claude/**` declaration split and the narrowing leg (ruled 2026-11-19): two batteries, two rows.
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -771,6 +789,7 @@ export const EXIT_REFUSED_UNATTRIBUTED = 5;
  */
 export const EXIT_REFUSED_OVERSIZED = 8;
 export const EXIT_REFUSED_SIZE_UNREADABLE = 9;
+// The NARROWING leg's two refusals (10, 11) are declared with the leg, below the SIZE leg.
 
 /**
  * The check-run name branch protection would pin, and the wiring it belongs
@@ -1147,7 +1166,8 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
         'and with it the one tier the record must stand at — is unknown',
     };
   }
-  const face = recognisers.reviewFace(pair.paths, pair.repo);
+  // A pair carrying `declaredOn` (the narrowing leg: its body and changesets) hands the declaration to the face.
+  const face = recognisers.reviewFace(pair.paths, pair.repo, Array.isArray(pair.declaredOn) ? { declaredOn: pair.declaredOn } : {});
   const located = recognisers.locate(pair);
   if (located.state === 'unreadable') {
     return {
@@ -1574,6 +1594,8 @@ export function satisfiedBy(entry) {
  */
 export function entryUnreadable(entry) {
   if (entry?.approval?.state === 'unreadable') return true;
+  // The `.claude/**` declaration split NOT MEASURED (its pull could not be read): Tier H, and a fact not found out.
+  if ((entry?.surfaces ?? []).some((s) => s?.ruleChangeVerdict?.measured === false)) return true;
   return entry?.tier === TIER_S && entry?.record?.state === 'unreadable';
 }
 
@@ -1731,6 +1753,7 @@ export function renderGuardVerdict(verdict) {
     lines.push(...surfaceLines(entry));
     lines.push(...renderWorkflowSplitLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
     lines.push(...renderLowRiskLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
+    lines.push(...renderRuleChangeLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
     // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
     // superseded by that ruling's own requirement: the early warning names the
     // tier and what it waits for.
@@ -1919,6 +1942,7 @@ export function renderGuardVerdict(verdict) {
         '         and every check green; then the OWNING seat lands it through',
         '         the queue — no maintainer click is waited for (#19133, maintainer 2026-09-18 「同意改规则。」). A record',
         '         on an OLDER head does not carry forward: a record names the head it judged.',
+        `         A \`.claude/**\` path also needs one bare \`Rule-change: none\` (or \`ruled\` beside a \`Ruling-ref:\` line) in the body, verified on the record's \`Rule-change-verified:\` line (${RULE_CHANGE_RULING}).`,
       );
     }
     lines.push(
@@ -2044,6 +2068,7 @@ export function renderGuardVerdict(verdict) {
       '           ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
       '           which since 2026-09-04 does — because a record names the head it judged. ⛔ And it widens to nothing:',
       '           one Tier H path in the diff and option 1 or 2 is the only way through.',
+      `           A \`.claude/**\` path lands so only on one bare \`Rule-change: none\` (or \`ruled\` beside a \`Ruling-ref:\` line) in the body and the same value on the record's \`Rule-change-verified:\` line (${RULE_CHANGE_RULING}).`,
     );
   }
   lines.push(
@@ -2109,9 +2134,34 @@ export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = n
         ...(cardLabels == null ? {} : { cardLabels }),
       }
     : { measured: false, reason: 'its pull request could not be read, so its body and labels are unknown' };
-  entry.surfaces = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading);
-  entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading);
+  // The `.claude/**` declaration split (2026-11-19) is re-applied as last read (`readRuleChangeTier`); undefined passes through.
+  entry.surfaces = applyRuleChangeSplit(applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading), repo, entry.ruleChangeReading);
+  entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading, entry.ruleChangeReading);
   return entry;
+}
+
+/**
+ * The `.claude/**` declaration split (maintainer ruling 2026-11-19) read off the pull request this leg
+ * already holds: the body's one bare `Rule-change: none` or `Rule-change: ruled` (beside a `Ruling-ref:`
+ * line) and — handed in on a SECOND call, as the low-risk arm's record stage is — the review of record on
+ * this head with its `Rule-change-verified:` line (`lowRiskRecordStage` with `ruleChange: true`). An entry
+ * the split's row does not hit is returned untouched; an unread pull is NOT MEASURED, so Tier H.
+ * ⛔ The tier comes from the register's `applyRuleChangeSplit`, never a second predicate here; the reading is
+ * kept on the entry so `readLowRiskTier` re-applies it. Mutates `entry` (`surfaces`, `tier`); returns it.
+ */
+export function readRuleChangeTier(entry, repo, pull, { record = null } = {}) {
+  if (!entry || !(entry.surfaces ?? []).some((s) => ruleChangeSplitIn(s, repo))) return entry;
+  entry.ruleChangeReading = pull
+    ? { measured: true, reason: null, body: String(pull.body ?? ''), ...(record == null ? {} : { record: { ...record, carried: record.ruleChangeCarried ?? null } }) }
+    : { measured: false, reason: 'its pull request could not be read, so its body is unknown' };
+  entry.surfaces = applyRuleChangeSplit(entry.surfaces, repo, entry.ruleChangeReading);
+  entry.tier = landingTierOf(entry.surfaces);
+  return entry;
+}
+
+/** Does the declaration split hold on this entry's body, with its record stage still unread? Tier H as it stands. */
+export function ruleChangeRecordStagePending(entry) {
+  return (entry?.surfaces ?? []).some((s) => s?.ruleChangeVerdict?.recordStage === LOW_RISK_RECORD_STAGE.pending);
 }
 
 /** `git diff-tree --raw` status letters, spelled as the arm reads them. */
@@ -2185,7 +2235,7 @@ export function lowRiskRecordStagePending(entry) {
  * reviewer's `Security-touching:` statement — was read from. A diff that cannot be read refuses too.
  * ONE rule for the record leg's PASS and the arm's record stage. Pure but for `runGit`.
  */
-export function lowRiskCarryRefusal(carriedFrom, pair) {
+export function lowRiskCarryRefusal(carriedFrom, pair, { prefixes = null, reads = 'the arm reads' } = {}) {
   const from = `\`${String(carriedFrom).slice(0, 12)}\``;
   if (typeof pair?.runGit !== 'function' || !pair?.headSha) return `was carried from ${from} and this leg could not diff the hops`;
   let moved;
@@ -2194,9 +2244,10 @@ export function lowRiskCarryRefusal(carriedFrom, pair) {
   } catch (error) {
     return `was carried from ${from} and the hops could not be diffed (${String(error?.message ?? error).split('\n')[0]})`;
   }
-  const catalog = GOVERNED_SURFACES.filter((s) => s.lowRisk && s.prefix).map((s) => s.prefix);
-  const touched = moved.filter((p) => p.startsWith('.changeset/') || catalog.some((prefix) => p.startsWith(prefix)));
-  if (touched.length > 0) return `was carried from ${from} over hops that moved ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ` (+${touched.length - 3} more)` : ''}, which the arm reads, after the review`;
+  // `prefixes` (the declaration split's `.claude/`) replaces the arm's own set: `.changeset/` and every catalog row.
+  const watched = prefixes ?? ['.changeset/', ...GOVERNED_SURFACES.filter((s) => s.lowRisk && s.prefix).map((s) => s.prefix)];
+  const touched = moved.filter((p) => watched.some((prefix) => p.startsWith(prefix)));
+  if (touched.length > 0) return `was carried from ${from} over hops that moved ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ` (+${touched.length - 3} more)` : ''}, which ${reads}, after the review`;
   return null;
 }
 
@@ -2216,13 +2267,13 @@ export function lowRiskCarryRefusal(carriedFrom, pair) {
  * ⛔ It decides nothing: the register's arm reads the object and gives the reasons. Pure but for
  * `pair.runGit`.
  */
-export function lowRiskRecordStage({ pair, recognisers }) {
+export function lowRiskRecordStage({ pair, recognisers, ruleChange = false }) {
   const unmeasured = (reason) => ({ measured: false, reason });
   if (recognisers?.available !== true) return unmeasured(recognisers?.reason ?? 'the contract-review recognisers were not loaded');
   if (typeof recognisers.reading !== 'function') return unmeasured('the contract-review record reader was not loaded');
   const located = recognisers.locate(pair);
   if (located.state === 'unreadable') return unmeasured(`${located.gaps.join(', ')} could not be read`);
-  if (located.state === 'absent') return { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null, securityTouching: null };
+  if (located.state === 'absent') return { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null, securityTouching: null, ...(ruleChange ? { ruleChangeVerified: null, ruleChangeCarried: null } : {}) };
   const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
   const comment = located.id === null || located.id === undefined ? null : rows.find((r) => r?.id === located.id) ?? null;
   if (comment === null) return unmeasured('the record comment was not among the rows read, so its line is unknown');
@@ -2235,7 +2286,21 @@ export function lowRiskRecordStage({ pair, recognisers }) {
     id: located.id,
     carried: located.carriedFrom ? { from: located.carriedFrom, ok: why === null, reason: why } : null,
     securityTouching: recognisers.reading(comment.body)?.securityTouching ?? null,
+    // The `.claude/**` declaration split (2026-11-19): the record's `Rule-change-verified:` line, read with the
+    // register's bare reader, and a carry that stands only when its hops moved no `.claude/` path.
+    ...(ruleChange
+      ? {
+          ruleChangeVerified: ruleChangeVerifiedReading(comment.body),
+          ruleChangeCarried: located.carriedFrom ? ruleChangeCarry(located.carriedFrom, pair) : null,
+        }
+      : {}),
   };
+}
+
+/** The declaration split's carry: the hops after the review may move no `.claude/` path. */
+function ruleChangeCarry(carriedFrom, pair) {
+  const why = lowRiskCarryRefusal(carriedFrom, pair, { prefixes: ['.claude/'], reads: 'the `Rule-change-verified:` line was read against' });
+  return { from: carriedFrom, ok: why === null, reason: why };
 }
 
 /**
@@ -2563,13 +2628,17 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     // timeline the enqueue leg read, the changesets at their commits and the whole
     // path list of its commits. An unread pull is NOT MEASURED: Tier H.
     for (const entry of governed) readLowRiskTier(entry, repo, pulls.get(entry.pr) ?? null, { timeline: timelines.get(entry.pr) ?? null, runGit });
+    // ⚖️ The `.claude/**` declaration split (2026-11-19) off the same pull object: the body's `Rule-change:` line now,
+    // the record's `Rule-change-verified:` line below, off the threads the record leg reads. An unread pull: Tier H.
+    for (const entry of governed) readRuleChangeTier(entry, repo, pulls.get(entry.pr) ?? null);
     let recognisers = null;
     for (const entry of governed) {
       // ⭐ The arm's RECORD STAGE: an entry whose pull-read arm conditions all hold is Tier H until the
       // review's `Security-touching:` line and the card's labels are read. They are read HERE, off the
       // threads this leg reads anyway, and only for an entry nothing else cleared — so the stage is as
       // MONOTONE and as FREE as the record leg it shares its threads with.
-      const pending = lowRiskRecordStagePending(entry);
+      const lowRiskPending = lowRiskRecordStagePending(entry);
+      const pending = lowRiskPending || ruleChangeRecordStagePending(entry);
       if (entry.tier !== TIER_S && !pending) continue;
       if (approvals.get(entry.pr)?.state === 'approved') continue;
       if (enqueues.get(entry.pr)?.state === 'authorized') continue;
@@ -2588,8 +2657,10 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         // record leg is never consulted for it.
         if (pending) {
           const unread = await readLowRiskRecordStage({ pr: entry.pr, pull: null, recognisers });
-          readRecordStage(unread.record, unread.cardLabels);
-          continue;
+          if (lowRiskPending) readRecordStage(unread.record, unread.cardLabels);
+          // The declaration split defers an unread record to the record leg, which refuses it below.
+          if (ruleChangeRecordStagePending(entry)) readRuleChangeTier(entry, repo, pulls.get(entry.pr) ?? null, { record: unread.record });
+          if (entry.tier !== TIER_S) continue;
         }
         records.set(entry.pr, recordVerdict({ pair: null, recognisers }));
         continue;
@@ -2622,11 +2693,16 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       const { ignoredAuthors, unreadable } = threads;
       if (pending) {
         // ⛔ A thread that could not be read is a record that was not read: NOT MEASURED, so Tier H.
-        const stage = unreadable !== null ? { measured: false, reason: unreadable } : lowRiskRecordStage({ pair, recognisers });
-        // Every card the pull names, not only the one whose thread may carry the record.
-        const labelled = await readCardLabels({ card, named: namedCardsOf(recognisers, pull), fetchLabels, fetchTimeline });
-        apiCalls += labelled.apiCalls;
-        readRecordStage(stage, labelled.reading);
+        const ruleChange = (entry.surfaces ?? []).some((s) => ruleChangeSplitIn(s, repo));
+        const stage = unreadable !== null ? { measured: false, reason: unreadable } : lowRiskRecordStage({ pair, recognisers, ruleChange });
+        if (lowRiskPending) {
+          // Every card the pull names, not only the one whose thread may carry the record.
+          const labelled = await readCardLabels({ card, named: namedCardsOf(recognisers, pull), fetchLabels, fetchTimeline });
+          apiCalls += labelled.apiCalls;
+          readRecordStage(stage, labelled.reading);
+        }
+        // AFTER the arm: an arm row that read S may leave the split pending only now.
+        if (ruleChangeRecordStagePending(entry)) readRuleChangeTier(entry, repo, pull, { record: stage });
         // Tier H on the record stage: the entry needs the maintainer, and the record leg is never consulted.
         if (entry.tier !== TIER_S) continue;
       }
@@ -2830,6 +2906,190 @@ export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchP
   return sizeGuardVerdict({ event, repo, pulls, readings, apiCalls });
 }
 
+// ── the NARROWING leg: a narrowed spec change lands only by the maintainer (ruling 2026-11-19) ──
+//
+// A pull request that declares a narrowed published accept set — `Metadata-protocol: narrowed`, or a
+// `Clause-②:` line with a `(narrowing)` arm, in its body or in a changeset its commits add or modify — is
+// refused until BOTH are on record: an authorized APPROVED review (`authorizedApprovalVerdict`, the account
+// list `GOVERNED_APPROVERS`) and a review of record on its head that reads PASS at the tier its face maps to
+// (`recordVerdict` with the declaration handed to `reviewFace`, then `recordPassVerdict`). Every queued pull
+// request is read, governed or not, like the SIZE leg. `added`, `semantic` and `none` are untouched.
+// ⛔ The maintainer's "Merge when ready" is NOT read as the approval here: the ruling names an APPROVED review.
+
+/** The leg's own name in a log, named apart from the other two. */
+export const NARROWING_LEG_NAME = 'Narrowed Spec Change (maintainer ruling 2026-11-19)';
+/** "Declared narrowed, and the approval or the PASS record is missing" and "could not read whether it is". */
+export const EXIT_REFUSED_NARROWING = 10;
+export const EXIT_REFUSED_NARROWING_UNREADABLE = 11;
+
+/**
+ * Does any text declare a narrowing? `texts` are `{ where, text }` — the PR body and each changeset read at
+ * its commit (`text: null`: not read). Read with the fleet's one reader of each line (`clause2-line.mjs`),
+ * ⛔ never a second parser. `narrowed` wins on any text; else a text not read, or a line either reader calls
+ * `malformed` (a near-miss arm such as `(narrowed)` collapses there exactly so it cannot read as no
+ * narrowing), is `unreadable`; else `none`. Pure.
+ */
+export function narrowingDeclaration(texts) {
+  const narrowed = [];
+  const unread = [];
+  const malformed = [];
+  for (const { where, text } of Array.isArray(texts) ? texts : []) {
+    if (typeof text !== 'string') {
+      unread.push(where);
+      continue;
+    }
+    const meta = readMetadataProtocolLine(text);
+    const clause = readClause2Line(text);
+    if (meta?.kind === 'declared' && meta.value === 'narrowed') narrowed.push(`${where}: \`Metadata-protocol: narrowed\``);
+    if (clause?.kind === 'declared' && clause.arm === 'narrowing') narrowed.push(`${where}: a \`Clause-②:\` line with the \`(narrowing)\` arm`);
+    for (const read of [meta, clause]) if (read?.kind === 'malformed') malformed.push(`${where}: ${read.line}`);
+  }
+  if (narrowed.length > 0) return { state: 'narrowed', where: narrowed, reason: null };
+  if (unread.length > 0) return { state: 'unreadable', where: [], reason: `${unread.join(', ')} could not be read, so whether it declares a narrowing is unknown` };
+  if (malformed.length > 0) return { state: 'unreadable', where: [], reason: `a declaration line reads malformed (${malformed.slice(0, 2).join('; ')}), so whether it declares a narrowing is unknown` };
+  return { state: 'none', where: [], reason: null };
+}
+
+/**
+ * The changesets this pull request's commits add or modify, each read at its commit: `{ where, text }`.
+ * A changeset a commit DELETES (a Version Packages PR consumes them all) declares nothing and is skipped —
+ * `git ls-tree` naming nothing at that commit is the deletion; a read that throws is `text: null`. Never throws.
+ */
+export function changesetTextsOf(rows, pr, runGit) {
+  const texts = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.pr !== pr) continue;
+    for (const path of (Array.isArray(row.paths) ? row.paths : []).filter((p) => LOW_RISK_CHANGESET_PATH.test(p) && p !== '.changeset/README.md')) {
+      const where = `${path} at ${String(row.sha ?? '(no commit)').slice(0, 12)}`;
+      if (typeof runGit !== 'function' || !row.sha) {
+        texts.push({ where, text: null });
+        continue;
+      }
+      try {
+        if (String(runGit(['ls-tree', '-z', '--name-only', row.sha, '--', path])) === '') continue;
+        texts.push({ where, text: String(runGit(['show', `${row.sha}:${path}`])) });
+      } catch {
+        texts.push({ where, text: null });
+      }
+    }
+  }
+  return texts;
+}
+
+/**
+ * The leg's verdict, as data. Pure. `entries` are the queued pull requests that declare a narrowing or could
+ * not be read: `{ pr, declaration, approval?, record?, state: 'cleared'|'refused'|'unreadable' }`. A known
+ * missing half refuses (10) ahead of an unread one (11). `pull_request` runs are `not-applicable`.
+ */
+export function narrowingGuardVerdict({ event, repo, entries = [], apiCalls = 0 }) {
+  assertGovernedRepo(repo, 'narrowingGuardVerdict');
+  const base = { event, repo, entries, apiCalls, legName: NARROWING_LEG_NAME };
+  if (event !== EVENT_MERGE_GROUP) return { ...base, entries: [], conclusion: 'not-applicable', exitCode: EXIT_CLEAR };
+  if (entries.some((e) => e.state === 'refused')) return { ...base, conclusion: 'refused', exitCode: EXIT_REFUSED_NARROWING };
+  if (entries.some((e) => e.state === 'unreadable')) return { ...base, conclusion: 'refused', exitCode: EXIT_REFUSED_NARROWING_UNREADABLE };
+  return { ...base, conclusion: 'clear', exitCode: EXIT_CLEAR };
+}
+
+/** One narrowed entry's state from its two halves. Pure. */
+export function narrowingEntryState(approval, record) {
+  const approved = approval?.state === 'approved';
+  const passed = record?.state === 'stands' && record?.verdict === 'PASS';
+  if (approved && passed) return 'cleared';
+  const knownMissing = (approval?.state !== 'approved' && approval?.state !== 'unreadable') || (!passed && record?.state !== 'unreadable');
+  return knownMissing ? 'refused' : 'unreadable';
+}
+
+/**
+ * The narrowing orchestrator. Every queued pull request (`queuedPullsInGroup`) is read through `fetchPull`
+ * (the SAME reader as the other legs; `main` hands one memoized reader to all three), its changesets through
+ * `runGit`. Only a narrowed one costs more: its reviews (the governed leg's verdict reused when it has one),
+ * then the record threads. A throw is `unreadable`, never a pass and never an escaping rejection.
+ */
+export async function runNarrowingGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, fetchComments = null, loadRecognisers = loadRecordRecognisers, runGit = null, baseRef = null, approvals = new Map() }) {
+  assertGovernedRepo(repo, 'runNarrowingGuard');
+  if (event !== EVENT_MERGE_GROUP) return narrowingGuardVerdict({ event, repo });
+  const why = (error) => String(error?.message ?? error).split('\n')[0];
+  const entries = [];
+  let apiCalls = 0;
+  let recognisers = null;
+  for (const pr of queuedPullsInGroup(rows, namedPull)) {
+    let pull;
+    try {
+      apiCalls += 1;
+      pull = await fetchPull(pr);
+    } catch (error) {
+      entries.push({ pr, state: 'unreadable', declaration: { state: 'unreadable', where: [], reason: `its pull request could not be read (${why(error)})` } });
+      continue;
+    }
+    const changesets = changesetTextsOf(rows, pr, runGit);
+    const declaration = narrowingDeclaration([{ where: 'the PR body', text: typeof pull?.body === 'string' ? pull.body : null }, ...changesets]);
+    if (declaration.state === 'none') continue;
+    if (declaration.state === 'unreadable') {
+      entries.push({ pr, state: 'unreadable', declaration });
+      continue;
+    }
+    const headSha = pull?.sha ?? null;
+    let approval = approvals.get(pr) ?? null;
+    if (approval === null) {
+      if (typeof fetchReviews !== 'function') approval = unreadableApproval('no review reader was supplied to the narrowing leg');
+      else {
+        try {
+          apiCalls += 1;
+          approval = authorizedApprovalVerdict(await fetchReviews(pr), headSha);
+        } catch (error) {
+          approval = unreadableApproval(why(error));
+        }
+      }
+    }
+    if (recognisers === null) {
+      try {
+        recognisers = await loadRecognisers();
+      } catch (error) {
+        recognisers = { available: false, reason: `the recogniser load threw: ${why(error)}` };
+      }
+    }
+    let record;
+    if (recognisers.available !== true) record = recordVerdict({ pair: null, recognisers });
+    else if (typeof fetchComments !== 'function') record = { state: 'unreadable', reason: 'no comment reader was supplied to the narrowing leg' };
+    else {
+      const card = recognisers.deliveredCard({ number: pr, body: String(pull?.body ?? ''), labels: pull?.labels ?? null, head: { ref: pull?.headRef ?? '' } });
+      const cardNote = card.card === null ? `⚠️ no card thread was searched — ${card.reason}` : `card #${card.card}, ${card.evidence}`;
+      const paths = [...new Set(rows.filter((r) => r?.pr === pr).flatMap((r) => (Array.isArray(r.paths) ? r.paths : [])))];
+      // ⭐ The declaration travels with the pair, so the face reads the narrowing the body and changesets declare.
+      const pair = { pr, card: card.card, headSha, runGit, baseRef, paths, repo, declaredOn: [String(pull?.body ?? ''), ...changesets.map((c) => c.text).filter((t) => typeof t === 'string')] };
+      const threads = await readRecordThreads({ pair, recognisers, fetchComments });
+      apiCalls += threads.apiCalls;
+      record = threads.unreadable !== null ? { state: 'unreadable', reason: threads.unreadable, cardNote } : recordPassVerdict(recordVerdict({ pair, recognisers, cardNote }), pair, recognisers);
+    }
+    entries.push({ pr, declaration, approval, record, state: narrowingEntryState(approval, record) });
+  }
+  return narrowingGuardVerdict({ event, repo, entries, apiCalls });
+}
+
+/** The words a reader acts on for this leg; '' when nothing in the group declares a narrowing. Pure. */
+export function renderNarrowingVerdict(verdict) {
+  if (verdict.conclusion === 'not-applicable' || verdict.entries.length === 0) return '';
+  const head = verdict.exitCode === EXIT_CLEAR ? '✅  CLEARED' : `⛔ REFUSED (exit ${verdict.exitCode})`;
+  const lines = [`${verdict.legName} — ${head}: ${verdict.entries.length} queued pull request(s) declare a narrowing or could not be read.`];
+  for (const e of verdict.entries) {
+    lines.push('', `  #${e.pr} — ${e.state}`);
+    if (e.declaration.state === 'narrowed') lines.push(...e.declaration.where.map((w) => `      declared: ${w}`));
+    else lines.push(`      ${e.declaration.reason}`);
+    if (e.approval) lines.push(`      approval: ${e.approval.state === 'approved' ? `APPROVED by ${e.approval.approvers.join(', ')}` : `${e.approval.state}${e.approval.reason ? ` (${e.approval.reason})` : ''}`}`);
+    if (e.record) lines.push(`      review of record on this head: ${e.record.state === 'stands' && e.record.verdict === 'PASS' ? 'PASS' : `${e.record.state}${e.record.verdictReason ? ` — ${e.record.verdictReason}` : e.record.reason ? ` — ${e.record.reason}` : ''}`}`);
+  }
+  if (verdict.exitCode !== EXIT_CLEAR) {
+    lines.push(
+      '',
+      '  ⛔ A narrowed spec change lands only by the maintainer (ruling 2026-11-19): BOTH an APPROVED review on the pull',
+      '     request from an account in GOVERNED_APPROVERS AND a `## Contract review` record naming its CURRENT head that',
+      '     reads PASS at the tier its face maps to. ⛔ No seat approves in the maintainer\'s place, and no record substitutes',
+      '     for the approval. A declaration that does not narrow is corrected in the body or changeset, never removed to pass.',
+    );
+  }
+  return lines.join('\n');
+}
+
 // ── #19344: the remedy's terminal is a RULESET fact, so it is READ ─────────
 //
 // GitHub offers it only to an account ruleset `main` lists as a bypass actor,
@@ -3020,8 +3280,10 @@ export function renderSizeVerdict(verdict) {
  * oversized prints both limbs and exits on the governed one. ⛔ No leg's code is swallowed silently: every block is always
  * printed, whichever code the run exits on.
  */
-export function groupExitCode({ governed, size }) {
+export function groupExitCode({ governed, size, narrowing = null }) {
   if (governed?.exitCode !== EXIT_CLEAR) return governed.exitCode;
+  // The narrowing leg (2026-11-19) sits between: its remedy is the maintainer's approval AND a record.
+  if (narrowing && narrowing.exitCode !== EXIT_CLEAR) return narrowing.exitCode;
   return size.exitCode;
 }
 
@@ -3595,7 +3857,13 @@ async function main() {
     token: env.GITHUB_TOKEN || env.GH_TOKEN || null,
   };
   const fetchReviews = makeReviewReader(reader);
-  const fetchPull = makePullReader(reader);
+  // ONE pull read per pull request across the three legs: the narrowing leg reads every queued pull, as the size leg does.
+  const readPull = makePullReader(reader);
+  const pullReads = new Map();
+  const fetchPull = (pr) => {
+    if (!pullReads.has(pr)) pullReads.set(pr, readPull(pr));
+    return pullReads.get(pr);
+  };
   const fetchComments = makeCommentReader(reader);
   const fetchTimeline = makeTimelineReader(reader);
   const fetchLabels = makeLabelReader(reader);
@@ -3621,10 +3889,25 @@ async function main() {
     approvals: new Map(verdict.entries.map((e) => [e.pr, e.enqueue === undefined ? e.approval : { ...e.approval, enqueue: e.enqueue }])),
   });
   const sizeBlock = renderSizeVerdict(size);
+  // The NARROWING leg (2026-11-19): every queued pull request, the governed leg's approvals reused.
+  const narrowing = await runNarrowingGuard({
+    event: context.event,
+    repo,
+    rows,
+    namedPull: context.namedPull,
+    fetchPull,
+    fetchReviews,
+    fetchComments,
+    runGit,
+    baseRef: context.baseSha ?? null,
+    approvals: new Map(verdict.entries.map((e) => [e.pr, e.approval])),
+  });
+  const narrowingBlock = renderNarrowingVerdict(narrowing);
   const report = [
     `${context.label} — ${commitsInRange(read.rows)} commit(s) in range`,
     ...notes,
     renderGuardVerdict(verdict),
+    ...(narrowingBlock === '' ? [] : ['', narrowingBlock]),
     ...(sizeBlock === '' ? [] : ['', sizeBlock]),
   ].join('\n');
   console.log(report);
@@ -3644,7 +3927,7 @@ async function main() {
   // or the maintainer's own direct merge, Prime Directive #14), the size
   // refusal's is the same human terminal. ⛔ No leg's code is swallowed
   // silently — every block states its refusal in full either way.
-  return groupExitCode({ governed: verdict, size });
+  return groupExitCode({ governed: verdict, size, narrowing });
 }
 
 // ⛔ NOT `process.exitCode = await main()`, and this is not a style choice.
@@ -3787,14 +4070,15 @@ export async function selfTest() {
   const WF = '.github/workflows/lint.yml';
   const wfWork = decomposeGovernedWork([row(23043, [WF])], REPO);
   assert('a-workflow-path-in-this-queue-with-NO-reading-decomposes-to-ONE-governed-entry-Tier-H', wfWork.governed.length === 1 && wfWork.governed[0].tier === TIER_H && wfWork.governed[0].surfaces.map((s) => s.id).join() === 'workflows' && wfWork.governed[0].paths.join() === WF, JSON.stringify(wfWork));
-  assert('the-same-path-is-governed-in-objectui-and-cloud', ['objectui', 'cloud'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 1 && governedTierFor([WF], r) === TIER_H));
-  assert('and-NOT-in-objectos-or-hotcrm-the-scope-is-the-rows-not-the-guards', ['objectos', 'hotcrm'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 0 && governedPathsIn([WF], r).length === 0));
+  // hotcrm joined the workflows row on 2026-11-19 (an audit mirror: its own guard copy is not in this tree).
+  assert('the-same-path-is-governed-in-objectui-cloud-and-hotcrm', ['objectui', 'cloud', 'hotcrm'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 1 && governedTierFor([WF], r) === TIER_H));
+  assert('and-NOT-in-objectos-the-scope-is-the-rows-not-the-guards', ['objectos'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 0 && governedPathsIn([WF], r).length === 0));
   assert('a-github-tree-sibling-outside-workflows-is-clear', decomposeGovernedWork([row(2, ['.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS', '.github/workflowsx/y.yml'])], REPO).governed.length === 0);
   const wfRefused = run('merge_group', [row(23043, [WF])], new Map([[23043, authorizedApprovalVerdict([], HEAD)]]));
   assert('an-unapproved-workflow-PR-is-REFUSED-at-the-queue-on-the-Tier-H-terminal', wfRefused.exitCode === EXIT_REFUSED_UNAPPROVED && renderGuardVerdict(wfRefused).includes(WF) && /landing tier: H/.test(renderGuardVerdict(wfRefused)), renderGuardVerdict(wfRefused));
   assert('and-an-authorized-approval-on-the-head-clears-it', run('merge_group', [row(23043, [WF])], new Map([[23043, authorizedPass()]])).exitCode === EXIT_CLEAR);
   const wfClearText = renderGuardVerdict(run('merge_group', [row(3, ['.github/ISSUE_TEMPLATE/bug.md'])]));
-  assert('the-clear-words-count-the-rows-that-govern-THIS-repository-and-name-it', /13 surfaces govern objectstack/.test(wfClearText), wfClearText);
+  assert('the-clear-words-count-the-rows-that-govern-THIS-repository-and-name-it', /20 surfaces govern objectstack/.test(wfClearText), wfClearText);
   const threw = (fn) => { try { fn(); return null; } catch (error) { return error; } };
   assert('⛔ decomposeGovernedWork-without-a-repository-is-an-ERROR-never-a-clear', threw(() => decomposeGovernedWork([row(1, [WF])])) instanceof TypeError && /decomposeGovernedWork wants the repository/.test(threw(() => decomposeGovernedWork([row(1, [WF])])).message));
   const liftRejects = await liftGeneratedExceptions('/w', 'base', [], []).then(() => null, (error) => error);
@@ -5443,7 +5727,9 @@ export async function selfTest() {
   const RULES_PATH = 'AGENTS.md';
   const TIER_H_PATHS = ['AGENTS.md', 'CLAUDE.md', 'docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md'];
 
-  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH, HOOK_PATH, SETTINGS_PATH], REPO) === TIER_S);
+  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH], REPO) === TIER_S);
+  // ⚖️ 2026-11-19: hooks and settings left the tier — each a Tier H row of its own, in the same diff or alone.
+  assert('hooks-and-settings-are-Tier-H-since-2026-11-19-alone-and-beside-Tier-S-paths', governedTierFor([HOOK_PATH], REPO) === TIER_H && governedTierFor([SETTINGS_PATH], REPO) === TIER_H && governedTierFor([REF_A, HOOK_PATH], REPO) === TIER_H);
   assert('⛔ the-old-references-boundary-is-GONE-SKILL-md-and-a-references-draft-sibling-are-Tier-S-alike', governedTierFor([SKILL_PATH], REPO) === TIER_S && governedTierFor(['.claude/skills/pm-dispatch/references-draft/x.md'], REPO) === TIER_S);
   assert('ONE-Tier-H-path-makes-the-WHOLE-entry-Tier-H', governedTierFor([REF_A, REF_B, RULES_PATH], REPO) === TIER_H);
   assert('each-Tier-H-surface-alone-is-Tier-H', TIER_H_PATHS.every((p) => governedTierFor([p], REPO) === TIER_H), TIER_H_PATHS.join());
@@ -5477,7 +5763,9 @@ export async function selfTest() {
   // the one the live loader assembled from `check-handover.mjs`, ⛔ never typed here.
   const RELAY = live.trustedAuthors?.[0];
   assert('the-live-loader-trusts-the-relay-identity-first-then-GOVERNED_APPROVERS-and-nothing-else', typeof RELAY === 'string' && RELAY.endsWith('[bot]') && JSON.stringify(live.trustedAuthors) === JSON.stringify([RELAY, ...GOVERNED_APPROVERS]), JSON.stringify(live.trustedAuthors));
-  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = '**VERDICT: PASS**', prose = [], by = RELAY } = {}) => ({
+  // ⚖️ `ruleChange` is the record's `Rule-change-verified:` line (2026-11-19): every `.claude/**` fixture's body declares
+  // `Rule-change: none` (`tierRun`'s default), so the default record verifies it; null leaves the line out.
+  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = '**VERDICT: PASS**', prose = [], by = RELAY, ruleChange = 'none' } = {}) => ({
     id,
     created_at: at,
     ...(by === null ? {} : { user: { login: by } }),
@@ -5487,6 +5775,7 @@ export async function selfTest() {
       `Head-sha: \`${sha}\``,
       ...(signed ? ['Reviewed-by: `session_01SEAT`'] : []),
       ...(tierLine ? [tierLine] : []),
+      ...(ruleChange === null ? [] : [`Rule-change-verified: ${ruleChange}`]),
       ...prose,
       '',
       verdictWord,
@@ -5506,6 +5795,8 @@ export async function selfTest() {
     comments = [],
     cardComments = [],
     prBody = `Fixes #${REF_CARD}`,
+    // ⚖️ The body's `Rule-change:` line (2026-11-19), appended to whatever `prBody` says; null appends none.
+    ruleChange = 'none',
     branch = `claude/issue-${REF_CARD}-x`,
     head = REF_HEAD,
     headThrows = false,
@@ -5537,7 +5828,7 @@ export async function selfTest() {
       event,
       rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }, ...extraRows],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
-      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels, fork }); },
+      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: ruleChange === null ? prBody : `${prBody}\n\nRule-change: ${ruleChange}`, headRef: branch, labels, fork }); },
       ...(timeline === null ? {} : { fetchTimeline: async (n) => { if (n !== pr) tierApiCalls += 1; const read = n === pr ? timeline : (cardTimelineBy[n] ?? cardTimeline); if (read === 'throw') throw new Error('HTTP 403'); return read; } }),
       ...(cardLabels === null ? {} : { fetchLabels: async (n) => { tierApiCalls += 1; tierLabelsRead.push(n); const read = cardLabelsBy[n] ?? cardLabels; if (read === 'throw') throw new Error('HTTP 403'); return read; } }),
       fetchComments: async (n) => {
@@ -5580,13 +5871,14 @@ export async function selfTest() {
   // ⭐ #19133, end to end: the generalised tier. An agents + settings diff lands
   // on the same record — and its lit control, the same diff with NO record, is
   // refused (the card's own acceptance line).
-  const agentPass = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [recordComment()] });
+  // Settings moved to Tier H on 2026-11-19, so the generalised pair is agents + a skill now.
+  const agentPass = await tierRun({ files: [AGENT_PATH, SKILL_PATH], comments: [recordComment()] });
   assert(
-    'a-claude-agents-plus-settings-PR-with-a-valid-record-PASSES-with-zero-approvals-Tier-S-generalised',
+    'a-claude-agents-plus-skill-PR-with-a-valid-record-PASSES-with-zero-approvals-Tier-S-generalised',
     agentPass.exitCode === EXIT_CLEAR && agentPass.conclusion === 'cleared' && agentPass.entries[0].tier === TIER_S && agentPass.entries[0].record.state === 'stands',
     JSON.stringify(agentPass.entries[0].record),
   );
-  const agentNoRecord = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [] });
+  const agentNoRecord = await tierRun({ files: [AGENT_PATH, SKILL_PATH], comments: [] });
   assert(
     '⛔ CONTROL: the-same-Tier-S-PR-with-NO-record-is-REFUSED',
     agentNoRecord.exitCode === EXIT_REFUSED_UNAPPROVED && agentNoRecord.entries[0].tier === TIER_S && agentNoRecord.entries[0].record.state === 'absent',
@@ -5872,8 +6164,9 @@ export async function selfTest() {
     loadRecognisers: async () => { throw new Error('the recognisers must not be loaded when an approval already satisfies the entry'); },
   });
   assert(
+    // Since 2026-11-19 a `.claude/**` entry whose body declares no `Rule-change:` line reads Tier H, so it carries no record key.
     '⭐ MONOTONE-an-APPROVED-references-PR-clears-on-the-approval-and-the-thread-is-never-read',
-    monotone.exitCode === EXIT_CLEAR && monotone.entries[0].record.state === 'unreadable',
+    monotone.exitCode === EXIT_CLEAR && monotone.entries[0].approval.state === 'approved' && monotone.entries[0].tier === TIER_H && monotone.entries[0].record === undefined,
     JSON.stringify(monotone.entries[0].record),
   );
   assert(
@@ -5895,7 +6188,8 @@ export async function selfTest() {
   const tierNoThread = await tierRun({ commentsThrow: true });
   assert('⛔ an-UNREADABLE-thread-is-exit-4-never-a-record-that-is-absent', tierNoThread.exitCode === EXIT_REFUSED_UNREADABLE && tierNoThread.entries[0].record.state === 'unreadable');
   const tierNoHead = await tierRun({ headThrows: true, comments: [recordComment()] });
-  assert('⛔ an-UNREADABLE-head-is-exit-4-on-THIS-tier-because-a-record-names-a-head', tierNoHead.exitCode === EXIT_REFUSED_UNREADABLE && tierNoHead.entries[0].record.state === 'unreadable');
+  // Since 2026-11-19 an unread pull is also an unread `Rule-change:` line: the split is NOT MEASURED, Tier H, still exit 4.
+  assert('⛔ an-UNREADABLE-head-is-exit-4-on-THIS-tier-because-a-record-names-a-head', tierNoHead.exitCode === EXIT_REFUSED_UNREADABLE && tierNoHead.entries[0].tier === TIER_H && /declaration split \([^)]*\): NOT MEASURED/.test(renderGuardVerdict(tierNoHead)), renderGuardVerdict(tierNoHead));
   const tierNoRecognisers = await tierRun({ recognisers: { available: false, reason: 'a rename' }, comments: [recordComment()] });
   assert('⛔ recognisers-that-did-not-load-are-exit-4-fail-CLOSED', tierNoRecognisers.exitCode === EXIT_REFUSED_UNREADABLE);
   const tierLoaderThrew = await tierRun({ loaderThrows: true, comments: [recordComment()] });
@@ -6277,7 +6571,7 @@ export async function selfTest() {
     const live = codeownersMirrorVerdict({ text: onDisk });
     assert('⭐ the-file-on-disk-mirrors-the-register-and-the-approver-list', live.ok, live.problems.join(' | '));
     assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries-or-an-arm-row-it-leaves-out', live.tierHPatterns.length + live.armPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)) && live.armPatterns.every((p) => !live.rows.some((r) => r.pattern === p)), JSON.stringify([live.tierHPatterns, live.armPatterns]));
-    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/,/.claude/hooks/,/.claude/settings.json,/.claude/settings.local.json,/scripts/pm/check-governed-merges.mjs,/scripts/pm/check-governed-queue-guard.mjs,/scripts/pm/record-recognisers.mjs,/scripts/pm/dispatch-gates.mjs', live.tierHPatterns.join());
     // Ruling record 6891850019: the rows carrying the low-risk arm leave the file — read off the register's `lowRisk`, never a list here.
     assert('⭐ the-arm-patterns-are-the-register-rows-carrying-the-low-risk-arm-here', live.armPatterns.join() === '/docs/adr/,/skills/,/ui/skills/' && live.armPatterns.join() === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H && s.lowRisk?.repos?.includes(REPO)).map((s) => `/${s.prefix ?? s.exact}`).join(), live.armPatterns.join());
     assert('every-line-on-disk-names-every-approver-spelled-as-a-login', live.rows.every((r) => GOVERNED_APPROVERS.every((a) => r.owners.includes(`@${a}`))) && live.rows.length >= live.tierHPatterns.length, JSON.stringify(live.rows));
@@ -6857,6 +7151,129 @@ export async function selfTest() {
       const p = asked.find((a) => a.includes('-p'));
       return Boolean(p) && p.join(' ') === addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], ['a'.repeat(40)], ADR).join(' ');
     })());
+  }
+
+  // ── ⚖️ the `.claude/**` declaration split at the queue (maintainer ruling 2026-11-19) ──
+  //
+  // End to end through `runGuard`: the body's `Rule-change:` line off the pull this leg already holds, the
+  // record's `Rule-change-verified:` line off the threads the record leg reads. Each branch both ways.
+  battery('⚖️ the `.claude/**` declaration split at the queue (ruled 2026-11-19)');
+  {
+    const words = (v) => renderGuardVerdict(v);
+    const cleared = await tierRun({ comments: [recordComment()] });
+    assert('Rule-change-none-and-a-PASS-record-verifying-none-CLEARS-at-Tier-S', cleared.exitCode === EXIT_CLEAR && cleared.entries[0].tier === TIER_S && /declaration split \([^)]*\): Tier S — the body declares one bare `Rule-change: none`/.test(words(cleared)), words(cleared));
+    const noLine = await tierRun({ ruleChange: null, comments: [recordComment()] });
+    assert('⛔ no-Rule-change-line-is-Tier-H-and-REFUSED-whatever-the-record-says', noLine.exitCode === EXIT_REFUSED_UNAPPROVED && noLine.entries[0].tier === TIER_H && /no `Rule-change:` line/.test(words(noLine)), words(noLine));
+    const yes = await tierRun({ ruleChange: 'yes', comments: [recordComment({ ruleChange: 'yes' })] });
+    assert('⛔ Rule-change-yes-is-Tier-H-and-REFUSED', yes.exitCode === EXIT_REFUSED_UNAPPROVED && yes.entries[0].tier === TIER_H);
+    const unverified = await tierRun({ comments: [recordComment({ ruleChange: null })] });
+    assert('⛔ a-PASS-record-with-no-Rule-change-verified-line-is-Tier-H-and-REFUSED', unverified.exitCode === EXIT_REFUSED_UNAPPROVED && unverified.entries[0].tier === TIER_H && /carries no `Rule-change-verified:` line/.test(words(unverified)), words(unverified));
+    const other = await tierRun({ comments: [recordComment({ ruleChange: 'ruled' })] });
+    assert('⛔ a-record-verifying-the-other-value-is-Tier-H-and-REFUSED', other.exitCode === EXIT_REFUSED_UNAPPROVED && other.entries[0].tier === TIER_H);
+    const RULED = `Fixes #${REF_CARD}\n\nRule-change: ruled\nRuling-ref: 「同意」 — the maintainer, review-split thread, 2026-11-19T04:30Z`;
+    const ruled = await tierRun({ ruleChange: null, prBody: RULED, comments: [recordComment({ ruleChange: 'ruled' })] });
+    assert('ruled-beside-a-Ruling-ref-and-verified-ruled-CLEARS-at-Tier-S', ruled.exitCode === EXIT_CLEAR && ruled.entries[0].tier === TIER_S, words(ruled));
+    const noRef = await tierRun({ ruleChange: null, prBody: `Fixes #${REF_CARD}\n\nRule-change: ruled`, comments: [recordComment({ ruleChange: 'ruled' })] });
+    assert('⛔ ruled-without-a-Ruling-ref-line-is-Tier-H-and-REFUSED', noRef.exitCode === EXIT_REFUSED_UNAPPROVED && noRef.entries[0].tier === TIER_H && /no line-start `Ruling-ref:`/.test(words(noRef)), words(noRef));
+    const quoted = await tierRun({ ruleChange: null, prBody: `Fixes #${REF_CARD}\n\n> Rule-change: none`, comments: [recordComment()] });
+    assert('⛔ a-quoted-Rule-change-line-is-Tier-H', quoted.exitCode === EXIT_REFUSED_UNAPPROVED && quoted.entries[0].tier === TIER_H);
+    const noRecord = await tierRun({ comments: [] });
+    assert('no-record-at-all-stays-Tier-S-DEFERRED-and-the-record-leg-REFUSES-it', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_S && noRecord.entries[0].record.state === 'absent' && /Tier S on the declaration/.test(words(noRecord)), words(noRecord));
+    const hook = await tierRun({ files: [HOOK_PATH], comments: [recordComment()] });
+    assert('⛔ a-hook-path-is-Tier-H-and-REFUSED-beside-a-verified-declaration', hook.exitCode === EXIT_REFUSED_UNAPPROVED && hook.entries[0].tier === TIER_H && hook.entries[0].surfaces.map((s) => s.id).join() === 'claude-tree,claude-hooks');
+    const settings = await tierRun({ files: ['.claude/settings.local.json', REF_A], comments: [recordComment()] });
+    assert('⛔ a-settings-file-beside-a-skill-is-Tier-H-and-REFUSED', settings.exitCode === EXIT_REFUSED_UNAPPROVED && settings.entries[0].tier === TIER_H);
+    const instrument = await tierRun({ files: ['scripts/pm/record-recognisers.mjs'], comments: [recordComment()] });
+    assert('⛔ a-guard-instrument-is-Tier-H-and-a-PASS-record-does-not-land-it', instrument.exitCode === EXIT_REFUSED_UNAPPROVED && instrument.entries[0].tier === TIER_H && instrument.entries[0].surfaces.map((s) => s.id).join() === 'guard-records');
+    const approvedH = await tierRun({ ruleChange: null, reviews: [approvedAt(GOVERNED_APPROVERS[0], REF_HEAD)] });
+    assert('an-authorized-approval-clears-a-claude-entry-the-split-put-at-Tier-H', approvedH.exitCode === EXIT_CLEAR && approvedH.entries[0].tier === TIER_H);
+    // The reader, as a unit: untouched without the row, NOT MEASURED without the pull.
+    const plain = { pr: 1, paths: ['AGENTS.md'], surfaces: governedPathsIn(['AGENTS.md'], REPO), tier: TIER_H };
+    assert('readRuleChangeTier-leaves-an-entry-the-row-does-not-hit-untouched', readRuleChangeTier(plain, REPO, pull(HEAD, { body: 'Rule-change: none' })).ruleChangeReading === undefined && plain.tier === TIER_H);
+    const unread = readRuleChangeTier({ pr: 2, paths: [REF_A], surfaces: governedPathsIn([REF_A], REPO), tier: TIER_S }, REPO, null);
+    assert('and-reads-an-unread-pull-NOT-MEASURED-Tier-H-which-is-exit-4s-fact', unread.tier === TIER_H && unread.surfaces[0].ruleChangeVerdict.measured === false && entryUnreadable({ ...unread, approval: { state: 'unapproved' } }));
+    // The record stage carries the record's line, and its own carry rule over `.claude/` hops.
+    const fakeStage = (moved) => lowRiskRecordStage({
+      ruleChange: true,
+      recognisers: { available: true, reading: () => ({ securityTouching: null }), locate: () => ({ state: 'found', where: 'PR', id: 5, carriedFrom: 'b'.repeat(40) }), threads: [{ rows: 'prRows' }] },
+      pair: { prRows: [{ id: 5, body: 'Rule-change-verified: none' }], headSha: 'c'.repeat(40), runGit: () => `${moved}\0` },
+    });
+    const overClaude = fakeStage('.claude/skills/x.md');
+    assert('the-record-stage-reads-the-Rule-change-verified-line-off-the-located-comment', overClaude.ruleChangeVerified?.value === 'none', JSON.stringify(overClaude));
+    assert('⛔ a-record-carried-over-hops-that-moved-a-claude-path-does-not-stand-for-the-split', overClaude.ruleChangeCarried?.ok === false && /\.claude\/skills\/x\.md/.test(overClaude.ruleChangeCarried.reason), JSON.stringify(overClaude.ruleChangeCarried));
+    assert('and-one-over-hops-that-moved-none-stands', fakeStage('docs/x.md').ruleChangeCarried?.ok === true && lowRiskRecordStage({ pair: {}, recognisers: { available: true, reading: () => ({}), locate: () => ({ state: 'absent' }), threads: [] } }).ruleChangeVerified === undefined);
+  }
+
+  // ── ⚖️ the NARROWING leg: a narrowed spec change lands only by the maintainer (ruling 2026-11-19) ──
+  battery('⚖️ the NARROWING leg: a narrowed spec change waits on an authorized approval AND a PASS record (ruled 2026-11-19)');
+  {
+    const at = (text, where = 'the PR body') => [{ where, text }];
+    assert('Metadata-protocol-narrowed-reads-narrowed', narrowingDeclaration(at('Metadata-protocol: narrowed')).state === 'narrowed');
+    assert('a-Clause-2-narrowing-arm-reads-narrowed-on-no-and-on-yes', ['Clause-②: no (narrowing)', 'Clause-②: yes (narrowing)'].every((t) => narrowingDeclaration(at(t)).state === 'narrowed'));
+    assert('added-semantic-none-a-plain-Clause-2-and-no-line-read-none', ['Metadata-protocol: added', 'Metadata-protocol: semantic', 'Metadata-protocol: none', 'Clause-②: no', 'Clause-②: yes', 'Fixes #1'].every((t) => narrowingDeclaration(at(t)).state === 'none'));
+    const CS = '---\n"@objectstack/spec": minor\n---\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\n';
+    const inChangeset = narrowingDeclaration([...at('Fixes #1'), ...at(CS, '.changeset/a.md at eeee')]);
+    assert('a-narrowing-in-a-changeset-counts-where-the-body-is-silent', inChangeset.state === 'narrowed' && inChangeset.where.every((w) => w.startsWith('.changeset/a.md')), JSON.stringify(inChangeset));
+    assert('an-unread-text-is-unreadable-unless-another-already-narrows', narrowingDeclaration(at(null)).state === 'unreadable' && narrowingDeclaration([...at(null), ...at('Metadata-protocol: narrowed', 'cs')]).state === 'narrowed');
+    assert('⛔ a-near-miss-arm-is-malformed-so-unreadable-never-no-narrowing', narrowingDeclaration(at('Clause-②: no (narrowed)')).state === 'unreadable');
+    const gitFor = (answers) => (args) => {
+      if (args[0] === 'ls-tree') return answers.lsTree;
+      if (answers.show === 'throw') throw new Error('bad object');
+      return answers.show;
+    };
+    const NPR = 81;
+    const csRows = [row(NPR, ['.changeset/a.md', '.changeset/README.md', 'packages/spec/src/x.ts'], 'e'.repeat(40)), row(82, ['.changeset/b.md'], 'd'.repeat(40))];
+    const read = changesetTextsOf(csRows, NPR, gitFor({ lsTree: '.changeset/a.md\0', show: CS }));
+    assert('changesetTextsOf-reads-this-pulls-changesets-at-their-commit-README-and-other-pulls-excluded', read.length === 1 && read[0].text === CS && read[0].where.startsWith('.changeset/a.md at eeeeeeeeeeee'), JSON.stringify(read));
+    assert('a-changeset-a-commit-DELETES-declares-nothing-and-one-that-will-not-read-is-null', changesetTextsOf(csRows, NPR, gitFor({ lsTree: '' })).length === 0 && changesetTextsOf(csRows, NPR, gitFor({ lsTree: '.changeset/a.md\0', show: 'throw' }))[0].text === null && changesetTextsOf(csRows, NPR, null)[0].text === null);
+    const NARROW = `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed`;
+    const spy = { reviews: 0 };
+    const nRun = async ({ body = NARROW, reviews = [], comments = [], rows = [row(NPR, ['packages/spec/src/x.ts'], 'e'.repeat(40))], pullThrows = false, reviewsThrow = false, runGit = null, approvals = new Map(), event = EVENT_MERGE_GROUP } = {}) => {
+      spy.reviews = 0;
+      return runNarrowingGuard({
+        event,
+        repo: REPO,
+        rows,
+        fetchPull: async () => { if (pullThrows) throw new Error('pull unreadable'); return pull(REF_HEAD, { body, headRef: `claude/issue-${REF_CARD}-x` }); },
+        fetchReviews: async () => { spy.reviews += 1; if (reviewsThrow) throw new Error('reviews unreadable'); return reviews; },
+        fetchComments: async (n) => (n === NPR ? comments : []),
+        loadRecognisers: async () => live,
+        runGit,
+        approvals,
+      });
+    };
+    const APPROVE = [approvedAt(GOVERNED_APPROVERS[0], REF_HEAD)];
+    const noApproval = await nRun({ comments: [recordComment()] });
+    assert('⛔ narrowed-with-a-PASS-record-and-NO-approval-is-REFUSED-on-10', noApproval.exitCode === EXIT_REFUSED_NARROWING && noApproval.entries[0].state === 'refused' && noApproval.entries[0].record.state === 'stands', JSON.stringify(noApproval.entries[0]));
+    const noRecord = await nRun({ reviews: APPROVE });
+    assert('⛔ narrowed-with-an-approval-and-NO-record-is-REFUSED-on-10', noRecord.exitCode === EXIT_REFUSED_NARROWING && noRecord.entries[0].approval.state === 'approved');
+    const both = await nRun({ reviews: APPROVE, comments: [recordComment()] });
+    assert('narrowed-with-an-authorized-approval-AND-a-PASS-record-on-this-head-CLEARS', both.exitCode === EXIT_CLEAR && both.entries[0].state === 'cleared' && /✅ {2}CLEARED/.test(renderNarrowingVerdict(both)), renderNarrowingVerdict(both));
+    assert('⛔ a-FAIL-record-does-not-clear', (await nRun({ reviews: APPROVE, comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] })).exitCode === EXIT_REFUSED_NARROWING);
+    assert('⛔ an-unauthorized-approver-does-not-count', (await nRun({ reviews: [approvedAt('someone-else', REF_HEAD)], comments: [recordComment()] })).exitCode === EXIT_REFUSED_NARROWING);
+    const added = await nRun({ body: `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: added` });
+    assert('Metadata-protocol-added-is-unchanged-no-entry-and-no-review-read', added.exitCode === EXIT_CLEAR && added.entries.length === 0 && spy.reviews === 0 && renderNarrowingVerdict(added) === '');
+    const unreadPull = await nRun({ pullThrows: true });
+    assert('⛔ an-unread-pull-is-REFUSED-on-11', unreadPull.exitCode === EXIT_REFUSED_NARROWING_UNREADABLE && /could not be read/.test(renderNarrowingVerdict(unreadPull)));
+    assert('an-unread-review-list-is-10-when-the-record-is-absent-and-11-when-it-PASSes', (await nRun({ reviewsThrow: true })).exitCode === EXIT_REFUSED_NARROWING && (await nRun({ reviewsThrow: true, comments: [recordComment()] })).exitCode === EXIT_REFUSED_NARROWING_UNREADABLE);
+    const reused = await nRun({ approvals: new Map([[NPR, authorizedApprovalVerdict(APPROVE, REF_HEAD)]]), comments: [recordComment()] });
+    assert('the-governed-legs-approval-is-reused-and-no-review-is-read', reused.exitCode === EXIT_CLEAR && spy.reviews === 0);
+    const early = await nRun({ event: EVENT_PULL_REQUEST });
+    assert('the-pull_request-leg-is-not-applicable-and-renders-nothing', early.conclusion === 'not-applicable' && early.exitCode === EXIT_CLEAR && renderNarrowingVerdict(early) === '');
+    const csOnly = await nRun({ body: `Fixes #${REF_CARD}`, rows: [row(NPR, ['.changeset/a.md', 'packages/spec/src/x.ts'], 'e'.repeat(40))], runGit: gitFor({ lsTree: '.changeset/a.md\0', show: CS }) });
+    assert('⛔ a-changeset-declaring-narrowed-REFUSES-the-pull-whose-body-is-silent', csOnly.exitCode === EXIT_REFUSED_NARROWING && csOnly.entries[0].declaration.where.some((w) => w.startsWith('.changeset/a.md')));
+    const versionPr = await nRun({ body: 'Releases', rows: [row(NPR, ['.changeset/a.md', 'packages/spec/CHANGELOG.md'], 'e'.repeat(40))], runGit: gitFor({ lsTree: '' }) });
+    assert('a-Version-Packages-style-pull-DELETING-narrowed-changesets-declares-nothing', versionPr.exitCode === EXIT_CLEAR && versionPr.entries.length === 0);
+    const refusal = renderNarrowingVerdict(noApproval);
+    assert('the-refusal-words-name-the-ruling-both-halves-and-the-pull', refusal.includes(NARROWING_LEG_NAME) && refusal.includes('GOVERNED_APPROVERS') && refusal.includes('## Contract review') && refusal.includes(`#${NPR}`) && /exit 10/.test(refusal), refusal);
+    const code = (c) => ({ exitCode: c });
+    assert('groupExitCode-governed-then-narrowing-then-size', groupExitCode({ governed: code(EXIT_REFUSED_UNAPPROVED), narrowing: code(EXIT_REFUSED_NARROWING), size: code(EXIT_REFUSED_OVERSIZED) }) === EXIT_REFUSED_UNAPPROVED && groupExitCode({ governed: code(EXIT_CLEAR), narrowing: code(EXIT_REFUSED_NARROWING), size: code(EXIT_REFUSED_OVERSIZED) }) === EXIT_REFUSED_NARROWING && groupExitCode({ governed: code(EXIT_CLEAR), narrowing: code(EXIT_CLEAR), size: code(EXIT_REFUSED_OVERSIZED) }) === EXIT_REFUSED_OVERSIZED && groupExitCode({ governed: code(EXIT_CLEAR), size: code(EXIT_CLEAR) }) === EXIT_CLEAR);
+    assert('the-two-narrowing-codes-are-distinct-from-every-other-code', new Set([EXIT_CLEAR, EXIT_CANNOT_RUN, EXIT_REFUSED_UNAPPROVED, EXIT_REFUSED_UNREADABLE, EXIT_REFUSED_UNATTRIBUTED, EXIT_REFUSED_OVERSIZED, EXIT_REFUSED_SIZE_UNREADABLE, EXIT_REFUSED_NARROWING, EXIT_REFUSED_NARROWING_UNREADABLE]).size === 9);
+    const seen = [];
+    const faceSpy = { available: true, reviewFace: (paths, repo, opts) => { seen.push(opts); return { face: 'narrowing', tierName: 'T' }; }, locate: () => ({ state: 'absent', read: {} }), threads: [] };
+    recordVerdict({ pair: { pr: 1, paths: ['packages/objectql/src/x.ts'], repo: REPO, declaredOn: ['Clause-②: no (narrowing)'] }, recognisers: faceSpy });
+    recordVerdict({ pair: { pr: 1, paths: ['AGENTS.md'], repo: REPO }, recognisers: faceSpy });
+    assert('recordVerdict-hands-a-pairs-declaration-to-the-face-and-a-pair-without-one-hands-none', seen[0]?.declaredOn?.[0] === 'Clause-②: no (narrowing)' && seen[1] !== undefined && seen[1].declaredOn === undefined, JSON.stringify(seen));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
