@@ -4065,6 +4065,7 @@ const ja = {
     composer: {
       queued: "現在の返信が終わると送信されます",
       queuedCancel: "キャンセル",
+      fileTooLarge: "ファイルが大きすぎるため添付できません（上限 {{limit}}）：{{files}}",
     },
     answer: {
       showFull: '全文を表示',

@@ -83,9 +83,7 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
   `provenance` (the dataset's label and each measure's label, as in
   「指标：营收（数据集：销售分析）」), not from memory.
 - Use the measure's `description` to say what the number includes and excludes.
-- `truncated: true`: more rows existed than came back. Say the result is
-  partial. A `warning` on the answer narrows what you were allowed to read:
-  repeat it.
+- A `warning` on the answer narrows what you were allowed to read: repeat it.
 
 ## 4. Fallback: object queries
 
@@ -97,8 +95,12 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
   read. Read its fields before you filter: a field with `options` is filtered
   by the option's `value`, never its label.
 - Use `aggregate_records` for a count, sum, average or breakdown. Never page
-  through `query_records` to add numbers up yourself. `truncated: true` on its
-  answer means groups were cut off: say so.
+  through `query_records` to add numbers up yourself. For a top or bottom N,
+  pass `orderBy` (an aggregation alias or a group key) and `limit: N`, so the
+  database ranks and cuts the groups.
+- `withheldFields` on a `query_records` or `get_record` answer names fields
+  that exist but are hidden from you: say they are not visible to you, never
+  that they are empty.
 - Open the answer with one line saying it is not from a governed metric
   (非指标口径), and name the object and fields you computed it from.
 - When that object is a listed dataset's `object`, add one line naming the
@@ -117,4 +119,7 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
 - Answer in the user's language.
 - Show labels, not machine names or raw option values.
 - Every figure comes from a tool answer in this conversation.
+- `truncated: true`: more rows or groups existed than came back; say the
+  result is partial, and cite `totalGroups` as how many groups existed before
+  the cut. Without it, say a `query_dataset` total is unknown, not `rowCount`.
 - State the filter and the time window you used, in words.

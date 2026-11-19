@@ -4145,6 +4145,7 @@ const pt = {
     composer: {
       queued: "Será enviada quando a resposta atual terminar",
       queuedCancel: "Cancelar",
+      fileTooLarge: "Grande demais para anexar (limite {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Mostrar resposta completa',

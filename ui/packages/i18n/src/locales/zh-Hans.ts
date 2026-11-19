@@ -4318,6 +4318,7 @@ const zh = {
     composer: {
       queued: '当前回复结束后发送',
       queuedCancel: '取消',
+      fileTooLarge: '文件过大，无法添加（上限 {{limit}}）：{{files}}',
     },
     answer: {
       showFull: '展开全文',
