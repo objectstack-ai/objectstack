@@ -241,3 +241,28 @@ describe('one stored value, one reading: the form face equals the cell (objectui
     });
   });
 });
+
+/**
+ * objectstack#34182 — the read display carries the theme's foreground token,
+ * which has a dark-mode value, instead of a fixed grey that dims in dark mode.
+ * happy-dom applies no Tailwind, so the class list is the measured property.
+ */
+describe('the summary read display carries a dark-mode colour (objectstack#34182)', () => {
+  /** A fixed palette shade with no `dark:` partner does not follow the theme. */
+  const fixedShades = (el: Element) =>
+    Array.from(el.classList).filter((c) => /^text-(gray|slate|zinc|neutral|stone)-\d+$/.test(c));
+
+  it.each([
+    ['a number', 15750.5],
+    ['a text value', 'Renewal pending legal review'],
+  ])('%s reads in `text-foreground`, with no fixed grey', (_label, value) => {
+    const { container } = renderSession(
+      'en-US',
+      <SummaryField field={summaryField('sum') as never} value={value} onChange={noop} readonly />,
+    );
+    const span = container.querySelector('span');
+    expect(span).not.toBeNull();
+    expect(span).toHaveClass('text-foreground');
+    expect(fixedShades(span!)).toEqual([]);
+  });
+});

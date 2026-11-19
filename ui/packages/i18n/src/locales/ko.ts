@@ -4062,6 +4062,7 @@ const ko = {
     composer: {
       queued: "현재 응답이 끝나면 전송됩니다",
       queuedCancel: "취소",
+      fileTooLarge: "파일이 너무 커서 첨부할 수 없습니다(최대 {{limit}}): {{files}}",
     },
     answer: {
       showFull: '전체 답변 보기',

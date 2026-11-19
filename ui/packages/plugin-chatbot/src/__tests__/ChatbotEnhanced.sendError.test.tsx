@@ -10,10 +10,15 @@
  * A host that held the message itself names the text to restore (`unsentText`,
  * objectstack#33562), a held suggestion chip included; absent, the composer
  * restores its own last typed submit and no chip text.
+ * A file the composer refuses for size names itself and the limit in the same
+ * band above the composer, and is not attached (objectstack#34463).
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ReactElement } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { I18nProvider } from '@object-ui/i18n';
+import { en, zh } from '@object-ui/i18n/locales';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
 import type { ChatbotEnhancedMessage } from '../ChatbotEnhanced';
 
@@ -309,5 +314,83 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
     await waitFor(() => expect(screen.getByTestId('chat-send-error')).toBeInTheDocument());
     expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatbotEnhanced composer — a file over maxFileSize is named to the user (objectstack#34463)', () => {
+  const LIMIT = 1024;
+  const limitText = new Intl.NumberFormat('en', { style: 'unit', unit: 'kilobyte', maximumFractionDigits: 1 }).format(1);
+  const png = (name: string, bytes: number) => new File([new Uint8Array(bytes)], name, { type: 'image/png' });
+
+  beforeEach(() => {
+    // jsdom has no object URLs; the composer makes one per attached file.
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:attached') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  });
+
+  function pick(container: HTMLElement, files: File[]) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { configurable: true, value: files });
+    fireEvent.change(input);
+  }
+
+  function mount(node: ReactElement = <ChatbotEnhanced placeholder="Ask…" enableFileUpload maxFileSize={LIMIT} />) {
+    return render(node).container;
+  }
+
+  it('an over-size file shows a notice naming the file and the limit, and is not attached', () => {
+    const container = mount();
+    pick(container, [png('big.png', LIMIT + 1)]);
+
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveAttribute('role', 'alert');
+    expect(notice).toHaveTextContent('big.png');
+    expect(notice).toHaveTextContent(limitText);
+    expect(screen.queryByAltText('big.png')).toBeNull();
+  });
+
+  it('a mixed pick attaches the file under the limit and names only the one over it', () => {
+    const container = mount();
+    pick(container, [png('big.png', LIMIT + 1), png('small.png', 10)]);
+
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent('big.png');
+    expect(notice).not.toHaveTextContent('small.png');
+    expect(screen.getByAltText('small.png')).toBeInTheDocument();
+    expect(screen.queryByAltText('big.png')).toBeNull();
+  });
+
+  it('CONTROL: a file under the limit attaches with no notice', () => {
+    const container = mount();
+    pick(container, [png('small.png', LIMIT)]);
+
+    expect(screen.getByAltText('small.png')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-attachment-refused')).toBeNull();
+  });
+
+  it('the close button dismisses the notice', () => {
+    const container = mount();
+    pick(container, [png('big.png', LIMIT + 1)]);
+
+    fireEvent.click(screen.getByRole('button', { name: en.common.close }));
+    expect(screen.queryByTestId('chat-attachment-refused')).toBeNull();
+  });
+
+  it('under zh the notice is the zh pack sentence, not the English one', async () => {
+    const zhLead = zh.chatbot.composer.fileTooLarge.split('{{')[0];
+    const enLead = en.chatbot.composer.fileTooLarge.split('{{')[0];
+    expect(zhLead).not.toBe(enLead);
+    const container = mount(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+        <ChatbotEnhanced placeholder="Ask…" enableFileUpload maxFileSize={LIMIT} />
+      </I18nProvider>,
+    );
+    await screen.findByPlaceholderText('Ask…');
+    pick(container, [png('big.png', LIMIT + 1)]);
+
+    const notice = await screen.findByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent(zhLead);
+    expect(notice).toHaveTextContent('big.png');
+    expect(notice).not.toHaveTextContent(enLead);
   });
 });
