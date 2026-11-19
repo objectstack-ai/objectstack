@@ -1199,7 +1199,20 @@ export const CEILINGS = new Map([
   // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
   // now holds were deleted whole (lowering is always legitimate). Landed count.
   // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 458],
+  // 458 → 14: split by subject (the skills-review order of improvements, step 5) — every
+  // reading moved verbatim into the nine `readings-*.md` files below and this file became their
+  // index (lowering is always legitimate). Each new row is its file's landed count, headroom 0;
+  // the split's own cost is one title line and one blank per file, plus this index.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 84],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -2746,6 +2759,15 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 0],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 0],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 0],
   ['.claude/skills/pm-dispatch/references/rest-channel.md', 0],
   ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 0],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 0],

@@ -2007,7 +2007,7 @@ export function renderGuardVerdict(verdict) {
     '      What satisfies this check:',
     '        1. ⭐ FIRST, whatever comes after it — the pull request is IN the queue, and disabling auto-merge',
     '           and converting it to DRAFT do not take it out of the queue',
-    '           (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue membership).',
+    '           (`.claude/skills/pm-dispatch/references/readings-queue.md`, queue membership).',
     '           So its landing seat sends the relay\'s `pr_dequeue` AT ONCE (measured live, comment 6902190812);',
     '           any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand.',
     '           Disable auto-merge AND convert it back to DRAFT, which disarms it so it does not re-enter once',
@@ -2976,7 +2976,7 @@ export function renderSizeVerdict(verdict) {
     '      What satisfies this check:',
     '        1. ⭐ The pull request is IN the queue, and disabling auto-merge and converting it to DRAFT do not',
     '           take it out of the queue',
-    '           (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue membership).',
+    '           (`.claude/skills/pm-dispatch/references/readings-queue.md`, queue membership).',
     '           So its landing seat sends the relay\'s `pr_dequeue` AT ONCE (measured live, comment 6902190812);',
     '           any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand.',
     '           Disable auto-merge AND convert it back to DRAFT, which disarms it so it does not re-enter once',
@@ -5195,7 +5195,7 @@ export async function selfTest() {
   // Both refusals print on the merge_group leg, so the pull request they name
   // IS in the queue. A DRAFT conversion and an auto-merge disable do not take
   // a queued pull request out of it
-  // (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue
+  // (`.claude/skills/pm-dispatch/references/readings-queue.md`, queue
   // membership), so the remedy is AGENTS.md Prime Directive #14's pull-back:
   // the landing seat's relay `pr_dequeue` at once (measured live, comment
   // 6902190812) or, from any other seat or on a stroke that does not land, the
@@ -5215,7 +5215,7 @@ export async function selfTest() {
     /Disable auto-merge AND convert it back to DRAFT, which disarms it/,
     /confirm from the remote that it is in neither the queue nor `origin\/main`/,
     /AGENTS\.md Prime Directive #14/,
-    /platform-readings\.md`, queue membership/,
+    /readings-queue\.md`, queue membership/,
   ]);
   // Every spelling a remedy or a rule has used to say that a DRAFT conversion
   // takes a queued pull request out of the queue, plus the general shape: a

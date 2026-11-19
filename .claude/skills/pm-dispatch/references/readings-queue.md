@@ -1,0 +1,89 @@
+# 平台读数:合并队列、auto-merge 与落地判据
+
+- 本仓是否强制队列是仓库 ruleset 事实;`grep merge_group` 答的是队列内是否重跑 CI,两者独立。
+- 缺席不构成反证:有仓 ruleset 强制而无 trigger,队列照收 PR;新仓靠实测,⛔ 不由缺席推断。
+- 权威读数 = 合并尝试本身(回 405 `Changes must be made through the merge queue`)或 rulesets API。
+- 判在不在队列的决断读数是 timeline 事件 `added_to_merge_queue` / `removed_from_merge_queue`,可重查。
+- 拼写 `GET /repos/{o}/{r}/issues/{pr}/timeline`:一次双向答,分得开未入队与被踢;webhook 不可重读。
+- 入队行通常即时可读,曾实测 +75 s 缺席 ⇒ 短窗缺席非读数,复读;`pull_request.enqueued` 旁证。
+- `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
+- ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
+- 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
+- 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
+- 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
+- 不在 `origin/main` 二义(在队等/没入队)⇒ 落地检查恒读两数:队列成员资格与 `origin/main`。
+- `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
+- 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
+- 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
+- `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
+- `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
+- `dirty` 即入队否决(冲突对象是当前 main);draft PR 照答 `clean`/`blocked`/`unknown`,不答 `draft`。
+- `mergeable_state: blocked` 且 `mergeable: true` = 规则或必需检查在挡,非冲突;无阻兄弟回 `clean`。
+- ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
+- `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
+- 零 legacy status 的仓恒答空集默认值 `pending`+`total_count: 0`,⛔ 非门禁读数,门禁读 check-runs。
+- 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
+- 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
+- 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
+- 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
+- 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
+- ⇒ 冲突证明探无驱动裸克隆,配方与读法见 `scripts/pm/os-regen-merge.sh`:exit 1 无树 id = 缺对象
+- 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
+- 状态核验用最小字段(search/list 加 `fields`)或等事件。
+- 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
+- 按名定位失败才拉全表;订阅来的 `check_suite.completed` 是唤醒不是放行读数。
+- 转 draft 不是可靠的踢队手段:本仓与姊妹仓均见已入队转 draft 仍保位照合,处置按最坏走。
+- 本仓转 draft 同秒掉 auto-merge 仅见于未入队时,转正后重挂;已入队者 2026-08-08、09-29 照合。
+- 补救:转 draft 与卸载 auto-merge 都做,卸载单独不踢队;两手齐做未见踢队(08-08、09-28、10-24)。
+- 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
+- 中继 `pr_dequeue` 实测出队(run 43767458575,审计 6902190812):mutation 200,回读离队,仍开未合。
+- `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
+- 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
+- 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
+- undraft 与挂载走中继 op,auto 模式三次零拒;ccr 路带 allow 行仍被拒,已退役;MCP 兜底已拒。
+- 2026-09-17 单席实测:ccr 路吃会话凭据的 GraphQL 小时池,尽则 429 且零字节写入,`draft` 未动。
+- 唯一可读信号是该 429 体自报的 `resets at` 时刻;体自带指令 ⛔ 重置前不重试。
+- ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
+- auto-merge 回读 `merge_method` 不恒定:同 `SQUASH` 载荷 `merge`/`squash` 皆现,⛔ 非落地方法判据。
+- 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。
+- 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
+- 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
+- ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
+- `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
+- squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
+- squash 的 committer date 是入队时刻,快进不改 ⇒ 落地时刻读 `merged_at`/`merged`,不读 `git log`。
+- 回显两向不可靠:全绿加 `clean` 即吞进队列不存记录 ⇒ 空回显是成功常态,⛔ 不空转。
+- 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
+- 效果读数 = 下列阳性探针、timeline 入队事件、最终落地;队列分支仅在场时算。
+- 队列 ref 答 BUILD 不答成员资格:`gh-readonly-queue/*` 只在存在时有意义,即有 build 在跑。
+- 阳性探针 ①:`update_pull_request_branch` 回已入队分支不能更新 = 在队。
+- 它正常返回则顺带逼出暗冲突;它不踢已挂 PR,只是永不入队。
+- 阳性探针 ②:`merge_pull_request` 回 405 `Pull Request is in the merge queue` = 在队。
+- 同接口回 405 `Merge commits are not allowed` = 不在队,改挂 auto-merge。
+- ⛔ enable 与其验证之间永不插 `disable`:入队 webhook 乱序迟到,会撤掉真实入队。
+- 进度读 `GET /actions/runs?event=merge_group`;批次分支按批内最后一个 PR 命名。
+- ⇒ 自己的 PR 号不在运行列表里不等于没在跑。
+- 踢出成因两则:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
+- 队列 ref 在场时还答位置:名形 `…/pr-<PR>-<PARENT>` 的 `<PARENT>` 是前一条目的 tip。
+- 从根在当前 `origin/main` 的那条起走父-tip 链即真实排队序;`ls-remote` 的字典序无意义。
+- 名形里的 `<PARENT>` 是推测基:实测晚十余分钟才落 `main` ⇒ ⛔ 不读作该基已落地。
+- 该读法零配额,答 timeline 答不了的排第几;⛔ 只读现在、不重建历史。
+- 队列踢出先认签名:与已知 flaky(如 `Checkout repository` 超时)一致 ⇒ 原样重投,理由记 PR。
+- 止血修复合入后同一签名再现就不再是那条 flaky,是新问题须重新诊断,⛔ 禁反射式重投。
+- 第三种签名:本 PR 名下没有任何 `merge_group` run,且批次同伴的 run 全部 `success`。
+- 队列重建的连带取消不是红 ⇒ 带签名收据重投一次,收据留在 PR 上,⛔ 无收据不重投。
+- 同一 PR 第二次被踢 ⇒ 停止重投,按签名四分支重判。
+- 吞吐两则:合并队列落地 ≈ 每 PR 15–30 分钟且串行,⛔ 不据还没落提前判异常。
+- 单容器重验证(build 加 test)并发甜点 ≈3,排批按它定上限。
+- 入队事件与队列 ref 迟 1–3 分钟才出现 ⇒ 轮询预算按 3 分钟,⛔ 不按 1 分钟判没挂上。
+- 队列窗口有界:满窗条目 ref 与 `merge_group` run 双缺席,ref 随前一条落地才现,不按计时器。
+- ready 翻转触发检查重跑 ⇒ 入队落在翻转之后约一分钟,那段空窗不是挂载失败。
+- 摘标签与翻 ready 是状态写,同 head 重起标签敏感检查 ⇒ ③ 在入队前末次状态写之后读。
+- 检查全部完成的 PR 挂 auto-merge 即入队,本仓 28–60 秒 ⇒ 挂载与落地之间无窗口。
+- `mergeable_state` 未落定时挂上的是经典 auto-merge、不入队,落定后再挂才入队。
+- `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先发 `pr_update_branch`。
+- `check_suite.completed` 会命名过期 head,check-run 也只属最后一次 push ⇒ 用前先重读当前 head。
+- 并行 spec PR 同动 pin 计数断言:被踢不是事故,按 os-regen 序再解一轮。
+- 解冲突两侧收据都保留、按合并顺序堆叠;新计数从合并后源码重数,⛔ 不从收据做算术。
+- 操作数是文件本身不是历史;双方占同一编号是常态,重编号后进侧。
+- 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
