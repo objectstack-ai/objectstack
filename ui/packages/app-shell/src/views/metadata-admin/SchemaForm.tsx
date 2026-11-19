@@ -71,7 +71,7 @@ import {
 import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp, type SupportedLocale } from './i18n.js';
 import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
-import { describeIssuePath, issuePathHead, issuePathRest, splitRowIssues } from './issuePath.js';
+import { describeIssuePath, issuePathHead, issuePathRest, splitRowIssues, useIssuePrefixRegister } from './issuePath.js';
 
 /**
  * The form authoring surface — `FormFieldSpec` and the `VisibilityPredicate`
@@ -1434,22 +1434,7 @@ function useInlineIssueFieldRegister(
   rootIdPath: string | undefined,
   onChange: SchemaFormProps['onInlineIssueFieldsChange'],
 ): InlineIssueFieldRegister {
-  const onChangeRef = React.useRef(onChange);
-  React.useEffect(() => {
-    onChangeRef.current = onChange;
-  });
-  const [counts] = React.useState(() => new Map<string, number>());
-  const [register] = React.useState(() => (field: string) => {
-    const publish = () => onChangeRef.current?.(new Set(counts.keys()));
-    counts.set(field, (counts.get(field) ?? 0) + 1);
-    publish();
-    return () => {
-      const n = (counts.get(field) ?? 1) - 1;
-      if (n > 0) counts.set(field, n);
-      else counts.delete(field);
-      publish();
-    };
-  });
+  const register = useIssuePrefixRegister(onChange);
   const [value, setValue] = React.useState<InlineIssueFieldRegister>(() => ({ rootIdPath, register }));
   if (value.rootIdPath !== rootIdPath) setValue({ rootIdPath, register });
   return value;
