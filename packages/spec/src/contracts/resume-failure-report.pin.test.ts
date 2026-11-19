@@ -13,12 +13,13 @@
  * it is NOT a second declaration: its shared members are inherited from
  * `ResumeFailureDetails` (`api/automation-api.zod.ts`, the automation resume
  * door's `400 FLOW_FAILED` details — the ruling's third carrier, #15221), and
- * it adds exactly the one member a success envelope cannot leave to its
- * envelope, the code.
+ * it adds exactly what a success envelope cannot leave to its envelope: the
+ * code, and (#34638) the refusal that stranded the run, `innerRefusal` /
+ * `userMessage`, which the resume door carries on its envelope instead.
  *
  * Four things are pinned, because each drifts on its own:
  *
- *  1. **Declared once.** `ResumeFailureReport` minus `code` IS
+ *  1. **Declared once.** `ResumeFailureReport` minus what it adds IS
  *     `ResumeFailureDetails` — a type-level identity (`Eq`, the
  *     `automation-result-status.pin.test.ts` form), so a member added to or
  *     dropped from either side reds this file by name under
@@ -58,7 +59,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import { ResumeFailureDetailsSchema } from '../api/automation-api.zod';
-import type { ResumeFailureDetails } from '../api/automation-api.zod';
+import type { FlowInnerRefusal, ResumeFailureDetails } from '../api/automation-api.zod';
 import { REGISTERED_ERROR_CODES } from '../api/error-code-ledger.zod';
 import type { ErrorCode } from '../api/error-code-ledger.zod';
 
@@ -78,8 +79,15 @@ type Assert< T extends true > = T;
  * pin no program compiles is no pin at all (`check:test-typecheck` compiles
  * this file under `tsconfig.test.json`).
  */
-/** 1. Declared once: the report minus its code IS the wire schema's input type. */
-export type ReportSharesTheWireMembers = Assert< Eq< Omit<ResumeFailureReport, 'code'>, ResumeFailureDetails > >;
+/**
+ * 1. Declared once: the report minus what it adds IS the wire schema's input
+ * type. It adds the code and (#34638) the refusal pair — the members the
+ * resume door leaves to its envelope and a success answer has no envelope for.
+ */
+export type ReportSharesTheWireMembers = Assert< Eq< Omit<ResumeFailureReport, 'code' | 'innerRefusal' | 'userMessage'>, ResumeFailureDetails > >;
+/** [#34638] The refusal pair, at the shapes every other channel spells it: the engine's `FlowInnerRefusal` and a string, both optional. */
+export type RefusalIsTheEngineShape = Assert< Eq< ResumeFailureReport['innerRefusal'], FlowInnerRefusal | undefined > >;
+export type UserMessageIsOptionalText = Assert< Eq< ResumeFailureReport['userMessage'], string | undefined > >;
 /** 3. The code member is the ledger vocabulary, exactly. */
 export type CodeIsTheLedgerVocabulary = Assert< Eq< ResumeFailureReport['code'], ErrorCode > >;
 /** 3. …and it is required — `undefined` is not a member of its type. */
@@ -143,6 +151,18 @@ describe('ResumeFailureReport — the resume failure a success answer carries', 
     const parsed = ResumeFailureDetailsSchema.parse(strandedParent);
     expect(parsed).toEqual({ runId: 'run_parent_001', status: 'stranded', repairable: true });
     expect(Object.keys(strandedParent).sort()).toEqual([...Object.keys(parsed), 'code'].sort());
+  });
+
+  it('1. [#34638] a report that carries the refusal pair still hands back exactly the three shared members', () => {
+    // The pair is the report's own, like `code`: the resume door carries it on
+    // its envelope (`FlowFailureDetailsSchema.innerRefusal`, top-level
+    // `userMessage`), so the shared wire schema neither declares nor keeps it.
+    const refused: ResumeFailureReport = {
+      ...strandedParent,
+      innerRefusal: { code: 'VALIDATION_FAILED', message: 'over capacity' },
+      userMessage: 'Capacity is taken.',
+    };
+    expect(ResumeFailureDetailsSchema.parse(refused)).toEqual({ runId: 'run_parent_001', status: 'stranded', repairable: true });
   });
 
   it('1. the wire schema strips that code SILENTLY, and the docblock no longer sends a caller down that path', () => {

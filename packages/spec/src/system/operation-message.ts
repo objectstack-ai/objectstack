@@ -538,7 +538,11 @@ export interface RenderOperationMessageInput {
 export interface RenderOperationMessageOptions {
   /** BCP-47 locale; defaults to `en`. */
   locale?: string;
-  /** Deployment override hook — an `II18nService.t`-compatible lookup. */
+  /**
+   * Deployment override hook — an `II18nService.t`-compatible lookup. It is
+   * asked for the override TEMPLATE with no params (`translate(key, locale)`);
+   * the renderer fills the placeholders once.
+   */
   translate?: ValidationMessageTranslator;
 }
 
