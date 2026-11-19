@@ -15,7 +15,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
@@ -34,8 +34,6 @@ metadata:
 ---
 
 ## Quick Reference — Detailed Rules
-
-Detailed rules, with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
 - **[Field Types](./rules/field-types.md)** — All field types and configs
@@ -58,7 +56,14 @@ Detailed rules, with incorrect/correct examples:
 ### Object Definition
 
 An **Object** is the fundamental data entity in ObjectStack. It maps to a
-database table and exposes automatic CRUD APIs.
+database table and exposes automatic CRUD APIs. As JSON (in TypeScript the
+same literal goes inside `ObjectSchema.create({...})`):
+
+```json
+{ "name": "crm_account", "label": "Account", "pluralLabel": "Accounts", "icon": "building",
+  "sharingModel": "public_read_write",
+  "fields": { "name": { "type": "text", "label": "Name", "required": true } } }
+```
 
 **Required properties:**
 
@@ -69,8 +74,7 @@ database table and exposes automatic CRUD APIs.
 | `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
 **`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
-removed). A *custom* object that omits it resolves to `private` at runtime, but
-the publish door rejects it before that:
+removed):
 
 | Value | Who can read / write |
 |:--|:--|
@@ -95,7 +99,7 @@ all (Relationship Patterns below).
 | `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
 | `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
-| `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
+| `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
@@ -143,7 +147,6 @@ record's title, copy that title into a **stored field on this object** and
 declare *that* field searchable. A task list searched by project name:
 
 ```typescript
-// `project_name` is a stored, denormalized mirror of the parent's title.
 {
   name: 'task',
   enable: { searchable: true },
@@ -281,8 +284,8 @@ lowercase option values — incorrect/correct examples: [rules/naming.md](./rule
 The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
 From here, three to get right: credentials are `secret` (**encrypted-at-rest**, ADR-0100) —
 never `password`, which on a generic object is **plaintext at rest**; `user` is the person
-picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`; see
-**objectstack-formula**).
+picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` envelope —
+`F\`...\`` in TypeScript; see **objectstack-formula**).
 
 - A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`
   and never `required`: a checkbox always holds one of its two values, so
@@ -312,12 +315,9 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
 | Record owner | the platform's `owner_id` (`ownership: 'user'`, the default), also when the request says assignee, 负责人 or 处理人 — never a hand-added owner field, a second owner that owner-scoped visibility and "My records" views never read. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, injected ones included: `owner_id` (Owner, 负责人), `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at` (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table |
 
-> **`multiple: true` lookup ≠ junction object.** A multi-value lookup
-> (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
-> **array of ids** on the record — reference elements positionally
-> (`{record.tags.0}` in flow values). It is NOT a junction table. Reach for a
-> **junction object** (two lookups) only when the relationship itself carries
-> attributes (role, added_at, …).
+> **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
+> and read as an **array of ids** on the record — reference elements positionally
+> (`{record.tags.0}` in flow values).
 
 ### Validation Patterns
 
@@ -354,8 +354,7 @@ indexes: [
 ```
 
 See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
-(`'organization'` / `'global'` — on a declared index bare `unique: true` is
-refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
+(on a declared index bare `unique: true` is refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
 database layer.
 
 ---
@@ -380,6 +379,11 @@ text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
+Translate patched text in the patching package's `translations`, under the
+owner's keys (`objects.crm_account.fields.industry.label`, `.help`,
+`.options.<value>`): the owner's translation of the replaced text never applies, a
+pair `.custom` translation comes first on `/meta`, and an untranslated locale
+serves the patch text.
 
 **An object an installed package ships** is extended from the
 base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
@@ -399,8 +403,6 @@ Per-object access control is authored in **permission sets**, not on the object
 schema. There is no object-level `permissions` key (and no `hooks` key either) —
 `ObjectSchema.create()` **rejects** both as unknown keys.
 
-Full rules: **[Security & Access Control](./rules/security.md)**.
-
 ### Access depth (scope-depth) — the ERP "see my unit / my unit and below" axis
 
 On an owner-scoped (`private`) object, a per-object grant in a permission set may
@@ -409,9 +411,10 @@ hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` �
 `unit` · `unit_and_below` · `org`. It resolves at request time into an
 `owner_id IN (…)` set and AND-injects like RLS. ⚠️ Open-core boundary (ADR-0016):
 only `own` and `org` work in open source — the hierarchy-relative three need the
-paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
-it, and `defineStack` errors unless the grant declares
-`requires: ['hierarchy-security']`.
+paid `@objectstack/security-enterprise` plugin in `plugins[]`, **fail closed to
+`own`** without it, and `defineStack` errors unless the stack declares
+`requires: ['hierarchy-security']`. The CLI only advises on a missing or unwired
+plugin: `os validate` warns, `os verify --json` lists it in `capabilities`.
 
 ### Ownership queues — park a record for a team to claim
 

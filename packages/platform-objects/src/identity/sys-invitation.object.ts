@@ -190,6 +190,9 @@ export const SysInvitation = ObjectSchema.create({
       // [#27843, ruling E on #27797] The pending invitation's accept link, for
       // a deployment whose mail is not delivered (invite-member answers
       // `outcome: 'link_only'` there): the one way the invitee is reached.
+      // It admits the sign-up only: accepting needs a verified address, so
+      // without mail it brings in just an invitee whose social or SSO sign-in
+      // verifies the address (the `link_only` copy says so).
       // The handler is plugin-auth's (`invitation-link-action.ts`), registered
       // under `target`; it builds the link the invitation mail carries, and
       // enforces this action's gates itself, because the link is a bearer

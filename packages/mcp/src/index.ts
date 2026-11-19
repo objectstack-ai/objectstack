@@ -38,6 +38,9 @@ export type {
   McpPrincipalKind,
 } from './types.js';
 export type { McpCallerExecutionContext } from './tool-call-interceptor.js';
+// The capped-list truncation flag the read tools share, and `query_records`'
+// one-row-per-group form a bridge receives.
+export type { McpLatestPer } from './types.js';
 export {
   registerObjectTools,
   registerActionTools,
@@ -46,6 +49,7 @@ export {
 } from './mcp-http-tools.js';
 export type {
   McpDataBridge,
+  McpFieldVisibility,
   McpObjectSummary,
   RegisterObjectToolsOptions,
   McpActionBridge,

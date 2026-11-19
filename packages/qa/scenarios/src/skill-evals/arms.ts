@@ -78,9 +78,13 @@ export interface ArmWorkdir {
  * Make one turn's directory: `ROOT/project` as the working directory, holding
  * `.claude/skills/BUNDLE/` (without `evals/`) on the with-skill arm and
  * nothing on the no-skill arm, and `ROOT/mcp.json` beside it.
+ *
+ * `ROOT` is always under the system temp directory, spelled at the call so the
+ * dispatch-gates scratch scan reads it as outside the tree; a caller that
+ * wants it gone removes `root` itself.
  */
-export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string, base: string = tmpdir()): ArmWorkdir {
-  const root = mkdtempSync(join(base, 'skill-eval-'));
+export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string): ArmWorkdir {
+  const root = mkdtempSync(join(tmpdir(), 'skill-eval-'));
   const cwd = join(root, 'project');
   mkdirSync(cwd);
   const mcpConfigPath = join(root, 'mcp.json');
@@ -96,4 +100,17 @@ export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string, 
     });
   }
   return { cwd, mcpConfigPath, root };
+}
+
+/**
+ * Place a case's `files` in a turn's project: each entry, a path under the
+ * bundle's `evals/files/` (the reader has refused any other), is copied to the
+ * same path below `evals/files/` inside `cwd`, a directory whole. Called for
+ * both arms alike, so the arms still differ only in the bundle.
+ */
+export function placeCaseFiles(files: readonly string[] | undefined, bundle: string, skillsRoot: string, cwd: string): void {
+  for (const f of files ?? []) {
+    const below = f.split('/').slice(2).join('/');
+    cpSync(join(skillsRoot, bundle, f), join(cwd, below), { recursive: true, dereference: true });
+  }
 }

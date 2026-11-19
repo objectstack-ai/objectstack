@@ -352,3 +352,148 @@ describe('#3863 — a handled failure does not trigger flow-level retry', () => 
         expect(upstreamRuns).toBe(1);
     });
 });
+
+/**
+ * A node whose type no installed plugin provides — an `approval` node on a
+ * deployment without the approvals plugin — fails with `NO_EXECUTOR`. That is
+ * a node failure like any other, so a declared `fault` edge routes it: the
+ * author's graceful path (notify, fall back, set the record back) runs instead
+ * of the run failing with nobody told. With no `fault` edge the run fails
+ * exactly as it always has, and `start`'s no-executor path is untouched.
+ */
+describe('a node with no installed executor is graded like any other node failure', () => {
+    const NO_EXECUTOR_MESSAGE = "No executor registered for node type 'approval'";
+
+    function approvalFlow(name: string, withFault: boolean) {
+        return {
+            name,
+            label: name,
+            type: 'autolaunched' as const,
+            nodes: [
+                { id: 'start', type: 'start' as const, label: 'Start' },
+                { id: 'signoff', type: 'approval' as any, label: 'Sign-off', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'signoff' },
+                { id: 'e2', source: 'signoff', target: 'end' },
+                ...(withFault ? [{ id: 'e_fault', source: 'signoff', target: 'handler', type: 'fault' as const }] : []),
+                { id: 'e3', source: 'handler', target: 'end' },
+            ],
+        };
+    }
+
+    function engineWithHandler() {
+        const engine = new AutomationEngine(createTestLogger());
+        const seen: { handlerRuns: number; error?: unknown; nodeScoped?: unknown } = { handlerRuns: 0 };
+        engine.registerNodeExecutor({
+            type: 'script',
+            async execute(_node, variables) {
+                seen.handlerRuns++;
+                seen.error = variables.get('$error');
+                seen.nodeScoped = variables.get('signoff');
+                return { success: true };
+            },
+        });
+        return { engine, seen };
+    }
+
+    it('routes a declared fault edge, and the handler reads $error.code NO_EXECUTOR', async () => {
+        const { engine, seen } = engineWithHandler();
+        engine.registerFlow('approval_with_fault', approvalFlow('approval_with_fault', true));
+
+        const result = await engine.execute('approval_with_fault');
+
+        expect(result.success).toBe(true);
+        expect(seen.handlerRuns).toBe(1);
+        expect(seen.error).toEqual({ nodeId: 'signoff', message: NO_EXECUTOR_MESSAGE, code: 'NO_EXECUTOR' });
+        expect((seen.nodeScoped as { error?: unknown } | undefined)?.error).toBe(NO_EXECUTOR_MESSAGE);
+    });
+
+    it('keeps the NO_EXECUTOR failure step in the run record when the fault branch completes', async () => {
+        const { engine } = engineWithHandler();
+        engine.registerFlow('approval_traced', approvalFlow('approval_traced', true));
+
+        await engine.execute('approval_traced');
+
+        const runs = await engine.listRuns('approval_traced');
+        const steps = runs[0]?.steps ?? [];
+        const signoff = steps.filter((s: any) => s.nodeId === 'signoff');
+        expect(signoff).toHaveLength(1);
+        expect(signoff[0]?.status).toBe('failure');
+        expect(signoff[0]?.error).toEqual({ code: 'NO_EXECUTOR', message: NO_EXECUTOR_MESSAGE });
+        expect(steps.map((s: any) => [s.nodeId, s.status])).toEqual([
+            ['start', 'success'],
+            ['signoff', 'failure'],
+            ['handler', 'success'],
+        ]);
+    });
+
+    it('CONTROL — with no fault edge the run fails exactly as before', async () => {
+        const { engine, seen } = engineWithHandler();
+        engine.registerFlow('approval_no_fault', approvalFlow('approval_no_fault', false));
+
+        const result = await engine.execute('approval_no_fault');
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+        expect(result.error).toBe(NO_EXECUTOR_MESSAGE);
+        expect(seen.handlerRuns).toBe(0);
+        const runs = await engine.listRuns('approval_no_fault');
+        const steps = runs[0]?.steps ?? [];
+        expect(steps.map((s: any) => [s.nodeId, s.status, s.error?.code])).toEqual([
+            ['start', 'success', undefined],
+            ['signoff', 'failure', 'NO_EXECUTOR'],
+        ]);
+        expect(steps[1]?.error?.message).toBe(NO_EXECUTOR_MESSAGE);
+    });
+
+    it('CONTROL — a start node with no executor still records success and the run proceeds', async () => {
+        const { engine, seen } = engineWithHandler();
+        engine.registerFlow('start_only', {
+            name: 'start_only',
+            label: 'start_only',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'handler' },
+                { id: 'e2', source: 'handler', target: 'end' },
+            ],
+        });
+
+        const result = await engine.execute('start_only');
+
+        expect(result.success).toBe(true);
+        expect(seen.handlerRuns).toBe(1);
+        expect(seen.error).toBeUndefined();
+        const runs = await engine.listRuns('start_only');
+        const startStep = runs[0]?.steps?.find((s: any) => s.nodeId === 'start');
+        expect(startStep?.status).toBe('success');
+        expect(startStep?.error).toBeUndefined();
+    });
+
+    it('CONTROL — a registered executor that throws still routes its fault edge with the thrown message', async () => {
+        const { engine, seen } = engineWithHandler();
+        engine.registerNodeExecutor({
+            type: 'approval',
+            async execute() {
+                throw new Error('approval store unreachable');
+            },
+        });
+        engine.registerFlow('approval_throws', approvalFlow('approval_throws', true));
+
+        const result = await engine.execute('approval_throws');
+
+        expect(result.success).toBe(true);
+        expect(seen.handlerRuns).toBe(1);
+        expect(seen.error).toEqual({ nodeId: 'signoff', message: 'approval store unreachable' });
+        const runs = await engine.listRuns('approval_throws');
+        const signoff = runs[0]?.steps?.find((s: any) => s.nodeId === 'signoff');
+        expect(signoff?.error).toEqual({ code: 'EXECUTION_ERROR', message: 'approval store unreachable' });
+    });
+});

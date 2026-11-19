@@ -61,7 +61,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           pending: "待审批",
           approved: "已批准",
-          rejected: "已拒绝",
+          rejected: "已驳回",
           recalled: "已撤回",
           returned: "已退回修改",
           cancelled: "已作废"
@@ -152,9 +152,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       approval_reject: {
-        label: "拒绝",
-        description: "拒绝该请求？拒绝对所有审批人立即生效。",
-        successMessage: "已拒绝“{{ result.request.record_title }}”",
+        label: "驳回",
+        description: "驳回该请求？驳回对所有审批人立即生效。",
+        successMessage: "已驳回“{{ result.request.record_title }}”",
         params: {
           comment: {
             label: "审批意见"
@@ -280,7 +280,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           submit: "提交",
           approve: "批准",
-          reject: "拒绝",
+          reject: "驳回",
           recall: "撤回",
           escalate: "升级",
           reassign: "转签",

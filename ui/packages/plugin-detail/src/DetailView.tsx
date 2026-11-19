@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
 import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
-import { useDefaultRecordPage } from './defaultRecordPage';
+import { EmptySectionsLineContext, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -325,9 +325,14 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // approval band below is live, per-viewer workflow state, not document
   // content, so it does not print.
   const isPrintPage = usePrintPage() !== null;
-  // objectstack#27055 — the synthesized default record page folds its
-  // entirely empty sections into one line (`EmptySectionsLine`).
+  // objectstack#27055, objectstack#35019 — a record page's details body folds
+  // its entirely empty sections into one line (`EmptySectionsLine`): every
+  // `record:details` body, authored page or synthesized default page alike,
+  // and anything else the default page draws. Every other body keeps the
+  // whole-body fold (`EmptySectionsFold`).
+  const inRecordDetailsBody = React.useContext(EmptySectionsLineContext);
   const onDefaultRecordPage = useDefaultRecordPage();
+  const emptySectionsAsLine = inRecordDetailsBody || onDefaultRecordPage;
   const isInlineEditing = inline?.editing ?? false;
   const editedValues = inline?.draft ?? EMPTY_DRAFT;
   const autoFocusField = inline?.autoFocusField ?? null;
@@ -2140,11 +2145,12 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     />
                   </SectionBoundary>
                 );
-                return onDefaultRecordPage && !schema.sectionGroups?.length ? (
+                return emptySectionsAsLine && !schema.sectionGroups?.length ? (
                   <EmptySectionsLine
                     sections={schema.sections ?? []}
                     data={{ ...data, ...editedValues }}
                     isEditing={isInlineEditing}
+                    objectName={schema.objectName}
                     renderSection={renderSectionAt}
                   />
                 ) : foldEmptySections(schema.sections!.map(renderSectionAt));

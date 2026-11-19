@@ -620,6 +620,7 @@ export {
   markAppAutomationElevation,
   appAutomationElevationOf,
   carryAppAutomationElevation,
+  withoutAppAutomationElevation,
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
 

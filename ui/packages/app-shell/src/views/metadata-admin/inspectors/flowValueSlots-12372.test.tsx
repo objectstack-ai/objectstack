@@ -24,6 +24,8 @@
  *      `{var}` token.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -53,7 +55,7 @@ import type { ScopeGroup } from './useFlowScope';
 afterEach(cleanup);
 
 const PICK = 'Insert a reference';
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 const env = (source: string) => ({ dialect: 'cel', source });
 const BODY = { nodes: [{ id: 'inner', type: 'assignment', label: 'Inner' }], edges: [] };
 

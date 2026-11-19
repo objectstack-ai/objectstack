@@ -520,10 +520,11 @@ const ADOPTER_SCHEMAS: Record<string, any> = {
 };
 
 /** A dataset for an object with no natural key of its own — every adopted
- *  object here is engine/append-only owned, so `mode: 'insert'` (no
- *  `externalId`) is how such rows would honestly be authored. */
+ *  object here is engine/append-only owned. The keyless `insert` mode such
+ *  rows were once authored with is retired (#34613), so the dataset keys on
+ *  `id`; these rows carry none, so each one is written as a new row. */
 function insertSeed(object: string, records: Array<Record<string, unknown>>) {
-  return { object, mode: 'insert', env: ['prod', 'dev', 'test'], records };
+  return { object, externalId: 'id', mode: 'ignore', env: ['prod', 'dev', 'test'], records };
 }
 
 describe('pointer-pair adoption per object (#11386)', () => {

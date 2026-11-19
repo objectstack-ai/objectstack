@@ -138,6 +138,11 @@ export const Opportunity = ObjectSchema.create({
       description: 'Opportunities should progress through stages in order.',
       field: 'stage',
       message: 'Invalid stage transition.',
+      // A deal may be recorded at any stage, an already-won or already-lost
+      // one included: `OpportunityStageHook` sets the probability on INSERT
+      // for exactly that case (test/opportunity-stage-hook.test.ts). The
+      // machine guards how a deal MOVES, not where it is first entered.
+      initialStates: ['prospecting', 'qualification', 'proposal', 'closed_won', 'closed_lost'],
       transitions: {
         prospecting:  ['qualification', 'closed_lost'],
         qualification:['proposal', 'closed_lost'],

@@ -1088,7 +1088,9 @@ const MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one',
  *                    conditions). Unlisted identifiers stay `dyn`
  *                    (`unlistedVariablesAreDyn: true`) so a flow variable never
  *                    faults — only a typed field misused does.
- * Built per call — cheap, and only used at build time.
+ *
+ * Memoized on its inputs ({@link TYPED_ENV_CACHE}): the env is a pure function
+ * of them and every caller only parses and checks against it.
  */
 function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
@@ -1102,6 +1104,54 @@ function buildTypedEnv(
    * reads the field.
    */
   recordRootTypes?: Readonly<Record<string, FieldCelType>>,
+): Environment {
+  const key = JSON.stringify([scope, temporal, fieldCelTypes, recordRootTypes ?? null]);
+  const cached = TYPED_ENV_CACHE.get(key);
+  if (cached) {
+    // Least-recently-used order: a hit moves to the young end.
+    TYPED_ENV_CACHE.delete(key);
+    TYPED_ENV_CACHE.set(key, cached);
+    return cached;
+  }
+  const env = createTypedEnv(fieldCelTypes, scope, temporal, recordRootTypes);
+  TYPED_ENV_CACHE.set(key, env);
+  if (TYPED_ENV_CACHE.size > TYPED_ENV_CACHE_LIMIT) {
+    TYPED_ENV_CACHE.delete(TYPED_ENV_CACHE.keys().next().value as string);
+  }
+  return env;
+}
+
+/**
+ * [#34756] The typed check envs {@link buildTypedEnv} has built, keyed on its
+ * inputs, least recently used first.
+ *
+ * Building one is not cheap: a fresh cel-js `Environment` clones the global
+ * registry and then registers the whole stdlib, the null comparisons and the
+ * temporal overloads one signature at a time. The runtime authoring gate runs
+ * the expression passes over the WHOLE stack on every metadata publish, and
+ * each expression asks for up to three of these envs. Measured on the
+ * showcase (one object publish): 903 builds for 97 distinct inputs, about
+ * 0.5 s of the publish request on an idle box, before this cache.
+ *
+ * Sharing an env is sound because nothing registers on one after it is built:
+ * every caller only `parse`s and `check`s against it, and neither changes
+ * what the env declares. ⛔ A new caller that registers on the returned env
+ * would leak that declaration into every later check with the same inputs —
+ * build a fresh one with {@link createTypedEnv} instead.
+ *
+ * Bounded so a long-lived process that sees many distinct field maps keeps a
+ * fixed footprint; the limit sits well above the distinct inputs one gate
+ * pass over the showcase asks for (97).
+ */
+const TYPED_ENV_CACHE = new Map<string, Environment>();
+const TYPED_ENV_CACHE_LIMIT = 512;
+
+/** {@link buildTypedEnv}'s uncached body: a fresh env for these inputs. */
+function createTypedEnv(
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  temporal: TemporalTyping,
+  recordRootTypes: Readonly<Record<string, FieldCelType>> | undefined,
 ): Environment {
   // `temporal` picks what a `date`/`datetime` field is declared as — see
   // {@link TemporalTyping}.
@@ -1204,6 +1254,14 @@ function withoutNames(
   for (const [name, t] of Object.entries(fieldCelTypes)) if (!names.has(name)) out[name] = t;
   return out;
 }
+
+/**
+ * [#29959, #34662] A `record.` / `previous.` read spelled member-wise — the gate
+ * of every flattened record-root pass ({@link firstTypeMismatch}'s and
+ * `validate.ts`'s date-text one), so the two can never disagree on whether a
+ * source reads a root.
+ */
+export const RECORD_ROOT_READ_RE = /(?<![\w$.])(?:record|previous)\s*\./;
 
 /**
  * [#29959] The `record.<field>` / `previous.<field>` read of a field of
@@ -1358,9 +1416,10 @@ export function firstTypeMismatch(
     // [#29959] A flattened condition reads the same field as `record.<field>`
     // (and `previous.<field>`), which the bare typing above leaves `dyn`. A
     // second pass types those roots too, for the text/boolean mismatch only:
-    // the same verdict the bare name gets. The date verdicts stay the bare
-    // name's alone, as before.
-    if (scope !== 'flattened' || !/(?<![\w$.])(?:record|previous)\s*\./.test(source)) return null;
+    // the same verdict the bare name gets. The `date-arith` verdict stays the
+    // bare name's alone, as before; the date-text family reaches the roots
+    // through `validate.ts`'s record-root pass (#34662).
+    if (scope !== 'flattened' || !RECORD_ROOT_READ_RE.test(source)) return null;
     const rootTyped = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', 'timestamp', fieldCelTypes));
     const r = rootTyped && textOrBool(rootTyped) ? confirmAgainstDateText(rootTyped, fieldCelTypes) : null;
     const celType = r ? textOrBool(r) : null;
@@ -1460,10 +1519,15 @@ function registerDateTextAnswersOnString(env: Environment): void {
  *    answer, so the expression faults and the field reads null;
  *  - `type` — the expression checks clean, and `type` is the CEL type it
  *    computes (`google.protobuf.Duration` for `today() - record.start_date`).
+ * `root` is set on the flattened record-root pass (`recordRootTypes`, #34662)
+ * when `field` is named by its `record.<field>` / `previous.<field>` read.
  */
 export type DateTextVerdict =
-  | { readonly kind: 'fault'; readonly operator: string; readonly operands: string; readonly field: string | null }
-  | { readonly kind: 'type'; readonly type: string; readonly field: string | null };
+  | {
+      readonly kind: 'fault'; readonly operator: string; readonly operands: string; readonly field: string | null;
+      readonly root?: 'record' | 'previous';
+    }
+  | { readonly kind: 'type'; readonly type: string; readonly field: string | null; readonly root?: 'record' | 'previous' };
 
 /**
  * #28944 — type-check `source` with every `date`/`datetime` field declared as
@@ -1485,29 +1549,70 @@ export type DateTextVerdict =
  * Returns `null` when the source does not parse, or the check faults on
  * anything other than arithmetic with a date field's text — that is another
  * check's to report, and this one never guesses.
+ *
+ * [#34662] `recordRootTypes` (flattened scope only) types a flow condition's
+ * `record.<field>` / `previous.<field>` reads as well, the record-root pass
+ * {@link firstTypeMismatch} runs for the text/boolean mismatch: the field is
+ * then named by its root read (`root`) wherever one is spelled member-wise.
  */
 export function firstDateTextVerdict(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
+  recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): DateTextVerdict | null {
   if (typeof source !== 'string' || !source.trim()) return null;
+  const rootTypes = scope === 'flattened' ? recordRootTypes : undefined;
   try {
-    const env = buildTypedEnv(fieldCelTypes, scope, 'date-text');
+    const env = buildTypedEnv(fieldCelTypes, scope, 'date-text', rootTypes);
     const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
       | { valid?: boolean; type?: unknown; error?: { message?: string } }
       | undefined;
     if (!result) return null;
-    const field = offendingField(source, fieldCelTypes, 'timestamp', scope);
+    const read = rootTypes ? offendingRecordRead(source, rootTypes, 'timestamp') : null;
+    const named = read
+      ? { field: read.field, root: read.root }
+      : { field: offendingField(source, fieldCelTypes, 'timestamp', scope) };
     if (result.valid !== false) {
-      return typeof result.type === 'string' ? { kind: 'type', type: result.type, field } : null;
+      return typeof result.type === 'string' ? { kind: 'type', type: result.type, ...named } : null;
     }
     const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
     if (!m || !ARITH_OPS.has(m[2]) || (m[1] !== DATE_TEXT_CEL_TYPE && m[3] !== DATE_TEXT_CEL_TYPE)) return null;
-    return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, field };
+    return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, ...named };
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile).
     return null;
+  }
+}
+
+/**
+ * [#34662] Whether the FIRST operator fault the Timestamp typing of a flattened
+ * condition's `record.<field>` / `previous.<field>` reads meets (every bare
+ * name `dyn`) is date/duration arithmetic against a number ({@link isDateArith})
+ * — `record.due_date + 1`. That shape is the `date-arithmetic` family's, and it
+ * is exactly where the bare name's own order stops: {@link firstTypeMismatch}
+ * answers `date-arith` there and the date-text check is never asked. Any other
+ * Timestamp-typing fault — `record.end_date - record.start_date > 3` (a Duration
+ * ordered against a number), `record.d >= "2026-01-01"` (the text ordering the
+ * runtime answers) — leaves the bare name's mismatch check at null and the
+ * date-text check asked, so it does not stand the record-root pass down
+ * either. `false` when the source does not parse.
+ */
+export function recordRootReadsFaultDateArith(
+  source: string,
+  recordRootTypes: Readonly<Record<string, FieldCelType>>,
+): boolean {
+  if (typeof source !== 'string' || !source.trim()) return false;
+  try {
+    const result = buildTypedEnv({}, 'flattened', 'timestamp', recordRootTypes)
+      .parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
+      | { valid?: boolean; error?: { message?: string } }
+      | undefined;
+    if (result?.valid !== false) return false;
+    const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
+    return m !== null && isDateArith(m);
+  } catch {
+    return false;
   }
 }
 
@@ -1572,24 +1677,39 @@ export interface DateTextCall {
  * wrap the field for, so the rewrite is `date(<field>)` in place of the call,
  * and `shift` carries the whole-day shift the stdlib teaches,
  * `isoDate(addDays(<field>, N))`, which reads the date text as it is.
+ *
+ * [#34662] `recordRootTypes` (flattened scope only): a flow condition's
+ * `record.<field>` / `previous.<field>` reads are typed with these, as
+ * {@link firstDateTextVerdict}'s record-root pass types them, and a root read
+ * qualifies by them alone (an `input.<field>` read then does not qualify: a
+ * flow does not bind `input` to the row the types describe). Absent, every
+ * reference is judged by `fieldCelTypes`, exactly as before.
  */
 export function firstDateTextCall(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
   dateOnlyFields: ReadonlySet<string> = new Set(),
+  recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): DateTextCall | null {
   if (typeof source !== 'string' || !source.trim()) return null;
-  const dateFields: Record<string, FieldCelType> = {};
-  let any = false;
-  for (const [name, t] of Object.entries(fieldCelTypes)) {
-    dateFields[name] = t === 'timestamp' ? 'timestamp' : 'dyn';
-    any ||= t === 'timestamp';
-  }
+  const textTyping = (types: Readonly<Record<string, FieldCelType>>): Record<string, FieldCelType> =>
+    Object.fromEntries(Object.entries(types).map(([name, t]) => [name, t === 'timestamp' ? 'timestamp' : 'dyn']));
+  const dateFields = textTyping(fieldCelTypes);
+  const rootDateFields = scope === 'flattened' && recordRootTypes ? textTyping(recordRootTypes) : undefined;
+  /** The date-text typing a reference is judged by: its root's, on the record-root pass. */
+  const typingOf = (written: string): Record<string, FieldCelType> | undefined => {
+    if (!rootDateFields) return dateFields;
+    const root = written.includes('.') ? written.slice(0, written.indexOf('.')) : undefined;
+    return root === undefined ? dateFields : root === 'record' || root === 'previous' ? rootDateFields : undefined;
+  };
+  const isDate = (name: string, types: Record<string, FieldCelType> | undefined): boolean =>
+    types?.[name] === 'timestamp';
+  const any = [dateFields, rootDateFields].some((types) => types && Object.values(types).includes('timestamp'));
   if (!any) return null;
-  const anyDateOnly = [...dateOnlyFields].some((name) => dateFields[name] === 'timestamp');
+  const anyDateOnly = [...dateOnlyFields].some((name) => isDate(name, dateFields) || isDate(name, rootDateFields));
   try {
-    const env = buildTypedEnv(dateFields, scope, 'text');
+    const env = buildTypedEnv(dateFields, scope, 'text', rootDateFields);
     const parsed = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
     // The whole expression checking clean is the common case: nothing to find,
     // unless a date-only field can reach `timestamp()`, which checks clean.
@@ -1605,7 +1725,7 @@ export function firstDateTextCall(
     };
     const dateRef = (node: unknown): string | null => {
       const ref = typedFieldRef(node, scope);
-      return ref && dateFields[ref.name] === 'timestamp' ? ref.written : null;
+      return ref && isDate(ref.name, typingOf(ref.written)) ? ref.written : null;
     };
     let verdict: DateTextCall | null = null;
     const visit = (v: unknown): void => {
@@ -1622,7 +1742,7 @@ export function firstDateTextCall(
       // [#34363] `timestamp(<date-only field>)`: clean on the text, faults on it.
       if (v.op === 'call' && Array.isArray(args) && args[0] === 'timestamp' && operands?.length === 1) {
         const ref = typedFieldRef(operands[0], scope);
-        if (ref && dateFields[ref.name] === 'timestamp' && dateOnlyFields.has(ref.name)) {
+        if (ref && isDate(ref.name, typingOf(ref.written)) && dateOnlyFields.has(ref.name)) {
           const rewrite = wrapInDate(operands[0] as CelNode);
           if (checkOf(rewrite) === true) {
             verdict = {

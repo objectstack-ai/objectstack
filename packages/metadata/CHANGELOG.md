@@ -1,5 +1,122 @@
 # @objectstack/metadata
 
+## 18.6.0
+
+### Patch Changes
+
+- 1ccb445: perf(metadata-protocol): the served item read caches its caller-independent compiled answer (ADR-0156)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `getMetaItem` (the served face of `GET /api/v1/meta/:type/:name`, and the per-item read an app bundle makes for every app, object, view, page and dashboard it names) no longer recompiles an item whose sources have not changed. Every caller gets the same answer it got before, the response body and ETag included: only the server's work per request moves.
+  
+  - **What is cached.** The compiled envelope of a by-name read of `app`, `object`, `view`, `page` and `dashboard` items, per engine. A read for a package, a state, a member or a draft preview is never cached. The per-caller gate, field mask, translation and ETag stay computed on every request, and the live trailers (`registration`, `disabledActions`, `cascadeDeleteObjects`) are read on every hit.
+  - **What retires it.** Each source counts its own changes at its own mutation point: the `sys_metadata` overlay generation, the schema registry's `objectRevision` and a new `revision` that every public write of `SchemaRegistry` moves (the classification of its public methods is exhaustive by type), and a new `revision` on `MetadataManager`. Any move drops every entry. A source without its counter makes the cache decline.
+  - **What another process can change.** After a bound (`OS_METADATA_COMPILE_CACHE_TTL_MS`, default 30000 ms) the cache confirms before it recompiles, once per bound per engine however many readers cross it: a digest of every stored row's identity, binding, state, `version`, `checksum` and `updated_at` (so an `updated_at` stamped from a clock that is behind still moves it; the bodies are not read) and each loader's reading of its backing store (`FilesystemLoader` stats the type directories and files its reads touched). If nothing moved, the entries stand for another bound, never past 10 bounds from when each was compiled; that cap is the only bound on a writer that bypasses the engine and rewrites a body while leaving all three bookkeeping columns as they were (#34522 tracks a column that would close it). Every confirmation also retires the overlay row cache, so a recompile reads rows at least as new as the reading, and a read in flight across a confirmation is not stored. A local counter move takes no store reading. A loader that keeps no change mark makes every entry recompile at its bound, never renewed.
+  - **New public members (additive).** `SchemaRegistry#revision`, `MetadataManager#revision`, `MetadataManager#loaderChangeMark()`, the optional `MetadataLoader#changeMark()` and `FilesystemLoader#changeMark()`.
+  - `OS_METADATA_COMPILE_CACHE_TTL_MS=0` is the uncached read, the same reads in the same order.
+  
+  On a showcase Setup bundle, an immediate repeat made 213 database reads before and 9 after.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/metadata-fs@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

@@ -11,8 +11,7 @@ Since **ADR-0020** there is **no `workflow` metadata type** and no
 validation rule** in the object's `validations` array: a flat `field` +
 `{ from: [allowedTo] }` transition table. It is **enforced on the write path** —
 an update whose `field` moves to a state not listed for the current state is
-rejected with the rule's `message`. A `from` state mapped to `[]` is a declared
-dead-end.
+rejected with the rule's `message`.
 
 <!-- os:check -->
 ```typescript
@@ -36,7 +35,7 @@ const rule: StateMachineValidation = {
 
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
-  are N separate `state_machine` rules, one per field.
+  are N separate `state_machine` rules.
 - **`initialStates`** (optional) gates INSERT: a record created with its
   state field outside this list is rejected. `transitions` only governs
   updates, so without it a record can be born mid-flow (e.g. created already
@@ -55,6 +54,8 @@ Notes:
   you want guarded rather than relying on an implicit "any → any".
 - Predicate conditions in sibling rules evaluate against the merged record in
   the **`record.<field>`** CEL scope (bare field names do not resolve).
+- **An AI-gated irreversible transition** pairs this rule with a lock on
+  `field`: **objectstack-ai** → Common Pitfalls.
 
 ### Approvals (Flow Nodes)
 
@@ -69,74 +70,54 @@ is one diagram a reviewer (or AI) can read end-to-end.
 > `sys_approval_action`, the record lock, the status mirror, approver
 > resolution) is owned by `plugin-approvals`.
 
-<!-- os:check -->
-```typescript
-import { cel, defineFlow } from '@objectstack/spec';
-// A record-triggered flow: high-value opportunities need manager sign-off,
-// and director sign-off too when the amount clears 500k.
-defineFlow({
-  name: 'crm_opportunity_discount_approval',
-  label: 'Opportunity Discount Approval',
-  type: 'record_change',
-  nodes: [
-    // The trigger is the START node's config.
-    {
-      id: 'start',
-      type: 'start',
-      label: 'On Opportunity Update',
-      config: {
-        objectName: 'opportunity',
-        triggerType: 'record-after-update',
-        condition: cel`record.amount != null && record.amount > 100000`,
-      },
-    },
-    {
-      id: 'manager_review',
-      type: 'approval',
-      label: 'Sales Manager Review',
-      config: {
-        approvers: [{ type: 'position', value: 'crm_sales_manager' }],
-        behavior: 'first_response',
-        lockRecord: true,
-        approvalStatusField: 'approval_status',
-      },
-    },
-    // Decision routing lives on the OUT-EDGES, not in node config: the engine
-    // evaluates each out-edge's `condition` and follows every match — and an
-    // out-edge with NO condition ALWAYS runs (all such edges execute in
-    // PARALLEL). Guard every branch with a condition — see e4/e5 below.
-    { id: 'needs_director', type: 'decision', label: 'Needs Director?' },
-    {
-      id: 'director_signoff',
-      type: 'approval',
-      label: 'Sales Director Sign-off',
-      config: {
-        approvers: [{ type: 'position', value: 'crm_sales_director' }],
-        behavior: 'unanimous',
-        approvalStatusField: 'approval_status',
-      },
-    },
-    { id: 'mark_won', type: 'update_record', label: 'Mark Won',
-      config: { objectName: 'opportunity', filter: { id: { dialect: 'cel', source: 'record.id' } },
-                fields: { stage: 'closed_won' } } },
-    { id: 'approved', type: 'end', label: 'Approved' },
-    { id: 'rejected', type: 'end', label: 'Rejected' },
+A record-triggered flow, as JSON: high-value opportunities need manager
+sign-off, and director sign-off too when the amount clears 500k. In TypeScript
+the same literal goes inside `defineFlow(...)`, and `` cel`…` `` builds each
+`{ dialect, source }` envelope.
+
+- The trigger is the START node's config.
+- Decision routing lives on the OUT-EDGES, not in node config: the engine
+  evaluates each out-edge's `condition` and follows every match — and an
+  out-edge with NO condition ALWAYS runs (all such edges execute in PARALLEL).
+  Guard every branch with a condition — `e4` / `e5`.
+- Entry criteria re-home onto the edge entering the approval node — `e1`.
+
+```json
+{
+  "name": "crm_opportunity_discount_approval",
+  "label": "Opportunity Discount Approval",
+  "type": "record_change",
+  "nodes": [
+    { "id": "start", "type": "start", "label": "On Opportunity Update", "config": {
+        "objectName": "opportunity", "triggerType": "record-after-update",
+        "condition": { "dialect": "cel", "source": "record.amount != null && record.amount > 100000" } } },
+    { "id": "manager_review", "type": "approval", "label": "Sales Manager Review", "config": {
+        "approvers": [{ "type": "position", "value": "crm_sales_manager" }],
+        "behavior": "first_response", "lockRecord": true, "approvalStatusField": "approval_status" } },
+    { "id": "needs_director", "type": "decision", "label": "Needs Director?" },
+    { "id": "director_signoff", "type": "approval", "label": "Sales Director Sign-off", "config": {
+        "approvers": [{ "type": "position", "value": "crm_sales_director" }],
+        "behavior": "unanimous", "approvalStatusField": "approval_status" } },
+    { "id": "mark_won", "type": "update_record", "label": "Mark Won", "config": {
+        "objectName": "opportunity", "filter": { "id": { "dialect": "cel", "source": "record.id" } },
+        "fields": { "stage": "closed_won" } } },
+    { "id": "approved", "type": "end", "label": "Approved" },
+    { "id": "rejected", "type": "end", "label": "Rejected" }
   ],
-  edges: [
-    { id: 'e1', source: 'start',          target: 'manager_review',
-      // entry criteria re-homes onto the edge entering the approval node:
-      condition: cel`record.amount > 100000` },
-    { id: 'e2', source: 'manager_review',  target: 'needs_director',   label: 'approve' },
-    { id: 'e3', source: 'manager_review',  target: 'rejected',         label: 'reject'  },
-    { id: 'e4', source: 'needs_director',  target: 'director_signoff', label: 'true',
-      condition: cel`record.amount > 500000` },
-    { id: 'e5', source: 'needs_director',  target: 'mark_won',         label: 'false',
-      condition: cel`record.amount <= 500000` },
-    { id: 'e6', source: 'director_signoff', target: 'mark_won',        label: 'approve' },
-    { id: 'e7', source: 'director_signoff', target: 'rejected',        label: 'reject'  },
-    { id: 'e8', source: 'mark_won',         target: 'approved' },
-  ],
-});
+  "edges": [
+    { "id": "e1", "source": "start", "target": "manager_review",
+      "condition": { "dialect": "cel", "source": "record.amount > 100000" } },
+    { "id": "e2", "source": "manager_review", "target": "needs_director", "label": "approve" },
+    { "id": "e3", "source": "manager_review", "target": "rejected", "label": "reject" },
+    { "id": "e4", "source": "needs_director", "target": "director_signoff", "label": "true",
+      "condition": { "dialect": "cel", "source": "record.amount > 500000" } },
+    { "id": "e5", "source": "needs_director", "target": "mark_won", "label": "false",
+      "condition": { "dialect": "cel", "source": "record.amount <= 500000" } },
+    { "id": "e6", "source": "director_signoff", "target": "mark_won", "label": "approve" },
+    { "id": "e7", "source": "director_signoff", "target": "rejected", "label": "reject" },
+    { "id": "e8", "source": "mark_won", "target": "approved" }
+  ]
+}
 ```
 
 ### Send-back for revision (ADR-0044)
@@ -280,8 +261,7 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 **`record` and bare field names are NOT available and fail the node loudly.**
 Everywhere else on this platform `record` means "the record at event time" — at an
 approval node that phrase is ambiguous between two different times, so you must
-say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
-over from conditions.
+say which one: `current.x` or `trigger.x`.
 
 Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
 result (present-but-empty field/variable) triggers `onEmptyApprovers`. A
@@ -372,7 +352,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`returned`/`recalled` onto (should be readonly) |
-| `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
+| `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens on the organization's administrators; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry: bare keys (free text) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }`, enforced at the decision — see *Recording a decision* |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |

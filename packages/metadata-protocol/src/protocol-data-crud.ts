@@ -26,7 +26,7 @@ import { recordNotFoundError } from '@objectstack/core';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer } from '@objectstack/types';
 import type { SummaryRecomputeRefusal } from '@objectstack/types';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import type { DroppedFieldsEvent, EngineQueryOptions, ValidationAdvisoryEvent } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DroppedFieldsEvent, EngineQueryOptions, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 import {
     redactStoredMetadataRow,
     redactStoredMetadataRows,
@@ -63,6 +63,47 @@ import {
 } from './protocol-list-query-params.js';
 import type { ProtocolHost } from './protocol-host.js';
 
+/**
+ * The engine's latest-per read option (`@objectstack/objectql`, `latest-per.ts`):
+ * one row per group. An in-process door hands it to {@link
+ * ProtocolDataCrudFacet.findData} on the REQUEST object under this key, beside
+ * `object` / `query` / `context`, and `findData` hands it on to `engine.find`
+ * as that same option. A `Symbol.for` key — this package does not depend on
+ * the engine — and a symbol, so no wire request, JSON body or spread author
+ * input can carry it: every ingress gate below judges the query exactly as it
+ * judges any other.
+ */
+const FIND_DATA_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
+/** The request's partition and order fields as sort nodes, for the sort gates; well-formed entries only — the engine judges the shape. */
+function latestPerSortNodes(request: unknown): Array<{ field: string; order: 'asc' | 'desc' }> {
+    const by = (request as { by?: unknown } | null)?.by;
+    const orderBy = (request as { orderBy?: unknown } | null)?.orderBy;
+    const nodes: Array<{ field: string; order: 'asc' | 'desc' }> = [];
+    if (Array.isArray(by)) {
+        for (const field of by) if (typeof field === 'string' && field !== '') nodes.push({ field, order: 'asc' });
+    }
+    if (Array.isArray(orderBy)) {
+        for (const key of orderBy) {
+            const field = (key as { field?: unknown } | null)?.field;
+            const order = (key as { order?: unknown } | null)?.order;
+            if (typeof field === 'string' && field !== '') nodes.push({ field, order: order === 'desc' ? 'desc' : 'asc' });
+        }
+    }
+    return nodes;
+}
+
+/** A latest-per read this door cannot serve as asked: `INVALID_QUERY` / 400, nothing read. */
+function latestPerQueryRefusal(object: string, detail: string): Error {
+    const err: any = new Error(`findData('${object}') with latestPer: ${detail} The query was NOT run and nothing was read.`);
+    err.code = 'INVALID_QUERY';
+    err.status = 400;
+    err.httpStatus = 400;
+    err.object = object;
+    err.param = 'latestPer';
+    return err;
+}
+
 export class ProtocolDataCrudFacet {
     /** The body of `ObjectStackProtocolImplementation#findData`; the method's docblock there is its contract. */
     static async findData(host: Pick<ProtocolHost, 'assertAggregationFieldsExist' | 'assertExpandTargetsExist' | 'assertFilterFieldsExist' | 'assertGroupByFieldsExist' | 'assertNoInternalFieldEvaluated' | 'assertObjectRegistered' | 'assertProjectionFieldsExist' | 'assertQueryParamsAreFields' | 'assertSearchFieldsAreSearchable' | 'assertSortFieldsExist' | 'engine' | 'servedExpand' | 'storedHashDigest'>, request: { object: string, query?: any, context?: any }): Promise<{
@@ -75,6 +116,11 @@ export class ProtocolDataCrudFacet {
         // query parameter is even parsed, so an unknown name can never be
         // probed for query-shape validity (nor reach the driver as a table).
         host.assertObjectRegistered(request.object);
+        // [latest per group] The engine-internal one-row-per-group request, when
+        // an in-process door carried one (see {@link FIND_DATA_LATEST_PER}).
+        const latestPer = (request as unknown as Record<symbol, unknown>)[FIND_DATA_LATEST_PER] as
+            { outcome?: { kind?: unknown } } | undefined;
+        const latestPerNodes = latestPer !== undefined ? latestPerSortNodes(latestPer) : [];
         const options: any = { ...request.query };
         // The execution context is SERVER-DERIVED and never caller input.
         //
@@ -229,6 +275,10 @@ export class ProtocolDataCrudFacet {
             if (orderBy.length > 0) options.orderBy = orderBy;
             else delete options.orderBy;
         }
+        // [latest per group] The partition and order fields are sort keys to
+        // this door too: an unknown, dotted or computed one is refused here in
+        // the sort axis' own words, as the engine judges them as sort keys.
+        if (latestPerNodes.length > 0) host.assertSortFieldsExist(request.object, latestPerNodes, 'latestPer');
 
         // Filter: the folded slot value → a usable `FilterCondition` on
         // `where`, or a rejection. The four spellings of this slot
@@ -527,9 +577,12 @@ export class ProtocolDataCrudFacet {
         // names it below the ingress collector's depth backstop, is refused like
         // a direct one. `[]` outside the family.
         const filterFields = collectStoredMetadataFilterFields(request.object, options);
-        const sortFields = Array.isArray(options.orderBy)
-            ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
-            : [];
+        const sortFields = [
+            ...(Array.isArray(options.orderBy)
+                ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
+                : []),
+            ...latestPerNodes.map((n) => n.field),
+        ];
         const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, { filterFields, sortFields });
         if (bodyPredicateRefusal) throw bodyPredicateRefusal;
         // [#21207] The same three shapes on the stored CONTENT-HASH columns
@@ -555,7 +608,12 @@ export class ProtocolDataCrudFacet {
         // Internal fields in a `$search` set are handled on their own axes: the
         // auto-default never scans one (engine), an explicit `$searchFields`
         // naming one is refused (the gate above, #4254 posture).
-        host.assertNoInternalFieldEvaluated(request.object, options);
+        host.assertNoInternalFieldEvaluated(
+            request.object,
+            latestPerNodes.length > 0
+                ? { ...options, orderBy: [...(Array.isArray(options.orderBy) ? options.orderBy : []), ...latestPerNodes] }
+                : options,
+        );
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -570,6 +628,9 @@ export class ProtocolDataCrudFacet {
         // every shape gate and before the engine, so a refusal leaves the
         // driver unasked. All three unset returns the caller's own `limit`.
         const readLimits = resolveQueryReadLimits();
+        if (latestPer !== undefined && (hasGroupBy || hasAggregations)) {
+            throw latestPerQueryRefusal(request.object, 'one row per group is a list read; it does not combine with groupBy or aggregations.');
+        }
         if (hasGroupBy || hasAggregations) {
             // The grouped branch slices in memory and never reads `offset`, so
             // the window it is judged on is the groups it returns.
@@ -709,6 +770,9 @@ export class ProtocolDataCrudFacet {
         // is served in keyed form — never the stored value, which beside the
         // projected body confirms a guess at the withheld material offline —
         // under the provider's key, or the process-scoped ephemeral one.
+        if (latestPer !== undefined) {
+            return ProtocolDataCrudFacet.findLatestPer(host, request.object, findQuery, latestPer, bodyProjection.addedType === true);
+        }
         const found = await host.engine.find(request.object, findQuery);
         if (listPlan.probe) {
             assertQueryReadRows(listRead, listPlan, found.length, console);
@@ -820,6 +884,54 @@ export class ProtocolDataCrudFacet {
             ...(total === undefined ? {} : { total }),
             hasMore,
         };
+    }
+
+    /**
+     * [latest per group] The list read of {@link findData} under a latest-per
+     * request: one row per group, at most `limit` groups.
+     *
+     * - The page is read with ONE row more than it serves (a `limit + 1`
+     *   probe): a read that returns it says more groups exist (`hasMore`), and
+     *   the extra row is not served.
+     * - `total` is omitted. The count read the list path runs counts ROWS, and
+     *   a row count is no group count; no cheap and correct group count is run.
+     * - The request comes back from the engine with its outcome set, or the
+     *   read was not served as one row per group: a layer between this door
+     *   and the engine dropped the option, and its rows are no answer.
+     */
+    static async findLatestPer(
+        host: Pick<ProtocolHost, 'engine' | 'storedHashDigest'>,
+        object: string,
+        findQuery: EngineQueryOptions,
+        latestPer: { outcome?: { kind?: unknown } },
+        dropType: boolean,
+    ): Promise<{ object: string; records: any[]; hasMore: boolean }> {
+        const limit = findQuery.limit;
+        if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 0) {
+            throw latestPerQueryRefusal(object, 'it needs a limit: the number of groups to return.');
+        }
+        // The request rides on a symbol member of the engine's read options, never a declared key.
+        const readOptions: BaseEngineOptions = {};
+        (readOptions as Record<symbol, unknown>)[FIND_DATA_LATEST_PER] = latestPer;
+        const found = await host.engine.find(object, { ...findQuery, limit: limit + 1 }, readOptions);
+        if (latestPer.outcome?.kind !== 'served') {
+            const err: any = new Error(
+                `findData('${object}') with latestPer: the read came back without being served as one row per group, `
+                + 'so its rows are not the answer and none is returned.',
+            );
+            err.code = 'INTERNAL_ERROR';
+            err.status = 500;
+            err.httpStatus = 500;
+            throw err;
+        }
+        const rows = Array.isArray(found) ? found : [];
+        const page = rows.slice(0, limit);
+        const records = await serveStoredMetadataHashColumnRows(
+            object,
+            redactStoredMetadataRows(object, page, { dropType }),
+            host.storedHashDigest(),
+        );
+        return { object, records, hasMore: rows.length > limit };
     }
 
     /** The body of `ObjectStackProtocolImplementation#getData`; the method's docblock there is its contract. */

@@ -42,6 +42,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -50,6 +51,11 @@ import { isAuthGateAllowlisted } from '@objectstack/core';
 const seedCalls: unknown[] = [];
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The real `loadStored` parses the stored request and hands it to `load`;
+        // the stand-in keeps that funnel, so the request `load` records is the parsed one.
+        async loadStored(raw: any) {
+            return this.load(SeedLoaderRequestSchema.parse(raw));
+        }
         async load(request: unknown) {
             seedCalls.push(request);
             return { summary: { totalInserted: 2, totalUpdated: 0, totalSkipped: 0 }, errors: [] };

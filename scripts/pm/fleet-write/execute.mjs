@@ -850,6 +850,13 @@ export function requestLanded(req, { status, json } = {}) {
         return { ok: false, why: `HTTP ${status}, but the answer lists ${listed.length ? listed.join(', ') : 'no requested reviewers'} — ${missing.join(', ')} not requested (the endpoint answers the pull with its pending review requests, so a login it lacks was not written; read the pull on the board before anything else)` };
       }
     }
+    // The issue type (`issue_patch` with `type`): the answer is the issue; a type it does not name did not land.
+    if (typeof req.typed === 'string') {
+      const named = typeof json?.type?.name === 'string' ? json.type.name : null;
+      if (named !== req.typed) {
+        return { ok: false, why: `HTTP ${status}, but the answer names ${named === null ? 'no issue type' : `the issue type ${named}`} — ${req.typed} not set (the endpoint answers the issue itself, so a type it does not name was not written)` };
+      }
+    }
     // The labels leg (header): the answer is the pull's whole label set; a name sent and not listed did not land.
     if (Array.isArray(req.labelled)) {
       const listed = labelNames(json);
@@ -1998,6 +2005,8 @@ export function resultOf(req, json, status = null) {
   if (Number.isInteger(json.number)) bits.push(`#${json.number}`);
   else if (Number.isInteger(json.id)) bits.push(`id ${json.id}`);
   if (typeof json.html_url === 'string') bits.push(json.html_url);
+  // An `issue_patch` that set the type prints it as the platform names it.
+  if (typeof req.typed === 'string') bits.push(`· type ${json.type?.name ?? 'none'}`);
   // The assignees leg's row prints the assignees as the platform lists them (header).
   if (Array.isArray(req.assigned)) bits.push(`· assignees ${assigneeLogins(json).join(', ') || 'none'}`);
   // The governed-review request's row prints the pull's pending requests as the platform lists them (header).
@@ -2582,7 +2591,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the sender gate: write, maintain and admin pass; read, triage, none and a stranger are refused with zero writes': 9,
-  'the requests: every op becomes the endpoint, verb and body the table declares, with the App token': 7,
+  'the requests: every op becomes the endpoint, verb and body the table declares, with the App token': 10,
   'the run: actions in order, stop at the first failure, later actions never attempted': 6,
   'the idempotent removal: a 404 on a directed label DELETE is success': 2,
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
@@ -2737,6 +2746,14 @@ export async function selfTest() {
         [`POST /repos/${REPO}/issues/2/assignees`, { assignees: ['u'] }],
         [`PATCH /repos/${REPO}/issues/2`, { state: 'closed', state_reason: 'not_planned' }],
       ]);
+      const TYPE_PATCH = `PATCH /repos/${REPO}/issues/3`;
+      const typeAnswer = (name) => ({ status: 200, json: { number: 3, html_url: 'https://github.test/i/3', type: name === null ? null : { name } } });
+      const setType = (answer, more = []) => run(base([{ op: 'issue_patch', issue: 3, type: 'Bug' }, ...more]), { ...allowed, [TYPE_PATCH]: answer, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 78 } } }, { file: paceFile });
+      const typed = await setType(typeAnswer('Bug'));
+      t('issue_patch with a type is ONE PATCH of the issue carrying the name, and its row prints the type the platform answered', [typed.exit, writes(typed.seen).map((s) => [s.call, s.body]), typed.rows[0].result], [EXIT_OK, [[TYPE_PATCH, { type: 'Bug' }]], '#3 https://github.test/i/3 · type Bug']);
+      const untyped = await setType(typeAnswer(null), [{ op: 'comment', issue: 1, body: 'after' }]);
+      t('⛔ a 200 whose answer names no type, or another one, is a FAILED action naming the type not set — and the stroke stops there', [untyped.exit === EXIT_OK, untyped.rows[0]?.result.includes('Bug not set'), writes(untyped.seen).length, requestLanded({ verb: 'PATCH', path: '/x', typed: 'Bug' }, typeAnswer('Task')).why.includes('the issue type Task')], [false, true, 1, true]);
+      t('…and an issue_patch that sends no type is not judged for one', requestLanded({ verb: 'PATCH', path: '/x' }, typeAnswer(null)).ok, true);
       const pr = await run(base([{ op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'issue_create', title: 'I', body: 'B', labels: ['l'] }]), {
         ...allowed,
         [`POST /repos/${REPO}/pulls`]: { status: 201, json: { number: 9, html_url: 'https://github.test/p/9' } },

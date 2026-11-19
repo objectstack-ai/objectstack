@@ -311,7 +311,7 @@ visible: 'status != "resolved"'
 ◆ Validate
 ────────────────────────────────────────
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (70)...
+  → Running author-time rules (73)...
 
   ✗ Author-time rules failed (1 issue)
   • stack · action 'resolve_ticket' visible: bare reference `status` — a
@@ -405,9 +405,11 @@ roll-ups, name fields). Ask the agent to keep the project lint-clean — "run
 The loop above never changes; what changes is **which skill the agent loads**.
 The bundle ships one skill per metadata domain (the table below names them),
 plus `objectstack-platform` (runtime setup, plugins, the `os` CLI),
-`objectstack-upgrade` (moving a project across a protocol major) and `objectui`
-(the `@object-ui/*` renderer), and the agent picks by task
-context (the trigger table lives in your project's `AGENTS.md`). To grow the
+`objectstack-upgrade` (moving a project across a protocol major), `objectui`
+(the `@object-ui/*` renderer) and `objectstack-project` (how a change moves
+through the project: what the app tests, releases, platform bumps). The agent
+picks by task context, from each skill's own description; your project's
+`AGENTS.md` points it at `objectstack-project`. To grow the
 support desk into a full application, keep describing — each row is a real
 prompt you can give verbatim:
 

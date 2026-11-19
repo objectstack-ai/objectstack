@@ -20,6 +20,10 @@
  * ordering comparison on a catalog field.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@object-ui/core';
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -102,7 +106,7 @@ describe('an ordering comparison on a field compiles behind a null guard (object
   it('the card flow — Add condition, the optional number, greater than, 40 — writes the guarded shape', async () => {
     const { container } = render(<Harness initial="" />);
     fireEvent.click(screen.getByRole('button', { name: /Add condition/ }));
-    await pick(comboboxes(container)[0], 'record.estimated_hours');
+    await pick(comboboxes(container)[0], 'Estimated Hours record.estimated_hours');
     await pick(comboboxes(container)[1], 'greater than');
     fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: '40' } });
 

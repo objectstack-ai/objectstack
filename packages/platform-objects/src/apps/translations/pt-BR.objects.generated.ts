@@ -155,7 +155,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -240,6 +240,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             email: "E-mail",
+            pendingAgain: "Já pendente",
             notApplied: "Já pendente, então não aplicado (defina no registro)",
             managerError: "Gestor",
             "host.reason": "Convite não enviado"
@@ -260,7 +261,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             "summary.added": "Adicionados",
-            "summary.alreadyPending": "Já pendentes, avisados novamente",
+            "summary.alreadyPending": "Já pendentes",
             "summary.failed": "Não adicionados",
             rows: "Resultado por linha"
           },
@@ -269,7 +270,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
               row: "Linha",
               email: "E-mail",
               ok: "Sucesso",
-              alreadyPending: "Já pendente, avisado novamente",
+              alreadyPending: "Já pendente",
               "host.notified": "Organização de hospedagem avisada",
               "host.reason": "Por que não foi avisada",
               "error.message": "Não adicionado porque",
@@ -704,7 +705,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -810,7 +811,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -962,7 +963,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -989,7 +990,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite reenviado",
         outcomeMessages: {
           sent: "Convite reenviado para {{ result.email }}",
-          link_only: "Convite renovado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite renovado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         }
       },
       copy_invitation_link: {

@@ -313,11 +313,16 @@ describe('DetailViewSection.hideEmpty — all four parties declare and honour it
     hidden.unmount();
 
     // (b) authored `false` — the section stays. Same fixture, same control, so
-    // the pair isolates the key and nothing else. Read-only, a kept all-empty
-    // section is its heading plus one fold row (ruling C, objectui#13386), and
-    // the rows are behind it.
+    // the pair isolates the key and nothing else. Read-only, a `record:details`
+    // body names a kept all-empty section in its closing empty-sections line
+    // (objectstack#35019); expanding the line draws it in place as its heading
+    // plus one fold row (ruling C, objectui#13386), and the rows are behind it.
     const kept = renderWith({ hideEmpty: false });
     expect(screen.getByText('Firmographics')).toBeInTheDocument();
+    const line = document.querySelector('[data-empty-sections-line]') as HTMLElement;
+    expect(line.textContent).toContain('Deal Terms');
+    expect(screen.queryAllByTitle('No value')).toHaveLength(0);
+    fireEvent.click(line.querySelector('button[aria-expanded="false"]') as HTMLButtonElement);
     expect(screen.getByText('Deal Terms')).toBeInTheDocument();
     expect(screen.queryAllByTitle('No value')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: /Show 3 empty fields/ }));

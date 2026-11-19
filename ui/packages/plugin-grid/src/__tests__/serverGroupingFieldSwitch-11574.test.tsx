@@ -192,7 +192,7 @@ async function expectServerGroups(field: string, expected: number) {
   await vi.waitFor(() => expect(headerLabels()).toEqual(expect.arrayContaining(answer)));
   // Exactly the server's groups: none left over from the previous field.
   expect([...headerLabels()].sort()).toEqual(answer);
-  expect(headerLabels()).not.toContain('(empty)');
+  expect(headerLabels()).not.toContain('Empty');
   // …and no group is left on "Loading grid…".
   await vi.waitFor(() => expect(stuckLoading()).toHaveLength(0));
 }

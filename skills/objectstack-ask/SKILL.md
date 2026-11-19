@@ -5,17 +5,19 @@ description: >
   MCP tools (list_datasets, query_dataset, list_objects, describe_object,
   query_records, aggregate_records): find the governed metric the question
   names, compute it and cite its source, or fall back to an object query and
-  say so. Use when the user asks for a number, a ranking, a breakdown, a trend
-  or a list from the app's data, in any language ("how many", "total", "top
-  10", "by stage", "this quarter"; "多少", "总额", "排名", "占比", "趋势",
-  "按阶段统计", "列出"). Do not use for building or changing metadata (the
+  say so. Use for EVERY question answered from the app's records, before the
+  first data tool call, even when it names no metric: a number, a total, what
+  has been claimed, spent, sold or paid so far, a ranking, a breakdown, a trend
+  or a list, in any language ("how many", "how much", "total", "so far", "top
+  10", "by stage", "this quarter"; "多少", "一共", "总额", "排名", "占比",
+  "趋势", "按阶段统计", "列出"). Do not use for building or changing metadata (the
   domain skills cover that), or for writing a query in application code (see
   objectstack-query).
 license: Apache-2.0
 compatibility: Requires an environment served by @objectstack/mcp 18.x
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: process
   tags: ask, question, metric, dataset, mcp, list_datasets, query_dataset, 问数, 指标
 ---
@@ -33,11 +35,18 @@ wrote its business definition) outranks a number you work out yourself.
   "商机数") and what it is grouped or filtered by ("by stage", "按行业").
 - Call `list_datasets({ terms })` with those words, as the user wrote them and
   in the user's language. Do not translate or reword a term: a match on a word
-  you supplied is your reading, not the user's.
+  you supplied is your reading, not the user's. A term is the noun phrase for
+  the thing, kept whole ("travel budget", not "travel" and "budget": a
+  fragment's matches are not the user's) and without the verbs, time words
+  and question words around it ("trip days", not "trip days requested";
+  "报销金额", not "报销金额合计是多少").
 - Each dataset in the answer carries `matches`: one entry per hit, with the
   `term`, the `member` it names (`measures.<name>` or `dimensions.<name>`) and
   `matchedOn`. A word matches only when it equals a member's name, label or
   synonym (case, spacing, `_` and `-` aside), never by similarity.
+- A word that matched nothing may have `candidates` on the answer: members
+  offered as possible readings, each a `{ term, dataset, member }` pointer to a
+  member the same answer lists. A candidate is not a match.
 - No `list_datasets` among your tools: this environment serves you no governed
   metrics. Go to step 4.
 
@@ -48,19 +57,20 @@ wrote its business definition) outranks a number you work out yourself.
 | Each word for a thing measured matches exactly one measure | Compute: step 3. Two words with one measure each ("营收和赢单率") are two metrics, not a choice: compute both, with one `query_dataset` per dataset. |
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
-| Nothing matches, and the word is a loose form of several listed measures | Ask the user which one they mean, listing the same three things. Do not pick one, and compute nothing yet. |
-| Nothing matches, and the listed measures do not offer several readings of the word | Step 4, and say in the answer that no governed metric was used. One near form is not a match either: it selects nothing. |
+| A word matches nothing, and `candidates` lists members for it | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one. |
+| No match and no candidates for the word for a thing measured | Step 4. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
-The same answer lists every dataset you may query with all its measures,
-matched or not (a call without `terms` returns that catalogue too), so the
-loose-form check needs no second read. A loose form is a word a listed
-measure's name, label or description contains, directly or in translation:
-"revenue" against Won Revenue, Annual Revenue and Planned Revenue; "金额"
-against several amounts.
+When the answer has `nextStep`, follow its `decision` and `note`. If `note`
+says to answer one measure and ask about a word, do both; use none of that
+word's candidates until the user answers.
 
-When you ask, the reply is the question alone: no figure, and no tool call
-until the user answers. `partial: true` on the answer means the catalogue may
+When you only ask, the reply is the question alone: no tool call until the user
+answers. State no figure of your own in it (no count, total
+or option number): name each option by its label in a bullet, and quote its
+description as written. Ask only about matches or candidates for words the user
+wrote; when their word matched nothing and has no candidates, go to step 4
+instead of asking about some other word's matches. `partial: true` on the answer means the catalogue may
 be incomplete; `warning` says why, and you repeat it when you fall back.
 
 ## 3. Compute a governed metric
@@ -69,21 +79,28 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
   `selection.dimensions` take the names `list_datasets` gave;
   `selection.runtimeFilter` filters; `selection.dateGranularity` buckets a date
   dimension for a trend; `selection.order` and `selection.limit` rank.
-- Cite the source from the answer's `provenance` (the dataset's label and each
-  measure's label, as in 「指标：营收（数据集：销售分析）」), not from memory.
+- Cite the answer's `sourceLine` as given; without one, build the source from
+  `provenance` (the dataset's label and each measure's label, as in
+  「指标：营收（数据集：销售分析）」), not from memory.
 - Use the measure's `description` to say what the number includes and excludes.
-- `truncated: true`: more rows existed than came back. Say the result is
-  partial. A `warning` on the answer narrows what you were allowed to read:
-  repeat it.
+- A `warning` on the answer narrows what you were allowed to read: repeat it.
 
 ## 4. Fallback: object queries
 
+- The question names a kind of record (trip requests, invoices) and no listed
+  object or dataset is that kind: say you cannot see those records here (they
+  may be hidden from you) and stop. Never answer from a different object that
+  merely links to it.
 - `list_objects`, then `describe_object({ objectName })` on the object you will
   read. Read its fields before you filter: a field with `options` is filtered
   by the option's `value`, never its label.
 - Use `aggregate_records` for a count, sum, average or breakdown. Never page
-  through `query_records` to add numbers up yourself. `truncated: true` on its
-  answer means groups were cut off: say so.
+  through `query_records` to add numbers up yourself. For a top or bottom N,
+  pass `orderBy` (an aggregation alias or a group key) and `limit: N`, so the
+  database ranks and cuts the groups.
+- `withheldFields` on a `query_records` or `get_record` answer names fields
+  that exist but are hidden from you: say they are not visible to you, never
+  that they are empty.
 - Open the answer with one line saying it is not from a governed metric
   (非指标口径), and name the object and fields you computed it from.
 - When that object is a listed dataset's `object`, add one line naming the
@@ -102,4 +119,7 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
 - Answer in the user's language.
 - Show labels, not machine names or raw option values.
 - Every figure comes from a tool answer in this conversation.
+- `truncated: true`: more rows or groups existed than came back; say the
+  result is partial, and cite `totalGroups` as how many groups existed before
+  the cut. Without it, say a `query_dataset` total is unknown, not `rowCount`.
 - State the filter and the time window you used, in words.

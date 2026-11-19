@@ -17,15 +17,27 @@
  *   never a substring, never a withheld member.
  * - `query_dataset`: one NOT_FOUND for missing and hidden; `provenance`
  *   composed from what ran, which the model's input cannot set; the row cap
- *   and `truncated`; the delegation statement; no `sql`.
+ *   and `truncated`; `totalGroups`, counted by the statement that grouped the
+ *   answer or as the length of a whole grid windowed in memory, and absent
+ *   where neither holds; the delegation statement; no `sql`.
+ * - [#34919] `nextStep` and `sourceLine` (ADR-0149 M1 note): the decision for
+ *   each term, the precedence among mixed cases, the partial-answer rule, the
+ *   sentence's language, and that neither sentence names a member the caller
+ *   was not admitted to — on a mirror of `examples/app-crm`'s dataset.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ListDatasetsOutputSchema, QueryDatasetOutputSchema, getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
 import { createDatasetTools, getDatasetToolDefinitions } from '../dataset-tools.js';
+import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
+import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
+import type { AnalyticsStrategy } from '../strategies/types.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a', locale: 'zh-CN' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -43,6 +55,23 @@ const OBJECTS: Record<string, { enable?: unknown; fields: Record<string, Record<
   },
   crm_locked: { fields: { id: { type: 'text' }, amount: { type: 'number' } } },
   crm_closed: { enable: { apiEnabled: false }, fields: { id: { type: 'text' }, amount: { type: 'number' } } },
+  // [#34919] app-crm's two pipeline objects, as `examples/app-crm/src/objects` declares the fields its datasets read.
+  crm_opportunity: {
+    fields: {
+      id: { type: 'text' },
+      stage: { type: 'select' },
+      account: { type: 'text' },
+      close_date: { type: 'date' },
+      amount: { type: 'currency' },
+    },
+  },
+  crm_opportunity_line_item: {
+    fields: { id: { type: 'text' }, product: { type: 'text' }, quantity: { type: 'number' }, amount: { type: 'currency' } },
+  },
+  // [#35005] one 销售额 measure beside an industry and a quarter grouping.
+  sales_order: {
+    fields: { id: { type: 'text' }, industry: { type: 'text' }, quarter: { type: 'text' }, amount: { type: 'number' }, churn: { type: 'number' } },
+  },
 };
 
 const PIPELINE = {
@@ -91,11 +120,14 @@ const nativeSql = () => ({ nativeSql: true, objectqlAggregate: false, inMemory: 
 
 function fakeEngine(rows: Record<string, unknown>[]) {
   const reads: string[] = [];
+  const statements: string[] = [];
   return {
     reads,
+    statements,
     engine: {
       execute: async (sql: unknown, options?: { object?: string }) => {
         reads.push(`execute:${options?.object ?? String(sql)}`);
+        statements.push(String((sql as { sql?: string })?.sql ?? sql));
         return { rows: rows.map((r) => ({ ...r })) };
       },
       hasObjectMiddleware: () => false,
@@ -105,22 +137,26 @@ function fakeEngine(rows: Record<string, unknown>[]) {
   };
 }
 
-/** The security double: u_me may not read `crm_locked` nor the `margin` field; u_admin reads everything. */
+/**
+ * The security double: u_me may not read `crm_locked` nor the `margin` field;
+ * [#34919] u_rep may not read the `amount` field of app-crm's two objects;
+ * u_admin reads everything.
+ */
+function fieldsFor(object: string, ctx?: ExecutionContext): string[] {
+  const all = Object.keys(OBJECTS[object]?.fields ?? {});
+  if (ctx?.userId === 'u_me') return all.filter((f) => f !== 'margin');
+  if (ctx?.userId === 'u_rep' && object.startsWith('crm_opportunity')) return all.filter((f) => f !== 'amount');
+  return all;
+}
 const security = {
   getReadFilter: async () => undefined,
   canReadObject: (object: string, ctx?: ExecutionContext) => !(ctx?.userId === 'u_me' && object === 'crm_locked'),
-  getReadableFields: async (object: string, ctx?: ExecutionContext) => {
-    const all = Object.keys(OBJECTS[object]?.fields ?? {});
-    return ctx?.userId === 'u_me' ? all.filter((f) => f !== 'margin') : all;
-  },
-  getQueryableFields: async (object: string, ctx?: ExecutionContext) => {
-    const all = Object.keys(OBJECTS[object]?.fields ?? {});
-    return ctx?.userId === 'u_me' ? all.filter((f) => f !== 'margin') : all;
-  },
+  getReadableFields: async (object: string, ctx?: ExecutionContext) => fieldsFor(object, ctx),
+  getQueryableFields: async (object: string, ctx?: ExecutionContext) => fieldsFor(object, ctx),
 };
 
 async function bootWired(rows: Record<string, unknown>[] = [{ stage: 'won', revenue: 100 }]) {
-  const { engine, reads } = fakeEngine(rows);
+  const { engine, reads, statements } = fakeEngine(rows);
   const registered: Record<string, unknown> = {};
   const warn = vi.fn();
   const ctx = {
@@ -134,7 +170,7 @@ async function bootWired(rows: Record<string, unknown>[] = [{ stage: 'won', reve
     logger: { info() {}, warn, error() {}, debug() {} },
   };
   await new AnalyticsServicePlugin({ queryCapabilities: nativeSql }).init(ctx as never);
-  return { service: registered.analytics as AnalyticsService, reads, warn };
+  return { service: registered.analytics as AnalyticsService, reads, statements, warn };
 }
 
 const loadSaved = vi.fn(async () => SAVED.map((d) => ({ ...d, _diagnostics: { source: 'test' } })));
@@ -155,6 +191,23 @@ describe('the two AIToolDefinitions', () => {
     expect(defs[0].description).toMatch(/ask the user/i);
     expect(defs[0].description).toContain('非指标口径');
     expect(defs[1].description).toContain('provenance');
+  });
+
+  it('[#35005] scopes the ask-back to a word with a measure among its candidates', () => {
+    const [list] = getDatasetToolDefinitions();
+    expect(list.description).toContain('A word with a measure among its candidates: ask the same way');
+    expect(list.description).toContain(
+      'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+      + 'stops a matched measure.',
+    );
+  });
+
+  it('[#34919] says follow nextStep and cite sourceLine, and names the precedence the executor applies', () => {
+    const [list, query] = getDatasetToolDefinitions();
+    expect(list.description).toContain('nextStep');
+    expect(list.description).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
+    expect(query.description).toContain('sourceLine');
+    expect(DATASET_NEXT_STEP_PRECEDENCE).toEqual(['several_measures', 'one_measure', 'candidates_only', 'no_measure']);
   });
 });
 
@@ -329,7 +382,8 @@ describe('query_dataset', () => {
     expect((dataset as { name: string }).name).toBe('pipeline');
     expect(selection).toEqual({ ...input.selection, limit: 51 });
     expect(context).toBe(ME);
-    expect(options).toBeUndefined();
+    // [query_dataset totalGroups] The one option the tool hands down: the group-count request.
+    expect(Object.keys(options ?? {})).toEqual(['groupCount']);
 
     expect(out.provenance).toEqual({
       kind: 'dataset',
@@ -532,6 +586,368 @@ describe('query_dataset', () => {
       code: 'NOT_FOUND',
       status: 404,
     });
+  });
+});
+
+// [query_dataset totalGroups] Beside `truncated`: how many groups the selection
+// formed before `offset` and `limit` cut them, the same name and meaning as
+// `aggregate_records`' `totalGroups` (`dataset-group-count.ts`). Two sources,
+// never a read made to count: a window in the ONE statement that grouped and
+// cut the answer in the database, or the length of a grid the executor or the
+// ObjectQL face windowed in memory, counted only when every read that built it
+// is vouched whole. Over a real engine: the SQLite cell always runs, the
+// PostgreSQL cell where `OS_TEST_POSTGRES_URL` is set (a named skip otherwise;
+// node-postgres answers the count as text). Every read of the object is
+// counted, so "no second read" is measured, not assumed. Where neither source
+// holds the member is ABSENT — never a number made up from a cut grid.
+const TG_OBJECT = 'os_tg_deal';
+const TG_ROWS = [
+  { id: 'd1', stage: 'lead', region: 'emea', phase: 'p1', amount: 10, closed_on: '2026-01-05' },
+  { id: 'd2', stage: 'lead', region: 'apac', phase: 'p1', amount: 20, closed_on: '2026-01-20' },
+  { id: 'd3', stage: 'qualified', region: 'emea', phase: 'p2', amount: 30, closed_on: '2026-02-03' },
+  { id: 'd4', stage: 'proposal', region: 'emea', phase: 'p2', amount: 40, closed_on: '2026-02-14' },
+  { id: 'd5', stage: 'proposal', region: 'amer', phase: 'p3', amount: 50, closed_on: '2026-03-01' },
+  { id: 'd6', stage: 'won', region: 'apac', phase: 'p3', amount: 60, closed_on: '2026-03-09' },
+  { id: 'd7', stage: 'lost', region: 'amer', phase: 'p3', amount: 70, closed_on: '2026-03-30' },
+] as const;
+const TG_STAGES = new Set(TG_ROWS.map((r) => r.stage)).size; // 5
+const TG_PAIRS = new Set(TG_ROWS.map((r) => `${r.stage}|${r.region}`)).size; // 7
+const TG_MONTHS = new Set(TG_ROWS.map((r) => r.closed_on.slice(0, 7))).size; // 3
+// A select field with options: the plugin's label resolver makes its dimension
+// label-bearing, so the tool's default order (every dimension, ascending, which
+// `limit: cap + 1` brings in) sorts it by the label in memory and the window is
+// applied there, not in SQL. The labels sort in another order than the values.
+const TG_PHASE_OPTIONS = [
+  { value: 'p1', label: 'Discovery' },
+  { value: 'p2', label: 'Negotiation' },
+  { value: 'p3', label: 'Closing' },
+];
+const TG_PHASES = new Set(TG_ROWS.map((r) => r.phase)).size; // 3
+const TG_DATASET = {
+  name: 'tg_pipeline',
+  label: 'Deal pipeline',
+  object: TG_OBJECT,
+  dimensions: [
+    { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
+    { name: 'region', label: 'Region', field: 'region', type: 'string' },
+    { name: 'phase', label: 'Phase', field: 'phase', type: 'string' },
+    { name: 'closed', label: 'Closed', field: 'closed_on', type: 'date' },
+  ],
+  measures: [
+    { name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' },
+    { name: 'deals', label: 'Deals', aggregate: 'count' },
+    { name: 'emea_revenue', label: 'EMEA revenue', aggregate: 'sum', field: 'amount', filter: { region: 'emea' } },
+    { name: 'avg_deal', label: 'Average deal', derived: { op: 'ratio', of: ['revenue', 'deals'] } },
+  ],
+};
+const TG_CELLS = [
+  { id: 'sqlite', config: () => ({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) },
+  {
+    id: 'postgres',
+    config: () => (process.env.OS_TEST_POSTGRES_URL ? { client: 'pg', connection: process.env.OS_TEST_POSTGRES_URL } : null),
+  },
+] as const;
+const TG_CALLER = { userId: 'u_tg' } as ExecutionContext;
+const tgSecurity = {
+  getReadFilter: async () => undefined,
+  canReadObject: () => true,
+  getReadableFields: async () => ['id', 'stage', 'region', 'phase', 'amount', 'closed_on'],
+  getQueryableFields: async () => ['id', 'stage', 'region', 'phase', 'amount', 'closed_on'],
+};
+const tgQuiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return tgQuiet; } };
+const TG_WINDOW = 'COUNT(*) OVER ()';
+
+for (const cell of TG_CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[query_dataset totalGroups] the groups before the cut, counted by the statement that grouped them (${cell.id})${config ? '' : ' (skipped: set OS_TEST_POSTGRES_URL to run this cell)'}`,
+    () => {
+      let driver: SqlDriver;
+      let engine: ObjectQL;
+      const reads = { statements: [] as string[], aggregate: 0 };
+      const services: Partial<Record<'native' | 'objectql' | 'guarded', AnalyticsService>> = {};
+      const loadTg = async () => [{ ...TG_DATASET }];
+
+      const run = async (
+        face: 'native' | 'objectql' | 'guarded',
+        selection: Record<string, unknown>,
+        opts: { maxQueryLimit?: number } = {},
+      ) => {
+        const before = { statements: reads.statements.length, aggregate: reads.aggregate };
+        const out = await services[face]!.datasetTools({ loadDatasets: loadTg, ...opts }).queryDataset(
+          { datasetName: TG_DATASET.name, selection },
+          TG_CALLER,
+        );
+        return {
+          out,
+          statements: reads.statements.slice(before.statements),
+          aggregate: reads.aggregate - before.aggregate,
+        };
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as never);
+        if (cell.id === 'postgres') await (driver as any).execute(`drop table if exists ${TG_OBJECT}`).catch(() => {});
+        engine = new ObjectQL({ logger: tgQuiet } as never);
+        engine.registerDriver(driver as never, true);
+        await engine.init();
+        engine.registry.registerObject({
+          name: TG_OBJECT,
+          label: 'Deal',
+          fields: {
+            stage: { name: 'stage', type: 'text' },
+            region: { name: 'region', type: 'text' },
+            phase: { name: 'phase', type: 'select', options: TG_PHASE_OPTIONS },
+            amount: { name: 'amount', type: 'number' },
+            closed_on: { name: 'closed_on', type: 'date' },
+          },
+        } as never, '@objectstack/service-analytics');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine as never);
+        for (const row of TG_ROWS) await engine.insert(TG_OBJECT, { ...row } as never);
+
+        const realExecute = (engine as any).execute.bind(engine);
+        (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
+          if (opts?.object === TG_OBJECT) reads.statements.push(String((sql as { sql?: string })?.sql ?? sql));
+          return realExecute(sql, opts);
+        };
+        const realAggregate = engine.aggregate.bind(engine);
+        (engine as any).aggregate = (object: string, ...rest: unknown[]) => {
+          if (object === TG_OBJECT) reads.aggregate += 1;
+          return (realAggregate as any)(object, ...rest);
+        };
+
+        for (const [face, caps] of [
+          ['native', undefined],
+          ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+          ['guarded', undefined],
+        ] as const) {
+          const registered: Record<string, unknown> = {};
+          await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+            getService: (name: string) => (name === 'data' ? engine : name === 'security' ? tgSecurity : registered[name]),
+            registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+            replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+            hook: () => {},
+            logger: tgQuiet,
+          } as never);
+          services[face] = registered.analytics as AnalyticsService;
+        }
+        // A host strategy ahead of the built-ins with a row guard of its own:
+        // it serves each query through the native strategy and keeps the first
+        // two rows. No built-in path cuts an unwindowed read; this is the shape
+        // a cap anywhere under the executor takes, so the arm is pinned on it.
+        const native = new NativeSQLStrategy();
+        const rowGuard: AnalyticsStrategy = {
+          name: 'HostRowGuard',
+          priority: 5,
+          canHandle: (query, ctx) => native.canHandle(query, ctx),
+          execute: async (query, ctx) => {
+            const answer = await native.execute(query, ctx);
+            return { ...answer, rows: answer.rows.slice(0, 2) };
+          },
+          generateSql: (query, ctx) => native.generateSql(query, ctx),
+        };
+        (services.guarded as unknown as { strategies: AnalyticsStrategy[] }).strategies.unshift(rowGuard);
+      });
+
+      afterAll(async () => {
+        if (cell.id === 'postgres') await (driver as any)?.execute(`drop table if exists ${TG_OBJECT}`).catch(() => {});
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      it('a limit below the group count: truncated, and totalGroups counts every group, in one statement', async () => {
+        const { out, statements, aggregate } = await run('native', {
+          measures: ['revenue'], dimensions: ['stage'], order: { revenue: 'desc' }, limit: 2,
+        });
+        expect(out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
+        expect(out.rows.map((r) => r.stage), 'proposal 90, lost 70').toEqual(['proposal', 'lost']);
+        expect(statements, 'one statement grouped, cut and counted').toHaveLength(1);
+        expect(statements[0]).toContain(TG_WINDOW);
+        expect(aggregate, 'no engine aggregate').toBe(0);
+        for (const row of out.rows) expect(row).not.toHaveProperty('__os_group_count');
+        expect(QueryDatasetOutputSchema.safeParse(out).success).toBe(true);
+      });
+
+      it('an answer not cut: totalGroups equals rowCount', async () => {
+        const { out, statements } = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 10 });
+        expect(out).toMatchObject({ rowCount: TG_STAGES, truncated: false, totalGroups: TG_STAGES });
+        expect(statements).toHaveLength(1);
+      });
+
+      it('the tool\'s own row cap is a cut too, and two dimensions count their pairs', async () => {
+        const capped = await run('native', { measures: ['revenue'], dimensions: ['stage'] }, { maxQueryLimit: 3 });
+        expect(capped.out).toMatchObject({ rowCount: 3, truncated: true, totalGroups: TG_STAGES });
+        const pairs = await run('native', { measures: ['deals'], dimensions: ['stage', 'region'], limit: 1 });
+        expect(pairs.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_PAIRS });
+      });
+
+      it('an offset: the count is before the offset; an empty page past the groups says nothing', async () => {
+        const page = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 2, offset: 4 });
+        expect(page.out).toMatchObject({ rowCount: 1, truncated: false, totalGroups: TG_STAGES });
+        const past = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 2, offset: 10 });
+        expect(past.out).toMatchObject({ rowCount: 0, truncated: false });
+        expect(past.out).not.toHaveProperty('totalGroups');
+      });
+
+      it('no dimension: one group', async () => {
+        const { out } = await run('native', { measures: ['revenue', 'deals'] });
+        expect(out).toMatchObject({ rowCount: 1, truncated: false, totalGroups: 1 });
+        expect(out.rows[0]).toEqual({ revenue: 280, deals: 7 });
+      });
+
+      it('a label-bearing dimension in the tool\'s default order, not cut: the grid windowed in memory is counted, totalGroups equals rowCount', async () => {
+        const { out, statements, aggregate } = await run('native', { measures: ['deals'], dimensions: ['phase'] });
+        expect(out).toMatchObject({ rowCount: TG_PHASES, truncated: false, totalGroups: TG_PHASES });
+        expect(out.totalGroups).toBe(out.rowCount);
+        expect(statements, 'the one grouped read, no second read to count').toHaveLength(1);
+        expect(statements[0], 'no window in SQL: the order is by label, so the window ran in memory').not.toContain(TG_WINDOW);
+        expect(statements[0]).not.toMatch(/\bLIMIT\b/i);
+        expect(aggregate).toBe(0);
+        expect(QueryDatasetOutputSchema.safeParse(out).success).toBe(true);
+      });
+
+      it('a label-bearing dimension in the tool\'s default order, cut: truncated, and totalGroups counts the whole grid', async () => {
+        const capped = await run('native', { measures: ['deals'], dimensions: ['phase'] }, { maxQueryLimit: 2 });
+        expect(capped.out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_PHASES });
+        expect(capped.statements).toHaveLength(1);
+        const deals = capped.out.rows.map((r) => r.deals);
+        expect(deals, 'ordered by label: Closing (p3), Discovery (p1)').toEqual([3, 2]);
+        // The in-memory window knows the whole grid, so a page past it still counts.
+        const past = await run('native', { measures: ['deals'], dimensions: ['phase'], limit: 2, offset: 10 });
+        expect(past.out).toMatchObject({ rowCount: 0, truncated: false, totalGroups: TG_PHASES });
+      });
+
+      it('an assembled grid (a measure with its own filter, a derived measure) is counted, with nothing extra read to count it', async () => {
+        for (const [measures, reads] of [[['revenue', 'emea_revenue'], 2], [['avg_deal'], 1]] as const) {
+          const { out, statements } = await run('native', { measures: [...measures], dimensions: ['stage'], limit: 2 });
+          expect(out, measures.join(',')).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
+          expect(statements, `${measures.join(',')}: the pass's own reads only`).toHaveLength(reads);
+          for (const sql of statements) expect(sql).not.toContain(TG_WINDOW);
+        }
+      });
+
+      it('the engine\'s aggregate answers every group and the ObjectQL face windows them in memory: a date bucket, and the face itself', async () => {
+        const bucketed = await run('native', {
+          measures: ['revenue'], dimensions: ['closed'], timeDimensions: [{ dimension: 'closed', granularity: 'month' }], limit: 1,
+        });
+        expect(bucketed.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_MONTHS });
+        expect(bucketed.aggregate, 'the ObjectQL face answered, once').toBe(1);
+        const face = await run('objectql', { measures: ['revenue'], dimensions: ['stage'], limit: 2 });
+        expect(face.out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
+        expect(face.aggregate).toBe(1);
+        expect(face.statements).toHaveLength(0);
+        const labelled = await run('objectql', { measures: ['deals'], dimensions: ['phase'] }, { maxQueryLimit: 1 });
+        expect(labelled.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_PHASES });
+        expect(labelled.aggregate).toBe(1);
+      });
+
+      it('absent where a cap cut the grid before the in-memory window: a host row guard', async () => {
+        const { out, statements } = await run('guarded', { measures: ['deals'], dimensions: ['phase'] });
+        expect(out, 'the guard kept two of the three groups').toMatchObject({ rowCount: 2, truncated: false });
+        expect(out).not.toHaveProperty('totalGroups');
+        expect(statements).toHaveLength(1);
+      });
+    },
+  );
+}
+
+describe('[query_dataset totalGroups] a SQL dialect the strategy does not know is not guessed at', () => {
+  it('runs no window and leaves totalGroups out', async () => {
+    // The engine double names no driver, so the strategy's dialect is `unknown`.
+    const rows = [{ stage: 'a', revenue: 1 }, { stage: 'b', revenue: 2 }, { stage: 'c', revenue: 3 }];
+    const { service, statements } = await bootWired(rows);
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+      { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 1 } },
+      ADMIN,
+    );
+    expect(out).toMatchObject({ rowCount: 1, truncated: true });
+    expect(out).not.toHaveProperty('totalGroups');
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('LIMIT 2');
+    expect(statements[0]).not.toContain(TG_WINDOW);
+  });
+});
+
+// [query_dataset totalGroups] The count is the served answer's, or absent. The
+// primary grid is counted by its own statement; the `totals` reads run after
+// it. When one of them meets a missing source, the service serves the empty
+// answer, and a count already written would pair `rowCount: 0` with the groups
+// of a grid that was never served. Over a real SQLite engine: the second
+// statement of the call fails as a table that vanished between the two would.
+describe('[query_dataset totalGroups] a totals read that meets a missing source serves no count', () => {
+  const OBJECT = 'os_tg_vanish';
+  const DATASET = {
+    name: 'tg_vanish',
+    label: 'Vanishing pipeline',
+    object: OBJECT,
+    dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' }],
+  };
+  let engine: ObjectQL;
+  let service: AnalyticsService;
+  const statements: string[] = [];
+  let failFrom = Number.POSITIVE_INFINITY;
+
+  beforeAll(async () => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    engine = new ObjectQL({ logger: tgQuiet } as never);
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: OBJECT,
+      label: 'Deal',
+      fields: { stage: { name: 'stage', type: 'text' }, amount: { name: 'amount', type: 'number' } },
+    } as never, '@objectstack/service-analytics');
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine as never);
+    for (const [i, stage] of ['lead', 'qualified', 'won'].entries()) {
+      await engine.insert(OBJECT, { id: `v${i}`, stage, amount: 10 * (i + 1) } as never);
+    }
+    const realExecute = (engine as any).execute.bind(engine);
+    (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
+      if (opts?.object === OBJECT) {
+        statements.push(String((sql as { sql?: string })?.sql ?? sql));
+        if (statements.length >= failFrom) return Promise.reject(new Error(`SQLITE_ERROR: no such table: ${OBJECT}`));
+      }
+      return realExecute(sql, opts);
+    };
+    const registered: Record<string, unknown> = {};
+    await new AnalyticsServicePlugin({} as never).init({
+      getService: (name: string) => (name === 'data' ? engine : name === 'security' ? tgSecurity : registered[name]),
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      hook: () => {},
+      logger: tgQuiet,
+    } as never);
+    service = registered.analytics as AnalyticsService;
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  const ask = () => service.datasetTools({ loadDatasets: async () => [{ ...DATASET }] }).queryDataset(
+    { datasetName: DATASET.name, selection: { measures: ['revenue'], dimensions: ['stage'], totals: { groupings: [[]] } } },
+    TG_CALLER,
+  );
+
+  it('CONTROL: with the totals read served, the primary statement counts the groups', async () => {
+    failFrom = Number.POSITIVE_INFINITY;
+    statements.length = 0;
+    const out = await ask();
+    expect(out).toMatchObject({ rowCount: 3, truncated: false, totalGroups: 3 });
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain(TG_WINDOW);
+  });
+
+  it('with the totals read failing as a missing source: the empty answer, and no totalGroups', async () => {
+    statements.length = 0;
+    failFrom = 2;
+    const out = await ask();
+    expect(statements, 'the primary statement ran and counted before the totals read failed').toHaveLength(2);
+    expect(statements[0]).toContain(TG_WINDOW);
+    expect(out).toMatchObject({ rowCount: 0 });
+    expect(out).not.toHaveProperty('totalGroups');
   });
 });
 
@@ -762,5 +1178,543 @@ describe('[#32072] query_dataset resolves the dataset by package (ADR-0150 D3)',
     const { answer, spy } = await run([broken]);
     expect(answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#34763] list_datasets candidates — only what this caller may read, never beside a match', () => {
+  /** Every candidate names a dataset the same answer lists and a member that entry lists. */
+  function expectResolvable(out: Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>) {
+    for (const c of out.candidates ?? []) {
+      const entry = out.datasets.find((d) => d.name === c.dataset);
+      expect(entry, `${c.dataset} is listed`).toBeDefined();
+      const [kind, name] = c.member.split('.') as ['measures' | 'dimensions', string];
+      expect(entry![kind].map((m) => m.name), `${c.member} is listed in ${c.dataset}`).toContain(name);
+    }
+    expect(ListDatasetsOutputSchema.safeParse(out).success).toBe(true);
+  }
+
+  const TERMS = ['rev', '营收', 'secret', 'rate', 'tot', 'marg'];
+
+  it('offers the readable near member for a term that matched nothing, and nothing for a term that matched', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ME);
+    // `secret` (an internal-field member), `rate` and `marg` (members over the
+    // unreadable `margin`) and `tot` (a measure of locked_ds, which u_me may
+    // not query, and of closed_ds, which is not API-exposed) offer nothing.
+    expect(out.candidates).toEqual([{ term: 'rev', dataset: 'pipeline', member: 'measures.revenue' }]);
+    expect(out.datasets[0].matches).toEqual([{ term: '营收', member: 'measures.revenue', matchedOn: 'label' }]);
+    expectResolvable(out);
+  });
+
+  it('a caller who reads more is offered more, from the same rule; an unexposed dataset is offered to nobody', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ADMIN);
+    expect(out.candidates).toEqual([
+      { term: 'rev', dataset: 'pipeline', member: 'measures.revenue' },
+      { term: 'rate', dataset: 'pipeline', member: 'measures.margin_rate' },
+      // `margin_total` folds to "margin total", which contains `tot`; datasets in listing order.
+      { term: 'tot', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'tot', dataset: 'locked_ds', member: 'measures.total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_rate' },
+    ]);
+    expect(out.candidates!.some((c) => c.dataset === 'closed_ds' || c.member === 'measures.secret_sum')).toBe(false);
+    expectResolvable(out);
+  });
+
+  it('a term with a match anywhere in the answer has no candidate, though a member is near it', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    // `margin` equals margin_total's label; margin_rate ("Margin rate") contains it and is not offered.
+    const matched = await tools.listDatasets({ terms: ['margin'] }, ADMIN);
+    expect(matched.datasets[0].matches).toEqual([{ term: 'margin', member: 'measures.margin_total', matchedOn: 'label' }]);
+    expect('candidates' in matched).toBe(false);
+    // The control: the near form alone is offered both members.
+    const near = await tools.listDatasets({ terms: ['marg'] }, ADMIN);
+    expect(near.candidates?.map((c) => c.member)).toEqual(['measures.margin_total', 'measures.margin_rate']);
+  });
+
+  it('omits the key when nothing is offered: no terms, every term matched, or nothing readable is near', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    for (const input of [{}, { terms: ['营收', 'phase'] }, { terms: ['secret', 'rate', 'tot', 'qa_no_word'] }]) {
+      const out = await tools.listDatasets(input, ME);
+      expect('candidates' in out, JSON.stringify(input)).toBe(false);
+    }
+  });
+});
+
+/**
+ * [#34919] `examples/app-crm`'s `crm_opportunity_metrics`
+ * (`src/datasets/opportunity.dataset.ts`), member for member with its labels
+ * and synonyms, beside a second dataset over app-crm's line items. app-crm
+ * declares one dataset, and the D1 rule refuses a word that answers to two
+ * members of one dataset, so "a word with two matches" needs a second dataset:
+ * `deal value` is `total_amount`'s synonym there and `line_amount`'s here.
+ */
+const CRM_OPPORTUNITY_METRICS = {
+  name: 'crm_opportunity_metrics',
+  label: 'Opportunity Metrics',
+  description: 'Semantic layer for sales-pipeline counts and amounts',
+  object: 'crm_opportunity',
+  dimensions: [
+    { name: 'stage', label: 'Stage', field: 'stage', type: 'string', synonyms: ['sales stage', 'deal stage', 'pipeline stage', '销售阶段', '商机阶段', '漏斗阶段'] },
+    { name: 'account', label: 'Account', field: 'account', type: 'string', synonyms: ['customer', 'client', 'company', '客户', '公司', '客户名称'] },
+    { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date', dateGranularity: 'month', synonyms: ['closing month', 'expected close date', '成交日期', '预计成交日期', '成交月份'] },
+  ],
+  measures: [
+    { name: 'opp_count', label: 'Opportunities', aggregate: 'count', synonyms: ['deal count', 'number of deals', '商机数', '商机数量', '机会数'] },
+    { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount', format: '0,0', synonyms: ['deal value', 'opportunity amount', '商机金额', '金额合计'] },
+    { name: 'avg_amount', label: 'Avg Deal Size', aggregate: 'avg', field: 'amount', format: '0,0', synonyms: ['average deal value', 'average opportunity amount', '平均商机金额'] },
+  ],
+};
+const CRM_LINE_ITEM_METRICS = {
+  name: 'crm_line_item_metrics',
+  label: 'Line Item Metrics',
+  object: 'crm_opportunity_line_item',
+  // `deal count` is also `opp_count`'s synonym in the other dataset: a word equal to a measure there and a dimension here.
+  dimensions: [{ name: 'product', label: 'Product', field: 'product', type: 'string', synonyms: ['deal count'] }],
+  measures: [
+    { name: 'line_amount', label: 'Line Amount', aggregate: 'sum', field: 'amount', synonyms: ['deal value', '明细金额'] },
+    { name: 'quantity_total', label: 'Quantity', aggregate: 'sum', field: 'quantity' },
+  ],
+};
+const loadCrm = async () => [CRM_OPPORTUNITY_METRICS, CRM_LINE_ITEM_METRICS];
+const REP = { userId: 'u_rep', tenantId: 'org_a' } as ExecutionContext;
+/** The members u_rep may not read (each over `amount`), by every word a sentence could name them with. */
+const WITHHELD_WORDS = ['Total Amount', 'total_amount', 'Avg Deal Size', 'avg_amount', 'Line Amount', 'line_amount'];
+/** Ruling B's ask-first instruction for a left-out word with candidates, by the locale the context names. */
+const ASK_FIRST: Record<string, string> = {
+  en: 'ask the user which one is meant before using it; do not pick one',
+  'zh-CN': '先问用户指的是哪一个再使用；不要替用户选',
+  'zh-TW': '先問使用者指的是哪一個再使用；不要替使用者選',
+  'ja-JP': '使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください',
+};
+const FOUR_LOCALES = [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[];
+
+type ListOut = Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>;
+
+/**
+ * The invariants `DatasetNextStepSchema` names and cannot refuse: the answer
+ * parses; `nextStep` is present exactly when terms were sent; every term it
+ * names was sent; a `candidates_only` term has entries in `candidates`; a
+ * measure case's terms have measure entries in `matches`.
+ */
+function expectNextStepInvariants(out: ListOut, sent: readonly string[] | undefined) {
+  expect(ListDatasetsOutputSchema.safeParse(out).success).toBe(true);
+  if (sent === undefined || sent.length === 0) {
+    expect('nextStep' in out).toBe(false);
+    return;
+  }
+  const step = out.nextStep!;
+  expect(step).toBeDefined();
+  for (const term of step.terms) {
+    expect(sent).toContain(term);
+    // Distinct members: a word sent twice repeats its entries in `matches`.
+    const measureHits = [...new Set(out.datasets.flatMap((d) => (d.matches ?? [])
+      .filter((m) => m.term === term && m.member.startsWith('measures.'))
+      .map((m) => `${d.name}.${m.member}`)))];
+    const offered = (out.candidates ?? []).filter((c) => c.term === term);
+    if (step.decision === 'one_measure') expect(measureHits).toHaveLength(1);
+    if (step.decision === 'several_measures') expect(measureHits.length).toBeGreaterThan(1);
+    if (step.decision === 'candidates_only') expect([measureHits.length, offered.length > 0]).toEqual([0, true]);
+    if (step.decision === 'no_measure') expect([measureHits.length, offered.length]).toEqual([0, 0]);
+  }
+  expect(new Set(step.terms).size).toBe(step.terms.length);
+}
+
+describe('[#34919] list_datasets nextStep on examples/app-crm — the decision each word gets', () => {
+  async function ask(terms: string[] | undefined, ctx: ExecutionContext = ADMIN) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets(terms === undefined ? {} : { terms }, ctx);
+    expectNextStepInvariants(out, terms);
+    return out;
+  }
+
+  it('a word with one match ⇒ one_measure, naming the measure, its dataset and the names to query', async () => {
+    const out = await ask(['商机数']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+    expect(out.nextStep!.note).toContain('Opportunities (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).toContain('"crm_opportunity_metrics"');
+    expect(out.nextStep!.note).toContain('"opp_count"');
+  });
+
+  it('one_measure beside a near-miss word: the measure is computed and the note names the left-out word with its candidates (ruling B)', async () => {
+    const CANDIDATES = ['Total Amount', 'Avg Deal Size', 'Line Amount'];
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '金额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('"opp_count"');
+      expect(note, String(ctx.locale)).toContain('金额');
+      for (const label of [...CANDIDATES, 'Line Item Metrics']) expect(note, `${ctx.locale} ⇒ ${label}`).toContain(label);
+      // Ruling B's ask-first sentence, after the candidates it is about.
+      const ask1st = ASK_FIRST[String(ctx.locale ?? 'en')];
+      expect(note, `${ctx.locale} ⇒ ask first`).toContain(ask1st);
+      expect(note.indexOf(ask1st), String(ctx.locale)).toBeGreaterThan(note.indexOf('Line Item Metrics'));
+    }
+    expect((await ask(['商机数', '金额'])).nextStep!.note).toContain('Total Amount (dataset: Opportunity Metrics)');
+    // The control: alone, the measure word's note asks nothing first.
+    expect((await ask(['商机数'])).nextStep!.note).not.toContain(ASK_FIRST.en);
+  });
+
+  it('one_measure beside an unknown word and a grouping word: the note keeps the unknown word\'s labelled fallback and names the grouping', async () => {
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '库存周转', '销售阶段'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('库存周转');
+      expect(note, String(ctx.locale)).toContain('query_records');
+      expect(note, String(ctx.locale)).toContain('Stage');
+    }
+    expect((await ask(['商机数', '库存周转', '销售阶段'])).nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    // The control: alone, the measure word's note sends nobody to the object tools.
+    expect((await ask(['商机数'])).nextStep!.note).not.toContain('query_records');
+  });
+
+  it('candidates_only beside an unknown word and a grouping word: the note names both, the unknown one with its labelled fallback (ruling B, seat S3)', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['库存周转', '金额', '销售阶段'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+      const note = out.nextStep!.note;
+      for (const label of ['Total Amount', 'Avg Deal Size', 'Line Amount']) expect(note, `${ctx.locale} ⇒ ${label}`).toContain(label);
+      expect(note, String(ctx.locale)).toContain('库存周转');
+      expect(note, String(ctx.locale)).toContain('query_records');
+      expect(note, String(ctx.locale)).toContain('Stage');
+    }
+    const two = await ask(['库存周转', '金额']);
+    expect(two.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+    expect(two.nextStep!.note).toContain('"库存周转" equals no measure and has no possible reading.');
+    expect(two.nextStep!.note).toContain('no governed metric was used for them');
+    expect((await ask(['金额', '销售阶段'])).nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    // The control: alone, the near-miss word's note sends nobody to the object tools.
+    expect((await ask(['金额'])).nextStep!.note).not.toContain('query_records');
+  });
+
+  it('two words that equal the same measure are one metric, not "each its own"', async () => {
+    const out = await ask(['商机数', '商机数量']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数', '商机数量'] });
+    expect(out.nextStep!.note).not.toContain('Each is its own metric');
+    expect(out.nextStep!.note).toContain('using that measure');
+    // The control: two words with two measures are two metrics.
+    expect((await ask(['商机数', '商机金额'])).nextStep!.note).toContain('Each is its own metric');
+  });
+
+  it('a mixed no_measure note falls back for the unknown word and still asks which number the grouping word means', async () => {
+    const out = await ask(['库存周转', '销售阶段']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
+    expect(out.nextStep!.note).toContain('query_records');
+    expect(out.nextStep!.note).toContain('ask the user which number they mean');
+  });
+
+  it('a word with two matches ⇒ several_measures, the note naming each by its label and its dataset\'s label', async () => {
+    const out = await ask(['deal value']);
+    expect(out.nextStep).toMatchObject({ decision: 'several_measures', terms: ['deal value'] });
+    expect(out.nextStep!.note).toContain('Total Amount (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).toContain('Line Amount (dataset: Line Item Metrics)');
+  });
+
+  it('a near-miss word ⇒ candidates_only, the note naming each offered member by its label and its dataset\'s label', async () => {
+    const out = await ask(['金额']);
+    expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['金额'] });
+    expect(out.candidates!.map((c) => c.member)).toEqual(['measures.total_amount', 'measures.avg_amount', 'measures.line_amount']);
+    for (const named of ['Total Amount (dataset: Opportunity Metrics)', 'Avg Deal Size (dataset: Opportunity Metrics)', 'Line Amount (dataset: Line Item Metrics)']) {
+      expect(out.nextStep!.note).toContain(named);
+    }
+  });
+
+  it('an unknown word ⇒ no_measure, and the note sends the reader to the object tools', async () => {
+    const out = await ask(['库存周转']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['库存周转'] });
+    expect(out.nextStep!.note).toContain('query_records');
+  });
+
+  it('a word equal only to a dimension ⇒ no_measure, naming the grouping, and asks for the number instead of falling back', async () => {
+    const out = await ask(['销售阶段']);
+    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['销售阶段'] });
+    expect(out.nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    expect(out.nextStep!.note).not.toContain('query_records');
+  });
+
+  it('no terms, or an empty list, ⇒ no nextStep', async () => {
+    await ask(undefined);
+    await ask([]);
+  });
+
+  it('a withheld member appears in no decision and no sentence (N5)', async () => {
+    // u_rep reads no `amount`: total_amount, avg_amount and line_amount are withheld.
+    for (const terms of [['deal value'], ['金额'], ['商机金额', '销售阶段'], ['商机数', 'deal value', '金额']]) {
+      const out = await ask(terms, REP);
+      const text = JSON.stringify(out.nextStep);
+      for (const word of WITHHELD_WORDS) expect(text, `${terms.join('+')} ⇒ ${word}`).not.toContain(word);
+    }
+    // What the same words read as for u_rep: the withheld equalities are gone, so nothing is a measure.
+    expect((await ask(['deal value'], REP)).nextStep).toMatchObject({ decision: 'no_measure', terms: ['deal value'] });
+    expect((await ask(['金额'], REP)).nextStep).toMatchObject({ decision: 'no_measure', terms: ['金额'] });
+    // The control: the same words name those members for a caller who reads `amount`.
+    expect((await ask(['deal value'])).nextStep!.note).toContain('Total Amount');
+  });
+});
+
+describe('[#34919] list_datasets nextStep — the precedence among mixed cases', () => {
+  async function decide(terms: string[]) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms }, ADMIN);
+    expectNextStepInvariants(out, terms);
+    return { decision: out.nextStep!.decision, terms: out.nextStep!.terms };
+  }
+
+  it('N1: a dimension-matched word never outranks a measure-matched one', async () => {
+    expect(await decide(['商机金额', '销售阶段'])).toEqual({ decision: 'one_measure', terms: ['商机金额'] });
+    expect(await decide(['销售阶段', '商机金额'])).toEqual({ decision: 'one_measure', terms: ['商机金额'] });
+  });
+
+  it('several_measures > one_measure > candidates_only > no_measure, naming every word in the reported case', async () => {
+    expect(await decide(['商机数', 'deal value'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['金额', 'deal value'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['deal value', '库存周转'])).toEqual({ decision: 'several_measures', terms: ['deal value'] });
+    expect(await decide(['金额', '商机数'])).toEqual({ decision: 'one_measure', terms: ['商机数'] });
+    expect(await decide(['库存周转', '金额'])).toEqual({ decision: 'candidates_only', terms: ['金额'] });
+    expect(await decide(['库存周转', '销售阶段'])).toEqual({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
+    // Two words with one measure each are two metrics: both named, in the order sent.
+    expect(await decide(['商机金额', '商机数', '销售阶段'])).toEqual({ decision: 'one_measure', terms: ['商机金额', '商机数'] });
+  });
+
+  it('a word equal to one measure and to a dimension is one_measure: the dimension is not counted', async () => {
+    expect(await decide(['deal count'])).toEqual({ decision: 'one_measure', terms: ['deal count'] });
+  });
+
+  it('a word sent twice is one word, and the member it equals is counted once', async () => {
+    expect(await decide(['商机数', '商机数'])).toEqual({ decision: 'one_measure', terms: ['商机数'] });
+  });
+});
+
+/**
+ * [#35005] An ask-back is owed only for the word being measured. A word whose
+ * candidates are all dimensions (「按行业」 near 行业, "this quarter" near
+ * `quarter`) is offered as a possible grouping: no question about it, and no
+ * stop for a matched measure. A word with a measure among its candidates keeps
+ * the question. The decision and the answer's `candidates` are unchanged: only
+ * the sentence is scoped.
+ */
+describe('[#35005] list_datasets nextStep — a grouping or time word with a candidate does not stop a matched measure', () => {
+  const SALES_METRICS = {
+    name: 'sales_metrics',
+    label: 'Sales Metrics',
+    object: 'sales_order',
+    dimensions: [
+      { name: 'industry', label: { en: 'Industry', 'zh-CN': '行业' }, field: 'industry', type: 'string' },
+      { name: 'quarter', label: { en: 'Quarter', 'zh-CN': '季度' }, field: 'quarter', type: 'string' },
+    ],
+    measures: [
+      { name: 'sales_amount', label: { en: 'Revenue', 'zh-CN': '销售额' }, aggregate: 'sum', field: 'amount' },
+      { name: 'churn_rate', label: { en: 'Churn Rate', 'zh-CN': '流失率' }, aggregate: 'avg', field: 'churn' },
+    ],
+  };
+  /** The sentence that offers a grouping and asks nothing about it, by the locale the context names. */
+  const GROUPING_OFFER: Record<string, string> = {
+    en: 'A possible grouping is not a question: do not ask the user about it',
+    'zh-CN': '可能的分组维度不需要追问：不要就它问用户',
+    'zh-TW': '可能的分組維度不需要追問：不要就它問使用者',
+    'ja-JP': 'グループ分けの候補は確認の対象ではありません',
+  };
+  /** The reported candidates_only question: compute nothing until the user answers. */
+  const ASK_BEFORE_COMPUTING: Record<string, string> = {
+    en: 'compute nothing until they answer',
+    'zh-CN': '用户回答前不要计算',
+    'zh-TW': '使用者回答前不要計算',
+    'ja-JP': '回答があるまで計算しないでください',
+  };
+  const loc = (ctx: ExecutionContext) => String(ctx.locale ?? 'en');
+
+  async function ask(terms: string[], ctx: ExecutionContext = ADMIN) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: async () => [SALES_METRICS] }).listDatasets({ terms }, ctx);
+    expectNextStepInvariants(out, terms);
+    return out;
+  }
+
+  it('「按行业」 + 销售额 ⇒ one_measure, computed with no question back, 行业 offered as a possible grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['按行业', '销售额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+      // The answer's candidates are what they were: the word is still offered its dimension.
+      expect(out.candidates).toEqual([{ term: '按行业', dataset: 'sales_metrics', member: 'dimensions.industry' }]);
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain('"sales_amount"');
+      expect(note, loc(ctx)).toContain('按行业');
+      expect(note, `${loc(ctx)} ⇒ no ask-first`).not.toContain(ASK_FIRST[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ no ask-before-computing`).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ grouping offered`).toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+    const en = (await ask(['按行业', '销售额'])).nextStep!.note;
+    expect(en).toContain('"按行业" matches no member exactly; it may name a grouping: Industry (dataset: Sales Metrics).');
+    expect(en).not.toContain('possible readings');
+  });
+
+  it('"this quarter" + "revenue" ⇒ one_measure, computed with no question back, quarter offered as a possible grouping', async () => {
+    const out = await ask(['this quarter', 'revenue']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+    expect(out.candidates).toEqual([{ term: 'this quarter', dataset: 'sales_metrics', member: 'dimensions.quarter' }]);
+    const note = out.nextStep!.note;
+    expect(note).toContain('"this quarter" matches no member exactly; it may name a grouping: Quarter (dataset: Sales Metrics).');
+    expect(note).toContain(GROUPING_OFFER.en);
+    expect(note).not.toContain(ASK_FIRST.en);
+    // 本季度 contains 季度 the same way.
+    const zh = await ask(['本季度', '销售额'], { ...ADMIN, locale: 'zh-CN' } as ExecutionContext);
+    expect(zh.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(zh.nextStep!.note).toContain(GROUPING_OFFER['zh-CN']);
+    expect(zh.nextStep!.note).not.toContain(ASK_FIRST['zh-CN']);
+  });
+
+  it('a bare near-miss measure word still asks: candidates_only, compute nothing until the user answers', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['销售'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
+      expect(out.candidates).toEqual([{ term: '销售', dataset: 'sales_metrics', member: 'measures.sales_amount' }]);
+      expect(out.nextStep!.note, loc(ctx)).toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a matched measure beside a word with a measure candidate still asks about that word (营收 + churn)', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['revenue', 'churn'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+      expect(out.nextStep!.note, `${loc(ctx)} ⇒ ask first`).toContain(ASK_FIRST[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a word with a measure AND a dimension among its candidates keeps the question', async () => {
+    const out = await ask(['industry revenue', '销售额']);
+    expect(out.candidates!.map((c) => c.member)).toEqual(['measures.sales_amount', 'dimensions.industry']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(out.nextStep!.note).toContain(ASK_FIRST.en);
+    expect(out.nextStep!.note).not.toContain(GROUPING_OFFER.en);
+    const alone = await ask(['industry revenue']);
+    expect(alone.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['industry revenue'] });
+    expect(alone.nextStep!.note).toContain(ASK_BEFORE_COMPUTING.en);
+  });
+
+  it('both kinds at once: the measure word is asked about and the grouping word is offered', async () => {
+    const withMeasure = (await ask(['churn', '按行业', '销售额'])).nextStep!;
+    expect(withMeasure).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(withMeasure.note).toContain(ASK_FIRST.en);
+    expect(withMeasure.note).toContain(GROUPING_OFFER.en);
+    // The ask-first sentence is about churn's readings and comes before the grouping offer.
+    expect(withMeasure.note.indexOf(ASK_FIRST.en)).toBeLessThan(withMeasure.note.indexOf('"按行业"'));
+    const noMeasure = (await ask(['销售', '按行业'])).nextStep!;
+    expect(noMeasure).toMatchObject({ decision: 'candidates_only', terms: ['销售', '按行业'] });
+    expect(noMeasure.note).toContain(ASK_BEFORE_COMPUTING.en);
+    expect(noMeasure.note).toContain(GROUPING_OFFER.en);
+  });
+
+  it('a lone grouping word with a candidate keeps candidates_only and asks which number, never about the grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['this quarter'], ctx);
+      // The decision is the spec's: a term with entries in `candidates` is candidates_only.
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['this quarter'] });
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain(GROUPING_OFFER[loc(ctx)]);
+      expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+    }
+    expect((await ask(['this quarter'])).nextStep!.note).toContain('ask the user which number they mean');
+  });
+});
+
+describe('[#34919] list_datasets nextStep — an incomplete catalogue says so (N4)', () => {
+  it('a degraded read keeps nextStep over what it lists and ends the note by saying the catalogue was incomplete', async () => {
+    const { service } = await bootWired();
+    const whole = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    const degraded = await service.datasetTools({
+      loadDatasets: async () => ({ items: [CRM_OPPORTUNITY_METRICS], partial: true as const, warning: 'one source unavailable' }),
+    }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    expectNextStepInvariants(degraded, ['商机数']);
+    expect(degraded).toMatchObject({ partial: true, nextStep: { decision: 'one_measure', terms: ['商机数'] } });
+    // The whole read's sentence, plus one closing sentence naming the warning.
+    expect(degraded.nextStep!.note.startsWith(whole.nextStep!.note)).toBe(true);
+    const added = degraded.nextStep!.note.slice(whole.nextStep!.note.length);
+    expect(added).toContain('incomplete');
+    expect(added).toContain('warning');
+    expect(whole.nextStep!.note).not.toContain('incomplete');
+  });
+
+  it('a catalogue that could not be read at all answers no_measure for every word, and says the catalogue was incomplete', async () => {
+    const { service } = await bootWired();
+    const failed = await service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); } })
+      .listDatasets({ terms: ['商机数', '销售阶段'] }, ADMIN);
+    expectNextStepInvariants(failed, ['商机数', '销售阶段']);
+    expect(failed).toMatchObject({ datasets: [], partial: true, nextStep: { decision: 'no_measure', terms: ['商机数', '销售阶段'] } });
+    expect(failed.nextStep!.note).toContain('incomplete');
+  });
+
+  it('an admission that could not be judged is a partial answer too, and its note says so', async () => {
+    const { service } = await bootWired();
+    vi.spyOn(service, 'admitDatasetCatalogEntry').mockImplementation(async () => ({ admitted: false, unresolved: true }) as never);
+    const out = await service.datasetTools({ loadDatasets: loadCrm }).listDatasets({ terms: ['商机数'] }, ADMIN);
+    expect(out).toMatchObject({ partial: true, nextStep: { decision: 'no_measure' } });
+    expect(out.nextStep!.note).toContain('incomplete');
+  });
+});
+
+describe('[#34919] the sentences are in the caller\'s language, by the user-text ladder', () => {
+  it('reads the request locale, then the workspace default, through the platform locale table; en below both', () => {
+    expect(datasetToolSentenceLocale(['zh-CN'])).toBe('zh-Hans');
+    expect(datasetToolSentenceLocale(['zh-TW'])).toBe('zh-Hant');
+    expect(datasetToolSentenceLocale(['zh-Hant-HK'])).toBe('zh-Hant');
+    expect(datasetToolSentenceLocale(['ja-JP'])).toBe('ja');
+    expect(datasetToolSentenceLocale(['en-GB'])).toBe('en');
+    // A language with no sentences takes the next rung: the workspace default, then en.
+    expect(datasetToolSentenceLocale(['fr-FR', 'ja-JP'])).toBe('ja');
+    expect(datasetToolSentenceLocale(['fr-FR'])).toBe('en');
+    expect(datasetToolSentenceLocale([])).toBe('en');
+  });
+
+  it('the executor writes the note for the context\'s locale, then its workspace default', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadCrm });
+    const notes: Record<string, string> = {};
+    for (const [key, ctx] of Object.entries({
+      en: ADMIN,
+      zh: { ...ADMIN, locale: 'zh-CN' },
+      hant: { ...ADMIN, locale: 'zh-TW' },
+      ja: { ...ADMIN, locale: 'ja-JP' },
+      frThenJa: { ...ADMIN, locale: 'fr-FR', workspaceLocale: 'ja-JP' },
+    } as Record<string, ExecutionContext>)) {
+      const out = await tools.listDatasets({ terms: ['deal value'] }, ctx);
+      expect(out.nextStep!.decision).toBe('several_measures');
+      notes[key] = out.nextStep!.note;
+    }
+    expect(new Set([notes.en, notes.zh, notes.hant, notes.ja]).size).toBe(4);
+    expect(notes.frThenJa).toBe(notes.ja);
+    // Every language still names both members by label and dataset label.
+    for (const note of Object.values(notes)) {
+      for (const label of ['Total Amount', 'Opportunity Metrics', 'Line Amount', 'Line Item Metrics']) expect(note).toContain(label);
+    }
+  });
+});
+
+describe('[#34919] query_dataset sourceLine — the provenance as one finished line', () => {
+  it('is composed from the answer\'s provenance, in the caller\'s language, and parses', async () => {
+    const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const out = await tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'] } }, ME);
+    expect(out.sourceLine).toBe(composeDatasetSourceLine(out.provenance, ['zh-CN']));
+    for (const label of ['营收', '销售分析', 'Stage']) expect(out.sourceLine).toContain(label);
+    const admin = await tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ADMIN);
+    expect(admin.sourceLine).toBe(composeDatasetSourceLine(admin.provenance, []));
+    for (const label of ['Revenue', 'Pipeline']) expect(admin.sourceLine).toContain(label);
+    for (const answer of [out, admin]) expect(QueryDatasetOutputSchema.safeParse(answer).success).toBe(true);
+  });
+
+  it('names no member the caller was not admitted to (N5): a withheld measure is refused before any line exists', async () => {
+    const { service } = await bootWired([{ stage: 'won', opp_count: 3 }]);
+    const tools = service.datasetTools({ loadDatasets: loadCrm });
+    const out = await tools.queryDataset({ datasetName: 'crm_opportunity_metrics', selection: { measures: ['opp_count'], dimensions: ['stage'] } }, REP);
+    for (const label of ['Opportunities', 'Opportunity Metrics', 'Stage']) expect(out.sourceLine).toContain(label);
+    for (const word of WITHHELD_WORDS) expect(out.sourceLine).not.toContain(word);
+    await expect(tools.queryDataset({ datasetName: 'crm_opportunity_metrics', selection: { measures: ['total_amount'] } }, REP))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 });

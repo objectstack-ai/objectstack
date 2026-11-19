@@ -22,6 +22,7 @@ import { loadLanguage } from './loadLanguage';
 import { loadLocales } from './loadLocales';
 import { seedTenantLanguage } from './languageSeed';
 import { preflightAuth } from './lib/auth-preflight';
+import { readConsoleDiscovery } from './lib/early-discovery';
 import { withConsoleBaseRootRelative } from './utils/consoleBase';
 import { resolveManifestIcons } from './pwaManifestIcons';
 
@@ -87,6 +88,13 @@ const SERVER_BASE = (import.meta.env.VITE_SERVER_URL || '').replace(/\/+$/, '');
  * full-page navigation lands under every mount.
  */
 const CONSOLE_SCOPE = new URL(withConsoleBaseRootRelative('/'), window.location.origin).href;
+
+// The console's one discovery read, started on every boot and not awaited: it
+// takes the request `index.html` sent beside the session check, and the data
+// adapter's `connect()` joins it instead of starting discovery after the
+// session has answered (`./lib/early-discovery.ts`). Its failure is the
+// adapter's to report; here it is absorbed.
+void readConsoleDiscovery(SERVER_BASE).catch(() => undefined);
 
 // The third entry seeds the UI language from the server's resolved locale for
 // the signed-in caller (objectui#4035). It joins this existing gate rather than adding one of its

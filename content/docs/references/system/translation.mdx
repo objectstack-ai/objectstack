@@ -139,6 +139,8 @@ Translation data for a single field
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string>; … }` | optional | Translations for the action result dialog |
 | **preflight** | `{ fields?: Record<string, string>; columns?: Record<string, Record<string, string>> }` | optional | Translations for the action preflight panel |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the action's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the action's `texts` declares |
 
 ### Nested Shape: `ObjectTranslationData._sections[string]`
 
@@ -194,6 +196,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
+| **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -244,6 +247,8 @@ Translation data for a single object
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string>; … }` | optional | Translations for the action result dialog |
 | **preflight** | `{ fields?: Record<string, string>; columns?: Record<string, Record<string, string>> }` | optional | Translations for the action preflight panel |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the action's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the action's `texts` declares |
 
 ### Nested Shape: `PlatformTranslationData.dashboards[string]`
 
@@ -324,6 +329,12 @@ Translation data for a single object
 | **description** | `string` | optional | Translated book description — overlays the book's own `description` |
 | **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
+### Nested Shape: `PlatformTranslationData.mappings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
+
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -375,6 +386,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
+| **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -424,6 +436,8 @@ Translation data for a single object
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string>; … }` | optional | Translations for the action result dialog |
 | **preflight** | `{ fields?: Record<string, string>; columns?: Record<string, Record<string, string>> }` | optional | Translations for the action preflight panel |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the action's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the action's `texts` declares |
 
 ### Nested Shape: `ServedTranslationData.dashboards[string]`
 
@@ -503,6 +517,12 @@ Translation data for a single object
 | **label** | `string` | optional | Translated book title — overlays the book's own `label` |
 | **description** | `string` | optional | Translated book description — overlays the book's own `description` |
 | **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
+
+### Nested Shape: `ServedTranslationData.mappings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
 ### Nested Shape: `ServedTranslationData.settingsCommon`
 
@@ -618,6 +638,7 @@ Per-app translation data for objects, apps, and UI messages
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
+| **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -667,6 +688,8 @@ Translation data for a single object
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string>; … }` | optional | Translations for the action result dialog |
 | **preflight** | `{ fields?: Record<string, string>; columns?: Record<string, Record<string, string>> }` | optional | Translations for the action preflight panel |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the action's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the action's `texts` declares |
 
 ### Nested Shape: `TranslationData.dashboards[string]`
 
@@ -747,6 +770,12 @@ Translation data for a single object
 | **description** | `string` | optional | Translated book description — overlays the book's own `description` |
 | **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
+### Nested Shape: `TranslationData.mappings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
+
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -819,6 +848,7 @@ One locale of translations — the `translation` metadata type
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
+| **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
@@ -879,6 +909,8 @@ Translation data for a single object
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string>; … }` | optional | Translations for the action result dialog |
 | **preflight** | `{ fields?: Record<string, string>; columns?: Record<string, Record<string, string>> }` | optional | Translations for the action preflight panel |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the action's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the action's `texts` declares |
 
 ### Nested Shape: `TranslationItem.dashboards[string]`
 
@@ -958,6 +990,12 @@ Translation data for a single object
 | **label** | `string` | optional | Translated book title — overlays the book's own `label` |
 | **description** | `string` | optional | Translated book description — overlays the book's own `description` |
 | **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
+
+### Nested Shape: `TranslationItem.mappings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

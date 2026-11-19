@@ -116,6 +116,14 @@ import {
 } from './i18n.js';
 import { isStudioCatalogueLoaded } from '@object-ui/i18n/namespaces/studio';
 import { MatrixScrollPane } from './MatrixScrollPane.js';
+import {
+  PERM_BULK_COLUMN_WIDTH,
+  PERM_FLAT_ONLY_CELL,
+  PERM_FLAT_ONLY_FLEX,
+  PERM_FOLDED_ONLY,
+  PERM_MATRIX_FLAT_KEYS,
+  PERM_MATRIX_TABLE_FLOOR,
+} from './permissionMatrixFold.js';
 import { PermissionAdvancedFacets, rlsClauseFindingCount } from './PermissionAdvancedFacets.js';
 import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
@@ -534,11 +542,6 @@ export interface PermissionStudioChrome {
   chips?: React.ReactNode;
   /** Before History in the header's actions (the pillar's Explain access). */
   actions?: React.ReactNode;
-  /**
-   * objectstack#34795 — the open app's name. The header's title reads
-   * "app · set label"; without it, the set's label alone.
-   */
-  appLabel?: string;
   /**
    * objectstack#32774 — told, for the set `name` this editor shows, the
    * package the clone door must name to copy it (`holdingPackage` of the
@@ -1493,12 +1496,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // draws (the object grant), so the click changes only the box it lands on.
       const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur, [action]: value };
-      // Cascade: !readable implies !editable — and no row condition: the spec
-      // refuses `when` beside `readable: false` (objectstack#25866), so Read
-      // off clears the condition instead of authoring the refused shape.
+      // Cascade: !readable implies !editable — and no row condition and no
+      // roll-up acknowledgement: the spec refuses `when` (objectstack#25866)
+      // and `rollupSourceUnreadableReason` beside `readable: false`, so Read
+      // off clears both instead of authoring the refused shape.
       if (action === 'readable' && !value) {
         next.editable = false;
         delete next.when;
+        delete next.rollupSourceUnreadableReason;
       }
       // Cascade: editable implies readable.
       if (action === 'editable' && value) next.readable = true;
@@ -2312,11 +2317,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const chipButton =
       'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
     const facetTab = chrome.tab === 'rls' || chrome.tab === 'tabs' || chrome.tab === 'admin' ? chrome.tab : null;
-    // objectstack#34795 — the title is "app · set label", in the title row
-    // alone, so it is not cut: the set's machine name is the title's tooltip,
-    // and the provenance, default and lock labels are the line under it.
-    const setLabel = headerLabel || name;
-    const studioTitle = chrome.appLabel ? `${chrome.appLabel} · ${setLabel}` : setLabel;
+    // objectstack#35018 — the title is the set's label alone: the app's name
+    // is the top bar's, so it is not repeated here (objectstack#34795 put it
+    // in front). The title row holds nothing else, so it is not cut; the
+    // set's machine name is the title's tooltip, and the provenance, default
+    // and lock labels are the line under it.
+    const studioTitle = headerLabel || name;
     return (
       <div className="flex h-full flex-col">
         <StudioItemHeader
@@ -2328,8 +2334,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           note={
             <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
               {/* Same test id and the same answer as the page's badge. */}
+              {/* objectstack#35018 — in the builder's words: a set the app
+                  brings reads 「随应用提供」, not the package term 「包内置」. */}
               <span data-testid="perm-provenance-badge">
-                {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
+                {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
               </span>
               {!!draft.isDefault && (
                 <>
@@ -3008,6 +3016,26 @@ const STUDIO_LEGEND_KEYS: Partial<Record<keyof ObjectPerm, string>> = {
 /** The sharing group (Transfer, View all, Modify all) opens behind a divider. */
 const STUDIO_SHARING_GROUP_START: keyof ObjectPerm = 'allowTransfer';
 
+/** objectstack#35061 — whether a box column stays flat in the folded matrix (`PERM_MATRIX_FLAT_KEYS`). */
+function isFlatKey(key: ObjectPermFlag): boolean {
+  return (PERM_MATRIX_FLAT_KEYS as readonly string[]).includes(key as string);
+}
+
+/**
+ * objectstack#35061 — how many of the six folded permissions a row has on:
+ * a ticked box among the four non-CRUD columns, and a record scope that is set
+ * (a picker reading anything but "Not set"). Read from the drawn entry, so an
+ * inherited row counts what it draws.
+ */
+function foldedPermissionsOn(
+  perm: ObjectPerm,
+  objectActions: ReadonlyArray<{ key: ObjectPermFlag }>,
+): number {
+  const boxes = objectActions.filter((a) => !isFlatKey(a.key) && perm[a.key] === true).length;
+  const scopes = SCOPE_AXES.filter((s) => perm[s.axis] !== undefined).length;
+  return boxes + scopes;
+}
+
 function StudioObjectsToolbar({
   shown,
   total,
@@ -3100,23 +3128,46 @@ function StudioObjectMatrix({
 }: PermissionTableProps) {
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
   const divider = (i: number) => (i === 0 || i === sharingStart ? 'border-l' : '');
+  // objectstack#35061 — below the fold width (`permissionMatrixFold.ts`) only
+  // the four CRUD columns are drawn; the other six live in each row's "More
+  // permissions" row. Both forms are in the DOM; the pane's width picks one.
   return (
-    <table className="w-full min-w-[1304px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
+    <table
+      className={cn('w-full border-collapse text-[13px]', PERM_MATRIX_TABLE_FLOOR)}
+      data-testid="perm-studio-matrix"
+    >
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
           <th className={cn(STICKY_OBJECT_CELL, 'pl-6 pr-3 text-left font-medium z-[1] bg-sidebar')}>{t('perm.col.object')}</th>
           <th className="w-28 px-3 text-left font-medium">{t('engine.studio.access.colOwd')}</th>
           {objectActions.map((a, i) => (
-            <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
+            <th
+              key={a.key as string}
+              title={a.tip}
+              data-perm-fold={isFlatKey(a.key) ? undefined : 'flat-only'}
+              className={cn('w-[52px] px-1 text-center font-medium', divider(i), !isFlatKey(a.key) && PERM_FLAT_ONLY_CELL)}
+            >
               <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s, i) => (
-            <th key={s.axis} title={t(s.tipKey)} className={cn('w-36 px-2 text-left font-medium', i === 0 && 'border-l')}>
+            <th
+              key={s.axis}
+              title={t(s.tipKey)}
+              data-perm-fold="flat-only"
+              className={cn('w-36 px-2 text-left font-medium', i === 0 && 'border-l', PERM_FLAT_ONLY_CELL)}
+            >
               {t(s.labelKey)}
             </th>
           ))}
-          <th className={cn(STICKY_BULK_CELL, 'w-56 px-3 font-medium z-[1] bg-sidebar')}>
+          <th
+            data-perm-fold="folded-only"
+            data-testid="perm-more-col"
+            className={cn('border-l px-3 text-left font-medium whitespace-nowrap', PERM_FOLDED_ONLY)}
+          >
+            {t('perm.more.col')}
+          </th>
+          <th className={cn(STICKY_BULK_CELL, PERM_BULK_COLUMN_WIDTH, 'px-3 font-medium z-[1] bg-sidebar')}>
             <span className="sr-only">{t('perm.col.bulk')}</span>
           </th>
         </tr>
@@ -3124,7 +3175,7 @@ function StudioObjectMatrix({
       <tbody>
         {objects.length === 0 && (
           <tr>
-            <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="px-6 py-8 text-center text-muted-foreground">
+            <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="px-6 py-8 text-center text-muted-foreground">
               {t('perm.filter.empty')}
             </td>
           </tr>
@@ -3205,8 +3256,12 @@ function StudioObjectRow({
   // the bulk strip no longer waits for either; every row draws it.
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
+  // objectstack#35061 — the row's "More permissions" row (folded form only).
+  const [moreOpen, setMoreOpen] = React.useState(false);
   const active = hovered || focused;
   const perm = cell.perm;
+  const moreOn = foldedPermissionsOn(perm, objectActions);
+  const moreCount = t('perm.more.count').replace('{count}', String(moreOn));
   // objectstack#34795 — read as "All · Read only · Clear", the three the card
   // names, then the CRUD arm as the fourth. Each still calls `onBulkSet` with
   // the action it called before.
@@ -3298,7 +3353,11 @@ function StudioObjectRow({
           </span>
         </td>
         {objectActions.map((a, i) => (
-          <td key={a.key as string} className={cn('px-1 py-1 text-center align-middle', divider(i))}>
+          <td
+            key={a.key as string}
+            data-perm-fold={isFlatKey(a.key) ? undefined : 'flat-only'}
+            className={cn('px-1 py-1 text-center align-middle', divider(i), !isFlatKey(a.key) && PERM_FLAT_ONLY_CELL)}
+          >
             <ObjectRuleBox
               objectName={o.name}
               action={a}
@@ -3312,7 +3371,11 @@ function StudioObjectRow({
           </td>
         ))}
         {SCOPE_AXES.map((s, i) => (
-          <td key={s.axis} className={cn('px-2 py-1 align-middle', i === 0 && 'border-l')}>
+          <td
+            key={s.axis}
+            data-perm-fold="flat-only"
+            className={cn('px-2 py-1 align-middle', i === 0 && 'border-l', PERM_FLAT_ONLY_CELL)}
+          >
             <ScopePicker
               objectName={o.name}
               perm={perm}
@@ -3324,6 +3387,22 @@ function StudioObjectRow({
             />
           </td>
         ))}
+        <td data-perm-fold="folded-only" className={cn('border-l px-2 py-1 align-middle', PERM_FOLDED_ONLY)}>
+          {/* Open on a read-only row too: its boxes show the grants, locked as their flat twins are. */}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+            // Named like the strip's buttons, without the object: the row says which.
+            aria-label={`${t('perm.more.col')} · ${moreCount}`}
+            data-testid={`perm-more-toggle-${o.name}`}
+            data-on={moreOn}
+            className="inline-flex h-6 items-center gap-1 whitespace-nowrap rounded px-1.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {moreOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+            <span className={cn(moreOn > 0 && 'font-medium text-foreground')}>{moreCount}</span>
+          </button>
+        </td>
         <td
           className={cn(
             STICKY_BULK_CELL,
@@ -3331,7 +3410,41 @@ function StudioObjectRow({
             active && 'bg-gradient-to-r from-primary/5 to-primary/5',
           )}
         >
-          <span className="flex items-center gap-1 whitespace-nowrap" data-testid={`perm-bulk-${o.name}`}>
+          {/* objectstack#35061 — the folded form's one "Bulk" menu: the strip's four actions, in its order. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={!writable}
+                data-testid={`perm-bulk-menu-${o.name}`}
+                data-perm-fold="folded-only"
+                className={cn(
+                  'inline-flex h-6 items-center gap-0.5 whitespace-nowrap rounded px-1 text-[12px] font-medium text-primary hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:hover:bg-transparent',
+                  PERM_FOLDED_ONLY,
+                )}
+              >
+                {t('perm.col.bulk')}
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {bulk.map((b) => (
+                <DropdownMenuItem
+                  key={b.action}
+                  disabled={!writable}
+                  onSelect={() => onBulkSet(o.name, b.action)}
+                  title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
+                >
+                  {t(b.key)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span
+            className={cn('items-center gap-1 whitespace-nowrap', PERM_FLAT_ONLY_FLEX)}
+            data-testid={`perm-bulk-${o.name}`}
+            data-perm-fold="flat-only"
+          >
             {bulk.map((b, i) => (
               <React.Fragment key={b.action}>
                 {i > 0 && (
@@ -3353,9 +3466,57 @@ function StudioObjectRow({
           </span>
         </td>
       </tr>
+      {moreOpen && (
+        // objectstack#35061 — the six folded permissions, under their row. The
+        // same boxes and pickers as the flat columns, so each is exactly as
+        // editable or locked as its flat twin. Folded form only.
+        <tr
+          className={cn('border-b bg-muted/10', PERM_FOLDED_ONLY)}
+          data-testid={`perm-more-row-${o.name}`}
+          data-perm-fold="folded-only"
+        >
+          <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="py-2.5 pl-12 pr-6">
+            <div className={cn('flex flex-wrap items-center gap-x-5 gap-y-2', FIELD_PANEL)}>
+              {objectActions
+                .filter((a) => !isFlatKey(a.key))
+                .map((a) => (
+                  <label key={a.key as string} className="inline-flex items-center gap-1.5 text-[13px]" title={a.tip}>
+                    <ObjectRuleBox
+                      objectName={o.name}
+                      action={a}
+                      checked={!!perm[a.key]}
+                      source={cell.source}
+                      writable={writable}
+                      t={t}
+                      onObjectPerm={onObjectPerm}
+                      className="h-[18px] w-[18px] rounded border-muted-foreground/40 align-middle data-[state=checked]:border-primary"
+                    />
+                    <span className="whitespace-nowrap">{t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}</span>
+                  </label>
+                ))}
+              {SCOPE_AXES.map((s) => (
+                <span key={s.axis} className="inline-flex items-center gap-1.5 text-[13px]">
+                  <span className="whitespace-nowrap text-muted-foreground">{t(s.labelKey)}</span>
+                  <span className="w-36">
+                    <ScopePicker
+                      objectName={o.name}
+                      perm={perm}
+                      inherited={cell.inherited}
+                      axis={s}
+                      writable={writable}
+                      t={t}
+                      onChange={onObjectScope}
+                    />
+                  </span>
+                </span>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
       {open && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="py-3 pl-12 pr-6">
+          <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="py-3 pl-12 pr-6">
             <FieldsSubTable
               objectName={o.name}
               objectPerm={perm}

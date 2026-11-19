@@ -67,7 +67,7 @@ import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
 import { useObjectLabel, useSafeFieldLabel, useObjectTranslation, useSafeTranslate, createSafeTranslation, pickLocalized, useDisplayLocale, resolveBuiltInLanguage } from '@object-ui/i18n';
-import { MoreHorizontal, RefreshCw } from 'lucide-react';
+import { Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 
 /**
  * The one authorable key the three thin containers publish — `page:section`,
@@ -2284,10 +2284,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // through the dedupe first, so a host action survives under a key only
     // when no authored action holds it — the key alone tells the two apart
     // past the localizer, which copies every def. Read by the disabled-reason
-    // branch below: only an authored action's DECLARED `disabled` is a fact
-    // about the record; the host's Edit / Delete carry a boolean the host
+    // branch below: only an authored action's DECLARED `disabled` earns the
+    // generic reason; the host's Edit / Delete carry a boolean the host
     // computed for reasons of its own (approval lock, `userActions`), which
-    // the host explains where it computes them.
+    // the host explains where it computes them — beside the header, or as
+    // the `disabledReason` it hands with the action.
     const authoredKeys = new Set<string>(
       authored
         .map((a) => (a?.name || a?.id || '') as string)
@@ -2373,8 +2374,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       : readActionEntryParamValues({ ...rest, params: rawParams }, rest.type || rest.actionType, 'page:header');
     if (!record || typeof record !== 'object') {
       const dropsObjectParams = rawParams != null && !Array.isArray(rawParams) && values === undefined;
-      void execute(dropsObjectParams ? rest : action);
-      return;
+      return execute(dropsObjectParams ? rest : action);
     }
     const dispatch: any = { ...rest };
     if (Array.isArray(rawParams)) {
@@ -2383,8 +2383,37 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     } else {
       dispatch.params = { ...(values || {}), _rowRecord: record };
     }
-    void execute(dispatch);
+    return execute(dispatch);
   }, [record, execute]);
+
+  // An action whose click is still in flight — the launch that opens its
+  // dialog, or the run itself — is busy: `aria-busy`, a spinner in place of
+  // its icon, and a further click does nothing until the click's promise
+  // settles, fulfilled or rejected. A click that returns no promise is never
+  // busy. The ref is the guard and the only one on an inline button, which
+  // stays focusable while busy (`aria-disabled`, never native `disabled`) so a
+  // dialog the click opened can hand focus back to it on close. The state is
+  // what draws the face.
+  const pendingActionKeysRef = React.useRef<Set<string>>(new Set());
+  const [pendingActionKeys, setPendingActionKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  const runHeaderAction = React.useCallback((action: any, key: string) => {
+    if (pendingActionKeysRef.current.has(key)) return;
+    const outcome: unknown = typeof action.onClick === 'function'
+      ? action.onClick()
+      : dispatchHeaderAction(action);
+    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return;
+    pendingActionKeysRef.current.add(key);
+    setPendingActionKeys(new Set(pendingActionKeysRef.current));
+    const settle = () => {
+      pendingActionKeysRef.current.delete(key);
+      setPendingActionKeys(new Set(pendingActionKeysRef.current));
+    };
+    Promise.resolve(outcome).then(settle, (err: unknown) => {
+      settle();
+      // A failed click stays loud: the button is the promise's last holder.
+      console.error(`[page:header] action "${String(action?.name ?? action?.id ?? key)}" failed`, err);
+    });
+  }, [dispatchHeaderAction]);
 
   const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
   const renderHeaderActions = () => {
@@ -2598,22 +2627,25 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       (inlineEditing && action?.disableDuringInlineEdit === true) ||
       resolveDisabled(action?.disabled, action?.name ?? action?.id);
     // The reason a greyed-out action gives (objectui#11811) — or `undefined`
-    // when it gives none. Only an AUTHORED action's DECLARED `disabled` earns
-    // it: that verdict is a fact about the record, read off the action spec.
+    // when it gives none. An AUTHORED action's DECLARED `disabled` earns it:
+    // that verdict is a fact about the record, read off the action spec. The
+    // text is the action's declared `disabledReason` (objectstack#26619),
+    // already resolved against the bundle by `localizeActionTexts` in the
+    // `headerActions` memo, and the generic reason when it declares none.
     // The inline-edit lock above is the host's own state, and the host's Edit /
     // Delete carry a boolean the host computed (see `authoredKeys` in the plan
-    // memo), so neither says "not available for this record". The text is the
-    // action's declared `disabledReason` (objectstack#26619), already resolved
-    // against the bundle by `localizeActionTexts` in the `headerActions` memo,
-    // and the generic reason when it declares none.
+    // memo), so a host action is never given the generic reason: it shows
+    // only the `disabledReason` the host handed with it, when the host judged
+    // that its own `disabled` is a fact about the record (objectstack#35135).
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
-      if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
+      if (key === '') return undefined;
       // A pending record answers `disabled`'s fallback (closed), which is not
       // a fact about the record — so it is not explained as one.
       if (headerRecordPending) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
       const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
+      if (!authoredHeaderActionKeys.has(key)) return declared.trim() !== '' ? declared : undefined;
       return declared.trim() !== ''
         ? declared
         : tt('actions.notAvailableForRecord', 'Not available for this record');
@@ -2627,9 +2659,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       const variant =
         action === primaryAction ? 'default' : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
+      const actionKey = action.name || action.id || `header-action-${idx}`;
+      const pending = pendingActionKeys.has(actionKey);
       const disabled = isActionDisabled(action);
       const icon = typeof action.icon === 'string' ? action.icon : null;
-      const actionKey = action.name || action.id || `header-action-${idx}`;
       const disabledReason = disabledReasonFor(action);
       const reasonId = `${disabledReasonIdBase}-reason-${idx}`;
       const pressed = pressedFor(action);
@@ -2639,6 +2672,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           variant={variant}
           size={size}
           disabled={disabled}
+          aria-disabled={pending && !disabled ? true : undefined}
+          aria-busy={pending || undefined}
           aria-describedby={disabledReason ? reasonId : undefined}
           aria-pressed={pressed}
           // The pressed face: Shadcn's toggle-on colours, keyed off the
@@ -2647,17 +2682,14 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           className={cn(
             'gap-2',
             barFace && 'h-11 min-w-0 flex-1',
+            pending && 'cursor-progress opacity-50',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
           )}
-          onClick={() => {
-            if (typeof action.onClick === 'function') {
-              void action.onClick();
-              return;
-            }
-            dispatchHeaderAction(action);
-          }}
+          onClick={() => runHeaderAction(action, actionKey)}
         >
-          {icon && <LazyIcon name={icon} className="h-4 w-4" />}
+          {pending
+            ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
+            : icon && <LazyIcon name={icon} className="h-4 w-4" />}
           <span className={barFace ? 'truncate' : undefined}>{label}</span>
         </Button>
       );
@@ -2721,7 +2753,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               )}
               {overflowActions.map((action, idx) => {
                 const label = resolveLabel(action);
-                const disabled = isActionDisabled(action);
+                const itemKey = action.name || action.id || `overflow-action-${idx}`;
+                const pending = pendingActionKeys.has(itemKey);
+                const disabled = isActionDisabled(action) || pending;
                 const icon = typeof action.icon === 'string' ? action.icon : null;
                 const isDestructive = isDestructiveAction(action);
                 // objectui#11811 — the same reason as the inline button, but
@@ -2735,28 +2769,26 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
                 const disabledReason = disabledReasonFor(action);
                 const labelId = `${disabledReasonIdBase}-more-label-${idx}`;
                 const reasonId = `${disabledReasonIdBase}-more-reason-${idx}`;
-                const itemKey = action.name || action.id || `overflow-action-${idx}`;
                 return (
                   <React.Fragment key={itemKey}>
                   {idx === firstDestructiveIdx && idx > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem
                     disabled={disabled}
+                    aria-busy={pending || undefined}
                     aria-labelledby={disabledReason ? labelId : undefined}
                     aria-describedby={disabledReason ? reasonId : undefined}
                     onSelect={(e) => {
                       e.preventDefault();
-                      if (typeof action.onClick === 'function') {
-                        void action.onClick();
-                        return;
-                      }
-                      dispatchHeaderAction(action);
+                      runHeaderAction(action, itemKey);
                     }}
                     className={cn(
                       'gap-2',
                       isDestructive && 'text-destructive focus:text-destructive focus:bg-destructive/10'
                     )}
                   >
-                    {icon && <LazyIcon name={icon} className="h-4 w-4" />}
+                    {pending
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
+                      : icon && <LazyIcon name={icon} className="h-4 w-4" />}
                     {disabledReason ? (
                       <span className="flex min-w-0 flex-col">
                         <span id={labelId}>{label}</span>

@@ -155,7 +155,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation sent to {{ result.email }}",
-          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Accepting needs a verified email address: without mail, only an invitee whose social or SSO sign-in verifies the address can accept. For anyone else, a platform administrator creates the account."
         },
         params: {
           role: {
@@ -240,6 +240,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             email: "Email",
+            pendingAgain: "Already pending",
             notApplied: "Already pending, so not applied (set these on the record)",
             managerError: "Manager",
             "host.reason": "Invitation not sent"
@@ -260,7 +261,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             "summary.added": "Added",
-            "summary.alreadyPending": "Already pending, told again",
+            "summary.alreadyPending": "Already pending",
             "summary.failed": "Not added",
             rows: "Result per row"
           },
@@ -269,7 +270,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               row: "Row",
               email: "Email",
               ok: "Succeeded",
-              alreadyPending: "Already pending, told again",
+              alreadyPending: "Already pending",
               "host.notified": "Hosting organization told",
               "host.reason": "Why not told",
               "error.message": "Not added because",
@@ -704,7 +705,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation sent to {{ result.email }}",
-          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Accepting needs a verified email address: without mail, only an invitee whose social or SSO sign-in verifies the address can accept. For anyone else, a platform administrator creates the account."
         },
         params: {
           role: {
@@ -810,7 +811,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation sent to {{ result.email }}",
-          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Accepting needs a verified email address: without mail, only an invitee whose social or SSO sign-in verifies the address can accept. For anyone else, a platform administrator creates the account."
         },
         params: {
           role: {
@@ -962,7 +963,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
           sent: "Invitation sent to {{ result.email }}",
-          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Accepting needs a verified email address: without mail, only an invitee whose social or SSO sign-in verifies the address can accept. For anyone else, a platform administrator creates the account."
         },
         params: {
           role: {
@@ -989,7 +990,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Invitation resent",
         outcomeMessages: {
           sent: "Invitation resent to {{ result.email }}",
-          link_only: "Invitation renewed for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          link_only: "Invitation renewed for {{ result.email }}. Mail is not configured on this server, so no email went out. Accepting needs a verified email address: without mail, only an invitee whose social or SSO sign-in verifies the address can accept. For anyone else, a platform administrator creates the account."
         }
       },
       copy_invitation_link: {

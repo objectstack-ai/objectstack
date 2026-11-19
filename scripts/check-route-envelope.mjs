@@ -292,6 +292,13 @@ const MODULES = {
   // the same PR that created the module.
   'packages/services/service-messaging/src/in-app-message-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#34728] The caller's own notification preferences door
+  // (`GET /api/v1/messaging/me/preferences`), mounted by `MessagingServicePlugin`
+  // beside the preference options door. Every body it answers is written by the
+  // shared pair (`sendOk` / `sendError` / `sendServerFault`), so it builds none
+  // itself. Declared in the same PR that created the module.
+  'packages/services/service-messaging/src/my-preferences-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // [#30209] The shareable-objects door (`GET /api/v1/sharing/shareable-objects`),
   // mounted by `SharingServicePlugin` straight on `IHttpServer`. Every body it
   // answers is written by the shared pair (`sendOk` / `sendError` /
@@ -1104,6 +1111,7 @@ const DISPATCHER_DOMAINS = {
     handBuilt: 2,
     note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
   },
+  'mcp-authoring.ts': { handBuilt: 0 },
   // The "new similar" target rule both clone doors share (ADR-0146 D3/D6):
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },

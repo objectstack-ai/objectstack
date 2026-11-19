@@ -158,6 +158,64 @@ const fail = (status: number, code: string, message: string): EndpointResult => 
 
 const badRequest = (message: string): EndpointResult => fail(400, 'INVALID_REQUEST', message);
 
+/**
+ * The one body key every door admits beyond its own: `organizationId`.
+ *
+ * A `type: 'api'` action forwarded to the auth mount carries the caller's
+ * active organization as `body.organizationId` (`buildApiActionRequest`,
+ * `@objectstack/runtime` `action-execution.ts`), so the console's Import
+ * Users, Add User and any other action that reaches these doors arrives with
+ * it. A door that refused the key refused every console call.
+ *
+ * The key is admitted only as a statement the session already makes: it must
+ * equal the organization the caller is working in, read from the caller's
+ * own session (`getCallerActiveOrganizationId`). Any other value, a value of
+ * any other type, or a value sent by a caller working in no organization is
+ * refused before anything is read or written. The value never feeds scope:
+ * no door reads `body.organizationId` past this check, and the organization a
+ * person joins is the session's, as it was before (seat ruling A on the card
+ * that admitted the key).
+ */
+const STAMPED_ORGANIZATION_KEY = 'organizationId';
+
+/** Body keys a door does not take: its own set, plus the stamped organization. */
+const unknownBodyKeys = (body: Record<string, unknown>, keys: ReadonlySet<string>): string[] =>
+  Object.keys(body).filter((key) => key !== STAMPED_ORGANIZATION_KEY && !keys.has(key));
+
+/**
+ * Refuse a `body.organizationId` that is not the caller's session
+ * organization. `undefined` when the key is absent or equal; the refusal
+ * otherwise, naming what was sent and what the session holds. `outcome` ends
+ * the sentence ("no one was added", "no one was removed").
+ */
+async function refuseForeignOrganization(
+  deps: PendingSsoUserDeps,
+  body: Record<string, unknown>,
+  outcome: string,
+): Promise<EndpointResult | undefined> {
+  if (!Object.prototype.hasOwnProperty.call(body, STAMPED_ORGANIZATION_KEY)) return undefined;
+  const sent = body[STAMPED_ORGANIZATION_KEY];
+  if (typeof sent !== 'string' || sent.length === 0) {
+    return badRequest(`organizationId must be the id of the organization you are working in, so ${outcome}.`);
+  }
+  const current = deps.getCallerActiveOrganizationId ? await deps.getCallerActiveOrganizationId() : null;
+  if (typeof current !== 'string' || current.length === 0) {
+    return fail(
+      400,
+      'NO_ACTIVE_ORGANIZATION',
+      `The request names organization ${sent}, but you are not working in an organization, so ${outcome}. `
+        + 'Switch to that organization, then try again.',
+    );
+  }
+  if (sent !== current) {
+    return badRequest(
+      `The request names organization ${sent}, but you are working in organization ${current}, so ${outcome}. `
+        + 'Switch to that organization, or send the request from the one you are in.',
+    );
+  }
+  return undefined;
+}
+
 /** One person, as either door reads them. */
 interface PendingPersonInput {
   email: string;
@@ -539,10 +597,12 @@ export async function runAddSsoUser(
   const reading = await readJsonRequestBody(request);
   if (!reading.ok) return badRequest(reading.message);
   const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
-  const unknown = Object.keys(body).filter((key) => !ADD_KEYS.has(key));
+  const unknown = unknownBodyKeys(body, ADD_KEYS);
   if (unknown.length > 0) {
     return badRequest(`Unknown field(s): ${unknown.join(', ')}. This door takes email, name, positions, permissionSets and manager; it sets no password.`);
   }
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was added');
+  if (foreign) return foreign;
   const person = readPerson(body, { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' });
   if (typeof person === 'string') return badRequest(person);
 
@@ -561,6 +621,12 @@ export async function runAddSsoUser(
         email: person.email,
         source: PENDING_SSO_SOURCE,
         alreadyPending: outcome.alreadyPending,
+        // Present only on a re-add of a person still pending, so a reader
+        // (the `add_sso_user` result dialog, which skips a field whose path
+        // resolves to nothing) shows the fact exactly when it is true and
+        // draws no `false` row on a fresh add. `alreadyPending` stays on
+        // every answer for API readers.
+        ...(outcome.alreadyPending ? { pendingAgain: true } : {}),
         ...(outcome.alreadyPending ? {} : { positions: person.positions, permissionSets: person.permissionSets }),
         ...(outcome.alreadyPending && notAppliedOn(person, ADD_FIELD_NAMES).length > 0
           ? { notApplied: notAppliedOn(person, ADD_FIELD_NAMES) }
@@ -610,8 +676,10 @@ export async function runImportSsoUsers(
   const reading = await readJsonRequestBody(request);
   if (!reading.ok) return badRequest(reading.message);
   const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
-  const unknownKeys = Object.keys(body).filter((key) => !IMPORT_BODY_KEYS.has(key));
+  const unknownKeys = unknownBodyKeys(body, IMPORT_BODY_KEYS);
   if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. Send { csv } or { rows }.`);
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was imported');
+  if (foreign) return foreign;
 
   let rows: Array<Record<string, unknown>>;
   if (typeof body.csv === 'string' && body.rows === undefined) {
@@ -745,8 +813,10 @@ export async function runRemoveSsoUser(
   const reading = await readJsonRequestBody(request);
   if (!reading.ok) return badRequest(reading.message);
   const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
-  const unknownKeys = Object.keys(body).filter((key) => !REMOVE_KEYS.has(key));
+  const unknownKeys = unknownBodyKeys(body, REMOVE_KEYS);
   if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. This door takes userId.`);
+  const foreign = await refuseForeignOrganization(deps, body, 'no one was removed');
+  if (foreign) return foreign;
   const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
   if (!userId) return badRequest('userId is required');
 

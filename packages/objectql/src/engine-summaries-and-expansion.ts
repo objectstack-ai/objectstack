@@ -152,13 +152,19 @@ const ruleReadsByIndex = new WeakMap<object, Set<string>>();
  * (`summary-rule-reads.ts`).
  */
 function rollUpReadByARule(host: Pick<SummariesAndExpansionHost, '_registry' | 'summaryIndex'>, descriptors: readonly SummaryDescriptor[]): boolean {
+  const read = summaryFieldsReadByRulesOf(host);
+  return descriptors.some((d) => read.has(ruleReadKey(d.parentObject, d.summaryField)));
+}
+
+/** The `<object>.<field>` keys a rule reads, cached per built summary index ({@link ruleReadsByIndex}). */
+function summaryFieldsReadByRulesOf(host: Pick<SummariesAndExpansionHost, '_registry' | 'summaryIndex'>): Set<string> {
   const index = host.summaryIndex;
   let read = index ? ruleReadsByIndex.get(index) : undefined;
   if (!read) {
     read = summaryFieldsReadByRules(host._registry.getAllObjects(), index ? [...index.values()].flat() : []);
     if (index) ruleReadsByIndex.set(index, read);
   }
-  return descriptors.some((d) => read.has(ruleReadKey(d.parentObject, d.summaryField)));
+  return read;
 }
 
 /**
@@ -454,6 +460,18 @@ export class SummariesAndExpansionFacet {
    *  recompute. Empty when no roll-up aggregates `childObject`. */
   static summaryForeignKeyColumns(this: Pick<SummariesAndExpansionHost, 'getSummaryDescriptors'>, childObject: string): string[] {
     return [...new Set(this.getSummaryDescriptors(childObject).map((desc) => desc.fkField))];
+  }
+
+  /** [#34465] The roll-ups over `childObject` whose summary field a rule reads
+   *  — the same judgement that keeps a recompute from being deferred
+   *  (`summary-rule-reads.ts`, ruling 6928862195 B). A predicate update folds
+   *  exactly these into the values its rules read, so each matched row is
+   *  judged as one-by-one updates judge it. Empty when no rule reads any. */
+  static summaryDescriptorsReadByRules(this: Pick<SummariesAndExpansionHost, '_registry' | 'getSummaryDescriptors' | 'summaryIndex'>, childObject: string): SummaryDescriptor[] {
+    const descriptors = this.getSummaryDescriptors(childObject);
+    if (descriptors.length === 0) return [];
+    const read = summaryFieldsReadByRulesOf(this);
+    return descriptors.filter((d) => read.has(ruleReadKey(d.parentObject, d.summaryField)));
   }
 
   /** The body of `ObjectQL#getOwnedSummaryDescriptors`; the method's docblock there is its contract. */

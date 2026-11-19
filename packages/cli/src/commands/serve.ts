@@ -75,7 +75,7 @@ import {
   type SeedSettlementSnapshot,
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
-import { missingProviderMessage } from '../utils/capability-preflight.js';
+import { judgeDeclaredCapabilities, missingProviderMessage } from '../utils/capability-preflight.js';
 import { composeSeedSettledMessage } from '../utils/seed-settled-message.js';
 // The deployment's product name, for `AuthPlugin` — the same resolver the email
 // capability's template context reads (`resolveEmailCapabilityArg`), so the two
@@ -5469,6 +5469,33 @@ export default class Serve extends Command {
       const hasPluginMatching = (identities: readonly string[]) =>
         Serve.providesCapability(plugins, identities) || Serve.providesCapability(resolverMounted, identities);
 
+      // A DECLARED token this resolver has no row for, and no tier block
+      // handles, is mounted by nothing here: an `enterprise` provider comes
+      // only from the app's own `plugins[]`, a cloud-only tier from a cloud
+      // runtime. The loop below stays quiet for those (they are known
+      // vocabulary, not typos), and the sharing layer then fails closed to
+      // owner-only without a word. Say it once at start-up, in the sentence
+      // `os validate` and `os verify` print for the same token, and only when
+      // nothing in `plugins[]` provides it. A warning, never a refusal: the
+      // boot is unchanged.
+      const unmountedKnownTokens = [...declaredRequires].filter(
+        (cap) =>
+          !CAPABILITY_PROVIDERS[cap] &&
+          !Object.prototype.hasOwnProperty.call(Serve.CAPABILITY_TO_TIER, cap) &&
+          PLATFORM_CAPABILITY_TOKENS.includes(cap),
+      );
+      if (unmountedKnownTokens.length > 0) {
+        const judged = await judgeDeclaredCapabilities({
+          requires: unmountedKnownTokens,
+          packages: [],
+          plugins,
+          projectDir: hostRoot,
+        });
+        for (const a of [...judged.errors, ...judged.warnings]) {
+          console.warn(chalk.yellow(`  ⚠ ${a.message}`));
+        }
+      }
+
       for (const cap of requires) {
         const spec = CAPABILITY_PROVIDERS[cap];
         if (!spec) {
@@ -5476,7 +5503,8 @@ export default class Serve extends Command {
           // ui/auth) are handled by their dedicated blocks above; other KNOWN
           // vocabulary tokens are provided elsewhere (`hierarchy-security` via
           // an explicit enterprise plugin in `plugins[]`, `ai-seat`/`governance`
-          // by cloud's objectos-runtime) — stay quiet for those. An UNKNOWN
+          // by cloud's objectos-runtime) — this loop stays quiet for those; the
+          // start-up line above names any that nothing provides. An UNKNOWN
           // declared token is a typo that was previously ignored SILENTLY
           // (#3265) — warn loudly. Warn-first: intended to become a hard error
           // once the vocabulary proves complete (Prime Directive #12).

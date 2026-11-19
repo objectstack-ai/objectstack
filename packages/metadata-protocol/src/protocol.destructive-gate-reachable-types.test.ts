@@ -83,6 +83,9 @@ import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objec
 // Reason 1 is a claim about the AUTHORABLE SHAPE of a `field` body, so it is
 // asserted against the schema itself rather than restated in prose here.
 import { FieldSchema } from '@objectstack/spec/data';
+// The refusal names still-shown items with lint's judges, loaded lazily: pay
+// that first load during collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
@@ -554,6 +557,8 @@ describe('[#24411 §4] the destructive diff reads the field\'s own storage decla
             code: 'field_removed',
             field: 'notes',
             message: "Field 'notes' removed — existing data in this column will become inaccessible.",
+            // Computed, and nothing in this fixture shows the field.
+            stillShownBy: [],
         }]);
         expect(metadataWrites(writes)).toEqual([]);
     });

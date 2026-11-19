@@ -203,6 +203,7 @@ export interface RegistrationCheckHost {
     readonly validateDecisionModes: AutomationEngine['validateDecisionModes'];
     readonly validateFlowExpressions: AutomationEngine['validateFlowExpressions'];
     readonly validateApiTriggerSecret: AutomationEngine['validateApiTriggerSecret'];
+    readonly refuseUnpackagedDefaultActive: AutomationEngine['refuseUnpackagedDefaultActive'];
     readonly registrationChecks: AutomationEngine['registrationChecks'];
     readonly actionDescriptors: AutomationEngine['actionDescriptors'];
     readonly collectUndeclaredConfigKeys: AutomationEngine['collectUndeclaredConfigKeys'];
@@ -214,7 +215,7 @@ export interface RegistrationCheckHost {
 
 /** The body of {@link AutomationEngine.registrationChecks}, moved unedited; that method's docblock is its contract. */
 export function registrationChecks(
-    this: Pick<RegistrationCheckHost, 'validateNodeConfigKeys' | 'validateDecisionModes' | 'validateFlowExpressions' | 'validateApiTriggerSecret'>,
+    this: Pick<RegistrationCheckHost, 'validateNodeConfigKeys' | 'validateDecisionModes' | 'validateFlowExpressions' | 'validateApiTriggerSecret' | 'refuseUnpackagedDefaultActive'>,
     { advisory }: { advisory: boolean },
 ): ReadonlyArray<(flowName: string, flow: FlowParsed) => RegistrationCheckRefusal | undefined> {
     return [
@@ -253,6 +254,11 @@ export function registrationChecks(
         // save for the whole backoff ladder. Refused here, naming the node
         // and the background path. A plain function: it reads no engine state.
         (flowName, flow) => validateAfterSaveInlineRetry(flowName, flow),
+        // [#34655, ADR-0126 §4] `defaultActive` is the default of the
+        // packaged-flow switch, so a flow no package ships may not declare
+        // it: its switch is its own `status`. Judged by name against the
+        // loader's set, the question the toggle door asks.
+        (flowName, flow) => this.refuseUnpackagedDefaultActive(flowName, flow),
     ];
 }
 
