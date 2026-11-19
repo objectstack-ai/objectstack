@@ -989,6 +989,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "パラメーター",
         helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
+      texts: {
+        label: "テキスト",
+        helpText: "フックがレコードに書き込む文。コードが ctx.text で要求する snake_case のキー（例: follow_up_subject）をキーとします。フックには宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。JavaScript（L2）本体またはハンドラーで使用可能。expression 本体では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "コードがこのキーを要求したときにフックが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: lead）。コードが ctx.text(key, { lead }) を要求すると、{{ lead }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
       handler: {
         label: "ハンドラー",
         helpText: "ハンドラー関数名（非推奨 — `body` を推奨）"

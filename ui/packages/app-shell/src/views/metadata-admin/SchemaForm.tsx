@@ -71,6 +71,7 @@ import {
 import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp, type SupportedLocale } from './i18n.js';
 import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
+import { describeIssuePath, issuePathHead, issuePathRest, splitRowIssues } from './issuePath.js';
 
 /**
  * The form authoring surface — `FormFieldSpec` and the `VisibilityPredicate`
@@ -1193,13 +1194,21 @@ function SchemaFormBody({
   // fields the user might add.
   // Hoisted above the schema-synthesis guard below so this hook runs on every
   // render (the guard can early-return a <RawJsonEditor/>).
-  const issuesByPath = React.useMemo(() => {
-    const map: Record<string, string[]> = {};
+  // objectstack#35499 — grouped by the row their path's HEAD names, not by the
+  // whole path: the row draws its exact issues, hands a nested form the ones
+  // that form renders a row for, and draws every other deeper issue itself,
+  // led by the path's trail. A head no row renders is drawn nowhere here; the
+  // host's banner says it (the inline register never names that head).
+  const issuesByHead = React.useMemo(() => {
+    const map = new Map<string, SchemaFormIssue[]>();
     for (const i of issues) {
-      (map[i.path] ??= []).push(translateSchemaIssue(i, locale));
+      const head = issuePathHead(i.path);
+      const row = map.get(head);
+      if (row) row.push(i);
+      else map.set(head, [i]);
     }
     return map;
-  }, [issues, locale]);
+  }, [issues]);
 
   // objectui#9912 — follow the ONE indirection the served derivation uses
   // before any widget decision reads the node. Memoised for cost only: the
@@ -1242,12 +1251,7 @@ function SchemaFormBody({
   // (create) schema gate a field on a sibling value (e.g. show the list layout
   // picker only when `data.viewKind == 'list'`). No predicate → always shown.
   const predicateData = (value ?? {}) as Record<string, unknown>;
-  const keys = orderKeys(Object.keys(props), fieldOrder)
-    .filter((k) => !hiddenFields.includes(k))
-    .filter((k) => {
-      const visibility = readVisibility(props[k] as any);
-      return !visibility || evaluatePredicate(visibility, buildPredicateCtx(predicateData, hostScope));
-    });
+  const keys = flatFormRowKeys(props, hiddenFields, fieldOrder, predicateData, hostScope);
 
   const v = value ?? {};
 
@@ -1292,7 +1296,7 @@ function SchemaFormBody({
           idPath={idPath}
           required={required}
           hiddenFields={hiddenFields}
-          issuesByPath={issuesByPath}
+          issuesByHead={issuesByHead}
           value={v as Record<string, unknown>}
           readOnly={readOnly}
           createMode={createMode}
@@ -1324,7 +1328,7 @@ function SchemaFormBody({
           schema={props[key]}
           value={(v as Record<string, unknown>)[key]}
           required={required.includes(key)}
-          issues={issuesByPath[key]}
+          formIssues={issuesByHead.get(key)}
           note={fieldNotes?.[key]}
           readOnly={readOnly}
           widgetContext={widgetContext}
@@ -1605,7 +1609,7 @@ function SectionedSchemaForm({
   props,
   required,
   hiddenFields,
-  issuesByPath,
+  issuesByHead,
   value,
   readOnly,
   createMode,
@@ -1621,7 +1625,7 @@ function SectionedSchemaForm({
   props: Record<string, JsonSchema>;
   required: string[];
   hiddenFields: string[];
-  issuesByPath: Record<string, string[]>;
+  issuesByHead: ReadonlyMap<string, SchemaFormIssue[]>;
   value: Record<string, unknown>;
   readOnly?: boolean;
   createMode?: boolean;
@@ -1730,7 +1734,7 @@ function SectionedSchemaForm({
                   }}
                   value={value[f.field]}
                   required={f.required ?? required.includes(f.field)}
-                  issues={issuesByPath[f.field]}
+                  formIssues={issuesByHead.get(f.field)}
                   note={fieldNotes?.[f.field]}
                   readOnly={rowReadOnly(f)}
                   fieldSpec={f}
@@ -1874,6 +1878,7 @@ function FieldRow({
   value,
   required,
   issues,
+  formIssues,
   note,
   readOnly,
   fieldSpec,
@@ -1893,7 +1898,14 @@ function FieldRow({
   schema: JsonSchema;
   value: unknown;
   required: boolean;
+  /** Lines the host already worded for this row (a record key's rename error). */
   issues?: string[];
+  /**
+   * The form's issues whose path HEAD is this row's `name`, paths relative to
+   * the form (`label`, `label.not_a_locale`). The row places them: see
+   * {@link splitRowIssues} (objectstack#35499).
+   */
+  formIssues?: SchemaFormIssue[];
   /** The host's line for this field ({@link SchemaFormProps.fieldNotes}). */
   note?: string;
   readOnly?: boolean;
@@ -1903,6 +1915,7 @@ function FieldRow({
   onChange: (v: unknown) => void;
 }) {
   const locale = useMetadataLocale();
+  const hostScope = usePredicateScope();
   // `add10d8f9` — validation-display timing. `touched` flips on the first
   // focusout anywhere in this row (React's onBlur IS focusout, so it bubbles
   // out of every widget, including the composite ones that never emit a DOM
@@ -1912,7 +1925,6 @@ function FieldRow({
   const deferIssues = React.useContext(DeferIssueDisplayContext);
   const [touched, setTouched] = React.useState(false);
   const markTouched = React.useCallback(() => setTouched(true), []);
-  const visibleIssues = !deferIssues || touched ? issues : undefined;
   // objectstack#27865 — a host-level row that shows its issue line tells the
   // host, whose summary banner then leaves that field out.
   const inlineRegister = React.useContext(InlineIssueFieldsContext);
@@ -1955,6 +1967,36 @@ function FieldRow({
   // three structural fallbacks) used to be decided inside `FieldControl`, i.e.
   // after this label was written, which is why they all emitted a dangling `for`.
   const face = resolveFieldFace({ fieldSpec, widget, schema, value });
+
+  // objectstack#35499 — where this row's issues are drawn. A nested-form face
+  // hands down the issues whose next segment names a row that nested form
+  // renders (computed by the very function its body renders by); every other
+  // issue is drawn here — exact ones as their message, deeper ones (below a
+  // repeater, a record map, a code widget, or a key the nested form does not
+  // render) led by the trail of the rest of the path.
+  const nestedRows =
+    face.kind === 'nested-form'
+      ? new Set(
+          flatFormRowKeys(
+            (inlineSchemaRefs(face.effective)?.properties ?? {}) as Record<string, JsonSchema>,
+            [],
+            [],
+            ((value as Record<string, unknown> | undefined) ?? {}),
+            hostScope,
+          ),
+        )
+      : undefined;
+  const { handDown, kept } = splitRowIssues(formIssues ?? [], nestedRows);
+  const lines = [
+    ...(issues ?? []),
+    ...kept.map((i) => {
+      const message = translateSchemaIssue(i, locale);
+      return issuePathRest(i.path)
+        ? `${describeIssuePath(label, i.path, { [name]: value })}: ${message}`
+        : message;
+    }),
+  ];
+  const visibleIssues = showsIssues && lines.length > 0 ? lines : undefined;
 
   // How this field's visible label must reach what that face renders — a
   // DECLARATION either way, never an inference from the DOM it happens to
@@ -2023,6 +2065,35 @@ function FieldRow({
     ? undefined
     : `${t('engine.form.machineName', locale)}: ${name}`;
 
+  const fieldControl = (
+    <FieldControl
+      id={channel.id}
+      ariaLabelledBy={channel.ariaLabelledBy}
+      required={showRequiredStar}
+      fieldName={name}
+      idPath={path}
+      schema={schema}
+      value={value}
+      onChange={handleChange}
+      readOnly={readOnly}
+      widget={widget}
+      fieldSpec={fieldSpec}
+      widgetContext={widgetContext}
+      formData={formData}
+      nestedIssues={handDown}
+    />
+  );
+  // A nested form's rows show their issues exactly when this row does, so an
+  // issue handed down is never hidden while the host row counts as drawing
+  // its head (the inline register): a nested row's focusout bubbles here, and
+  // this row's reveal reaches every nested row (objectstack#35499).
+  const control =
+    face.kind === 'nested-form' ? (
+      <DeferIssueDisplayContext.Provider value={!showsIssues}>{fieldControl}</DeferIssueDisplayContext.Provider>
+    ) : (
+      fieldControl
+    );
+
   // Booleans render inline (label · description · switch) on one row to
   // save vertical space and feel like a real settings panel.
   if (isBoolean) {
@@ -2047,21 +2118,7 @@ function FieldRow({
             <div key={i} data-testid="schema-form-issue" className="text-xs text-destructive mt-0.5">{m}</div>
           ))}
         </div>
-        <FieldControl
-          id={channel.id}
-          ariaLabelledBy={channel.ariaLabelledBy}
-          required={showRequiredStar}
-          fieldName={name}
-          idPath={path}
-          schema={schema}
-          value={value}
-          onChange={handleChange}
-          readOnly={readOnly}
-          widget={widget}
-          fieldSpec={fieldSpec}
-          widgetContext={widgetContext}
-          formData={formData}
-        />
+        {control}
       </div>
     );
   }
@@ -2081,21 +2138,7 @@ function FieldRow({
           )}
         </Label>
       </div>
-      <FieldControl
-        id={channel.id}
-        ariaLabelledBy={channel.ariaLabelledBy}
-        required={showRequiredStar}
-        fieldName={name}
-        idPath={path}
-        schema={schema}
-        value={value}
-        onChange={handleChange}
-        readOnly={readOnly}
-        widget={widget}
-        fieldSpec={fieldSpec}
-        widgetContext={widgetContext}
-        formData={formData}
-      />
+      {control}
       {description && (
         <div className="text-xs text-muted-foreground">{description}</div>
       )}
@@ -2145,6 +2188,7 @@ function FieldControl({
   widgetContext,
   formData,
   listElement,
+  nestedIssues,
 }: {
   /**
    * The host field id. From `FieldRow` it is present only on the
@@ -2205,6 +2249,11 @@ function FieldControl({
    * no "— None —" item even though it carries no required marker.
    */
   listElement?: boolean;
+  /**
+   * The host row's issues a nested-form face draws, paths relative to it
+   * ({@link splitRowIssues}). Every other face ignores it.
+   */
+  nestedIssues?: SchemaFormIssue[];
 }) {
   const locale = useMetadataLocale();
   // The host shell's predicate scope (`ExpressionProvider` → `usePredicateScope`).
@@ -2350,6 +2399,7 @@ function FieldControl({
           schema={face.effective}
           value={(value as Record<string, unknown>) ?? {}}
           onChange={(v) => onChange(v)}
+          issues={nestedIssues}
           readOnly={readOnly}
           widgetContext={widgetContext}
           idPath={idPath}
@@ -3616,6 +3666,27 @@ function orderKeys(keys: string[], preferred: string[]): string[] {
   const head = preferred.filter((k) => set.has(k));
   const tail = keys.filter((k) => !preferred.includes(k));
   return [...head, ...tail];
+}
+
+/**
+ * The keys a FLAT form body renders a row for, in order: ordered, not hidden,
+ * and visible under the draft. One function for the body that renders the rows
+ * and for a nested-form host row that must know which of its issues those rows
+ * will draw (objectstack#35499), so the two can never disagree.
+ */
+function flatFormRowKeys(
+  props: Record<string, JsonSchema>,
+  hiddenFields: readonly string[],
+  fieldOrder: string[],
+  predicateData: Record<string, unknown>,
+  hostScope: ReturnType<typeof usePredicateScope>,
+): string[] {
+  return orderKeys(Object.keys(props), fieldOrder)
+    .filter((k) => !hiddenFields.includes(k))
+    .filter((k) => {
+      const visibility = readVisibility(props[k] as any);
+      return !visibility || evaluatePredicate(visibility, buildPredicateCtx(predicateData, hostScope));
+    });
 }
 
 /**

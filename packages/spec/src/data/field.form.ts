@@ -97,8 +97,9 @@ export const fieldForm = defineForm({
         // host, so declared = enforced = shown. A select over the schema's two
         // members with no default: an untouched row writes nothing and the
         // field keeps the renderer's default face, the bar. Gated to `percent`,
-        // the one type the key describes.
-        { field: 'percentDisplay', type: 'select', visibleWhen: "data.type == 'percent'", helpText: 'How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability.', options: [
+        // the one type the key describes, and to a formula returning `percent`
+        // (#35047), which the console draws through the same percent face.
+        { field: 'percentDisplay', type: 'select', visibleWhen: "data.type == 'percent' || (data.type == 'formula' && data.returnType == 'percent')", helpText: 'How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability.', options: [
           { label: 'Bar', value: 'bar' },
           { label: 'Plain', value: 'plain' },
         ] },
@@ -371,16 +372,18 @@ export const fieldForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'expression', widget: 'textarea', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
-        // The five members are what FieldSchema declares — an explicit list, not
+        // The six members are what FieldSchema declares — an explicit list, not
         // the derived enum, so this row cannot pick up a member the formula
         // return type does not have. `currency` joined with #22727; its currency
         // is the `currencyConfig` row above, shown for a currency formula too.
-        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset).', options: [
+        // `percent` joined with #35047; its face is the `percentDisplay` row.
+        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%.', options: [
           { label: 'Text', value: 'text' },
           { label: 'Number', value: 'number' },
           { label: 'Boolean', value: 'boolean' },
           { label: 'Date', value: 'date' },
           { label: 'Currency', value: 'currency' },
+          { label: 'Percent', value: 'percent' },
         ] },
         {
           field: 'summaryOperations',

@@ -40,7 +40,7 @@ import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from 
 // only — `actionExecutionDeps` hands the endpoint step the same `deps` object
 // every domain already passes to `callData`, without this file calling it.
 import type { ActionExecutionDeps } from './action-execution.js';
-import { admittingCredentialKind } from './security/admitting-credential.js';
+import { admittingCredentialKind, sessionAdmittedPrincipal } from './security/admitting-credential.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -120,9 +120,10 @@ export interface HttpProtocolContext {
      * {@link executionContext}'s principal, and — for an API key — the
      * key-admission seam's ADR-0069 answer on the key's owner. Written by
      * {@link HttpDispatcher.resolveRequestScope}; read by the ADR-0069 gate,
-     * which judges a key-admitted request by the key's answer and re-reads the
-     * session only for a principal a session admitted. Undefined for an
-     * anonymous request.
+     * which judges a key-admitted request by the key's answer and a principal
+     * the request's own session admitted by the posture decided off that same
+     * read (`sessionAdmittedPrincipal`), so the session is read once per
+     * request. Undefined for an anonymous request.
      */
     admission?: { credential: 'api_key' | 'session'; authGate: AuthGate | undefined };
     /**
@@ -1592,6 +1593,9 @@ export class HttpDispatcher {
      *  - allow-listed path, no `auth` service, or no gate feature active —
      *    including an `isAuthGateActive()` probe that THROWS (a host whose
      *    probe faults never declared a gate) — answers null with no read;
+     *  - the gate is active and the request's own session admitted the
+     *    principal (`sessionAdmittedPrincipal`) ⇒ the posture decided off the
+     *    identity step's read, with no second read: its 403, or null;
      *  - the gate is active and the session API, the header bag or the read
      *    itself fails ⇒ the branded outage, never null;
      *  - the gate is active and the read RESOLVES with no posture (no session,
@@ -1631,6 +1635,20 @@ export class HttpDispatcher {
             const authService = await this.resolveService(this.requestKernel(context), 'auth', context.environmentId);
             if (!authService || typeof authService.isAuthGateActive !== 'function' || !authService.isAuthGateActive()) {
                 return null;
+            }
+            // A principal THIS request's own session read admitted is judged by
+            // the posture decided off that same read, recorded by the identity
+            // step above (`resolveRequestScope` → `context.admission`). ⛔ No
+            // second read for it: one request reads its session once, and the
+            // gate and principal resolution share that read. The read already
+            // succeeded, so there is no unread session for decision 2 B to
+            // refuse. An anonymous request, an OAuth access token (whose session
+            // the door established) and an identity step that degraded after
+            // the read fall through to the read below, as before.
+            const admitted = sessionAdmittedPrincipal(context as HttpProtocolContext | undefined);
+            if (admitted) {
+                const gate = evaluateAuthGate(admitted, cleanPath, method);
+                return gate ? this.error(gate.message, 403, { code: gate.code }) : null;
             }
             // The gate is ACTIVE from here: the session read either answers or
             // is the outage it is (#13906 decision 2 B). ⛔ Never a
