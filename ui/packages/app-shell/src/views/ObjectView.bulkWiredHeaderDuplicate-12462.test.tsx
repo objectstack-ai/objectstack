@@ -29,6 +29,9 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
