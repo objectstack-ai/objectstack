@@ -4,7 +4,7 @@
 
 fix(metadata-protocol)!: `$expand` and a relation condition stop serving a disabled package's object through an enabled object's lookup, the answer its own data route already gives
 
-Clause-②: yes (narrowing: `$expand` withholds a disabled package's object and a relation condition on one is refused, the answer its own data route already gives)
+Clause-②: no (narrowing: `$expand` withholds a disabled package's object and a relation condition on one is refused, the answer its own data route already gives)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is what the data routes serve of a disabled package's object reached through another object's lookup. A caller that needs those records re-enables the package. -->
