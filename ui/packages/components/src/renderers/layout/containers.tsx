@@ -2284,10 +2284,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // through the dedupe first, so a host action survives under a key only
     // when no authored action holds it — the key alone tells the two apart
     // past the localizer, which copies every def. Read by the disabled-reason
-    // branch below: only an authored action's DECLARED `disabled` is a fact
-    // about the record; the host's Edit / Delete carry a boolean the host
+    // branch below: only an authored action's DECLARED `disabled` earns the
+    // generic reason; the host's Edit / Delete carry a boolean the host
     // computed for reasons of its own (approval lock, `userActions`), which
-    // the host explains where it computes them.
+    // the host explains where it computes them — beside the header, or as
+    // the `disabledReason` it hands with the action.
     const authoredKeys = new Set<string>(
       authored
         .map((a) => (a?.name || a?.id || '') as string)
@@ -2626,22 +2627,25 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       (inlineEditing && action?.disableDuringInlineEdit === true) ||
       resolveDisabled(action?.disabled, action?.name ?? action?.id);
     // The reason a greyed-out action gives (objectui#11811) — or `undefined`
-    // when it gives none. Only an AUTHORED action's DECLARED `disabled` earns
-    // it: that verdict is a fact about the record, read off the action spec.
+    // when it gives none. An AUTHORED action's DECLARED `disabled` earns it:
+    // that verdict is a fact about the record, read off the action spec. The
+    // text is the action's declared `disabledReason` (objectstack#26619),
+    // already resolved against the bundle by `localizeActionTexts` in the
+    // `headerActions` memo, and the generic reason when it declares none.
     // The inline-edit lock above is the host's own state, and the host's Edit /
     // Delete carry a boolean the host computed (see `authoredKeys` in the plan
-    // memo), so neither says "not available for this record". The text is the
-    // action's declared `disabledReason` (objectstack#26619), already resolved
-    // against the bundle by `localizeActionTexts` in the `headerActions` memo,
-    // and the generic reason when it declares none.
+    // memo), so a host action is never given the generic reason: it shows
+    // only the `disabledReason` the host handed with it, when the host judged
+    // that its own `disabled` is a fact about the record (objectstack#35135).
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
-      if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
+      if (key === '') return undefined;
       // A pending record answers `disabled`'s fallback (closed), which is not
       // a fact about the record — so it is not explained as one.
       if (headerRecordPending) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
       const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
+      if (!authoredHeaderActionKeys.has(key)) return declared.trim() !== '' ? declared : undefined;
       return declared.trim() !== ''
         ? declared
         : tt('actions.notAvailableForRecord', 'Not available for this record');
