@@ -2,6 +2,7 @@
 
 import type { IDataEngine, IFieldFileService, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
 import type {
+  SeedLoaderRequest,
   SeedLoaderRequestParsed,
   SeedLoaderResultParsed,
   SeedLoaderConfig,
@@ -16,6 +17,9 @@ import type {
 } from '@objectstack/spec/data';
 import {
   SeedLoaderConfigSchema,
+  SeedLoaderRequestSchema,
+  SeedMode,
+  RETIRED_SEED_MODE_VALUES,
   isMultiValueField,
   isTenancyDisabled,
   referenceTargetOf,
@@ -48,6 +52,7 @@ import { validationFailureDetails } from '@objectstack/types';
 // `SysMetadataRepository` (#4867) and `cascadeDeleteRelations` (#8895) ask, so
 // a driver quirk is taught to the platform once instead of per seam.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { createHash } from 'node:crypto';
 // [#25779] `seedFile(path)` values: stored, kept across replays, and owned by
 // the row that holds them; an id-shaped file value that names no file refused.
 import { SeedDatasetFiles, type SeedFileClaims } from './seed-files.js';
@@ -369,7 +374,30 @@ function isLocaleScopedDataset(dataset: Seed): boolean {
 
 /** Render a dataset's declared locale scope for a log line. */
 function localeScopeLabel(dataset: Seed): string {
-  return `${dataset.object} (locale: ${(dataset.locale as string[]).join(', ')})`;
+  return `${dataset.object} (locale: ${(dataset.locale as string[]).join(', ')}${isFallbackDataset(dataset) ? '; fallback' : ''})`;
+}
+
+/**
+ * [Seed.fallback] True when the dataset is marked its object's fallback set.
+ * The schema refuses the marker on a dataset with no `locale`, so a marked
+ * dataset is always locale-scoped.
+ */
+function isFallbackDataset(dataset: Seed): boolean {
+  return (dataset as { fallback?: unknown }).fallback === true;
+}
+
+/**
+ * [Seed.fallback] The objects for which a locale-scoped dataset of `datasets`
+ * lists `locale`. A dataset with no `locale` is locale-neutral and is not a
+ * match: it loads beside whichever set is chosen, and does not keep the
+ * object's fallback set from filling in.
+ */
+function objectsWithLocaleMatch(datasets: readonly Seed[], locale: string): Set<string> {
+  const matched = new Set<string>();
+  for (const dataset of datasets) {
+    if (isLocaleScopedDataset(dataset) && datasetAllowsLocale(dataset, locale)) matched.add(dataset.object);
+  }
+  return matched;
 }
 
 /**
@@ -402,6 +430,13 @@ function perOrganizationSeedRowId(authoredId: string, organizationId: string): s
 const SEED_LANDED_KEY_OBJECT = 'sys_seed_landed_key';
 
 /**
+ * [#34613] The `SeedMode` values retired by ruling 6942780880 that a stored
+ * seed can still carry. Only membership is read here: the prescription a
+ * refused dataset reports is `SeedMode`'s own refusal.
+ */
+const RETIRED_SEED_MODES: ReadonlySet<string> = new Set(RETIRED_SEED_MODE_VALUES);
+
+/**
  * [#31021] The key a landed seed row is recorded under in
  * {@link SEED_LANDED_KEY_OBJECT}: the dataset's `externalId` field names, each
  * with the value the row is matched by, JSON-encoded (`[["name","Acme"]]`).
@@ -422,6 +457,32 @@ function seedLandedKey(record: Record<string, unknown>, externalId: string | str
     pairs.push([field, String(value)]);
   }
   return JSON.stringify(pairs);
+}
+
+/**
+ * [#34800] The id a seed row lands with when a reference in its `externalId`
+ * is still empty on the load that inserts it — a person not signed up yet,
+ * deferred to pass 2 and held past it.
+ *
+ * Such a row is stored with that key column NULL, so the natural key the load
+ * matches existing rows by can never find it again: while the reference stays
+ * unresolvable the record keys empty, and once it resolves the record carries
+ * an id the stored row does not. Each load then inserted another copy. The
+ * row's identity has to come from what does not move between loads: the key
+ * as AUTHORED (`authoredKey`, {@link seedLandedKey} over the record before
+ * its references resolve — the natural key the author wrote, never the id it
+ * resolves to), in the object and organization the row belongs to.
+ *
+ * DERIVED, never minted, for {@link perOrganizationSeedRowId}'s reason: a
+ * replay finds its row again by recomputing the id. A digest rather than the
+ * key itself, because the key is any text the author wrote and an id is not.
+ * A row a person created never carries one, so a lookup by this id can only
+ * find the seed's own row, and two records whose keys differ only in that
+ * reference derive two ids.
+ */
+function seedDeferredKeyRowId(objectName: string, rowOrganization: string, authoredKey: string): string {
+  const digest = createHash('sha256').update(JSON.stringify([objectName, rowOrganization, authoredKey])).digest('hex');
+  return `seed_${digest.slice(0, 32)}`;
 }
 
 /**
@@ -458,8 +519,8 @@ interface LandedKeyLedger {
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references — pass 2 writes a deferred
  *   reference back through the source row's INTERNAL id captured at insert
- *   time (commit 9a884c6e4), so it heals KEYLESS datasets (`mode: 'insert'`, no
- *   `externalId`) the same as keyed ones
+ *   time (commit 9a884c6e4), so it heals a row whose key evaluates empty the
+ *   same as a keyed one
  * - Dry-run validation mode
  * - Upsert support honoring SeedSchema mode
  * - Idempotent replay: an upsert/update whose declared fields already match
@@ -1285,15 +1346,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       ? { context: { ...SEED_WRITE_EXECUTION_CONTEXT, tenantId: writeOrganization } }
       : SeedLoaderService.SEED_OPTIONS;
 
-    // 1. Filter datasets by the scope axes (environment AND locale)
-    const datasets = this.filterDatasets(request.seeds, config);
+    // 1. Filter datasets by the scope axes (environment AND locale). An object
+    // whose env-scoped datasets mark two DISTINCT fallback sets has no single
+    // set to fall back to (`Seed.fallback`): only its fallback CHOICE is
+    // refused. Every marked set still goes through the locale filter and loads
+    // for the locales it lists, exactly as an unmarked set would; none fills in
+    // for a locale no set lists. Identical copies of one declaration count
+    // once — the shared per-organization replay list holds a package's
+    // datasets once per merge.
+    const envScoped = this.filterByEnv(request.seeds, config.env);
+    const fallbackRefusals = findDuplicateFallbackSets(envScoped);
+    const refusedFallbackObjects = new Set(fallbackRefusals.map(refusal => refusal.object));
+    const datasets = this.filterByLocale(envScoped, config.locale, refusedFallbackObjects);
+    allErrors.push(...this.reportDuplicateFallbackSets(fallbackRefusals));
 
     // [#31021] The record of landed seed rows, once the organization this load
     // seeds is known. A load with nothing to seed reads and writes none.
     this.landedKeyLedger = datasets.length > 0 ? await this.openLandedKeyLedger(config) : undefined;
 
     if (datasets.length === 0) {
-      return this.buildEmptyResult(config, Date.now() - startTime);
+      return allErrors.length > 0
+        ? this.buildResult(config, { nodes: [], insertOrder: [], circularDependencies: [] }, [], allErrors, Date.now() - startTime)
+        : this.buildEmptyResult(config, Date.now() - startTime);
     }
 
     // 2. Build dependency graph. `Seed.dependsOn` adds its declared edges to
@@ -1305,7 +1379,10 @@ export class SeedLoaderService implements ISeedLoaderService {
     const graph = await this.buildDependencyGraph(objectNames, declared.edges);
     const dependsOnRefusals = [...declared.refusals, ...this.findDeclaredEdgeCycles(graph.nodes, declared.edges)];
     if (dependsOnRefusals.length > 0) {
-      return this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+      const refused = this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+      // [Seed.fallback] An object's refused fallback choice stays reported on a load refused for its declarations.
+      refused.errors.unshift(...allErrors);
+      return refused;
     }
 
     this.logger.info('[SeedLoader] Dependency graph built', {
@@ -1532,6 +1609,66 @@ export class SeedLoaderService implements ISeedLoaderService {
     return fromMetadata;
   }
 
+  /**
+   * [#34613] Load a request built from STORED seeds: the loads that replay a
+   * seed the author is not there to fix — the single-tenant boot seed, the
+   * per-organization replay, the dev hot reload, a package install, upgrade
+   * or sample-data reseed.
+   *
+   * `SeedMode` retired `insert` and `replace` (ruling 6942780880, ADR-0049):
+   * neither matched a row, so every replay inserted each record again. A
+   * package built or a seed stored before the retirement can still carry one,
+   * and the request parse would refuse the WHOLE load over it. Here that
+   * dataset alone is refused: it writes nothing, its prescription (the
+   * `SeedMode` refusal, read from the schema, never restated) becomes one
+   * error of the result with `success: false`, and every other dataset loads.
+   * No log line of its own: the refusal is handed to the caller, which
+   * reports a failed load's errors as it reports any other. (A compiled
+   * artifact reaches here too: the artifact door parses the rest of the
+   * artifact without such a dataset, see `@objectstack/metadata`'s
+   * `artifact-retired-seed-modes.ts`; and `loadDataset` refuses the mode again
+   * for a caller that skips this funnel.)
+   *
+   * The publish doors do not come here. A publish has its author present, so
+   * it parses the request itself and refuses the whole publish with the same
+   * prescription.
+   *
+   * Every other problem of the request is the parse's, as before: it throws.
+   */
+  async loadStored(request: {
+    seeds: ReadonlyArray<unknown>;
+    config?: SeedLoaderRequest['config'];
+  }): Promise<SeedLoaderResultParsed> {
+    const admitted: unknown[] = [];
+    const refusals: ReferenceResolutionError[] = [];
+    for (const seed of request.seeds) {
+      const mode = (seed as { mode?: unknown } | null)?.mode;
+      const verdict = typeof mode === 'string' && RETIRED_SEED_MODES.has(mode) ? SeedMode.safeParse(mode) : undefined;
+      if (!verdict || verdict.success) {
+        admitted.push(seed);
+        continue;
+      }
+      const objectName = String((seed as { object?: unknown }).object ?? '(unnamed)');
+      refusals.push({
+        sourceObject: objectName,
+        field: 'mode',
+        targetObject: objectName,
+        targetField: '(dataset)',
+        attemptedValue: mode,
+        // The mode is the dataset's, not a row's; no row was attempted.
+        recordIndex: 0,
+        message: `Seed dataset for '${objectName}' was not loaded: ${verdict.error.issues[0]?.message ?? `mode '${mode}' is retired`}`,
+      });
+    }
+    if (refusals.length === 0) return this.load(SeedLoaderRequestSchema.parse({ config: {}, ...request }));
+    // Every dataset refused: there is nothing to load (and the request schema
+    // asks for at least one dataset), so the answer is the empty load, failed.
+    const result = admitted.length === 0
+      ? this.buildEmptyResult(SeedLoaderConfigSchema.parse(request.config ?? {}), 0)
+      : await this.load(SeedLoaderRequestSchema.parse({ config: {}, ...request, seeds: admitted }));
+    return { ...result, success: false, errors: [...refusals, ...result.errors] };
+  }
+
   async validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResultParsed> {
     const parsedConfig = SeedLoaderConfigSchema.parse({ ...config, dryRun: true });
     // `datasets` is the AUTHOR state (that is what `validate` takes); `load`
@@ -1556,6 +1693,44 @@ export class SeedLoaderService implements ISeedLoaderService {
   ): Promise<SeedLoadResultParsed> {
     const objectName = dataset.object;
     const mode = dataset.mode || config.defaultMode;
+    // [#34613] A mode outside the live `SeedMode` set refuses the dataset HERE,
+    // whatever the caller parsed: `load()` and `validate()` take requests they
+    // do not parse, and the retired `insert` / `replace` would otherwise fall to
+    // the default arm below and insert every record again on each replay. The
+    // refusal writes nothing, counts every record errored, and carries the
+    // schema's own prescription. (No mode at all, a request built without the
+    // parse's defaults, keeps its old path below.)
+    const modeVerdict = mode === undefined ? undefined : SeedMode.safeParse(mode);
+    if (modeVerdict && !modeVerdict.success) {
+      const error: ReferenceResolutionError = {
+        sourceObject: objectName,
+        field: 'mode',
+        targetObject: objectName,
+        targetField: '(dataset)',
+        attemptedValue: mode,
+        // The mode is the dataset's, not a row's; no row was attempted.
+        recordIndex: 0,
+        message: `Seed dataset for '${objectName}' was not loaded: ${modeVerdict.error.issues[0]?.message ?? `mode '${String(mode)}' is not a seed mode`}`,
+      };
+      allErrors.push(error);
+      this.logger.error(`[SeedLoader] ${error.message}`, undefined, { object: objectName, mode });
+      return {
+        object: objectName,
+        mode,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        errored: dataset.records.length,
+        total: dataset.records.length,
+        referencesResolved: 0,
+        referencesDeferred: 0,
+        referencesDropped: 0,
+        summariesStale: 0,
+        landedIds: [],
+        insertedIds: [],
+        errors: [error],
+      };
+    }
     const externalId = dataset.externalId || 'name';
     // [#25761] Left out of every write to a row this dataset MATCHED — see
     // `matchesExistingRow` in the record loop below.
@@ -1611,8 +1786,19 @@ export class SeedLoaderService implements ISeedLoaderService {
     // that share the same natural key — e.g. `name: 'Acme Corp'`).
     let existingRecords: Map<string, any> | undefined;
     const keyedMode = mode === 'upsert' || mode === 'update' || mode === 'ignore';
+    // [#34800] The externalId fields that are references. A row can land with
+    // one of them still empty, and a replay finds that row by its id (see
+    // `seedDeferredKeyRowId`), so the same read also indexes every row by id.
+    const referenceKeyFields: ReadonlySet<string> = new Set(
+      (refMap.get(objectName) ?? [])
+        .map((ref) => ref.field)
+        .filter((field) => (Array.isArray(externalId) ? externalId : [externalId]).includes(field)),
+    );
+    const existingRowsById = referenceKeyFields.size > 0 ? new Map<string, any>() : undefined;
+    /** [#34800] Ids of rows a record of this dataset found by id (or will insert with), so no two claim one. */
+    const claimedKeyRowIds = new Set<string>();
     if (keyedMode && !config.dryRun) {
-      existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId);
+      existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId, existingRowsById);
     }
     // [#28952] A keyed dataset whose every record keys EMPTY — its
     // `externalId` names a field no record carries, most often a field the
@@ -1627,7 +1813,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
           `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
           `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
-          `Set externalId to a field the object declares and each record carries, or use mode 'insert'.`,
+          `Set externalId to a field the object declares and each record carries, a list of fields when no ` +
+          `single field names a row, or 'id' when the records carry their own ids.`,
         { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
       );
     }
@@ -1656,8 +1843,8 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // [#31021] The record of landed seed rows, for the datasets that insert a
     // keyed row they do not find (`upsert`, `ignore`): the modes the
-    // create-only rule reaches. `update` never inserts; `insert` / `replace`
-    // match no key.
+    // create-only rule reaches. `update` never inserts. (The unkeyed
+    // `insert` / `replace` modes are retired, #34613.)
     const recordedKeys = this.landedKeyLedger && (mode === 'upsert' || mode === 'ignore')
       ? await this.landedKeysOf(objectName)
       : undefined;
@@ -1691,8 +1878,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // gets the batched path below. See framework#2678.
     const hasSelfRef = objectRefs.some(ref => ref.targetObject === objectName);
 
-    // Records resolved as inserts (mode 'insert'/'replace', or an unmatched
-    // upsert/ignore) are buffered here and flushed in batches through the
+    // Records resolved as inserts (an unmatched upsert/ignore) are buffered here and flushed in batches through the
     // engine's array-form insert() — one round-trip per batch instead of one
     // per record, with transient-error retry and per-row degradation on a
     // logical/validation failure. See framework#2678.
@@ -1708,9 +1894,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // unlike the `insertedRecords` registrations, which need a non-empty
     // natural key. Once the dataset has fully written, the deferred updates it
     // pushed are annotated from this map (see the loop after the final flush),
-    // so pass 2 back-fills BY INTERNAL ID and a KEYLESS dataset (`mode:
-    // 'insert'`, no `externalId` — the honest authoring for an engine-owned
-    // object with no natural key) heals exactly like a keyed one. Before this,
+    // so pass 2 back-fills BY INTERNAL ID and a row whose key evaluates empty
+    // heals exactly like a keyed one (the keyless `insert` mode this was first
+    // written for is retired, #34613). Before this,
     // pass 2 re-resolved the source row through its externalId and a keyless
     // deferral was structurally unreachable: it resolved the target, then
     // dropped the link ("empty externalId, so no internal id").
@@ -2103,6 +2289,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         authoredIdByRecordIndex.set(i, authoredId);
       }
 
+      // [#34800] The key as AUTHORED, before any of its references resolves:
+      // the identity of a row that lands while one of them is still empty.
+      // `''` when the dataset keys on no reference or the record leaves a key
+      // field blank as written; such a record matches by natural key alone.
+      const authoredKey = existingRowsById ? seedLandedKey(record, externalId) : '';
+      const authoredKeyValues = authoredKey === ''
+        ? undefined
+        : new Map([...referenceKeyFields].map((field) => [field, record[field]] as const));
+      /** [#34800] Key fields whose reference this record defers to pass 2. */
+      const deferredKeyFields = new Set<string>();
+
       // Resolve references
       let unresolvedRefError = false;
 
@@ -2170,16 +2367,64 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
 
       /**
+       * [#34800] The row this record landed on while a reference in its key
+       * was still empty, found by id when its natural key cannot find it:
+       * the row's own key column is NULL, so the key misses whether the
+       * reference is still deferred (the record keys `''`) or resolves now
+       * (the record carries an id the row does not). An exact natural-key
+       * match always wins. The id is the record's own `id` when it carries
+       * one, else {@link seedDeferredKeyRowId}; a row found by it is taken
+       * only when its other key columns still equal the record's and each
+       * reference column it holds is empty or the very value the record
+       * resolved, and only by one record of the load. A row a person created
+       * carries neither id, so it is never taken.
+       *
+       * Asked once the key is final — after the key's references resolved —
+       * and answered once per record.
+       */
+      let deferredKeyRow: { row: any } | null | undefined;
+      const rowLandedWithEmptyKeyReference = (): any | undefined => {
+        if (deferredKeyRow !== undefined) return deferredKeyRow?.row;
+        deferredKeyRow = null;
+        if (!existingRowsById || authoredKey === '') return undefined;
+        const key = this.externalIdKey(record, externalId);
+        if (key !== '' && existingRecords?.has(key)) return undefined;
+        const ownId = record['id'];
+        const rowId = typeof ownId === 'string' && ownId !== ''
+          ? ownId
+          : seedDeferredKeyRowId(objectName, String(record[organizationColumn] ?? ''), authoredKey);
+        const row = existingRowsById.get(rowId);
+        if (row === undefined || claimedKeyRowIds.has(rowId)) return undefined;
+        for (const field of keyFields) {
+          if (deferredKeyFields.has(field)) continue;
+          if (referenceKeyFields.has(field) && isMissing(row[field])) continue;
+          if (String(row[field] ?? '') !== String(record[field] ?? '')) return undefined;
+        }
+        claimedKeyRowIds.add(rowId);
+        deferredKeyRow = { row };
+        return row;
+      };
+      /**
+       * [#34800] The existing rows this record's write decision reads: the
+       * dataset's, or — when the record landed on a row its natural key
+       * cannot find — that one row, under the key the record has.
+       */
+      const existingRowsFor = (): Map<string, any> | undefined => {
+        const row = rowLandedWithEmptyKeyReference();
+        return row === undefined ? existingRecords : new Map([[this.externalIdKey(record, externalId), row]]);
+      };
+
+      /**
        * [#25761] Is this row one the load MATCHED — an existing row this
        * dataset writes over? The create-only policy is the only thing that
        * asks. The same lookup {@link SeedLoaderService.decideWriteAction}
        * makes: the record's natural key, as resolved so far, against the rows
        * pre-loaded for the modes that match one (`upsert`, `update`,
-       * `ignore`). A dry run and the `insert` / `replace` modes pre-load
-       * nothing, so every row they see is one they create.
+       * `ignore`). A dry run pre-loads nothing, so every row it sees is one
+       * it creates.
        */
       const matchesExistingRow = (): boolean =>
-        existingRecords?.has(this.externalIdKey(record, externalId)) === true;
+        existingRowsFor()?.has(this.externalIdKey(record, externalId)) === true;
 
       const allRecordRefs: Array<
         Pick<ReferenceResolutionParsed, 'field' | 'targetObject' | 'targetField'> & { multiple?: boolean }
@@ -2217,6 +2462,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (!recordedKeys || !this.landedKeyLedger?.honour) return false;
         const key = this.externalIdKey(record, externalId);
         if (key === '' || existingRecords?.has(key)) return false;
+        // [#34800] Found by id: the row is there, under a key column still empty.
+        if (rowLandedWithEmptyKeyReference() !== undefined) return false;
         return recordedKeys.has(landedKeyOf(record, i));
       };
       let withdrawnRow = false;
@@ -2404,6 +2651,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // array): a partially-written array is a corrupt association, and
             // pass 2 re-resolves every element from the same authored keys.
             delete record[ref.field];
+            if (keyFields.has(ref.field)) deferredKeyFields.add(ref.field); // [#34800]
             deferredUpdates.push({
               objectName,
               recordExternalId: this.externalIdKey(record, externalId),
@@ -2524,12 +2772,54 @@ export class SeedLoaderService implements ISeedLoaderService {
         for (const column of createOnlyColumns) delete record[column];
       }
 
+      // [#34800] A row that lands while a reference in its key is still empty
+      // takes the id derived from its authored key, so the next load finds it
+      // by that id (`rowLandedWithEmptyKeyReference`) instead of inserting
+      // another. Only for the modes that insert a keyed row they do not find,
+      // only when the record names no id of its own, and never an id a row of
+      // this organization or another record of this load already has.
+      if (!config.dryRun && (mode === 'upsert' || mode === 'ignore') && deferredKeyFields.size > 0
+        && authoredKey !== '' && record['id'] === undefined && rowLandedWithEmptyKeyReference() === undefined) {
+        const rowId = seedDeferredKeyRowId(objectName, String(record[organizationColumn] ?? ''), authoredKey);
+        if (!existingRowsById!.has(rowId) && !claimedKeyRowIds.has(rowId)) {
+          claimedKeyRowIds.add(rowId);
+          record['id'] = rowId;
+        }
+      }
+      // [#34800] `ignore` writes nothing over a row it found, so a key
+      // reference that was empty when the row landed and resolves now is
+      // back-filled by pass 2 onto that row, that column only — the way a held
+      // person reference is written later onto the row the seed landed on.
+      const landedKeyRow = mode === 'ignore' && config.multiPass && !config.dryRun
+        ? rowLandedWithEmptyKeyReference()
+        : undefined;
+      if (landedKeyRow !== undefined) {
+        for (const ref of allRecordRefs) {
+          if (!referenceKeyFields.has(ref.field) || deferredKeyFields.has(ref.field) || ref.multiple) continue;
+          if (!isMissing(landedKeyRow[ref.field]) || isMissing(record[ref.field])) continue;
+          deferredUpdates.push({
+            objectName,
+            recordExternalId: this.externalIdKey(record, externalId),
+            externalIdLabel: this.externalIdLabel(externalId),
+            field: ref.field,
+            targetObject: ref.targetObject,
+            targetField: ref.targetField,
+            attemptedValue: authoredKeyValues!.get(ref.field),
+            multiple: false,
+            recordIndex: i,
+          });
+          // Booked as pass 2's, which counts it resolved once it is written.
+          if (record[ref.field] !== authoredKeyValues!.get(ref.field)) referencesResolved--;
+          referencesDeferred++;
+        }
+      }
+
       // [#25779] Seed files, once the row's references and organization are
       // final: each `seedFile(path)` becomes the id of a file stored for (or
       // kept by) this row, and a file value that cannot be honoured refuses
       // the row before anything of it is written.
       if (datasetFiles) {
-        const matched = existingRecords?.get(this.externalIdKey(record, externalId));
+        const matched = existingRowsFor()?.get(this.externalIdKey(record, externalId));
         const organizationOfRow =
           typeof record[organizationColumn] === 'string' && record[organizationColumn] !== ''
             ? (record[organizationColumn] as string)
@@ -2590,7 +2880,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // verbatim — this line only moves WHEN the author learns, from after the
       // engine's rejection to before the write that provokes it.
       if (!config.dryRun && requiredDeferrals.length > 0) {
-        if (this.decideWriteAction(record, mode, externalId, existingRecords, comparands).action === 'insert') {
+        if (this.decideWriteAction(record, mode, externalId, existingRowsFor(), comparands).action === 'insert') {
           for (const deferral of requiredDeferrals) {
             if (earlySignalledFields.has(deferral.field)) continue;
             earlySignalledFields.add(deferral.field);
@@ -2629,7 +2919,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords, comparands, record[organizationColumn],
+              objectName, record, mode, externalId, existingRowsFor(), comparands, record[organizationColumn],
             );
 
             if (result.action === 'inserted') written.inserted++;
@@ -2653,7 +2943,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // already exist (rejected update), so keep its natural-key
             // mapping alive for downstream reference resolution.
             const externalIdValue = this.externalIdKey(record, externalId);
-            const existingId = this.extractId(existingRecords?.get(externalIdValue));
+            const existingId = this.extractId(existingRowsFor()?.get(externalIdValue));
             if (existingId) noteLanded(i, existingId); // [commit 9a884c6e4]
             if (externalIdValue && existingId) {
               insertedRecords.get(objectName)!.set(externalIdValue, existingId);
@@ -2672,7 +2962,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             );
           }
         } else {
-          const decision = this.decideWriteAction(record, mode, externalId, existingRecords, comparands);
+          const decision = this.decideWriteAction(record, mode, externalId, existingRowsFor(), comparands);
           const externalIdValue = this.externalIdKey(record, externalId);
 
           if (decision.action === 'skip') {
@@ -3838,11 +4128,6 @@ export class SeedLoaderService implements ISeedLoaderService {
     const opts = this.writeOptionsFor(rowOrganization) as any;
 
     switch (mode) {
-      case 'insert': {
-        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
-        return { action: 'inserted', id: this.extractId(result) };
-      }
-
       case 'update': {
         if (!existing) {
           return { action: 'skipped' };
@@ -3877,12 +4162,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         return { action: 'inserted', id: this.extractId(result) };
       }
 
-      case 'replace': {
-        // Replace mode: just insert (caller should have cleared the table)
-        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
-        return { action: 'inserted', id: this.extractId(result) };
-      }
-
+      // The retired `insert` / `replace` (#34613) never reach here:
+      // `loadDataset` refuses a mode outside the live set before any write.
       default: {
         const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
@@ -3928,8 +4209,6 @@ export class SeedLoaderService implements ISeedLoaderService {
           : { action: 'update', id: this.extractId(existing)! };
       case 'ignore':
         return existing ? { action: 'skip', id: this.extractId(existing) } : { action: 'insert' };
-      case 'insert':
-      case 'replace':
       default:
         return { action: 'insert' };
     }
@@ -4331,6 +4610,31 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
+   * [Seed.fallback] The errors for the objects whose fallback choice this
+   * load refused, one per object (`field: 'fallback'`), each named once at
+   * `warn`. Every dataset still loads where its own scope admits it, so the
+   * errors join the load's own and its result reads `success: false`. The
+   * `warn` is a functional degradation (an organization on a locale no set
+   * lists visibly gets none of that object's rows), said here because a
+   * replay's consumer may report a failed load's errors at `info` only.
+   */
+  private reportDuplicateFallbackSets(refusals: DuplicateFallbackRefusal[]): ReferenceResolutionError[] {
+    for (const refusal of refusals) {
+      this.logger.warn(`[SeedLoader] ${refusal.message}`, { object: refusal.object, fallbackSets: refusal.scopes });
+    }
+    return refusals.map(refusal => ({
+      sourceObject: refusal.object,
+      field: 'fallback',
+      targetObject: refusal.object,
+      targetField: '(dataset)',
+      attemptedValue: refusal.scopes.join(' | '),
+      // The marker is the dataset's, not a row's; no row was attempted.
+      recordIndex: 0,
+      message: refusal.message,
+    }));
+  }
+
+  /**
    * [Seed.dependsOn] The answer of a load refused for its declarations:
    * nothing written, `success: false`, one error per refused declaration
    * (`field: 'dependsOn'`). Returned rather than thrown, so every caller
@@ -4522,34 +4826,48 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * Drop datasets that do not apply to this load, on every scope axis.
-   *
-   * The axes COMPOSE by conjunction: a dataset is kept when it passes `env`
-   * **and** `locale`. They stay separate functions — and separate log lines —
-   * because the two answer different operator questions ("why are my demo rows
-   * missing in production" vs "why did the Chinese dataset load"), and a single
-   * merged message would have to name a reason it did not measure.
-   */
-  private filterDatasets(datasets: Seed[], config: SeedLoaderConfigParsed): Seed[] {
-    return this.filterByLocale(this.filterByEnv(datasets, config.env), config.locale);
-  }
-
-  /**
-   * Drop datasets that do not apply to the resolved locale.
+   * Drop datasets that do not apply to the resolved locale. Runs on the
+   * datasets {@link filterByEnv} kept: the axes COMPOSE by conjunction, a
+   * dataset is kept when it passes `env` **and** `locale`. They stay separate
+   * functions — and separate log lines — because the two answer different
+   * operator questions ("why are my demo rows missing in production" vs "why
+   * did the Chinese dataset load"), and a single merged message would have to
+   * name a reason it did not measure.
    *
    * The mirror of {@link filterByEnv}, down to the reporting posture: skipping
    * is the declared, intended outcome of `locale: ['zh-CN']`, so it logs at
    * `info` — but it always NAMES what it dropped.
+   *
+   * [Seed.fallback] A dataset marked `fallback: true` that the locale would
+   * drop is kept instead when no locale-scoped dataset of its object lists
+   * the locale ({@link objectsWithLocaleMatch}), and that is named too —
+   * unless its object is in `refusedFallbackObjects` (two distinct marked
+   * sets, {@link findDuplicateFallbackSets}): there the marker is ignored and
+   * the dataset is filtered like an unmarked one. A load with no locale
+   * returns every dataset above, the fallback set included.
    */
-  private filterByLocale(datasets: Seed[], locale?: string): Seed[] {
+  private filterByLocale(datasets: Seed[], locale?: string, refusedFallbackObjects: ReadonlySet<string> = new Set()): Seed[] {
     if (!locale) return datasets;
 
+    const matched = objectsWithLocaleMatch(datasets, locale);
     const kept: Seed[] = [];
     const skipped: Seed[] = [];
+    const fellBack: Seed[] = [];
     for (const dataset of datasets) {
-      (datasetAllowsLocale(dataset, locale) ? kept : skipped).push(dataset);
+      if (datasetAllowsLocale(dataset, locale)) kept.push(dataset);
+      else if (isFallbackDataset(dataset) && !matched.has(dataset.object) && !refusedFallbackObjects.has(dataset.object)) {
+        kept.push(dataset);
+        fellBack.push(dataset);
+      } else skipped.push(dataset);
     }
 
+    if (fellBack.length > 0) {
+      this.logger.info(
+        `[SeedLoader] Locale '${locale}': no dataset is scoped to it for ${fellBack.length} object(s), so their ` +
+          `fallback set(s) loaded: ${fellBack.map(localeScopeLabel).join('; ')}`,
+        { locale, fallback: fellBack.map(d => d.object) },
+      );
+    }
     if (skipped.length > 0) {
       this.logger.info(
         `[SeedLoader] Locale '${locale}': skipped ${skipped.length} dataset(s) scoped to other ` +
@@ -4740,6 +5058,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     objectName: string,
     externalId: string | string[],
     organizationId?: string,
+    /** [#34800] When given, filled with every row read, by id — keyed or not. */
+    byId?: Map<string, any>,
   ): Promise<Map<string, any>> {
     const map = new Map<string, any>();
     try {
@@ -4770,6 +5090,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (key) {
           map.set(key, record);
         }
+        const id = byId ? this.extractId(record) : undefined;
+        if (id) byId!.set(id, record);
       }
     } catch (error) {
       // [#8896] Discriminate by error TYPE. This map is not a convenience —
@@ -5146,6 +5468,78 @@ export class SeedLoaderService implements ISeedLoaderService {
 // Internal Types
 // ==========================================================================
 
+/** [Seed.fallback] One object whose fallback choice a load refuses: it marks more than one distinct set. */
+interface DuplicateFallbackRefusal {
+  readonly object: string;
+  /** The locale scopes of the distinct marked datasets, one entry each, for the error's `attemptedValue`. */
+  readonly scopes: string[];
+  readonly message: string;
+}
+
+/**
+ * [Seed.fallback] A dataset's declaration, for telling a second COPY of one
+ * declaration from a second declaration: every key but the runtime protection
+ * envelope (`_`-prefixed, stamped by the loader that read the artifact),
+ * serialised with sorted keys so key order does not make two copies differ.
+ */
+function seedDeclarationFingerprint(dataset: Seed): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])]),
+      );
+    }
+    return value;
+  };
+  const declared = Object.fromEntries(Object.entries(dataset as Record<string, unknown>).filter(([key]) => !key.startsWith('_')));
+  return JSON.stringify(canonical(declared));
+}
+
+/**
+ * [Seed.fallback] Every object for which `datasets` (the datasets `env` kept
+ * for this load) mark more than one DISTINCT declaration `fallback: true`.
+ * Identical copies count once: the shared per-organization replay list holds
+ * a package's datasets once per merge (boot rehydrate, install or upgrade,
+ * reseed), and a second copy of the one fallback set is not a second choice.
+ * Object names are global, so two packages marking the same object are two
+ * declarations and that object's fallback choice is refused. So are two
+ * versions of one package whose marked set changed: an upgrade appends the new
+ * version's datasets beside the old version's until the process restarts.
+ *
+ * Judged whatever the load's locale: the declaration is ambiguous on every
+ * load, not only on one that needs the fallback, and a refusal that waited for
+ * an unmatched locale would surface on the first organization in a new market.
+ */
+function findDuplicateFallbackSets(datasets: readonly Seed[]): DuplicateFallbackRefusal[] {
+  const byObject = new Map<string, Map<string, Seed>>();
+  for (const dataset of datasets) {
+    if (!isFallbackDataset(dataset)) continue;
+    const distinct = byObject.get(dataset.object) ?? new Map<string, Seed>();
+    const fingerprint = seedDeclarationFingerprint(dataset);
+    if (!distinct.has(fingerprint)) distinct.set(fingerprint, dataset);
+    byObject.set(dataset.object, distinct);
+  }
+  const refusals: DuplicateFallbackRefusal[] = [];
+  for (const [object, distinct] of byObject) {
+    if (distinct.size < 2) continue;
+    const scopes = [...distinct.values()].map(d => `locale: ${((d.locale as string[] | undefined) ?? []).join(', ')}`);
+    refusals.push({
+      object,
+      scopes,
+      message:
+        `Seed datasets of '${object}' mark ${distinct.size} different sets \`fallback: true\` (${scopes.join('; ')}). ` +
+        'An object has at most one fallback set: it is the one set that loads when no other set lists the ' +
+        `resolved locale. No fallback was used for '${object}': each marked set still loads for the locales it ` +
+        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. Two causes ' +
+        `leave more than one marked set: the packages being seeded mark more than one set of '${object}' (keep the ` +
+        'marker on one), or an upgrade within this process changed a package\'s marked set (the earlier ' +
+        'version\'s datasets stay on the replay list until the process restarts).',
+    });
+  }
+  return refusals;
+}
+
 /** [Seed.dependsOn] One declaration a load refuses: `object` named `target`. */
 interface DeclaredDependencyRefusal {
   readonly object: string;
@@ -5180,8 +5574,8 @@ interface DeferredUpdate {
    * The source record's INTERNAL id, captured at the moment its pass-1 write
    * landed (commit 9a884c6e4). This is the handle pass 2 writes the resolved reference
    * back through: it exists for every row this load actually wrote —
-   * including rows of a KEYLESS dataset (`mode: 'insert'`, no `externalId`)
-   * and rows whose composite key evaluated to the empty string — so the
+   * including rows whose key (single or composite) evaluated to the empty
+   * string — so the
    * "pass 2 resolved the target and had nowhere to write it" loss (#5127) is
    * reduced to the one case where it is true: the source row never landed.
    *

@@ -46,7 +46,35 @@
       {"object": "activity", "field": "owner", "to": "employee"}
     ],
     "dashboards": ["receivables_aging_report"],
-    "appNavTargets": ["account", "sales_order", "invoice", "payment", "activity", "receivables_aging_report"]
+    "appNavTargets": ["account", "sales_order", "invoice", "payment", "activity", "receivables_aging_report"],
+    "datasets": [
+      {
+        "name": "order_book",
+        "label": "Order book",
+        "description": "Sales orders and the amounts booked on them, by status.",
+        "object": "sales_order",
+        "measures": [
+          {"name": "booked_amount", "label": "Booked amount", "aggregate": "sum", "field": "total_amount", "synonyms": ["bookings", "revenue", "营收", "订单金额", "成交额"], "description": "The sum of the sales orders' total amounts, every status counted, cancelled ones included."},
+          {"name": "order_count", "label": "Order count", "aggregate": "count", "synonyms": ["number of orders", "订单数"], "description": "How many sales orders there are."}
+        ],
+        "dimensions": [
+          {"name": "order_status", "label": "Order status", "field": "status", "synonyms": ["order stage"], "description": "Where an order stands, from draft to fulfilled."}
+        ]
+      },
+      {
+        "name": "billing",
+        "label": "Billing",
+        "description": "Invoices: what was billed and what customers still owe.",
+        "object": "invoice",
+        "measures": [
+          {"name": "billed_amount", "label": "Billed amount", "aggregate": "sum", "field": "amount", "synonyms": ["billings", "revenue", "营收", "开票金额"], "description": "The sum of the invoices' amounts, every status counted."},
+          {"name": "open_balance", "label": "Open balance", "aggregate": "sum", "field": "balance", "synonyms": ["receivables", "amount owed", "应收账款"], "description": "What customers still owe on their invoices: each invoice's amount less what was paid."}
+        ],
+        "dimensions": [
+          {"name": "aging", "label": "Aging bucket", "field": "aging_bucket", "synonyms": ["aging"], "description": "How long an open balance has been past due."}
+        ]
+      }
+    ]
   },
   "asOf": "2026-10-31",
   "capabilities": [
@@ -1038,6 +1066,13 @@
         "summary": "Write off an invoice's open balance as bad debt; irreversible.",
         "confirm": true
       }
+    ],
+    "datasetQuestions": [
+      {"id": "dq_bookings", "ask": {"zh": "我们的订单金额合计是多少?", "en": "What do our bookings add up to?"}, "words": ["bookings", "订单金额"], "expect": {"kind": "metric_selected", "dataset": "order_book", "measure": "booked_amount"}},
+      {"id": "dq_receivables", "ask": {"zh": "我们的应收账款还有多少?", "en": "How much do we have in receivables?"}, "words": ["receivables", "应收账款"], "expect": {"kind": "metric_selected", "dataset": "billing", "measure": "open_balance"}},
+      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}, {"dataset": "billing", "measure": "billed_amount"}]}},
+      {"id": "dq_booking_total", "ask": {"zh": "我们的成交合计是多少?", "en": "What is our booking total?"}, "words": ["booking", "成交"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}]}},
+      {"id": "dq_payment_count", "ask": {"zh": "我们一共收到了多少笔付款?", "en": "How many payments have we received?"}, "words": ["payments", "付款"], "expect": {"kind": "fallback_labelled", "object": "payment"}}
     ]
   },
   "iterate": {

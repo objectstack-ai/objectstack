@@ -149,14 +149,16 @@ describe('the enable path still arms', () => {
         expect((await engine.execute('f')).success).toBe(true);
     });
 
-    it('re-enabling the LEDGER bit of a flow whose STATUS is obsolete does not arm it — it still cannot run', async () => {
+    it('switching ON a flow whose STATUS is obsolete is refused before the ledger write, and it stays unarmed — it still cannot run', async () => {
         const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.setFlowActivationStore(new InMemoryFlowActivationStore());
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
         engine.registerFlow('retired', packagedFlow('retired', RECORD_CHANGE, { status: 'obsolete' }));
 
-        await engine.toggleFlow('retired', true);
+        // [ADR-0126 §7.2] The switch moves only the ledger bit, so it refuses
+        // a flow the author's status keeps off rather than reporting it on.
+        await expect(engine.toggleFlow('retired', true)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
 
         // Armed, it would refuse every event it fired (`FLOW_DISABLED`, the
         // status dimension) — the same armed-but-cannot-run state as a

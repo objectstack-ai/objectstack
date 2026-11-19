@@ -71,6 +71,7 @@ const ALL_VIEW_TYPES_TABLE = {
   chart: true,
   tree: true,
   page: true,
+  timesheet: true,
 } satisfies Record<string, true>;
 
 type _UncoveredViewType = _AssertNever<Exclude<ViewType, keyof typeof ALL_VIEW_TYPES_TABLE>>;

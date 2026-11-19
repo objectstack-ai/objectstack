@@ -76,6 +76,7 @@ export default defineStack({
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
 | Action labels, confirm text, success messages, disabled reasons, param dialog submit labels, confirm and param dialog dismiss labels | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
+| Column headers of a table in an action's result dialog or preflight panel | `objects.<name>._actions.<action>.resultDialog.columns.<field path>.<column path>` / `.preflight.columns.<field path>.<column path>` — a sibling of `fields`, both paths written literally, dots included |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
@@ -93,15 +94,18 @@ export default defineStack({
 | Text a flow writes into a record (a `create_record` / `update_record` field value marked `{ dialect: 'template', source }`) | `flows.<flow>.records.<node_id>.fields.<field>` — picked in the organization's language (the Localization setting when set, else the app's `i18n.defaultLocale`), never the run starter's; see [Flows](/docs/automation/flows#text-a-record-keeps--a-field-value-marked-as-text) |
 | Hook refusal messages | `hooks.<hook>.refusals.<CODE>.message` — one per entry of the hook's `refusals` catalogue — and `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`, one per reason an entry declares. A hook (a `js` body or a TypeScript `handler`) refuses by code, optionally with a declared reason, and the server answers the refusal with this sentence in the caller's locale, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
 | Hook texts | `hooks.<hook>.texts.<key>.message` — one per entry of the hook's `texts`. A hook asks for the sentence with `ctx.text(key, params)` when it writes it into a record, and the server answers it in the **organization's** language (the Localization setting somebody set, else the app's `i18n.defaultLocale`), never the caller's, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
+| Action refusal messages | `objects.<object>._actions.<action>.refusals.<CODE>.message` — one per entry of the action's `refusals` catalogue — and `….refusals.<CODE>.reasons.<REASON>.message`, one per reason an entry declares; `globalActions.<action>.refusals.…` for an action with no `objectName`. A `script` action's `js` body refuses by code, and the server answers the refusal with this sentence in the caller's locale, else the declared one, on the refusal's `userMessage`. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
+| Action texts | `objects.<object>._actions.<action>.texts.<key>.message` — one per entry of the action's `texts`; `globalActions.<action>.texts.<key>.message` for an action with no `objectName`. A `script` action's `js` body asks for the sentence with `ctx.text(key, params)` when it writes it into a record, and the server answers it in the **organization's** language (the Localization setting somebody set, else the app's `i18n.defaultLocale`), never the caller's, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
 | Position label / description | `positions.<name>.label` / `description` — keyed by the position's `name`; overlaid on every served position, which is the list the console's position picker draws |
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
 | Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
+| Import mapping label | `mappings.<name>.label` — keyed by the mapping's `name`; overlaid on every served mapping, which is the list the import wizard offers by name. A mapping's `fieldMapping` holds column and field names, not copy: a target field's label is translated under `objects.<object>.fields.<field>.label` |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, dataset, report, page, picklist, position, permission and book** — a field's labels are translated as part of
+dashboard, dataset, report, page, picklist, position, permission, book and mapping** — a field's labels are translated as part of
 its object document, and so are the labels of any actions the object declares
 inline
 (#3370). Before that, an object document went out with its authored action
@@ -159,7 +163,9 @@ is resolved by this one rule.
 `resultDialog` shown by actions like `create_user` (temporary password), 2FA
 backup codes, and OAuth client-secret rotation carries its own
 `_actions.<action>.resultDialog` slot (`title` / `description` / `acknowledge`
-and `fields` keyed by the literal result-field path, e.g. `"user.email"`).
+and `fields` keyed by the literal result-field path, e.g. `"user.email"`; a
+`format: 'table'` field's column headers sit beside `fields` under
+`columns.<field path>.<column path>`).
 `os i18n extract` emits these keys; the shipped platform dialogs ship
 en / zh-CN / ja-JP / es-ES copy. Separately, **platform notification and
 storage strings localize to the recipient's locale** — collaboration

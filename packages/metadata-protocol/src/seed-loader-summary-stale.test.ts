@@ -103,7 +103,7 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -111,7 +111,7 @@ const CONFIG = {
 const seedFor = (object: string, records: any[]) => ({
   object,
   externalId: 'name',
-  mode: 'insert',
+  mode: 'ignore',
   env: ['prod', 'dev', 'test'],
   records,
 });
@@ -286,7 +286,7 @@ describe('the counter survives the contract, and the contract survives older pay
     // a pre-#4998 producer's output, and it must still parse.
     const legacyPerObject = {
       object: 'roll_invoice',
-      mode: 'insert',
+      mode: 'ignore',
       inserted: 2, updated: 0, skipped: 0, errored: 0, total: 2,
       referencesResolved: 0, referencesDeferred: 0,
       errors: [],

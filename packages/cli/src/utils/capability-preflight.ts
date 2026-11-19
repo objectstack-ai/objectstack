@@ -2,6 +2,8 @@
 
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { providesCapability } from '@objectstack/core';
+import { createHostImporter, packageNameFromSpecifier } from '@objectstack/types/node';
 import {
   classifyRequiredCapability,
   RETIRED_PLATFORM_CAPABILITY_GUIDANCE,
@@ -76,17 +78,61 @@ export function renderCapabilityMessage(c: DeclaredCapabilityClassification): st
   return c.package === undefined ? text : `package '${c.package}' — ${text}`;
 }
 
+/**
+ * What an `enterprise`-edition capability's metadata does while no provider is
+ * wired in, for the tokens whose effect has a concrete shape worth naming.
+ *
+ * WHICH tokens get a finding is never read from here: every token whose
+ * registry row (`PLATFORM_CAPABILITY_PROVIDERS`) carries `edition: 'enterprise'`
+ * gets one, and a token with no row here gets the generic sentence of
+ * {@link enterpriseAbsenceConsequence}. This table only sharpens the
+ * consequence. Every key is pinned to an enterprise-edition registry row in
+ * `capability-preflight.test.ts`, so a row cannot outlive its token.
+ */
+export const ENTERPRISE_ABSENCE_CONSEQUENCE: Readonly<Record<string, string>> = Object.freeze({
+  // The sharing layer fails CLOSED without the `hierarchy-scope-resolver`
+  // service (`SharingService.resolveOwnerScopeIds`, ADR-0057): a hierarchy
+  // scope never widens, and nothing logs it.
+  'hierarchy-security':
+    "the hierarchy scopes (`own_and_reports`, `unit`, `unit_and_below`) behave as owner-only",
+});
+
+/**
+ * The consequence sentence for an `enterprise` token with no provider wired in.
+ * It names the edition that enforces the token and what the open edition does
+ * instead, and nothing else: no product pitch, one fact an author can act on.
+ */
+export function enterpriseAbsenceConsequence(token: string): string {
+  const shape = Object.prototype.hasOwnProperty.call(ENTERPRISE_ABSENCE_CONSEQUENCE, token)
+    ? ENTERPRISE_ABSENCE_CONSEQUENCE[token]
+    : `nothing provides "${token}", and the metadata that relies on it is not enforced`;
+  return `Only the enterprise edition enforces it: without a wired provider, as on the open edition, ${shape}, and no log line says so.`;
+}
+
 /** {@link renderCapabilityMessage} without the package prefix. */
-function renderTokenMessage(c: CapabilityClassification): string {
+function renderTokenMessage(c: DeclaredCapabilityClassification): string {
   const p = c.provider;
+  if (c.wiring !== undefined && p?.package) {
+    const note = p.note ? ` (${p.note})` : '';
+    const found =
+      c.wiring.state === 'unloadable'
+        ? `${p.package} resolves here, but it could not be loaded to check \`plugins[]\` (${c.wiring.error})`
+        : `${p.package} is installed, but no entry of \`plugins[]\` comes from it, and nothing mounts an enterprise provider on its own`;
+    return (
+      `Capability "${c.token}" is provided by ${p.package}${note}. ${found}. ` +
+      `${enterpriseAbsenceConsequence(c.token)} ` +
+      `Add its plugin to \`plugins[]\`, or remove "${c.token}" from \`requires\`.`
+    );
+  }
   switch (c.status) {
     case 'installable': {
       const pkg = p!.package!;
       if (p!.edition === 'enterprise') {
         const note = p!.note ? ` (${p!.note})` : '';
         return (
-          `Capability "${c.token}" is provided by ${pkg}${note}. ` +
-          `Run \`pnpm add ${pkg}\` and add it to \`plugins[]\`, or remove "${c.token}" from \`requires\`.`
+          `Capability "${c.token}" is provided by ${pkg}${note}, which is not installed. ` +
+          `${enterpriseAbsenceConsequence(c.token)} ` +
+          `Install ${pkg} and add its plugin to \`plugins[]\`, or remove "${c.token}" from \`requires\`.`
         );
       }
       return (
@@ -166,6 +212,14 @@ export function preflightRequiredCapabilities(opts: {
  */
 export interface DeclaredCapabilityClassification extends CapabilityClassification {
   readonly package?: string;
+  /**
+   * Set only by {@link preflightProviderWiring}: an `enterprise` token whose
+   * provider package resolves (`status: 'ok'`) but which no `plugins[]` entry
+   * provides (`unwired`), or whose package could not be loaded to tell
+   * (`unloadable`). Nothing mounts an enterprise provider from `requires`, so
+   * a resolvable package alone enforces nothing.
+   */
+  readonly wiring?: { readonly state: 'unwired' } | { readonly state: 'unloadable'; readonly error: string };
 }
 
 /** {@link CapabilityPreflightResult}, each finding attributed to where it was declared. */
@@ -228,6 +282,153 @@ export function preflightDeclaredCapabilities(opts: {
     warnings.push(...result.warnings.map((c) => ({ ...c, package: pkg.id })));
   }
   return { errors, warnings };
+}
+
+// ── Wiring (enterprise providers are mounted from `plugins[]` only) ─────────
+
+/** Loads a provider package's module the way the served app would reach it. */
+export type ProviderModuleLoader = (pkg: string) => Promise<unknown>;
+
+/**
+ * The default {@link ProviderModuleLoader}: `serve`'s host-anchored importer
+ * (`createHostImporter`, the app's own declaration first), falling back to
+ * this package's module graph. Loading a module runs it, so this is only ever
+ * called for a token whose package already resolved.
+ */
+export function makeProviderModuleLoader(projectDir: string): ProviderModuleLoader {
+  return createHostImporter(projectDir, {
+    fallbackImport: (specifier) => import(/* webpackIgnore: true */ specifier),
+  });
+}
+
+/** Names of the functions a module exports (its classes), the identities `providesCapability` matches. */
+function exportedFunctionNames(mod: unknown): string[] {
+  const names = new Set<string>();
+  const visit = (bag: unknown) => {
+    if (!bag || (typeof bag !== 'object' && typeof bag !== 'function')) return;
+    for (const value of Object.values(bag as Record<string, unknown>)) {
+      if (typeof value === 'function' && value.name) names.add(value.name);
+    }
+  };
+  visit(mod);
+  visit((mod as { default?: unknown } | null | undefined)?.default);
+  return [...names];
+}
+
+/**
+ * The `enterprise` tokens a stack declares whose provider package RESOLVES,
+ * but which no `plugins[]` entry provides.
+ *
+ * {@link preflightDeclaredCapabilities} asks only whether a token's package
+ * can be resolved. For an `open` token that is the whole question, because
+ * `os serve` mounts the provider from `requires` itself. For an `enterprise`
+ * token it is not: no runtime in this repository mounts an enterprise provider
+ * from `requires` (`serve`'s resolver has no row for one), so the app must wire
+ * the plugin into `plugins[]`, and a package that resolves but is not wired
+ * enforces nothing. Which tokens are `enterprise` is the registry's edition
+ * tag, never a list here.
+ *
+ * A `plugins[]` entry provides the token when it is an instance whose class (or
+ * `name`) is one the provider package exports, the exact identity match
+ * `serve` uses (`providesCapability`), or a string entry naming that package.
+ * A package that resolves but cannot be loaded is reported as such, never
+ * read as wired.
+ *
+ * @param opts.plugins - The stack's top-level `plugins` (`plugins[]` is a
+ *   host-level array; package bodies carry none).
+ */
+export async function preflightProviderWiring(opts: {
+  requires: unknown;
+  packages: ReadonlyArray<{ readonly id: string; readonly body: Record<string, unknown> }>;
+  plugins: unknown;
+  projectDir: string;
+  /** Injectable for tests; defaults to on-disk `require.resolve` resolution. */
+  isInstalled?: (pkg: string) => boolean;
+  /** Injectable for tests; defaults to {@link makeProviderModuleLoader}. */
+  loadModule?: ProviderModuleLoader;
+}): Promise<DeclaredCapabilityClassification[]> {
+  const isInstalled = opts.isInstalled ?? makeProviderResolver(opts.projectDir);
+  const loadModule = opts.loadModule ?? makeProviderModuleLoader(opts.projectDir);
+  const plugins = Array.isArray(opts.plugins) ? opts.plugins : [];
+
+  // Same rule as `preflightDeclaredCapabilities`: a top-level `requires` wins;
+  // otherwise each package body's, attributed to its package.
+  const sources: Array<{ tokens: unknown[]; package?: string }> =
+    Array.isArray(opts.requires) || opts.packages.length === 0
+      ? [{ tokens: Array.isArray(opts.requires) ? opts.requires : [] }]
+      : opts.packages.map((p) => ({
+          tokens: Array.isArray(p.body.requires) ? (p.body.requires as unknown[]) : [],
+          package: p.id,
+        }));
+
+  const verdicts = new Map<string, Promise<DeclaredCapabilityClassification['wiring'] | undefined>>();
+  const judge = (pkg: string) => {
+    let v = verdicts.get(pkg);
+    if (!v) {
+      v = (async () => {
+        const named = plugins.some(
+          (entry) => typeof entry === 'string' && packageNameFromSpecifier(entry) === pkg,
+        );
+        if (named) return undefined;
+        let mod: unknown;
+        try {
+          mod = await loadModule(pkg);
+        } catch (err) {
+          return { state: 'unloadable' as const, error: err instanceof Error ? err.message : String(err) };
+        }
+        return providesCapability(plugins, exportedFunctionNames(mod)) ? undefined : { state: 'unwired' as const };
+      })();
+      verdicts.set(pkg, v);
+    }
+    return v;
+  };
+
+  const found: DeclaredCapabilityClassification[] = [];
+  for (const source of sources) {
+    const seen = new Set<string>();
+    for (const token of source.tokens) {
+      if (typeof token !== 'string' || seen.has(token)) continue;
+      seen.add(token);
+      const c = classifyRequiredCapability(token, isInstalled);
+      if (c.status !== 'ok' || c.provider?.edition !== 'enterprise' || !c.provider.package) continue;
+      const wiring = await judge(c.provider.package);
+      if (wiring) found.push(source.package === undefined ? { ...c, wiring } : { ...c, package: source.package, wiring });
+    }
+  }
+  return found;
+}
+
+/** One capability advisory as `os validate --json` and `os verify --json` carry it. */
+export interface CapabilityAdvisory {
+  readonly token: string;
+  readonly message: string;
+}
+
+/**
+ * Every capability finding for a stack, in one list: the resolution preflight's
+ * errors and warnings, then the wiring findings. `os verify` reports all of
+ * them as advisories (its exit code does not read them); `os serve` prints
+ * them at start-up.
+ */
+export async function judgeDeclaredCapabilities(opts: {
+  requires: unknown;
+  packages: ReadonlyArray<{ readonly id: string; readonly body: Record<string, unknown> }>;
+  plugins: unknown;
+  projectDir: string;
+  isInstalled?: (pkg: string) => boolean;
+  loadModule?: ProviderModuleLoader;
+}): Promise<{ errors: CapabilityAdvisory[]; warnings: CapabilityAdvisory[] }> {
+  const isInstalled = opts.isInstalled ?? makeProviderResolver(opts.projectDir);
+  const resolution = preflightDeclaredCapabilities({ ...opts, isInstalled });
+  const wiring = await preflightProviderWiring({ ...opts, isInstalled });
+  const advise = (c: DeclaredCapabilityClassification): CapabilityAdvisory => ({
+    token: c.token,
+    message: renderCapabilityMessage(c),
+  });
+  return {
+    errors: resolution.errors.map(advise),
+    warnings: [...resolution.warnings, ...wiring].map(advise),
+  };
 }
 
 /**

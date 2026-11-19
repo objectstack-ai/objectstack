@@ -243,6 +243,12 @@ const READERS: Record<string, Row> = {
     disposition: 'exempt',
     why: 'names the related object only to judge the join beside the federated test; it reads no row',
   },
+  // [latest per group] A federated object refuses the one-row-per-group read
+  // before anything is read, so no window is compiled against its remote table.
+  'latest-per.ts#latestPerRegistryRefusal :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated object refuses the latest-per read before anything is read; it reads no row',
+  },
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
   // as the caller outright, so its federated answer is the caller's own read.

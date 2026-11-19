@@ -98,6 +98,9 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
   };
 });
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -198,7 +201,7 @@ const pendingRequest = () => fireEvent.click(screen.getByRole('button', { name: 
 async function noteIsOpen(): Promise<void> {
   await screen.findByTestId('studio-rail-data', undefined, { timeout: 8000 });
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-item-api-name')).toHaveTextContent('acme_note'),
+    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', 'acme_note'),
     { timeout: 8000 },
   );
 }

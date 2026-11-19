@@ -54,6 +54,8 @@ apps too).
 | [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
 | [Upgrade](./objectstack-upgrade/SKILL.md) | `process` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
+| [Ask](./objectstack-ask/SKILL.md) | `process` | Answer a business question over a live ObjectStack environment through its MCP tools (list_datasets, query_dataset, list_objects, describe_object, query_records, aggregate_records): find the governed metric the question names, compute it and cite its source, or fall back to an object query and say so. |
+| [Project](./objectstack-project/SKILL.md) | `process` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
 | [ObjectUI](./objectui/SKILL.md) | `ui` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
 
 <!-- END GENERATED: skills -->
@@ -128,6 +130,8 @@ A few common decision points where the right skill isn't obvious:
   **objectstack-data**.
 - **Labels vs. bundles** — a `label` you want translated is **objectstack-i18n**.
 - **Upgrade vs. platform** — a protocol-major move is **objectstack-upgrade**.
+- **Writing metadata vs. running the project** — where a change belongs, what
+  the app tests, releases and pin bumps are **objectstack-project**.
 - **Rendering this metadata** — the consuming UI is the `@object-ui/*`
   packages, and their own skill is [`objectui`](./objectui/SKILL.md) in this catalog.
 

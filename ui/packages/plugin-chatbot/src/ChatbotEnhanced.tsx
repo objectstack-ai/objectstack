@@ -2874,7 +2874,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       [resolveObjectLabel, resolveFieldLabel, resolveFieldTypeLabel],
     );
     // objectstack#32984 — the issues chip spoke English in every locale.
-    const { t: tCount } = useObjectTranslation();
+    const { t: tCount, language: composerLanguage } = useObjectTranslation();
     const buildIssuesCountLabel = (count: number): string =>
       tCount('chatbot.build.issuesCount', { count, defaultValue: '{{count}} to fix' });
     const planObjectsLabel = tt('chatbot.plan.objectsAndFields', 'Objects and fields');
@@ -3322,6 +3322,27 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       ReadonlyArray<{ id: number; text: string; files?: File[] }>
     >([]);
     const queuedSeqRef = React.useRef(0);
+    // objectstack#34463 — a picked, pasted or dropped file the composer
+    // refuses for size is named to the user with the limit, instead of only
+    // reaching `console.warn` while the file silently fails to attach. Cleared
+    // by the next send or the notice's close button; a later refusal replaces it.
+    const [attachmentNotice, setAttachmentNotice] = React.useState<string | null>(null);
+    const handlePromptInputError = React.useCallback(
+      (e: { code: string; message: string; files?: File[] }) => {
+        if (e.code === 'max_file_size' && e.files?.length) {
+          setAttachmentNotice(
+            tCount('chatbot.composer.fileTooLarge', {
+              files: e.files.map((f) => f.name).join(', '),
+              limit: formatSizeLimit(maxFileSize, composerLanguage),
+              defaultValue: 'Not attached, over the {{limit}} limit: {{files}}',
+            }),
+          );
+          return;
+        }
+        console.warn('[plugin-chatbot] prompt-input error', e);
+      },
+      [tCount, maxFileSize, composerLanguage],
+    );
     const handleSubmit = React.useCallback(
       (payload: PromptInputMessage) => {
         const hasText = Boolean(payload.text?.trim());
@@ -3331,6 +3352,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         const hasFiles = Boolean(files && files.length > 0);
         if (!(hasText || hasFiles)) return;
         const text = payload.text?.trim() ?? '';
+        setAttachmentNotice(null);
         if (isLoading) {
           queuedSeqRef.current += 1;
           const id = queuedSeqRef.current;
@@ -3803,7 +3825,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // (`has`) only, never as a dependency.
     const supersededPlans = supersededPlanIds(messages);
 
-    const renderToolDetail = (tool: RenderedToolInvocation) => {
+    /**
+     * objectstack#34627 — `failureOnChecklist`: the turn's result card shows a
+     * failed checklist, which states the build's failure; this card then draws
+     * neither its issue-count chip nor the red summary beside it.
+     */
+    const renderToolDetail = (
+      tool: RenderedToolInvocation,
+      { failureOnChecklist = false }: { failureOnChecklist?: boolean } = {},
+    ) => {
       const state =
         tool.state ??
         (tool.errorText
@@ -4087,7 +4117,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                       WHY a build did or didn't auto-publish without reading
                       tool JSON. Green = referentially clean; amber = blocking
                       issues, the build stays draft until the agent repairs. */}
-                  {tool.draftReview.verification ? (
+                  {tool.draftReview.verification && !(failureOnChecklist && tool.draftReview.verification.errors > 0) ? (
                     tool.draftReview.verification.errors > 0 ? (
                       <span
                         className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 text-xs font-medium text-amber-700"
@@ -4131,6 +4161,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     {(() => {
                       const issues = tool.draftReview!.issues!;
                       const errorCount = issues.filter((i) => i.severity === 'error').length;
+                      if (errorCount > 0 && failureOnChecklist) return null;
                       return (
                         <div
                           className={cn(
@@ -5517,7 +5548,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         </Reasoning>
                       ) : null}
                       {!isUser && detailedTools.length > 0
-                        ? detailedTools.map(renderToolDetail)
+                        ? detailedTools.map((tool) =>
+                            renderToolDetail(tool, { failureOnChecklist: buildChecklist?.status === 'failed' }),
+                          )
                         : null}
                       {isUser ? (
                         message.content ? (
@@ -5684,6 +5717,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           )
         ) : null}
 
+        {attachmentNotice && !readOnly ? (
+          <ComposerNotice
+            text={attachmentNotice}
+            testId="chat-attachment-refused"
+            closeLabel={tt('common.close', 'Close')}
+            onClose={() => setAttachmentNotice(null)}
+          />
+        ) : null}
+
         {readOnly ? null : (
         <div
           ref={promptInputWrapRef}
@@ -5746,10 +5788,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             fileInputLabel={L.uploadFiles}
             maxFileSize={maxFileSize}
             onSubmit={handleSubmit}
-            onError={(e) => {
-              // Surface upload-level validation errors via the existing toast/alert path
-              console.warn('[plugin-chatbot] prompt-input error', e);
-            }}
+            onError={handlePromptInputError}
           >
             {enableFileUpload ? (
               <PromptInputBody>
@@ -6539,28 +6578,51 @@ function PlanCardObjectRows({
  * rows): every line the producer measured on the build, objects in one column
  * and views and the sample data in the other, each with its own pass mark.
  * The lines are the producer's words, read verbatim from `checklist.lines`.
+ * objectstack#34627 — a `verification` line states the build's failed verdict
+ * in red: the producer's `label`, then its issue `count`. A failed checklist is
+ * then the one place the card's turn states the failure.
  */
 function BuildChecklistRows({ checklist }: { checklist: BuildResultChecklist }) {
+  const { t } = useObjectTranslation();
   const objectLines = checklist.lines.filter((l) => l.kind === 'object');
   const otherLines = checklist.lines.filter((l) => l.kind !== 'object');
   const column = (lines: BuildResultChecklist['lines'], testId: string) =>
     lines.length > 0 ? (
       <ul className="flex flex-col" data-testid={testId}>
-        {lines.map((l, idx) => (
-          <li
-            key={idx}
-            className="flex items-start gap-2 py-1 text-xs text-foreground/90"
-            data-testid="build-checklist-line"
-            data-status={l.status}
-          >
-            {l.status === 'passed' ? (
-              <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-            ) : (
-              <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-            )}
-            <span className="min-w-0">{l.line}</span>
-          </li>
-        ))}
+        {lines.map((l, idx) =>
+          l.kind === 'verification' ? (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-red-600 dark:text-red-400"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+              data-kind={l.kind}
+            >
+              <XCircle className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">
+                {l.label}
+                {' · '}
+                <span data-testid="build-checklist-verification-count">
+                  {t('chatbot.build.issuesCount', { count: l.count, defaultValue: '{{count}} to fix' })}
+                </span>
+              </span>
+            </li>
+          ) : (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-foreground/90"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+            >
+              {l.status === 'passed' ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+              )}
+              <span className="min-w-0">{l.line}</span>
+            </li>
+          ),
+        )}
       </ul>
     ) : null;
   return (
@@ -7225,16 +7287,63 @@ function SendErrorNotice({
     () => (isRateLimitError(error) ? rateLimitedLabel : genericLabel),
     [error, rateLimitedLabel, genericLabel],
   );
+  return <ComposerNotice text={text} testId="chat-send-error" />;
+}
+
+/**
+ * The amber band above the composer that tells the user why something they
+ * did there did not go through — an unsent message ({@link SendErrorNotice})
+ * or a refused attachment (objectstack#34463). `onClose` adds a close button.
+ */
+function ComposerNotice({
+  text,
+  testId,
+  closeLabel,
+  onClose,
+}: {
+  text: string;
+  testId: string;
+  closeLabel?: string;
+  onClose?: () => void;
+}) {
   return (
-    <div className="border-t bg-background px-3 py-2 text-sm" role="alert" data-testid="chat-send-error">
+    <div className="border-t bg-background px-3 py-2 text-sm" role="alert" data-testid={testId}>
       <div className="rounded-md border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-foreground dark:bg-amber-950/20">
         <div className="flex items-start gap-2">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <div className="min-w-0 flex-1 break-words leading-snug">{text}</div>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={closeLabel}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <XCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * A byte count as the user's locale spells a size, in the largest binary unit
+ * it reaches (`10 * 1024 * 1024` → "10 MB"), for the composer's size-limit notice.
+ */
+function formatSizeLimit(bytes: number, locale: string): string {
+  const units = [
+    ['gigabyte', 1024 ** 3],
+    ['megabyte', 1024 ** 2],
+    ['kilobyte', 1024],
+  ] as const;
+  const spell = (unit: string, value: number) =>
+    new Intl.NumberFormat(locale, { style: 'unit', unit, maximumFractionDigits: 1 }).format(value);
+  for (const [unit, size] of units) {
+    if (bytes >= size) return spell(unit, bytes / size);
+  }
+  return spell('byte', bytes);
 }
 
 /**

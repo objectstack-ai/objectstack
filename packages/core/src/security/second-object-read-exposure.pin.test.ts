@@ -218,6 +218,27 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/services/service-analytics/src/analytics-service.ts', call: 'assertObjectsExposed(objects, provider' },
     pin: 'packages/services/service-analytics/src/__tests__/cross-object-relation-group-join.test.ts',
   },
+  // [#35145] The MCP stdio bridge's `expand` (`query_records`), built as the data door builds it.
+  'packages/mcp/src/stdio-data-bridge.ts': {
+    kind: 'decided',
+    read: "the MCP stdio bridge's `expand` on `query_records` (the engine's expansion sub-read, entered from an engine-only bridge)",
+    operation: 'get',
+    decision: { file: 'packages/mcp/src/stdio-data-bridge.ts', fn: 'stdioExpandMap' },
+    wiring: { file: 'packages/mcp/src/stdio-data-bridge.ts', call: 'stdioExpandMap(reads, object' },
+    pin: 'packages/mcp/src/mcp-relation-reads.test.ts',
+  },
+  // [#35145] The MCP tools' relation judging for `expand` and `related`.
+  'packages/mcp/src/mcp-relation-reads.ts': {
+    kind: 'executes',
+    read:
+      "the MCP tools' `expand` (`query_records`) and `related` (`get_record`): the targets are judged here by the MCP " +
+      "read guard, then read through the data door, whose `servedExpand` decides each expansion target",
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
+    also:
+      'reads no record: `referenceTargetOf` names the object an `expand` field points at (asked of the MCP read guard, ' +
+      'then expanded by `findData`, which asks its exposure) and checks that a `related` link field points at the parent ' +
+      'record; each related list is a `findData` read of the child it names, judged by that door as any list.',
+  },
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
@@ -260,6 +281,18 @@ const CALLERS: Record<string, Classification> = {
   'packages/lint/src/stored-expression-inputs.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
+  },
+  // [#35146] The post-publish build probes' two landed-data checks.
+  'packages/metadata-protocol/src/build-probes.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the post-publish build probes (`runBuildProbes`) name the object a reference column or a roll-up's foreign key " +
+      "points at, under the system identity kept inside an organization the way `inspectDanglingReferences` keeps its " +
+      "probe (#19837: the publishing organization, else the referencing row's own), only to report whether a landed " +
+      "reference resolves (`seed_reference_unresolved`, the target read projected to `id`) or a parent's roll-up was " +
+      "ever computed (`rollup_never_computed`, projected to `id` and the roll-up field); the finding carries counts " +
+      "and the referencing column's own values, never a field of the target, and is returned to the publisher on the " +
+      'publish receipt, not served to a caller',
   },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
@@ -527,6 +560,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         'servesPayloadDisplayTarget',
         'servesReferenceTarget',
         'servesSummaryTitleTarget',
+        'stdioExpandMap',
       ]);
 
       for (const d of decided) {

@@ -772,6 +772,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // implicit; making it explicit is the migration, not a widening — the
       // effective access for a member is byte-identical.
       sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [rulings 6968686390, 6969143776 and 6973785798] A member's own
+      // notification preferences: which topics reach them on which channel,
+      // their digest and their quiet hours (Account → Notification Settings).
+      // The object is `system-data` ("RLS is the authz"), so WHICH ROWS is the
+      // `sys_notification_preference_self` policy below, which carries a write
+      // check and binds every principal holding this grant, and its owner/admin
+      // widener; read both before touching this line. ⛔ No `allowDelete`, for the anchor reason above
+      // (ADR-0090 D5): "reset to the administrator's default" is not a
+      // baseline right.
+      sys_notification_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       // A reader's own named list views (ruling 6570568131 on #28971, letter
       // C): save and rename their own views, on the preference template.
       // The object's own owner-only default row scope (`sys_personal_view_self`,
@@ -1015,6 +1025,50 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         object: 'sys_user_preference',
         operation: 'all',
         using: 'user_id == current_user.id',
+      },
+      // [rulings 6968686390, 6969143776 and 6973785798] The WHICH-ROWS half of
+      // the `sys_notification_preference` grant above. A row whose `user_id` is
+      // EMPTY is the organization's default for everyone (ADR-0118 D1), so a
+      // member must stay off it on every face. Two policies, the
+      // `sys_invitation_org_admin` shape (a `positions` domain belongs on the
+      // WIDENING policy, never on the narrowing one):
+      //   - `sys_notification_preference_self` carries NO `positions`: it binds
+      //     every principal that resolves the grant, so a role that normalizes
+      //     to neither owner nor admin (`delegated_admin`) is narrowed to its
+      //     own rows like an ordinary member. Its `check` is load-bearing:
+      //     without one, the write check is the OR of every applicable `using`
+      //     (`writeCheckPolicies`, case 2), with the `owner_only_writes` floor
+      //     above taking part. A row the member created keeps
+      //     `created_by == current_user.id`, so they could move it to another
+      //     person or to the empty user, muting a topic for the whole
+      //     organization. A declared `check` alone judges the row as written.
+      //   - `sys_notification_preference_org_admin` widens organization owners
+      //     and administrators back to every row (Layer 0, the tenant wall,
+      //     AND-composes ahead of it), so their Setup grid lists, creates,
+      //     edits and deletes as before. `delegated_admin` is deliberately
+      //     absent.
+      // ⚠ The widener's `check` is `topic != null` ON PURPOSE, coupled to
+      // `topic` being a REQUIRED field with a `defaultValue`: the insert check
+      // judges the post-hook write image, where `id` is not yet assigned (so
+      // `id != null` would refuse every administrator create) but a defaulted
+      // `topic` always is. If `topic` ever becomes optional, an administrator's
+      // create is refused, never widened.
+      // `default-permission-sets.notification-preference.integration.test.ts`
+      // pins both policies per persona.
+      {
+        name: 'sys_notification_preference_self',
+        object: 'sys_notification_preference',
+        operation: 'all',
+        using: 'user_id == current_user.id',
+        check: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_notification_preference_org_admin',
+        object: 'sys_notification_preference',
+        operation: 'all',
+        using: 'id != null',
+        check: 'topic != null',
+        positions: [BUILTIN_IDENTITY_ORG_OWNER, BUILTIN_IDENTITY_ORG_ADMIN],
       },
       {
         name: 'sys_api_key_self',

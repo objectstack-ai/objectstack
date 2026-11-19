@@ -1148,7 +1148,7 @@ const rows = await engine.aggregate('opportunity', {
 
 A `groupBy` entry may be an object carrying `dateGranularity`, which buckets a
 `date`/`datetime` column into uniform periods. The bucketed value is projected under
-the field name (or `alias`, on the in-memory path):
+the field name, or under `alias` when the node sets one (pushed down or in memory alike):
 
 ```typescript
 const revenueByMonth = await engine.aggregate('order', {

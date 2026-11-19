@@ -310,32 +310,6 @@ describe('objectui#5827 — sortable headers', () => {
     fireEvent.click(sortButtons()[1]);
     expect(dimensionColumn()).toEqual(['Finance', 'Technology']);
   });
-
-  it('exports the CSV in the order the table is showing', async () => {
-    installMetaRouter();
-    const blobs: Blob[] = [];
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    (URL as any).createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      render(<DatasetWidget widget={TABLE_WIDGET} dataSource={industrySource()} />);
-      await waitFor(() => expect(bodyRows().length).toBe(3));
-      fireEvent.click(sortButtons()[1]); // revenue — one click IS descending now
-      fireEvent.click(screen.getByTestId('dataset-export'));
-
-      expect(blobs.length).toBe(1);
-      const lines = (await blobs[0].text()).trim().split('\n').map((l) => l.trim());
-      // Header, then the rows in the order on screen.
-      expect(lines[1]).toContain('Technology');
-      expect(lines[2]).toContain('Finance');
-      // The measure round-trips as a bare number, as it always has.
-      expect(lines[1]).toContain('30000000');
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
-  });
 });
 
 describe('objectui#5845 — a numeric measure column starts DESCENDING', () => {

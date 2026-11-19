@@ -583,6 +583,7 @@ const ja = {
         "このビューはグループ化されていますが、データソースが queryGroupHeaders を実装していないため、グループの件数を数えられません。レコードを表示するにはグループ化を解除してください。",
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
+      draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,8 @@ const ja = {
     removeGroup: "削除",
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
     groupingUnstoredRemove: "グループ化から削除",
+    draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
+    withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
   },
@@ -1560,7 +1563,6 @@ const ja = {
     widgetForbiddenMessage: "このウィジェットのデータを表示する権限がありません。",
     allWidgetsForbiddenMessage: "このダッシュボードのデータを表示する権限がありません。",
     details: "詳細",
-    exportCsv: "CSV で書き出す",
     openInList: "リストで開く",
     filters: {
       label: "ダッシュボードのフィルター",
@@ -1590,6 +1592,9 @@ const ja = {
     },
     total: "合計",
     noDataSourceFor: "データソースが利用できません：",
+    drillTooMany: 'この値に関連するレコードが多すぎるため、ここには一覧表示できません。ダッシュボードのフィルターを絞り込んでから再度お試しください。',
+    drillUnavailable: 'この値に対応するレコードはここでは一覧表示できません。',
+    drillFailed: 'この値に対応するレコードを読み込めませんでした。しばらくしてから再度お試しください。',
     config: {
       breadcrumb: {
         dashboard: "ダッシュボード",
@@ -2176,7 +2181,7 @@ const ja = {
       changesApplied: "適用済み",
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
-      discussing: "話題: {{target}}",
+      discussing: "表示中: {{target}}",
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -2224,7 +2229,7 @@ const ja = {
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
-        title: "アシスタント",
+        title: "AI アシスタント",
         description: "AI アシスタントのチャット",
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
@@ -2522,8 +2527,16 @@ const ja = {
       },
       viewTypeTree: "ツリー",
       viewTypeTreeDesc: "親項目によって自己参照レコードを階層に入れ子にします。",
+      viewTypeTimesheet: "タイムシート",
+      viewTypeTimesheetDesc: "行と曜日ごとに数値を入力します。入力済みのセルが1件のレコードです。",
       parentField: "親項目",
       parentFieldHelp: "階層を定義する親レコード（同一オブジェクト）を指す項目です。自己参照の項目のみ指定できます。",
+      timesheetRowField: "行の項目",
+      timesheetRowFieldHelp: "グリッドの各行はこの項目の値（例: プロジェクト）に対応します。",
+      timesheetDateField: "日付項目",
+      timesheetDateFieldHelp: "レコードはこの日付の曜日列に配置されます。",
+      timesheetValueField: "数値項目",
+      timesheetValueFieldHelp: "各セルに表示・編集する数値（例: 時間）です。",
       viewName: "名前",
       viewNameHelp: "マシンキー（snake_case）。タイトルから自動入力されます — 必要に応じて編集してください。",
       viewNameRequired: "キーを入力してください（英小文字、数字、アンダースコア）。ラテン文字以外のタイトルでは自動入力されません。",
@@ -2552,7 +2565,7 @@ const ja = {
       expandToPage: "フルページで開く",
       openAsPage: "フルページで開く",
       objectNotFound: "オブジェクトが見つかりません",
-      objectNotFoundDescription: "オブジェクト「{{objectName}}」は現在の設定に存在しません。",
+      objectNotFoundDescription: "オブジェクト「{{objectName}}」は存在しないか、アクセスする権限がありません。",
       objectNotFoundHint: "アプリのナビゲーション設定を確認するか、サイドバーから別のオブジェクトを選択してください。",
       objectPackageDisabled: "オブジェクト「{{objectName}}」が属するパッケージは無効になっているため、提供されていません。",
       filterOrGroupNotEditable: "このフィルターには他の条件と並んで OR グループが含まれており、フィルターエディターでは表示できないため、ここでは読み取り専用です。ビューには引き続き適用されます。",
@@ -2951,6 +2964,10 @@ const ja = {
       missingToken: "確認リンクにトークンがありません。",
       emailMissing: "メールアドレスがありません",
       resendButton: "確認メールを再送信",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "メールアドレスはまだ確認されていません。{{email}} に確認リンクを送信し、リンクをクリックしてアカウントを確認してください。",
+      sendButton: "確認メールを送信",
       resending: "送信中…",
       resent: "メールが送信されました！受信箱を確認してください",
       resentSuccess: "確認メールが送信されました！",
@@ -3416,7 +3433,6 @@ const ja = {
   },
   empty: {
     objectNotFound: "オブジェクトが見つかりません",
-    objectNotFoundDescription: "オブジェクト「{{name}}」の定義が見つかりません。設定を確認するか、有効なオブジェクトを選択してください。",
     interfacePageSourceMissing: "このインターフェースページは「{{name}}」を参照していますが、利用できません。",
     pageNotFound: "ページが見つかりません",
     pageNotFoundDescription: "ページ「{{name}}」が見つかりません。削除または名前変更された可能性があります。",
@@ -4049,6 +4065,7 @@ const ja = {
     composer: {
       queued: "現在の返信が終わると送信されます",
       queuedCancel: "キャンセル",
+      fileTooLarge: "ファイルが大きすぎるため添付できません（上限 {{limit}}）：{{files}}",
     },
     answer: {
       showFull: '全文を表示',
@@ -4609,7 +4626,7 @@ const ja = {
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
       fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
+      draftedByCopilot: 'AI アシスタントが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
@@ -4717,7 +4734,8 @@ const ja = {
       securityBlockTitle: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
-      securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      securityBlockWhere: 'オブジェクトの「設定 → 誰がどのレコードを見られるか」で修正してから、もう一度公開してください。',
+      flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',
         owdAlias: 'レコード共有のベースライン（sharingModel）が正規の値ではないため、ランタイムはこのオブジェクトを private として扱います。',
@@ -5199,6 +5217,33 @@ const ja = {
     insecureBody: "このサーバーのアドレスは {{address}} です。モバイルアプリはこのアドレスを通じてサインインするため HTTPS が必要で、コードは表示されません。サーバーを HTTPS で提供し、{{setting}} を https:// のアドレス（例: {{example}}）に設定して、サーバーを再起動してください。",
     unpublishedTitle: "このサーバーは公開アドレスを公開していません",
     unpublishedBody: "コードは表示されません。このサーバーはまだ公開アドレスをモバイルアプリに提供していません。対応するバージョンにサーバーを更新してください。",
+  },
+  notificationSettings: {
+    title: "通知設定",
+    subtitle: "どの通知をどのチャネルで受け取るかを選択します",
+    loading: "通知設定を読み込んでいます…",
+    loadFailed: "通知設定を読み込めませんでした。ページを再読み込みしてもう一度お試しください。",
+    saveFailed: "変更は保存されませんでした: {{reason}}",
+    general: "全般",
+    generalWarning: "ダイジェストやおやすみ時間を変更すると、あなた自身の全般設定が保存されます。以後、個別に設定していないすべてのトピックとチャネルで、組織の既定値の代わりにこの設定が適用されます。",
+    digest: "ダイジェスト",
+    digestNone: "ダイジェストなし",
+    digestDaily: "毎日",
+    digestWeekly: "毎週",
+    digestNoOff: "「ダイジェストなし」は選べません。保存しても組織が設定したダイジェストは止まらないため、反映されない場合があります。",
+    quietHours: "おやすみ時間",
+    quietHoursNoClear: "空の時間帯は保存できません。組織が設定したおやすみ時間は止まらないため、反映されない場合があります。開始時刻と終了時刻を設定してください。",
+    save: "保存",
+    matrix: "トピックとチャネル",
+    topic: "トピック",
+    allTopics: "すべてのトピック",
+    alwaysDelivered: "常に配信",
+    notConfigured: "未設定",
+    toggleLabel: "{{channel}} での {{topic}}",
+    sourceOwn: "あなたの設定",
+    sourceDefault: "組織の既定値",
+    sourceBuiltin: "既定",
+    sourceMandatory: "必須",
   },
 };
 

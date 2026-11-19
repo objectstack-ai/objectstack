@@ -2780,6 +2780,14 @@ export interface FlowContender {
 export type PackagedFlowSource = (name: string, packageId?: string) => string | undefined;
 
 /**
+ * [#34655, ADR-0126 §4] The `defaultActive` package `packageId`'s own flow
+ * `name` declares, as the loader's set holds it, or `undefined` when it
+ * declares none (or the set holds no such body). See
+ * {@link AutomationEngine.setPackagedFlowDefaultSource}.
+ */
+export type PackagedFlowDefaultSource = (name: string, packageId: string) => boolean | undefined;
+
+/**
  * [ADR-0150 D3] A reader over the ONE package-scoped resolver: which item the
  * bare flow name `name` means for a caller of package `callerPackageId`
  * (`null` for a caller with no package). The automation plugin attaches
@@ -3120,6 +3128,13 @@ export class AutomationEngine implements IAutomationService {
                 { flow: name, holders },
             );
         },
+        // [#34655, ADR-0126 §4] With no row deciding, the package's default:
+        // a flow shipped `defaultActive: false` is off until an administrator
+        // switches it on. Read off the package's own body for the version
+        // installed now, so an upgrade that changes the default moves an
+        // installation no one switched, and a `.custom` override does not
+        // move it ({@link packagedFlowDefault}).
+        shipsOff: (key) => this.packagedFlowDefault(key) === false,
     });
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
@@ -3135,6 +3150,22 @@ export class AutomationEngine implements IAutomationService {
      * no flow a managed package loaded.
      */
     private packagedFlowSource?: PackagedFlowSource;
+    /** [#34655] The reader over the loader's bodies' defaults — see {@link setPackagedFlowDefaultSource}. */
+    private packagedFlowDefaultSource?: PackagedFlowDefaultSource;
+    /**
+     * [#34655, L2 N9] What {@link packagedFlowDefaultSource} answered for an
+     * armed body, so {@link isFlowEnabled} never reads the loader's set:
+     * keyed by the body {@link registerFlow} armed, which is a new object on
+     * every registration, so a registration asks again. A re-sync does not
+     * always re-register (L2 S4: the `metadata:reloaded` re-sync keeps a body
+     * the metadata-mutation sync armed from the same stored row, and keeps
+     * the body it had when a re-registration throws), and the answer depends
+     * on the loader's set, not on the body. So the map is replaced whenever
+     * either reader is attached and at every re-sync
+     * ({@link refreshPackagedFlowDefaults}), which also re-judges the flows
+     * whose answer moved.
+     */
+    private packagedFlowDefaults = new WeakMap<FlowParsed, { readonly value: boolean | undefined }>();
     /**
      * [ADR-0150 D3] The reader that answers which item a bare flow name means
      * for a caller — see {@link setFlowNameResolver}. `undefined` until a host
@@ -6135,6 +6166,21 @@ export class AutomationEngine implements IAutomationService {
      */
     setPackagedFlowSource(source: PackagedFlowSource | undefined): void {
         this.packagedFlowSource = source;
+        this.packagedFlowDefaults = new WeakMap();
+    }
+
+    /**
+     * [#34655, ADR-0126 §4] Attach the reader over the bodies THE LOADER'S
+     * SET holds: the `defaultActive` package `packageId`'s own flow `name`
+     * declares. Hosts call this at start(), beside {@link setPackagedFlowSource};
+     * the automation plugin asks the metadata protocol at question time
+     * (`packagedFlowDefaultReader`). It is how the package's default is read
+     * while a declared `.custom` override is armed in the base's place
+     * ({@link packagedFlowDefault}).
+     */
+    setPackagedFlowDefaultSource(source: PackagedFlowDefaultSource | undefined): void {
+        this.packagedFlowDefaultSource = source;
+        this.packagedFlowDefaults = new WeakMap();
     }
 
     /**
@@ -6269,6 +6315,138 @@ export class AutomationEngine implements IAutomationService {
     /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */
     private isPackagedFlow(name: string): boolean {
         return this.packagedFlowOwner(name) !== undefined;
+    }
+
+    /**
+     * [#34655, ADR-0126 §4] Refuse a body that declares `defaultActive` for a
+     * flow no package ships. The key is the default of the packaged-flow
+     * switch (the activation ledger), and a flow authored in this deployment
+     * has no such switch: its switch is its own `status`, so the key could
+     * only be a declaration the engine does not honour.
+     *
+     * A flow is packaged when any package's loader set holds its name
+     * ({@link isShippedFlowName}: the loader's own answer, a name two
+     * packages hold included); every other flow is the environment's. Judged by NAME, never by the arm a
+     * registration names, because it is one of the {@link registrationChecks}
+     * (#23317): {@link registerFlow} throws it, {@link dryRun} refuses a draft
+     * for it, and the stored pass ({@link canonicalizeStoredFlow}) lists a
+     * stored row it would refuse, all three asking the same question. A
+     * package's declared `.custom` override is served at the base's name, so
+     * it passes; the default it carries is not read ({@link packagedFlowDefault}).
+     *
+     * Registration refuses it as it refuses every check: `registerFlow` throws
+     * an `Error`, which the automation write doors (`registerAndSaveFlow` in
+     * `@objectstack/runtime`) answer `VALIDATION_FAILED` / 400 with nothing
+     * stored. The metadata door (`PUT /api/v1/meta/flow/:name`) parses
+     * without registering, so it stores such a row; the engine then refuses
+     * to arm it, and the stored pass names it.
+     */
+    private refuseUnpackagedDefaultActive(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
+        if (flow.defaultActive === undefined || this.isShippedFlowName(flowName, flow)) return undefined;
+        const why =
+            `'${flowName}' declares defaultActive, which is the default of the switch an administrator turns a ` +
+            `PACKAGED flow on and off with, and '${flowName}' was authored in this deployment, not shipped by a ` +
+            `package. A flow authored here is switched by its own status: remove defaultActive, and publish ` +
+            `it with status 'obsolete' to keep it off or 'active' to arm it.`;
+        return {
+            message: `Flow ${why}`,
+            sites: [{ path: 'flows[0].defaultActive', from: JSON.stringify(flow.defaultActive), detail: `the flow ${why}` }],
+        };
+    }
+
+    /**
+     * [#34655, L2 S3] Does ANY package's loader set hold a flow `name`? The
+     * question {@link refuseUnpackagedDefaultActive} asks — not "is there ONE
+     * owner": {@link packagedFlowOwner} answers none for a bare name two
+     * packages hold (ADR-0150 D4), and a package's body re-registered under
+     * such a name (a re-sync, a hot upgrade, a third holder arriving) is
+     * still a package's. Every answer is the loader's own, asked per package
+     * ({@link packagedFlowSlotOwner}) of each package that may hold it: the
+     * packages whose slots hold the name now, and the package the body names
+     * itself as (`_packageId`). The stamp is only which package to ASK; a
+     * stamp naming a package that ships no such flow answers no.
+     */
+    private isShippedFlowName(name: string, flow: FlowParsed): boolean {
+        if (this.isPackagedFlow(name)) return true;
+        const bare = this.flowSlots.slot(name)?.name ?? name;
+        const stamped = (flow as { _packageId?: unknown })._packageId;
+        const candidates = new Set<string>(typeof stamped === 'string' && stamped !== '' ? [stamped] : []);
+        for (const slot of this.flowSlots.slotsOf(bare)) if (slot.packageId !== null) candidates.add(slot.packageId);
+        return [...candidates].some((packageId) => this.packagedFlowSlotOwner(bare, packageId) !== undefined);
+    }
+
+    /**
+     * [#34655, ADR-0126 §4, seat ruling on S2] The `defaultActive` the
+     * PACKAGE declares for the flow held under `key`, or `undefined` for none
+     * (and for a flow no package ships). Read off the package's own body:
+     * the armed body when the loader's body is what is armed, else the body
+     * the loader's set holds for the slot's package
+     * ({@link setPackagedFlowDefaultSource}). So a declared `.custom` override
+     * does not change the default, in either direction: an override that
+     * omits the key does not arm a flow its package ships off, and one that
+     * writes `false` does not switch off a flow its package ships on. The
+     * administrator's switch (the activation ledger) decides either way.
+     * With no reader attached, only an armed loader's body answers.
+     *
+     * [L2 N9] The reader's answer is asked once per armed body
+     * ({@link packagedFlowDefaults}), not on every {@link isFlowEnabled},
+     * and asked again after each change to the loader's set
+     * ({@link refreshPackagedFlowDefaults}).
+     */
+    private packagedFlowDefault(key: string): boolean | undefined {
+        const armed = this.flows.get(key);
+        if (!armed) return undefined;
+        if (this.flowArms.get(armed)?.source === 'package') return armed.defaultActive;
+        const source = this.packagedFlowDefaultSource;
+        if (source === undefined) return undefined;
+        const asked = this.packagedFlowDefaults.get(armed);
+        if (asked !== undefined) return asked.value;
+        const owner = this.packagedFlowOwner(key);
+        const value = owner === undefined ? undefined : source(this.flowSlots.slot(key)?.name ?? key, owner);
+        this.packagedFlowDefaults.set(armed, { value });
+        return value;
+    }
+
+    /**
+     * [#34655, L2 S4] The loader's set may have changed (a package installed,
+     * upgraded or removed): forget every default {@link packagedFlowDefault}
+     * cached, and send each held flow whose armed body is NOT the loader's
+     * own (a declared `.custom` override, a `runtime` body under a held name)
+     * back through the arming gate when its enablement moved. Returns the
+     * keys it moved.
+     *
+     * The cache is keyed by the armed body, and a re-sync does not always
+     * re-register: the automation plugin's `metadata:reloaded` re-sync keeps
+     * the body the metadata-mutation sync armed from the same stored row, and
+     * keeps the body it had when a re-registration throws. An override's
+     * stored body does not change when its base is upgraded, so without this
+     * the default read from the previous version's body would stay until the
+     * next registration of that flow or a restart: a flow the new version
+     * ships off would keep running, and one it ships on would stay off. The
+     * plugin calls this at every re-sync; a body {@link rollbackFlow} puts
+     * back is asked again too, since the map it was cached in is gone.
+     *
+     * A loader-armed flow reads its own body's declaration and is never
+     * cached, so it is not re-judged here: its re-registration is what moves
+     * it. An activation ledger row decides before any default is read, so a
+     * flow an administrator switched does not move.
+     */
+    refreshPackagedFlowDefaults(): string[] {
+        const before = new Map<string, boolean>();
+        for (const [key, armed] of this.flows) {
+            if (this.flowArms.get(armed)?.source !== 'package') before.set(key, this.isFlowEnabled(key));
+        }
+        this.packagedFlowDefaults = new WeakMap();
+        const moved: string[] = [];
+        for (const [key, wasEnabled] of before) {
+            if (this.isFlowEnabled(key) === wasEnabled) continue;
+            if (wasEnabled) this.deactivateFlowTrigger(key);
+            else this.activateFlowTrigger(key);
+            moved.push(key);
+        }
+        // [#20725, ADR-0126 §7.3] The callers of a subflow that moved, through the same gate.
+        for (const key of moved) this.rejudgeSubflowCallers(key);
+        return moved;
     }
 
     /**
@@ -6843,8 +7021,17 @@ export class AutomationEngine implements IAutomationService {
      * {@link registerFlow}. Returns the names it disarmed so the host can say
      * so in its bootstrap audit.
      *
+     * [#34655] A row switching a flow ON is offered to the arming gate
+     * ({@link activateFlowTrigger}, idempotent, still declined by a disarming
+     * `status`), so a flow its package ships off that an administrator
+     * switched on is armed after a restart on a host whose trigger was
+     * registered before the pull. The return value names only what it
+     * disarmed.
+     *
      * An empty ledger — the stock-boot case — disarms nothing and rebinds
-     * nothing, which is §4's "an empty ledger changes nothing anywhere".
+     * nothing, which is §4's "an empty ledger changes nothing anywhere" for
+     * every flow that declares no default; a flow shipped
+     * `defaultActive: false` stays unarmed, its package's default.
      */
     hydrateFlowActivations(): Promise<string[]> {
         // The body lives in ./flow-definitions.ts (#25222).
@@ -6853,6 +7040,7 @@ export class AutomationEngine implements IAutomationService {
             get flowActivationStore() { return readFlowActivationStore(); },
             flowLedgerDisabled: this.flowLedgerDisabled,
             flows: this.flows,
+            activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
             flowSlotKeysOf: (...a) => this.flowSlotKeysOf(...a),
@@ -6866,7 +7054,9 @@ export class AutomationEngine implements IAutomationService {
      *
      * `flowStatusDisabled` is the authoring state (`obsolete` / `invalid`),
      * owned by the definition. `flowLedgerDisabled` is the installation's
-     * activation choice (ADR-0126 §4), owned by `sys_metadata_activation`.
+     * activation choice (ADR-0126 §4), owned by `sys_metadata_activation`;
+     * with no row deciding, it is the package's default, which a packaged
+     * flow may declare off (`defaultActive: false`, #34655).
      * Either one disarms; neither can override the other, because they answer
      * different questions and an "override" would mean one silently undoing a
      * decision it does not own.
@@ -6890,7 +7080,16 @@ export class AutomationEngine implements IAutomationService {
      * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
-        if (this.flowLedgerDisabled.has(flowName)) {
+        if (this.flowLedgerDisabled.offByDefault(flowName)) {
+            // [#34655] No row: the package ships it off and no administrator
+            // has switched it on here.
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — its package ships it switched off ` +
+                    '(defaultActive: false) and the activation ledger (sys_metadata_activation) holds no row ' +
+                    'switching it on.',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        } else if (this.flowLedgerDisabled.has(flowName)) {
             this.logger.info(
                 `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
                     '(sys_metadata_activation, ADR-0126 §7.2).',
@@ -7536,7 +7735,12 @@ export class AutomationEngine implements IAutomationService {
      *
      * @throws when the flow is unknown, when no package ships it
      *   (`RESOURCE_CONFLICT` / 409, before anything is written or changed),
-     *   when §7.3's subflow guard refuses in either direction, when the
+     *   when `enabled` is true and the flow's own definition's `status`
+     *   disables it (`RESOURCE_CONFLICT` / 409, before anything is written or
+     *   changed: this switch moves only the ledger bit, so the write would
+     *   leave the flow off while the caller read it as on; the refusal names
+     *   publishing the definition `active` — switching such a flow OFF still
+     *   records the choice), when §7.3's subflow guard refuses in either direction, when the
      *   durable suspended-run store cannot be listed while the disable guard
      *   judges a switched-off caller, or when the durable write fails — a
      *   reported flip that did not persist is the failure mode this whole leg
@@ -7574,6 +7778,7 @@ export class AutomationEngine implements IAutomationService {
         const host: ThisParameterType<typeof toggleFlow> = {
             flows: this.flows,
             refuseCustomerAuthoredToggle: (...a) => this.refuseCustomerAuthoredToggle(...a),
+            flowStatusDisabled: this.flowStatusDisabled,
             packagedFlowOwner: (...a) => this.packagedFlowOwner(...a),
             refuseEnableOntoDisabledSubflow: (...a) => this.refuseEnableOntoDisabledSubflow(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
@@ -10548,6 +10753,21 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * The CLOSED node-type vocabulary — every type this engine can run — or
+     * `undefined` while {@link sealNodeTypeVocabulary} has not been called.
+     *
+     * Read by the metadata publish gate, which refuses a flow naming a type no
+     * executor serves (`flow-node-type-no-executor`, `@objectstack/lint`).
+     * `undefined` before the seal is the whole point: until the host declares
+     * the vocabulary closed, "not registered" is still "not registered YET"
+     * (AGENTS.md "Startup registry reads"), so the gate judges nothing rather
+     * than record a refusal the boot can contradict. Read-only; it never seals.
+     */
+    getSealedNodeTypeVocabulary(): string[] | undefined {
+        return this.nodeTypeVocabularySealed ? [...this.knownNodeTypes()].sort() : undefined;
+    }
+
+    /**
      * Report — once per engine — that a flow ran on an engine whose node-type
      * vocabulary was never sealed, so the ADR-0018 §M1 check never ran (#4792).
      *
@@ -10647,6 +10867,7 @@ export class AutomationEngine implements IAutomationService {
             validateDecisionModes: (...a) => this.validateDecisionModes(...a),
             validateFlowExpressions: (...a) => this.validateFlowExpressions(...a),
             validateApiTriggerSecret: (...a) => this.validateApiTriggerSecret(...a),
+            refuseUnpackagedDefaultActive: (...a) => this.refuseUnpackagedDefaultActive(...a),
         };
         return registrationChecks.call(host, { advisory });
     }

@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "studio-authoring",
-  "axis": "studio",
+  "axis": "build",
   "title": "Studio authoring — the admin/maker loop: packages, objects, views, record pages, draft→publish",
   "items": [
     {
@@ -955,7 +955,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -1016,7 +1016,7 @@
         {
           "clause": "the read-only gate holds: a read-only set hides Save, offers no field bulk at all and no operating object-row bulk, and disables every checkbox; the read-only badge names WHICH gate holds",
           "oracle": "screenshot",
-          "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and the object row's bulk, which appears only on hover or keyboard focus (engine.studio.access.bulkHint), is disabled when it appears; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
+          "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and every object row draws its bulk strip, every button of which is disabled in read-only Studio; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
           "evidence": "the read-only screenshot"
         },
         {
@@ -1096,6 +1096,12 @@
           "date": "2026-11-04",
           "change": "steps[3] and acceptance[3].clause corrected from QA run #29893 (W5-STUDIO, at 589049b0): after Clear a field falls back to the object's grant (data-field-rule=\"inherited\"), not to a read-only default; the verify (keys absent from the saved map) is unchanged. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-17",
+          "change": "acceptance[5].verify re-read for #34795 (PR #34914): every object row now draws its bulk strip, so the verify no longer says the strip appears only on hover or keyboard focus or cites engine.studio.access.bulkHint (that key is removed). It says every row draws the strip and every button in it is disabled in read-only Studio. The FAIL condition, an operating bulk control, is unchanged. Wording only; no clause weakened",
+          "ref": "#34795"
         }
       ]
     },

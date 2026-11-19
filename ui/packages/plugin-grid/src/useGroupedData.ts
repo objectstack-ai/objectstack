@@ -8,9 +8,10 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import type { GroupingConfig } from '@object-ui/types';
-import { compareSortValues, getSortValue, type SortValue } from '@object-ui/core';
+import { compareSortValues, getSortValue, referencedRecordTitle, type SortValue } from '@object-ui/core';
 import { deriveColumnSummary, listViewGroupOrderColumn, type ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 import { temporalCellText, temporalExtreme, temporalInstant, type TemporalCellFace } from './temporalCellFace';
+import { useGridTranslation } from './objectGridTranslations';
 
 /** Supported aggregation function types. */
 export type AggregationType = 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
@@ -152,13 +153,15 @@ export type GroupValueFormatter = (field: string, value: any) => string | undefi
  *
  * When a `formatValue` resolver is supplied, it is consulted first so callers
  * can map raw values (e.g. select option codes, booleans) to display labels.
+ * `emptyLabel` is the empty group's heading, in the reader's language.
  */
 function buildSegmentLabel(
   value: any,
   field: string,
-  formatValue?: GroupValueFormatter,
+  formatValue: GroupValueFormatter | undefined,
+  emptyLabel: string,
 ): string {
-  if (value === undefined || value === null || value === '') return '(empty)';
+  if (value === undefined || value === null || value === '') return emptyLabel;
   if (formatValue) {
     const formatted = formatValue(field, value);
     if (formatted !== undefined && formatted !== '') return formatted;
@@ -170,27 +173,22 @@ function buildSegmentLabel(
           const f2 = formatValue(field, v);
           if (f2 !== undefined && f2 !== '') return f2;
         }
-        return buildSegmentLabel(v, field);
+        return buildSegmentLabel(v, field, undefined, emptyLabel);
       })
       .join(', ');
-    return joined || '(empty)';
+    return joined || emptyLabel;
   }
   // Lookup / master_detail fields: the cell is an expanded object such as
   // `{ id, name, ... }`. Stringifying directly produces "[object Object]",
-  // so prefer common display fields, falling back to the id.
+  // so it is named by the shared referenced-record ladder, falling back to
+  // the id. With no target definition in hand the ladder reads the record
+  // alone; a host that holds one names it through `formatValue` above.
   if (typeof value === 'object') {
-    const label =
-      (value as any).name ??
-      (value as any).label ??
-      (value as any).title ??
-      (value as any).display_name ??
-      (value as any).displayName ??
-      (value as any).fullName ??
-      (value as any).full_name;
-    if (label !== undefined && label !== null && label !== '') return String(label);
+    const label = referencedRecordTitle(undefined, value);
+    if (label !== undefined) return label;
     const id = (value as any).id ?? (value as any)._id ?? (value as any).pk;
     if (id !== undefined && id !== null && id !== '') return String(id);
-    return '(empty)';
+    return emptyLabel;
   }
   return String(value);
 }
@@ -408,7 +406,7 @@ function compareGroupEntries(
       if (cmp !== 0) return order === 'desc' ? -cmp : cmp;
     }
   }
-  if (!ranks) return compareGroups(a.label, b.label, order);
+  if (!ranks) return compareGroupLabels(a, b, order);
   const aEmpty = a.segment === '';
   const bEmpty = b.segment === '';
   if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
@@ -422,6 +420,19 @@ function compareGroupEntries(
     return order === 'desc' ? -cmp : cmp;
   }
   if (aRank || bRank) return aRank ? -1 : 1;
+  return compareGroupLabels(a, b, order);
+}
+
+/**
+ * Label order, with the empty group placed by its KEY rather than by its
+ * heading: ahead of every label ascending and after every one descending,
+ * where the untranslated `(empty)` heading always sorted, whatever the
+ * heading reads in the reader's language.
+ */
+function compareGroupLabels(a: SortableGroup, b: SortableGroup, order: 'asc' | 'desc'): number {
+  const aEmpty = a.segment === '';
+  const bEmpty = b.segment === '';
+  if (aEmpty !== bEmpty) return (aEmpty ? -1 : 1) * (order === 'desc' ? -1 : 1);
   return compareGroups(a.label, b.label, order);
 }
 
@@ -644,6 +655,9 @@ export function useGroupedDataInOptionOrder(
   const rawFields = config?.fields;
   const fields = useMemo(() => usableGroupingFields(rawFields), [rawFields]);
   const isGrouped = fields.length > 0;
+  // The empty group's heading: the grid's own empty-value string.
+  const { t } = useGridTranslation();
+  const emptyLabel = t('grid.empty');
 
   // Track which group keys have been explicitly toggled by the user.
   const [toggledKeys, setToggledKeys] = useState<Record<string, boolean>>({});
@@ -682,7 +696,7 @@ export function useGroupedDataInOptionOrder(
             row,
             raw,
             segment: extractValueKey(raw),
-            label: resolved ?? buildSegmentLabel(raw, f.field, formatValue),
+            label: resolved ?? buildSegmentLabel(raw, f.field, formatValue, emptyLabel),
             ...(orderColumn !== undefined ? { orderValue: orderValueOf(row[orderColumn]) } : {}),
           };
         });
@@ -737,7 +751,7 @@ export function useGroupedDataInOptionOrder(
         const segment = buildSegmentKey(row, f.field);
         if (!map.has(segment)) {
           map.set(segment, {
-            label: buildSegmentLabel(row[f.field], f.field, formatValue),
+            label: buildSegmentLabel(row[f.field], f.field, formatValue, emptyLabel),
             rows: [],
           });
           keyOrder.push(segment);
@@ -791,7 +805,7 @@ export function useGroupedDataInOptionOrder(
     };
 
     return buildLevel(data, 0, '', {});
-  }, [data, fields, isGrouped, toggledKeys, aggregations, formatValue, server, optionRanks, temporalAggregates]);
+  }, [data, fields, isGrouped, toggledKeys, aggregations, formatValue, server, optionRanks, temporalAggregates, emptyLabel]);
 
   const toggleGroup = useCallback((key: string) => {
     setToggledKeys((prev) => {

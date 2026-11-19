@@ -12,7 +12,15 @@
  *   1. the stack's own `stack.tools[]` names (the optional refinement layer);
  *   2. `PLATFORM_PROVIDED_TOOL_NAMES` — the curated registry of tools the
  *      cloud AI runtime registers at boot (spec owns the list; the owning
- *      cloud packages carry the conformance tests);
+ *      cloud packages carry the conformance tests) — and, only for a skill
+ *      offered over MCP (`mcpPrompt` is not `false`), `MCP_FILE_TOOL_NAMES`:
+ *      the file tools the MCP door registers (`read_file`,
+ *      `create_upload_link`; `@objectstack/mcp` carries their conformance
+ *      test), kept out of the cloud registry so each of its groups stays the
+ *      exact set one cloud package registers. No cloud package registers
+ *      either, so an in-product turn runs without them: a skill whose owner
+ *      keeps it out of MCP (`mcpPrompt: false`) runs only there, and naming
+ *      the pair in it is still reported;
  *   3. the materialised `action_<name>` family — one tool per declarative
  *      action (`stack.actions` ∪ every object's `actions`), the mechanism the
  *      built-in `actions_executor` subscribes to with `action_*`.
@@ -32,7 +40,11 @@
  * positives (6 references resolve via the registry).
  */
 
-import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import {
+  MCP_FILE_TOOL_NAMES,
+  PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOL_FAMILY_PREFIXES,
+} from '@objectstack/spec/system';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -138,8 +150,9 @@ function materialisesAsTool(action: AnyRec): boolean {
 }
 
 /**
- * The full set of tool names resolvable from this stack: declared tool
- * records ∪ the platform registry ∪ the materialised action family.
+ * The set of tool names resolvable from this stack for EVERY skill: declared
+ * tool records ∪ the platform registry ∪ the materialised action family. The
+ * MCP door's file tools join it per skill ({@link offeredOverMcp}).
  */
 function collectToolUniverse(stack: AnyRec): Set<string> {
   const universe = new Set<string>(PLATFORM_PROVIDED_TOOL_NAMES);
@@ -182,6 +195,18 @@ function collectUnexposedActionNames(stack: AnyRec): Set<string> {
 }
 
 /**
+ * Can this skill be offered over MCP, where the door's file tools are served?
+ * `mcpPrompt: false` keeps a skill off every MCP connection whatever its
+ * binding (`SkillSchema.mcpPrompt`), so it runs only in the in-product agents,
+ * and no cloud AI package registers `read_file` or `create_upload_link`
+ * there. Seat ruling on the contract review of this rule's MCP widening:
+ * `mcpPrompt !== false` is the whole condition (no `instructions` test).
+ */
+function offeredOverMcp(skill: AnyRec): boolean {
+  return skill.mcpPrompt !== false;
+}
+
+/**
  * Validate every `skill.tools[]` reference in a stack. Returns findings
  * (empty = clean).
  */
@@ -189,10 +214,11 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
   const findings: AiToolRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const universe = collectToolUniverse(stack);
+  const shared = collectToolUniverse(stack);
+  const withMcpFileTools = new Set<string>([...shared, ...MCP_FILE_TOOL_NAMES]);
   const unexposedActions = collectUnexposedActionNames(stack);
 
-  const resolves = (ref: string): boolean => {
+  const resolves = (ref: string, universe: ReadonlySet<string>): boolean => {
     if (ref.endsWith('*')) {
       const prefix = ref.slice(0, -1);
       for (const name of universe) {
@@ -208,10 +234,11 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     const skill = skills[si];
     const skillName = strName(skill.name) ?? `#${si}`;
     const refs = Array.isArray(skill.tools) ? skill.tools : [];
+    const universe = offeredOverMcp(skill) ? withMcpFileTools : shared;
 
     for (let ti = 0; ti < refs.length; ti++) {
       const ref = strName(refs[ti]);
-      if (!ref || resolves(ref)) continue;
+      if (!ref || resolves(ref, universe)) continue;
 
       const isPattern = ref.endsWith('*');
       // The distinct, high-frequency case: the action EXISTS but never

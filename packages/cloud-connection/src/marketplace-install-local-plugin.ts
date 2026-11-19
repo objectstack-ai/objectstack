@@ -490,10 +490,19 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
  *
  * `undefined` for a throw that declares no status below 500 — an undeclared
  * throw or a declared 5xx: the caller rethrows it, never relabels it.
+ *
+ * [#34583] `side` says whose body was refused. `'incoming'` (every step's
+ * default) is the package this request installs. `'installed'` is the copy
+ * this system stored at the last install, which a re-install reads to compare
+ * against (2c″): the same status, code and `details`, but the sentence names
+ * the stored copy and the way out (uninstall it, then install), never the
+ * incoming package, whose author would otherwise go fixing an artifact that
+ * was never judged.
  */
 function declaredRefusalAnswer(
     manifestId: string,
     err: unknown,
+    side: 'incoming' | 'installed' = 'incoming',
 ): { status: number; body: { success: false; error: { code: string; message: string; details?: Record<string, unknown> } } } | undefined {
     const refusal = resolveThrownHttpError(err);
     if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
@@ -501,13 +510,19 @@ function declaredRefusalAnswer(
     const details = stated !== null && typeof stated === 'object' && !Array.isArray(stated)
         ? stated as Record<string, unknown>
         : undefined;
+    const reason = String((err as any)?.message ?? err);
     return {
         status: refusal.status,
         body: {
             success: false,
             error: {
                 code: refusal.code,
-                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+                message: side === 'installed'
+                    ? `The installed copy of package '${manifestId}', stored here by its last install, is refused by this `
+                        + `runtime: ${reason} A re-install compares the incoming version with that stored copy, so it cannot `
+                        + 'go ahead; the incoming version was not judged. Remove the stored copy first (uninstall '
+                        + `'${manifestId}'), then install this version. Nothing was installed or written.`
+                    : `Package '${manifestId}' cannot be installed: ${reason} Nothing was installed or written.`,
                 ...(details !== undefined ? { details } : {}),
             },
         },
@@ -4654,7 +4669,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   refuses): that refusal's own declared status and code
      *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
      *   read. An undeclared throw out of the resolver is rethrown, never
-     *   relabelled.
+     *   relabelled. [#34583] When the refused body is the installed copy,
+     *   the same status and code, with a sentence naming that stored copy
+     *   and the way out, never the incoming package.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4674,13 +4691,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // throws is answered as the table read's. Without this, the
         // resolver's 422 was answered as the 503 below and its author was told
         // to retry once the database answers.
+        // [#34583] Each side in its own `try`, the incoming body first: a
+        // refusal of the installed copy (stored by an earlier install, read
+        // here to compare against) is answered naming that copy, never as
+        // "Package 'X' cannot be installed", which blames the incoming one.
         try {
             packageUpgradeSideOf(converted);
-            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
         } catch (err: unknown) {
-            const refused = declaredRefusalAnswer(manifestId, err);
+            const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
             if (!refused) throw err;
             return { tables: [], refusal: refused };
+        }
+        if (installed !== null && installed !== undefined) {
+            try {
+                packageUpgradeSideOf(installed);
+            } catch (err: unknown) {
+                const refused = declaredRefusalAnswer(manifestId, err, 'installed');
+                if (!refused) throw err;
+                return { tables: [], refusal: refused };
+            }
         }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
@@ -4805,7 +4834,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // step 3) the body the registry serves. With neither — a ledger file
         // that will not parse, an entry or a registry row carrying no body —
         // the verdict is the one finding that says so, confirmable like any
-        // other, never "no finding".
+        // other, never "no finding". [#34583] The fold below meets no resolver
+        // refusal: step 2c″, asked first over the same two bodies, answered
+        // either side's refusal and returned.
         const installed = this.installedPackageSide(ctx, manifestId, previous);
         const verdict = installed === undefined
             ? ledgerRecordUnavailableVerdict(manifestId, previous.failure)
@@ -7660,10 +7691,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
-            import('@objectstack/runtime'),
-            import('@objectstack/spec/data'),
-        ]);
+        const { SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad } = await import('@objectstack/runtime');
         const seedLocale = await resolveSeedLocaleForLoad(ctx, {
             seeds: datasets,
             organizationId,
@@ -7672,7 +7700,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
-        const request = (SeedLoaderRequestSchema as any).parse({
+        // [#34613] `loadStored`: a stored dataset declaring a retired `mode`
+        // is refused alone, as an error of the result; the rest load.
+        const result = await seedLoader.loadStored({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
@@ -7687,7 +7717,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ...(seedLocale ? { locale: seedLocale.locale } : {}),
             },
         });
-        const result = await seedLoader.load(request);
         // [#30324 · ruling 6670861426] The rows this load CREATED get the
         // person this door names as `owner_id` and `created_by`, then follow
         // the ordinary permission rules like any record they own.

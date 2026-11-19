@@ -38,18 +38,18 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
   it('exposes the sharing model control with the four canonical OWD options', async () => {
     renderPanel(baseDraft);
     // The section header is present.
-    expect(screen.getByText('Record sharing (OWD)')).toBeTruthy();
+    expect(screen.getByText('Who can see which records')).toBeTruthy();
     // Canonical OWD options are all offered.
     const internal = await openDial('owd-internal-select');
-    expect(internal.getByRole('option', { name: 'Private — owner only' })).toBeTruthy();
+    expect(internal.getByRole('option', { name: 'Only the owner can see' })).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Public read — everyone reads, only the owner writes' }),
+      internal.getByRole('option', { name: 'Everyone can see' }),
     ).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Public read/write — everyone reads and writes' }),
+      internal.getByRole('option', { name: 'Everyone can see and edit' }),
     ).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Controlled by parent — inherited from the master record' }),
+      internal.getByRole('option', { name: 'Follows its parent record' }),
     ).toBeTruthy();
   });
 
@@ -69,7 +69,7 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
     expect(desc.textContent).toMatch(/security-owd-unset/);
     // The runtime fallback is still stated — it is what makes `private` the
     // safe pick — but as context, not as an all-clear.
-    expect(desc.textContent).toMatch(/Private/);
+    expect(desc.textContent).toMatch(/Only the owner can see/);
     // Styled as a problem.
     expect(desc.className).toMatch(/amber/);
   });
@@ -83,13 +83,13 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
 
   it('patches sharingModel when a model is picked', async () => {
     const onPatch = renderPanel(baseDraft);
-    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Private — owner only' }));
+    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Only the owner can see' }));
     expect(onPatch).toHaveBeenCalledWith({ sharingModel: 'private' });
   });
 
   it('clears sharingModel back to unset', async () => {
     const onPatch = renderPanel({ ...baseDraft, sharingModel: 'private' });
-    expect(screen.getByTestId('owd-internal-select').textContent).toBe('Private — owner only');
+    expect(screen.getByTestId('owd-internal-select').textContent).toBe('Only the owner can see');
     fireEvent.click(
       (await openDial('owd-internal-select')).getByRole('option', { name: t('engine.studio.settings.sharingUnset', 'en-US') }),
     );
@@ -114,7 +114,7 @@ describe('ObjectSettingsPanel — no external OWD dial (objectui#12353)', () => 
     expect(screen.queryByTestId('owd-external-select')).toBeNull();
     expect(screen.queryByTestId('owd-external-desc')).toBeNull();
     expect(document.body.textContent).not.toMatch(/externalSharingModel/);
-    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Private — owner only' }));
+    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Only the owner can see' }));
     expect(onPatch.mock.calls).toEqual([[{ sharingModel: 'private' }]]);
   });
 });

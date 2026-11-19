@@ -39,6 +39,7 @@
 // replayer IS the scenario.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -93,6 +94,11 @@ const appDefaultBodies: unknown[] = [];
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The real `loadStored` parses the stored request and hands it to `load`;
+        // the stand-in keeps that funnel, so the request `load` records is the parsed one.
+        async loadStored(raw: any) {
+            return this.load(SeedLoaderRequestSchema.parse(raw));
+        }
         async load(request: any) { loadCalls.push(request); return seedResult; }
     },
     recordSeedOutcome: vi.fn(),

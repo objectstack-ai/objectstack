@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-audit",
-  "version": "18.5.0",
+  "version": "18.6.0",
   "license": "Apache-2.0",
   "description": "Audit Plugin for ObjectStack — System audit log object and audit trail",
   "type": "commonjs",
@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sqlite-wasm": "workspace:*",
+    "@objectstack/service-messaging": "workspace:*",
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

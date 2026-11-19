@@ -77,12 +77,13 @@ import {
 import { mapDataError } from '@objectstack/types';
 import {
   inProcessHostSurface,
+  resolveActionRefusal,
   resolveHookRefusal,
   resolveInProcessHookRefusal,
   type HookRefusalI18nSource,
 } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
-import { buildHookTextSurface } from './hook-text.js';
+import { buildActionTextSurface, buildHookTextSurface } from './hook-text.js';
 import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
 import { deriveHookApi, openTransactionKind, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
 
@@ -91,9 +92,10 @@ interface FactoryOptions {
   appId: string;
   logger?: any;
   /**
-   * [#26170] Where a hook's declared refusal is translated: the `i18n`
-   * service, read at refusal time (see `resolveHookRefusal`). Absent, a
-   * declared refusal is answered with its declared message.
+   * [#26170] Where a hook's declared refusal — and, #34273, an action's — is
+   * translated: the `i18n` service, read at refusal time (see
+   * `resolveHookRefusal`, `resolveActionRefusal`). Absent, a declared refusal
+   * is answered with its declared message.
    */
   i18n?: HookRefusalI18nSource;
   /**
@@ -606,7 +608,16 @@ export function hookBodyRunnerFactory(
 export function actionBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
-): (action: { name: string; body?: unknown; object?: string; type?: string; timeoutMs?: number }) =>
+): (action: {
+  name: string;
+  body?: unknown;
+  object?: string;
+  objectName?: string;
+  type?: string;
+  timeoutMs?: number;
+  refusals?: unknown;
+  texts?: unknown;
+}) =>
   | ((actionCtx: any) => Promise<unknown>)
   | undefined {
   return (action) => {
@@ -667,16 +678,23 @@ export function actionBodyRunnerFactory(
       // the body runs and before its sandbox context is built.
       const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
       if (subjectRefusal) throw subjectRefusal;
+      const doorCaller = actionDoorCaller(actionCtx);
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
+        // [#34374 PR2] The action's declared texts, in the organization's
+        // language — the hook body's `ctx.text`, built by the same core — for
+        // the door caller's organization, so every action door answers alike.
+        buildActionTextSurface(action, doorCaller.organizationId, {
+          i18n: opts.i18n, getService: opts.getService, logger: opts.logger,
+        }),
       );
       installBodyDoors(
         sandboxCtx,
         opts,
         { kind: 'action', name: action.name },
-        actionDoorCaller(actionCtx),
+        doorCaller,
         actionCtx?.executionContext?.transaction,
       );
       try {
@@ -694,8 +712,13 @@ export function actionBodyRunnerFactory(
         warnDiscardedRecordWrites(result, action.name, action.object, opts);
         return result.value;
       } catch (err: any) {
-        logBodyThrow(opts, { kind: 'action', name: action.name }, err);
-        throw err;
+        // [#34273] An action that declares `refusals` refuses by code only,
+        // exactly as a hook does: the body's throw is answered with the
+        // declared entry in the caller's locale, or refused loudly when the
+        // catalogue cannot answer it. Everything else leaves as thrown.
+        const answered = resolveActionRefusal(action, err, actionCtx, { i18n: opts.i18n, logger: opts.logger });
+        logBodyThrow(opts, { kind: 'action', name: action.name }, answered);
+        throw answered;
       }
     };
   };
@@ -1558,7 +1581,8 @@ function buildSandboxContext(
     // sites; widening the accessor to it is a separate capability call and is
     // deliberately not taken here — the ruling names hook bodies.
     title,
-    // [#34374] Hook face only: the hook's declared texts, answered in the
+    // [#34374] The hook's declared texts (the action face carries its own,
+    // #34374 PR2, `buildActionSandboxContext`), answered in the
     // organization's language (`hook-text.ts`).
     ...(text ? { text } : {}),
     // [#11552] Hook face only, both of them: an action is never one of N
@@ -1608,6 +1632,7 @@ function buildActionSandboxContext(
   actionCtx: any,
   ql: any,
   log: ScriptContext['log'],
+  text?: ScriptContext['text'],
 ): ScriptContext {
   // Action ctx convention (mirrors http-dispatcher.ts):
   //   { record, params, recordId, user, session, engine, services, ... }
@@ -1652,6 +1677,9 @@ function buildActionSandboxContext(
     // [#7448] Same removal as the hook face: neither action-context assembly
     // site (`../domains/actions.ts`, `../action-execution.ts`) writes `logger`.
     log,
+    // [#34374 PR2] The action's declared texts, answered in the
+    // organization's language (`hook-text.ts` `buildActionTextSurface`).
+    ...(text ? { text } : {}),
     crypto: globalThis.crypto,
   };
 }

@@ -26,6 +26,12 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * The whole field panel is now pinned at the cell's inset and no wider than
  * the pane shows (`FIELD_PANEL` in `PermissionMatrixEditor.tsx`).
  *
+ * objectstack#35061 (item 2): below a 1000 px pane the Studio rendering folds
+ * to the four CRUD columns and drops the floor (`permissionMatrixFold.ts`), so
+ * it no longer scrolls sideways there. The Studio 720 px case reads that
+ * form: the matrix fits the pane and every box answers at scrollLeft 0. The
+ * metadata-admin rendering does not fold and keeps its 720 px sweep.
+ *
  * ## Why a Playwright spec and not a vitest test
  *
  * jsdom and happy-dom have no layout engine: no rect, no sticky offset, no
@@ -277,7 +283,11 @@ async function mount(page: Page, c: Case): Promise<void> {
   }, c);
   await page.addScriptTag({ content: bundle, type: 'module' });
   const compiled = new Set<string>();
-  const expand = page.getByRole('button', { name: new RegExp(`^Project\\W*${OBJECT}\\W*$`) });
+  // The Studio row names the object by its label alone, the machine name being
+  // the button's tooltip (objectstack#34795); the environment table still
+  // prints the name beside the label.
+  const name = c.host === 'studio' ? /^Project$/ : new RegExp(`^Project\\W*${OBJECT}\\W*$`);
+  const expand = page.getByRole('button', { name });
   await expand.waitFor({ state: 'attached', timeout: 30_000 });
   await styleUntilStable(page, compiled);
   await expand.click();
@@ -408,22 +418,39 @@ test.beforeAll(async () => {
 test.describe('an expanded object’s field boxes stay reachable while the matrix scrolls sideways (objectstack#29677)', () => {
   test.setTimeout(120_000);
 
-  for (const host of ['studio', 'environment'] as const) {
-    for (const width of [1000, 720]) {
-      test(`${host} rendering, ${width} px pane: every Read and Edit box answers at its centre at every scroll offset`, async ({
-        page,
-      }, testInfo) => {
-        const readings = await sweep(page, { name: `${host}-${width}`, host, width }, testInfo);
-        // The pane really scrolls, and far past the card's 80 px.
-        expect(readings[0].pane.scrollWidth).toBeGreaterThanOrEqual(FLOOR);
-        expect(readings.at(-1)!.scrollLeft).toBeGreaterThan(80);
-        expectAllReachable(readings);
-        // The panel holds its place at the cell's inset whatever the offset.
-        const lefts = new Set(readings.map((r) => r.panel.left));
-        expect([...lefts], 'the field panel moved with the scroll').toHaveLength(1);
-      });
-    }
+  // The Studio rendering under 1000 px is folded, not scrolled: its own case below.
+  const scrolled = [
+    { host: 'studio', width: 1000 },
+    { host: 'environment', width: 1000 },
+    { host: 'environment', width: 720 },
+  ] as const;
+  for (const { host, width } of scrolled) {
+    test(`${host} rendering, ${width} px pane: every Read and Edit box answers at its centre at every scroll offset`, async ({
+      page,
+    }, testInfo) => {
+      const readings = await sweep(page, { name: `${host}-${width}`, host, width }, testInfo);
+      // The pane really scrolls, and far past the card's 80 px.
+      expect(readings[0].pane.scrollWidth).toBeGreaterThanOrEqual(FLOOR);
+      expect(readings.at(-1)!.scrollLeft).toBeGreaterThan(80);
+      expectAllReachable(readings);
+      // The panel holds its place at the cell's inset whatever the offset.
+      const lefts = new Set(readings.map((r) => r.panel.left));
+      expect([...lefts], 'the field panel moved with the scroll').toHaveLength(1);
+    });
   }
+
+  test('studio rendering, 720 px pane: the matrix folds to fit the pane (objectstack#35061), nothing scrolls and every Read and Edit box answers', async ({
+    page,
+  }, testInfo) => {
+    const readings = await sweep(page, { name: 'studio-720', host: 'studio', width: 720 }, testInfo);
+    // The folded form: the row's More permissions toggle is drawn, and the
+    // matrix is no wider than the pane, so there is no offset to sweep.
+    await expect(page.getByTestId(`perm-more-toggle-${OBJECT}`)).toBeVisible();
+    expect(readings).toHaveLength(1);
+    expect(readings[0].scrollLeft).toBe(0);
+    expect(readings[0].pane.scrollWidth).toBeLessThanOrEqual(readings[0].pane.clientWidth);
+    expectAllReachable(readings);
+  });
 
   test('CONTROL: where the pane holds the whole floor, nothing scrolls and every box answers at scrollLeft 0, as on main', async ({
     page,

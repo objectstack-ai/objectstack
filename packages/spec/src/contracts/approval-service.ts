@@ -411,7 +411,14 @@ export interface ApprovalRequestRow {
    *   routed to an unstaffed position, or whose approvers have all since left,
    *   which would otherwise leave the request undecidable and the record locked
    *   forever. Clients OR it into the decision actions' `visible` gate; the
-   *   service re-checks the same privilege before applying any override.
+   *   service re-checks the same privilege before applying any override. The
+   *   override never APPROVES a request the caller submitted, so the approve
+   *   lever reads `can_override_approve` instead.
+   * - `can_override_approve` — `can_override`, except on a request the caller
+   *   submitted: the override never approves its actor's own request, and the
+   *   approve door refuses one with `403 FORBIDDEN`. Added beside
+   *   `can_override`, which keeps its meaning for reject / reassign / recall.
+   *   Optional only because a server that predates it does not send it.
    *
    * Absent when the row is surfaced outside a service read with a user context
    * (e.g. a raw data-API grid); a `record.viewer.*` predicate then fails closed.
@@ -420,6 +427,7 @@ export interface ApprovalRequestRow {
     can_act: boolean;
     is_submitter: boolean;
     can_override: boolean;
+    can_override_approve?: boolean;
   };
 }
 

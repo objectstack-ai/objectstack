@@ -14,10 +14,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { FieldPermissionSchema } from '@objectstack/spec/security';
 import {
   applyFieldBulk,
   fieldRuleCell,
   fieldRuleSeed,
+  withFieldBits,
   type FieldPerm,
   type ObjectPerm,
 } from './permission-slice';
@@ -144,5 +146,34 @@ describe('applyFieldBulk — a shortcut writes only the rows whose boxes change'
     expect(next).toEqual({ 'deal.stage': { readable: true, editable: false } });
     expect(fieldRuleCell(next['deal.amount'], EDIT_ON)).toMatchObject({ inherited: true, editable: true });
     expect(JSON.stringify(fields)).toBe(before);
+  });
+});
+
+describe('withFieldBits — a roll-up acknowledgement survives a readable rewrite and never a hidden one', () => {
+  const REASON = 'Service staff read account totals but not invoice rows';
+  const acknowledged: FieldPerm = { readable: true, editable: true, rollupSourceUnreadableReason: REASON };
+
+  it('keeps the reason while the entry stays readable, and the spec accepts the entry', () => {
+    const next = withFieldBits(acknowledged, true, false);
+    expect(next).toEqual({ readable: true, editable: false, rollupSourceUnreadableReason: REASON });
+    expect(FieldPermissionSchema.safeParse(next).success).toBe(true);
+  });
+
+  it('drops the reason when the entry goes readable:false, the shape the spec refuses it beside', () => {
+    // The refused shape, measured against the real schema, so the drop below is load-bearing.
+    const refused = FieldPermissionSchema.safeParse({ readable: false, editable: false, rollupSourceUnreadableReason: REASON });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((i) => i.path.join('.'))).toContain('rollupSourceUnreadableReason');
+
+    const next = withFieldBits(acknowledged, false, false);
+    expect(next).toEqual({ readable: false, editable: false });
+    expect(FieldPermissionSchema.safeParse(next).success).toBe(true);
+  });
+
+  it('the bulk Read-only all shortcut keeps the reason on the row it rewrites', () => {
+    const fields = { 'deal.total': acknowledged };
+    const next = applyFieldBulk(fields, 'deal', EDIT_ON, 'readable', ['total']);
+    expect(next['deal.total']).toEqual({ readable: true, editable: false, rollupSourceUnreadableReason: REASON });
+    expect(FieldPermissionSchema.safeParse(next['deal.total']).success).toBe(true);
   });
 });

@@ -9,12 +9,36 @@
  *                        any other directory is loaded as the private overlay,
  *                        where a `generic` card is refused (`libraryOf`)
  *   --only ID[,ID]       run only these cards
- *   --modes M[,M]        scratch, template, ask (default: scratch,template);
+ *   --modes M[,M]        scratch, template, ask, door (default: scratch,template);
  *                        ask runs only the questions and operations on a
  *                        verified build — --template F, else this run's
  *                        scratch build when it passed — and authors nothing,
  *                        so ask without --template and without scratch is
- *                        refused before any card runs
+ *                        refused before any card runs; door builds through
+ *                        the app's MCP draft door with no project, publishes
+ *                        the drafts as a person, then scores and runs the Run
+ *                        half (`door.ts`, `doorMode`); the live `claude`
+ *                        driver or a replay only
+ *   --door-skills DIR    door mode: give the client the Claude Code skills in
+ *                        DIR (the published `skills/`), as --ask-skills gives
+ *                        them; absent ⇒ none
+ *   --door-skill-omit N[,N]
+ *                        door mode: leave these skills of --door-skills out,
+ *                        the arm without them; a name DIR holds no skill of
+ *                        is refused
+ *   --door-rules builtin door mode: give the client the built-in rule texts,
+ *                        the hosted MCP build door's authoring rules ported as
+ *                        data (`door-rules-corpus.ts` names their source)
+ *   --door-rules FILE    door mode: give the client the rule texts in FILE
+ *                        instead, a rules file the maintainer supplies from
+ *                        outside the repository (`door.ts` states the format);
+ *                        default the OS_SCENARIOS_DOOR_RULES variable (a file
+ *                        or `builtin`); absent ⇒ none
+ *   --door-rules-omit S[,S]
+ *                        door mode: leave these rule ids or named sets of the
+ *                        rules out, the arm without them (the built-in sets:
+ *                        metadata-authoring, solution-design, inline,
+ *                        ondemand, names-build-door-tools)
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
  *                        login (`drivers/codex.ts`); it has no turn cap and no
@@ -50,6 +74,13 @@
  *   --ask-model M        the model for question and operation turns, in place
  *                        of --model; the record and the scorecard state the
  *                        model each turn was served, and mark a mismatch
+ *   --ask-skills DIR     give every question and operation turn the Claude Code
+ *                        skills in DIR (one skill directory holding SKILL.md,
+ *                        or a directory of them): each turn's directory gets
+ *                        them under .claude/skills/ and the turn may use the
+ *                        Skill tool. Off by default; the record states each
+ *                        skill's name, version and sha256 (`ask-skills.ts`).
+ *                        The live `claude` driver only
  *   --effort LEVEL       the effort level every live turn asks for, as
  *                        `claude --effort` takes it (Claude Code 2.1.325: low,
  *                        medium, high, xhigh, max); a level the CLI's own
@@ -104,8 +135,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../loader.js';
 import { HttpApp } from './app.js';
+import { askSkillsText } from './ask-skills.js';
+import { DOOR_RULES_ENV, doorArmText, doorModeRefusal, readDoorRules } from './door.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { CodexDriver } from './drivers/codex.js';
 import { ExternalDriver } from './drivers/external.js';
@@ -115,7 +148,7 @@ import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleW
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
-import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
+import { cardScorecard, renderScorecard, runRecord, type CardStamp } from './scorecard.js';
 import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
 
 /** The `summary` command, re-exported so the published bin reaches it through this built entry (`src/bin.ts`). */
@@ -137,7 +170,7 @@ export function findUp(start: string, test: (dir: string) => boolean): string {
 export interface CliArgs {
   cards?: string;
   only?: string[];
-  modes: Array<'scratch' | 'template' | 'ask'>;
+  modes: Array<'scratch' | 'template' | 'ask' | 'door'>;
   driver: string;
   record?: string;
   template?: string;
@@ -162,6 +195,16 @@ export interface CliArgs {
   authorEffort?: string;
   /** The effort level a question or operation turn asks for (`--ask-effort`), in place of `effort`. */
   askEffort?: string;
+  /** The skills directory every question and operation turn is given (`--ask-skills`); none when absent. */
+  askSkills?: string;
+  /** Door mode's skills directory (`--door-skills`); none when absent. */
+  doorSkills?: string;
+  /** Skill names left out of {@link doorSkills} (`--door-skill-omit`). */
+  doorSkillOmit?: string[];
+  /** Door mode's rules file, or `builtin` for the built-in corpus (`--door-rules`); else {@link DOOR_RULES_ENV}; none when neither. */
+  doorRules?: string;
+  /** The rule ids and set names left out of the rules file (`--door-rules-omit`). */
+  doorRulesOmit?: string;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -202,7 +245,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
       const modes = val().split(',');
-      for (const m of modes) if (m !== 'scratch' && m !== 'template' && m !== 'ask') throw new Error(`unknown mode \`${m}\` (scratch, template, ask)`);
+      for (const m of modes) if (m !== 'scratch' && m !== 'template' && m !== 'ask' && m !== 'door') throw new Error(`unknown mode \`${m}\` (scratch, template, ask, door)`);
       a.modes = modes as CliArgs['modes'];
     } else if (flag === '--driver') a.driver = val();
     else if (flag === '--record') a.record = val();
@@ -228,6 +271,19 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--effort') a.effort = effort();
     else if (flag === '--author-effort') a.authorEffort = effort();
     else if (flag === '--ask-effort') a.askEffort = effort();
+    else if (flag === '--ask-skills') {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`--ask-skills takes a skills directory, not \`${raw}\``);
+      a.askSkills = raw;
+    }
+    else if (flag === '--door-skills' || flag === '--door-rules' || flag === '--door-rules-omit' || flag === '--door-skill-omit') {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes ${flag === '--door-skills' ? 'a skills directory' : flag === '--door-rules' ? 'a rules file or `builtin`' : 'a comma-separated list'}, not \`${raw}\``);
+      if (flag === '--door-skills') a.doorSkills = raw;
+      else if (flag === '--door-rules') a.doorRules = raw;
+      else if (flag === '--door-rules-omit') a.doorRulesOmit = raw;
+      else a.doorSkillOmit = raw.split(',').map((x) => x.trim());
+    }
     else if (flag === '--lang') {
       const l = val();
       if (!(PROMPT_LANGS as readonly string[]).includes(l)) throw new Error(`unknown --lang \`${l}\` (${PROMPT_LANGS.join(', ')})`);
@@ -248,6 +304,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   }
   const askRefusal = askModeRefusal(a.modes, a.template !== undefined);
   if (askRefusal) throw new Error(askRefusal);
+  const doorFlags = [['--door-skills', a.doorSkills], ['--door-skill-omit', a.doorSkillOmit], ['--door-rules', a.doorRules], ['--door-rules-omit', a.doorRulesOmit]].filter(([, v]) => v !== undefined).map(([f]) => f as string);
+  if (doorFlags.length && !a.modes.includes('door')) throw new Error(`${doorFlags.join(', ')} ${doorFlags.length === 1 ? 'sets' : 'set'} door mode's arm, and --modes does not include door`);
+  if (a.doorSkillOmit !== undefined && a.doorSkills === undefined) throw new Error('--door-skill-omit leaves skills out of --door-skills, which is not given');
   if (a.packages === 'workspace' && a.createVersion !== undefined) {
     throw new Error('--create-version names a published create-objectstack; --packages workspace scaffolds with the one this checkout builds');
   }
@@ -268,7 +327,10 @@ export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 /** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
 export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
 
-const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts), string]> = [
+/** The skills a run may give the live `claude` driver: `--ask-skills`, and door mode's arm (`--door-*`). */
+export type DriverSkills = Pick<CliArgs, 'askSkills' | 'doorSkills' | 'doorSkillOmit' | 'doorRules' | 'doorRulesOmit'>;
+
+const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills), string]> = [
   ['authorTimeoutMin', '--author-timeout'],
   ['authorMaxTurns', '--author-max-turns'],
   ['askMaxTurns', '--ask-max-turns'],
@@ -278,14 +340,26 @@ const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & D
   ['effort', '--effort'],
   ['authorEffort', '--author-effort'],
   ['askEffort', '--ask-effort'],
+  ['askSkills', '--ask-skills'],
+  ['doorSkills', '--door-skills'],
+  ['doorSkillOmit', '--door-skill-omit'],
+  ['doorRules', '--door-rules'],
+  ['doorRulesOmit', '--door-rules-omit'],
 ];
 
 /** The live flags of `keys` that `opts` sets, as typed (`--effort`), in {@link LIVE_FLAGS} order. */
-const givenFlags = (opts: DriverLimits & DriverModels & DriverEfforts, keys?: ReadonlyArray<keyof (DriverLimits & DriverModels & DriverEfforts)>): string[] =>
+const givenFlags = (opts: DriverLimits & DriverModels & DriverEfforts & DriverSkills, keys?: ReadonlyArray<keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills)>): string[] =>
   LIVE_FLAGS.filter(([key]) => (keys === undefined || keys.includes(key)) && opts[key] !== undefined).map(([, flag]) => flag);
 
-export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts = {}): AgentDriver {
+/** What {@link makeDriver} reads beyond the flags: this runner's checkout (a rules file inside it is refused). */
+export interface DriverContext {
+  repoRoot?: string;
+}
+
+export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts & DriverSkills = {}, context: DriverContext = {}): AgentDriver {
+  if (opts.doorRulesOmit !== undefined && opts.doorRules === undefined) throw new Error('--door-rules-omit leaves rules out of --door-rules, which is not given (`--door-rules builtin` gives the built-in corpus)');
   if (spec === 'claude') {
+    const rules = opts.doorRules !== undefined ? readDoorRules(opts.doorRules, { ...(opts.doorRulesOmit !== undefined ? { omit: opts.doorRulesOmit } : {}), ...(context.repoRoot !== undefined ? { repoRoot: context.repoRoot } : {}) }) : undefined;
     return new ClaudeCodeDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
       ...(opts.authorMaxTurns !== undefined ? { authorMaxTurns: opts.authorMaxTurns } : {}),
@@ -296,8 +370,19 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
       ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
+      ...(opts.askSkills !== undefined ? { askSkillsDir: opts.askSkills } : {}),
+      ...(opts.doorSkills !== undefined ? { doorSkillsDir: opts.doorSkills } : {}),
+      ...(opts.doorSkillOmit !== undefined ? { doorSkillOmit: opts.doorSkillOmit } : {}),
+      ...(rules ? { doorRules: rules } : {}),
     });
   }
+  // Only the `claude` CLI loads a project skill through its `Skill` tool; no other driver is given one.
+  const skills = givenFlags(opts, ['askSkills']);
+  if (skills.length && spec !== 'claude' && !spec.startsWith('recorded:')) {
+    throw new Error(`--ask-skills applies to the live \`claude\` driver only: it places Claude Code skills where a \`claude\` session discovers them and allows its \`Skill\` tool, and \`${spec}\` has neither`);
+  }
+  const door = givenFlags(opts, ['doorSkills', 'doorSkillOmit', 'doorRules', 'doorRulesOmit']);
+  if (door.length && spec !== 'claude' && !spec.startsWith('recorded:')) throw new Error(`${door.join(', ')}: ${doorModeRefusal(`\`${spec}\``)}`);
   if (spec.startsWith('recorded:')) {
     const given = givenFlags(opts);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
@@ -346,6 +431,16 @@ export function withSuppliedTemplate(record: Record<string, unknown>, cardRun: C
   return supplied && installed ? { ...record, template: supplied } : record;
 }
 
+/**
+ * The {@link CardStamp} of a loaded card: its id and the sha256 of the bytes
+ * the loader parsed (`LoadedScenario.fileSha256`), never a second read of the
+ * file. A card edited while its run went on is still stamped with the card
+ * that ran, and one moved or deleted meanwhile still gets its record written.
+ */
+export function loadedCardStamp(loaded: Pick<LoadedScenario, 'fileSha256' | 'card'>): CardStamp {
+  return { id: loaded.card.id, sha256: loaded.fileSha256 };
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   // `summary` reads records back; it runs nothing (`summary.ts`).
   if (argv[0] === 'summary') return summaryMain(argv.slice(1));
@@ -384,7 +479,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const live = makeDriver(args.driver, args);
+  // Door mode's rules file: the flag, else the variable, read only where door mode runs on the live driver.
+  const envRules = process.env[DOOR_RULES_ENV]?.trim();
+  if (args.doorRules === undefined && envRules && args.modes.includes('door') && args.driver === 'claude') {
+    args.doorRules = envRules;
+    console.log(`door rules: ${DOOR_RULES_ENV} names the rules file`);
+  }
+  if (args.modes.includes('door') && args.driver !== 'claude' && !args.driver.startsWith('recorded:')) throw new Error(doorModeRefusal(`\`--driver ${args.driver}\``));
+  const live = makeDriver(args.driver, args, checkout ? { repoRoot: repo } : {});
   // A replay reads the first N asks of each question turn: refused here, before any card runs, when it holds fewer.
   if (args.askRepeats !== undefined && live instanceof RecordedDriver) live.assertAskRepeats(args.askRepeats, chosen.map((c) => c.card));
   // A replay under other prompts than its recording's would grade one choice's answers as another's: refused here, before any card runs.
@@ -399,7 +501,9 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.authorModel ? ` · author model: ${info.authorModel}` : '') +
       (info.askModel ? ` · ask model: ${info.askModel}` : '') +
       (info.authorEffort ? ` · author effort: ${info.authorEffort}` : '') +
-      (info.askEffort ? ` · ask effort: ${info.askEffort}` : ''),
+      (info.askEffort ? ` · ask effort: ${info.askEffort}` : '') +
+      (info.askSkills ? ` · ask skills: ${askSkillsText(info.askSkills)}` : '') +
+      (args.modes.includes('door') ? ` · door arm: ${doorArmText(info.door)}` : ''),
   );
   if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
   if (promptChoice) console.log(`prompts: ${promptChoiceText(promptChoice)}`);
@@ -427,7 +531,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     os: (dir, a) => os(dir, a),
     readArtifact,
     namespace: readNamespace,
-    boot: (dir) => bootDev(dir),
+    // Door mode's host serves the OAuth authorization server its client's token comes from.
+    boot: (dir, o) => bootDev(dir, undefined, o?.authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };
   const templateBytes = args.template ? readFileSync(args.template) : undefined;
@@ -455,10 +560,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
-    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun), cardRun, supplied);
+    // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
+    const card = loadedCardStamp(loaded);
+    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
-    console.log(renderScorecard(cardScorecard(cardRun, packages)));
+    console.log(renderScorecard(cardScorecard(cardRun, packages, card)));
     console.log(`record: ${file}`);
     if (driver instanceof RecordingDriver && args.record) driver.save(args.record);
   }

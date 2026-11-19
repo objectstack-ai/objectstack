@@ -378,6 +378,7 @@ export * from './utils/parent-scope.js';
 // The other half of a view's field appetite: the fields its PREDICATES read,
 // which the column-derived `$select` never asked the server for.
 export * from './utils/predicate-fields.js';
+export * from './utils/withheld-fields.js';
 // The THIRD source of a view's field appetite: the fields it GROUPS BY. The
 // spec's `grouping` block is a sibling of `columns`, not a subset, so a grid
 // may group by a field it never shows (objectui#7179).

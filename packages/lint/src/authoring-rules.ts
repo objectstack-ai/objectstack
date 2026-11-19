@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
+import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
@@ -131,7 +132,6 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
-import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
@@ -148,8 +148,12 @@ import {
   type MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
+import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateActionObjectBinding } from './validate-action-object-binding.js';
+import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
+import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { validateFlowRegionShape } from './validate-flow-region-shape.js';
@@ -489,6 +493,18 @@ export interface AuthoringRuleContext {
    * nobody owns).
    */
   membershipKeyOwners?: MembershipKeyOwners;
+  /**
+   * The node types the deployment's automation engine runs, handed in only
+   * once the host has declared that vocabulary CLOSED
+   * (`AutomationEngine.getSealedNodeTypeVocabulary()`, answered after
+   * `sealNodeTypeVocabulary()` at `kernel:bootstrapped`). Set only by the
+   * runtime publish gate, and only on a sealed engine; ABSENT on the three CLI
+   * commands, whose stack does not say which plugins the deployment loads.
+   * Read by `validateFlowNodeExecutors` only, which judges nothing without it:
+   * a verdict drawn from a vocabulary still filling at boot is one the boot can
+   * contradict (AGENTS.md "Startup registry reads").
+   */
+  flowNodeTypeVocabulary?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1075,6 +1091,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
   },
+  // ADR-0149 D1 — a dataset measure or dimension with neither `synonyms` nor a
+  // `description` answers only to its own name and label, so a question asked
+  // in a user's own words (or in another language) matches nothing and is
+  // answered by an ungoverned object query. Advisory: the dataset is valid and
+  // draws every widget bound to it, and one that only feeds charts loses
+  // nothing. `parsed`, like the two dataset rules above, because the three read
+  // the same positions (`datasets[].dimensions[]` / `.measures[]`) and must be
+  // handed one document; `os lint` judges it on its unparsed stack, which the
+  // rule tolerates (it reads two optional keys and nothing a default fills).
+  //
+  // On the runtime publish door for the type that carries the declaration,
+  // `dataset`, and nothing else: another type's write would only re-judge a
+  // STORED dataset, which the differential cancels as a pre-existing
+  // condition. The rule reads the written dataset's own members and no other
+  // collection, so the per-write snapshot cannot invent a finding. One finding
+  // per member that lacks both keys, on the save response, never a refusal.
+  {
+    name: 'validateDatasetMemberVocabulary',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-member-vocabulary.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMemberVocabulary(stack),
+  },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
   // target must name a defined action, a `modal` target must name a declared
@@ -1315,9 +1357,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
     // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
     // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
-    // `validateAiToolReferences` resolves a skill's tools against a universe of
-    // three limbs — `stack.tools`, the platform registry and the materialised
-    // `action_<name>` family — and a per-write snapshot carries neither
+    // `validateAiToolReferences` resolves a skill's tools against `stack.tools`,
+    // the platform registry, the MCP door's file tools (for a skill offered
+    // over MCP) and the materialised `action_<name>` family — and a per-write
+    // snapshot carries neither
     // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
     // registers outside the registry is invisible to every static universe.
     // So at this door the member has no truthful `unresolved` verdict to give:
@@ -1811,6 +1854,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
+  // A standalone action that declares a location but no `objectName` binds to
+  // no object, so the button it declares never renders (every location is an
+  // object's surface). The handler still runs: an object-less action answers
+  // every object's action route (`resolveActionByPackage` falls through to the
+  // global scope). Gating: the placement the declaration names can never work. On the runtime door for an
+  // `action` write, whose snapshot carries the written action itself.
+  {
+    name: 'validateActionObjectBinding',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-object-binding.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action'],
+    run: (stack) => validateActionObjectBinding(stack),
+  },
   // [ADR-0142 D5] An assignment rule naming a user id carries one
   // organization's data in package metadata, and one targeting a declared queue
   // with no member parks every row it matches. Advisory: the engine never
@@ -1826,18 +1885,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
   },
-  // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
-  // duplicates its table on every restart.
-  {
-    name: 'validateSeedReplaySafety',
-    tier: 'advisory',
-    input: 'parsed',
-    commands: ALL,
-    source: 'packages/lint/src/validate-seed-replay-safety.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateSeedReplaySafety(stack),
-  },
+  // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
+  // replay warning) is retired: `SeedMode` itself refuses `insert` and
+  // `replace` at parse (ruling 6942780880), so no stack this rule could flag
+  // gets past the schema.
   // framework#3433 follow-up — #3433 exempts seed writes from the
   // `state_machine` rule, so a seeded status the FSM does not declare is no
   // longer rejected at write time. Re-added at author time; advisory, because
@@ -1851,6 +1902,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
+  },
+  // An active state machine with no (or an empty) `initialStates`: a record
+  // can be born in any state. Gating: the declaration works against its author
+  // on every create. Reads the object's own body alone, so it judges an `object` write
+  // at the runtime door exactly as on the CLI.
+  {
+    name: 'validateInertObjectDeclarations',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-inert-object-declarations.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) => validateInertObjectDeclarations(stack),
   },
   // ADR-0089 D3b — a mis-layered binding root, plus (#6128) the bare-identifier
   // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
@@ -2040,7 +2105,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the
   // runtime REFUSES to execute), plus `flow-branch-label-unmatched` and
   // `flow-default-edge-with-condition` (#4414 — a declaration that is inert, so
-  // the route silently differs from what the author wrote). The bar for
+  // the route silently differs from what the author wrote), and others since,
+  // `flow-approval-decision-unrouted` among them (an approval whose edges do not
+  // claim both decisions runs every branch on either). The bar for
   // promoting one is stated at the top of `lint-flow-patterns.ts`.
   {
     name: 'lintFlowPatterns',
@@ -2059,10 +2126,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         severity: f.severity ?? 'warning',
         rule: f.rule,
         where: f.where,
-        path: f.where,
+        // [#34818] A finding placed on a node carries its document path, so a
+        // draft's `_diagnostics` entry resolves onto that node; the rest keep
+        // `where` as before.
+        path: f.path ?? f.where,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the doors can
+        // render this finding in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
+  },
+  // A flow node whose `type` no executor runs fails every run with
+  // NO_EXECUTOR. Judged only against the SEALED vocabulary the runtime gate
+  // hands in (`AuthoringRuleContext.flowNodeTypeVocabulary`); the CLI commands
+  // have none, so there the entry runs and judges nothing — the vocabulary is
+  // the deployment's, not the stack's.
+  {
+    name: 'validateFlowNodeExecutors',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-node-executors.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) => validateFlowNodeExecutors(stack, ctx.flowNodeTypeVocabulary),
   },
   // A credential typed as a LITERAL into a flow position every flow reader is
   // served — an `http` node's `headers` or `url` query, a node's
@@ -2854,6 +2942,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
+  },
+  // An L2 action body that does not compile in the wrapper the runtime runs it
+  // in (`(async (input, ctx) => { SOURCE })`, built from the same function the
+  // rule compiles inside). Such a body passed every author-time door and then
+  // failed every run, on every door; `const input = ctx.input || {}` is the
+  // shape an AI author writes, a redeclared parameter. Gating: no reading of
+  // the metadata behaves as written, because the body never starts. A
+  // regular-expression literal the host refuses is the one `warning` arm (the
+  // two engines' regular-expression dialects measurably differ; see the
+  // module). Across the runtime publish gate for `action` writes and for
+  // `object` writes, whose inline `actions[]` the same walk reads; the
+  // differential charges a write only with the bodies it adds. The rule loads
+  // no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateActionBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCompiles(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
   // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is

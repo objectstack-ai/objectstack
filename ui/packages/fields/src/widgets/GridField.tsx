@@ -583,6 +583,54 @@ function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: Fi
   return String(value);
 }
 
+/**
+ * The cell values a `boolean` / `toggle` field's write is stored as, each with
+ * the boolean it stands for: the readings the engine's write normalisation
+ * (`BOOLEAN_READINGS` in `@objectstack/objectql`'s record validator) turns into
+ * a boolean before it validates a row, compared the same way (SameValueZero).
+ * Every other value is no reading, and is left as it is.
+ */
+const BOOLEAN_READINGS: ReadonlyMap<unknown, boolean> = new Map<unknown, boolean>([
+  ['true', true],
+  ['1', true],
+  [1, true],
+  ['false', false],
+  ['0', false],
+  [0, false],
+]);
+
+/**
+ * A column over a `boolean` / `toggle` child field: the `select` column
+ * `@object-ui/plugin-form` derives for one, whose two options store the
+ * strings `'true'` / `'false'` (`optionsFor` in `deriveMasterDetail.ts`). A
+ * grid column carries no field definition, so this option pair is what names
+ * the field's type here.
+ */
+function isBooleanSelectColumn(c: GridColumn): boolean {
+  if (c.type !== 'select' || !Array.isArray(c.options) || c.options.length !== 2) return false;
+  const values = new Set(c.options.map((o) => o.value));
+  return values.has('true') && values.has('false');
+}
+
+/**
+ * The row a column's `readonlyWhen` / `requiredWhen` predicate reads as
+ * `record`: the row, with each boolean column's cell read as the boolean it
+ * stands for. The select cell writes the string `'true'` / `'false'` into the
+ * row, so `record.won == true` compared a string and the cell marker showed
+ * the wrong state, while the server — which stores and judges the boolean —
+ * refused the row. Only the predicate's view changes: the cell still shows,
+ * and the row still saves, what the select wrote.
+ */
+function ruleRecordOf(booleanColumns: readonly string[], row: Row | undefined): Record<string, unknown> {
+  const base: Row = row || {};
+  let out: Row | undefined;
+  for (const name of booleanColumns) {
+    const judged = BOOLEAN_READINGS.get(base[name]);
+    if (judged !== undefined) (out ??= { ...base })[name] = judged;
+  }
+  return out ?? base;
+}
+
 function coerce(type: string | undefined, raw: string): any {
   if (isNumeric(type)) {
     if (raw === '' || raw == null) return null;
@@ -788,7 +836,13 @@ function GridFieldBody({
 
   // Per-cell CEL rule state (B2 in grids). A column with no readonlyWhen/
   // requiredWhen resolves to its static flags (cheap fast-path — no engine
-  // call). Otherwise evaluate against the row (`record`) + header (`parent`).
+  // call). Otherwise evaluate against the row (`record`) + header (`parent`),
+  // the row's boolean cells read as booleans (`ruleRecordOf`). Every column,
+  // shown or not, since a predicate may read any cell of the row.
+  const booleanColumns = React.useMemo(
+    () => allColumns.filter(isBooleanSelectColumn).map((c) => c.name),
+    [allColumns],
+  );
   const cellRules = useCallback(
     (c: GridColumn, row: Row): { readonly: boolean; required: boolean } => {
       if (!c.readonlyWhen && !c.requiredWhen) {
@@ -796,14 +850,14 @@ function GridFieldBody({
       }
       const s = resolveFieldRuleState(
         { readonlyWhen: c.readonlyWhen, requiredWhen: c.requiredWhen },
-        (row || {}) as Record<string, unknown>,
+        ruleRecordOf(booleanColumns, row),
         { required: !!c.required, readonly: false },
         undefined,
         contextRecord ? { parent: contextRecord } : undefined,
       );
       return { readonly: s.readonly, required: s.required };
     },
-    [contextRecord],
+    [contextRecord, booleanColumns],
   );
   // List mode: rows are read-only at-a-glance; editing happens in the full form.
   const isList = displayMode === 'list' && !readonly;

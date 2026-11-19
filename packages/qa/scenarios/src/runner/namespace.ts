@@ -72,6 +72,8 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
       ...(ex.lookups ? { lookups: ex.lookups.map((l) => ({ ...l, object: o(l.object), to: o(l.to) })) } : {}),
       ...(ex.dashboards ? { dashboards: ex.dashboards.map(o) } : {}),
       ...(ex.appNavTargets ? { appNavTargets: ex.appNavTargets.map(o) } : {}),
+      // A dataset is named plainly (the naming rule); the object it reads is an object, and carries the prefix.
+      ...(ex.datasets ? { datasets: ex.datasets.map((d) => ({ ...d, object: o(d.object) })) } : {}),
     },
     run: {
       ...c.run,
@@ -105,6 +107,9 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
           : {}),
       })),
       ...(c.run.agentActions ? { agentActions: c.run.agentActions.map((a) => ({ ...a, name: o(a.name), object: o(a.object) })) } : {}),
+      ...(c.run.datasetQuestions
+        ? { datasetQuestions: c.run.datasetQuestions.map((q) => (q.expect.kind === 'fallback_labelled' ? { ...q, expect: { ...q.expect, object: o(q.expect.object) } } : q)) }
+        : {}),
     },
     iterate: {
       ...c.iterate,

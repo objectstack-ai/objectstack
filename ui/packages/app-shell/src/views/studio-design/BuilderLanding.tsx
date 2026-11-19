@@ -34,7 +34,19 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, fetchListedPackageIds, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
-import { fetchPackageCustomizationCounts, type PackageCustomizationCounts } from './packageCustomizations-io.js';
+import {
+  customizationCountsOf,
+  fetchPackageCustomizations,
+  type PackageCustomizationCounts,
+  type PackageCustomizations,
+} from './packageCustomizations-io.js';
+import { LandingCustomizationsPanel, type AppCustomizationRead } from './LandingCustomizationsPanel.js';
+import {
+  readActionObjects,
+  switchedOffActionListPath,
+  switchedOffActionPath,
+  type ActionObjects,
+} from './switchedOffActionTargets.js';
 import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
@@ -61,12 +73,26 @@ const RECENT_PACKAGES_SHOWN = 3;
  * read. No entry means the read has not answered: the line shows no number.
  */
 type CustomizationLine =
-  | { kind: 'read'; counts: PackageCustomizationCounts }
+  | {
+      kind: 'read';
+      counts: PackageCustomizationCounts;
+      read: PackageCustomizations;
+      /**
+       * objectstack#34724 — which object holds each switched-off action, read
+       * only when the base has one (`readActionObjects`); empty when that read
+       * failed, so every action then links to its item page.
+       */
+      actionObjects?: ActionObjects;
+    }
   | { kind: 'failed'; message: string };
 
 /** A package's Studio address on one pillar, the way `open` below spells it. */
 const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
   `/studio/${encodeURIComponent(packageId)}/${pillar}`;
+
+/** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
+const SWITCHED_OFF_ACTIONS_NAMED = 3;
+
 
 export function BuilderLanding(): React.ReactElement {
   const navigate = useNavigate();
@@ -156,6 +182,15 @@ export function BuilderLanding(): React.ReactElement {
   const writable = cards.filter((p) => p.writable);
   const readonly = cards.filter((p) => !p.writable);
 
+  // objectstack#35018 — "Recently viewed" is drawn only when it adds something
+  // to the cards above it. When its entries are exactly the apps those cards
+  // already show (one recent visit to the only app, say), the row repeats the
+  // page and is left out; any entry the cards do not show, or any card it does
+  // not repeat, keeps the whole row.
+  const cardIds = new Set(cards.map((p) => p.id));
+  const recentRepeatsCards =
+    recentPackages.length === cardIds.size && recentPackages.every((item) => cardIds.has(item.name));
+
   // ADR-0146 D3 — each read-only BASE's card carries "n customized, m switched
   // off", the server's counts (`GET /packages/:id/customizations`), one read
   // per card drawn. A pair (`<base>.custom`) draws no line and is never sent:
@@ -166,30 +201,60 @@ export function BuilderLanding(): React.ReactElement {
     .map((p) => p.id)
     .join('\n');
   const [customizationLines, setCustomizationLines] = React.useState<Record<string, CustomizationLine>>({});
+  const metadataClient = useMetadataClient();
   React.useEffect(() => {
     if (!customizationTargetKey) return;
     let cancelled = false;
     for (const id of customizationTargetKey.split('\n')) {
-      fetchPackageCustomizationCounts(id).then(
-        (counts) => {
-          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', counts } }));
-        },
-        (e: unknown) => {
-          const message = e instanceof Error ? e.message : String(e);
-          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'failed', message } }));
-        },
-      );
+      // objectstack#34714 — the whole answer is kept: the card draws its two
+      // numbers off it and the "Customizations in this environment" panel its
+      // rows, so one read serves both and the panel's total is the cards' sum.
+      fetchPackageCustomizations(id)
+        .then(async (read) => {
+          const counts = customizationCountsOf(read);
+          // objectstack#34724 — a switched-off action's link needs its object,
+          // which the ledger row does not name: read it before drawing the line.
+          if (!counts.switchedOffActions?.length) return { counts, read };
+          const actionObjects = await readActionObjects(metadataClient, id).catch((): ActionObjects => ({}));
+          return { counts, read, actionObjects };
+        })
+        .then(
+          (line) => {
+            if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', ...line } }));
+          },
+          (e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e);
+            if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'failed', message } }));
+          },
+        );
     }
     return () => {
       cancelled = true;
     };
+    // Keyed on the ids alone: the client only carries the reads, and a new
+    // client identity must not read every card again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customizationTargetKey]);
+  // objectstack#34714 — the panel's apps are the cards' bases, in card order;
+  // its reads are the same answers the cards draw.
+  const customizationApps = React.useMemo(
+    () => readonly.filter((p) => !isCustomizationPackage(p.id)).map((p) => ({ id: p.id, name: p.name })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customizationTargetKey, pkgs],
+  );
+  const customizationReads = React.useMemo(() => {
+    const out: Record<string, AppCustomizationRead> = {};
+    for (const [id, line] of Object.entries(customizationLines)) {
+      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read, actionObjects: line.actionObjects } : line;
+    }
+    return out;
+  }, [customizationLines]);
+
   // objectui#11553 — how many flows belong to no package: the same published
   // and draft union the package-less scope lists (`loadPackageLessSurfaces`).
   // The entry is drawn once the read says there is at least one; a failed read
   // draws it with no number, so the scope stays reachable when the count is
   // unknown. `null` = not answered yet.
-  const metadataClient = useMetadataClient();
   const [packageLessFlows, setPackageLessFlows] = React.useState<number | 'failed' | null>(null);
   React.useEffect(() => {
     let cancelled = false;
@@ -254,6 +319,21 @@ export function BuilderLanding(): React.ReactElement {
       customized: line.counts.customized,
     });
     const linkClass = 'hover:text-foreground hover:underline';
+    // objectstack#34724 — the "switched off" count leads to the items: a flow's
+    // switch is in the Automations pillar, an action's where the action is
+    // drawn (`switchedOffActionPath`: its object's Actions view, or its own
+    // item page when no object holds it). When every switched-off item is an
+    // action, the count opens it (one) or the action list (several); when
+    // flows are among them, the count opens Automations. Whenever the count
+    // alone does not land on the action, the line names each switched-off
+    // action as a link to where it is switched (the action list marks none of
+    // them), up to SWITCHED_OFF_ACTIONS_NAMED, then a "more" link to the list.
+    const offActions = line.counts.switchedOffActions ?? [];
+    const actionPath = (name: string) => switchedOffActionPath(baseId, name, line.actionObjects?.[name]);
+    const offOnlyActions = offActions.length > 0 && offActions.length === line.counts.switchedOff;
+    const nameActions = offActions.length > 1 || (offActions.length > 0 && !offOnlyActions);
+    const namedActions = offActions.slice(0, SWITCHED_OFF_ACTIONS_NAMED);
+    const moreActions = offActions.length - namedActions.length;
     return (
       <p data-testid="studio-landing-customizations" data-state="read" className={lineClass}>
         {pair ? (
@@ -270,8 +350,19 @@ export function BuilderLanding(): React.ReactElement {
         )}
         {t('engine.studio.landing.customizations.separator', locale)}
         <Link
-          to={studioPillarPath(baseId, 'automations')}
-          title={t('engine.studio.landing.customizations.switchedOffTitle', locale)}
+          to={
+            !offOnlyActions
+              ? studioPillarPath(baseId, 'automations')
+              : offActions.length === 1
+                ? actionPath(offActions[0])
+                : switchedOffActionListPath(baseId)
+          }
+          title={t(
+            offOnlyActions
+              ? 'engine.studio.landing.customizations.switchedOffActionsTitle'
+              : 'engine.studio.landing.customizations.switchedOffTitle',
+            locale,
+          )}
           data-testid="studio-landing-customizations-switched-off"
           className={linkClass}
         >
@@ -279,6 +370,37 @@ export function BuilderLanding(): React.ReactElement {
             switchedOff: line.counts.switchedOff,
           })}
         </Link>
+        {nameActions && (
+          <span data-testid="studio-landing-customizations-switched-off-actions">
+            {t('engine.studio.landing.customizations.separator', locale)}
+            {t('engine.studio.landing.customizations.switchedOffActionsLead', locale)}
+            {namedActions.map((name, i) => (
+              <React.Fragment key={name}>
+                {i > 0 && t('engine.studio.landing.customizations.separator', locale)}
+                <Link
+                  to={actionPath(name)}
+                  title={t('engine.studio.landing.customizations.switchedOffActionsTitle', locale)}
+                  data-testid="studio-landing-customizations-switched-off-action"
+                  className={`${linkClass} font-mono`}
+                >
+                  {name}
+                </Link>
+              </React.Fragment>
+            ))}
+            {moreActions > 0 && (
+              <>
+                {' '}
+                <Link
+                  to={switchedOffActionListPath(baseId)}
+                  data-testid="studio-landing-customizations-switched-off-actions-more"
+                  className={linkClass}
+                >
+                  {tFormat('engine.studio.landing.customizations.switchedOffActionsMore', locale, { count: moreActions })}
+                </Link>
+              </>
+            )}
+          </span>
+        )}
       </p>
     );
   };
@@ -416,11 +538,23 @@ export function BuilderLanding(): React.ReactElement {
         </section>
       )}
 
+      {/* objectstack#34714 — every change this deployment made to its
+        * installed apps, in one list, under the apps themselves. */}
+      <LandingCustomizationsPanel
+        apps={customizationApps}
+        reads={customizationReads}
+        locale={locale}
+        headingClass={headingClass}
+      />
+
       <h2 className={headingClass}>{t('engine.studio.landing.ownHeading', locale)}</h2>
       <div data-testid="studio-landing-own" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {writable.map((p) => (
           <div key={p.id} data-package-id={p.id} className="rounded-lg border bg-background">
-            <div className="flex items-center gap-2.5 px-3 py-2.5">
+            {/* objectstack#35018 — the app's id is not on the card's face, only
+              * in its hover title, as on an installed app's card. Every app in
+              * this section is writable, so the card carries no badge saying so. */}
+            <div title={p.id} className="flex items-center gap-2.5 px-3 py-2.5">
               <button
                 type="button"
                 onClick={() => open(p.id)}
@@ -431,12 +565,8 @@ export function BuilderLanding(): React.ReactElement {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-medium">{p.name}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{p.id}</span>
                 </span>
               </button>
-              <span className="rounded bg-emerald-400/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-300">
-                {t('engine.studio.pkg.writable', locale)}
-              </span>
               {/* ADR-0070 D4 — Duplicate clones a writable base: the copy is a new
                 * writable package holding the base's sys_metadata rows. It is
                 * offered here, on writable bases only; a read-only package's card
@@ -520,19 +650,21 @@ export function BuilderLanding(): React.ReactElement {
 
       {/* objectui#11863 — the packages last opened here. objectstack#34715
         * orders the page by the errand: installed apps first, the author's own
-        * apps next, then the other entries, this one among them. */}
-      {recentPackages.length > 0 && (
+        * apps next, then the other entries, this one among them.
+        * objectstack#35018 — left out when it only repeats those cards. */}
+      {recentPackages.length > 0 && !recentRepeatsCards && (
         <>
           <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
           <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {recentPackages.map((item) => (
-              <Link key={item.id} to={item.href} className={entryCardClass}>
+              // objectstack#35018 — the app's id is only the entry's hover
+              // title, as on the cards above; its face shows the name.
+              <Link key={item.id} to={item.href} title={item.name} className={entryCardClass}>
                 <span className={entryIconClass}>
                   <Clock className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
                 </span>
               </Link>
             ))}

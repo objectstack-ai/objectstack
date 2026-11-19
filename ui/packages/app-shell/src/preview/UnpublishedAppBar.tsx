@@ -55,6 +55,7 @@ import { toast } from 'sonner';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { useAdapter } from '../providers/AdapterProvider.js';
 import { emitPublishReceipt } from '../assistant/assistantBus.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { CommitTimeline } from './CommitTimeline.js';
@@ -65,6 +66,7 @@ export function UnpublishedAppBar() {
   const { appName } = useParams();
   const location = useLocation();
   const { apps, refresh } = useMetadata();
+  const adapter = useAdapter();
   const { t } = useObjectTranslation();
   const [publishing, setPublishing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -102,11 +104,20 @@ export function UnpublishedAppBar() {
       const appKey = typeof (app as { name?: unknown }).name === 'string' && (app as { name: string }).name
         ? (app as { name: string }).name
         : routeApp;
+      // objectstack#35054 (route D) — the body is the app as its author
+      // STORED it (`getAuthoredItem`, the untranslated layers, read at the
+      // address this write names), not the served row above: that row is
+      // translated for the console's locale, and the door stores a body
+      // verbatim, so publishing in zh-CN stored the app's label and every
+      // navigation label in Chinese. An app with nothing stored to read is not
+      // published from the served copy.
+      const stored = adapter?.getAuthoredItem ? await adapter.getAuthoredItem('app', appKey) : null;
+      if (!stored) throw new Error(`app/${appKey}`);
       const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(appKey)}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ ...(app as Record<string, unknown>), _unpublished: false }),
+        body: JSON.stringify({ ...stored, _unpublished: false }),
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => null);

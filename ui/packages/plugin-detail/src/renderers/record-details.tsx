@@ -34,6 +34,7 @@ import {
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
 import { hasCellValue } from '../emptiness';
+import { EmptySectionsLineContext } from '../defaultRecordPage';
 import { RecordPageProvenanceContext } from '../recordPageProvenance';
 import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
@@ -1037,8 +1038,10 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         // entry with no schema default, and states the fallback as the
         // renderer's: hiding is on, so a section whose fields are ALL empty
         // renders nothing at all — no heading, no skeleton — and `false` keeps
-        // the section a brand-new record needs (read-only, its heading plus one
-        // fold row since objectui#13386; edit mode, every row).
+        // the section a brand-new record needs (read-only, named in the body's
+        // closing empty-sections line and drawn as its heading plus one fold
+        // row when that line expands, objectui#13386 and objectstack#35019;
+        // edit mode, every row).
         //
         // ⭐ The default is resolved HERE, on an AUTHORED section, and that
         // placement is the whole design. `DetailSection` tests `=== true`, so
@@ -1198,13 +1201,17 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         >
           {/* objectui#12701 — the record is the context host's (the record
               page's read, or the binding's row above); this body never reads it
-              again, it waits for `ctx.data`. */}
-          <DetailView
-            schema={synthesized}
-            dataSource={ctx.dataSource}
-            inlineEdit={inlineEditDefault}
-            recordFromHost
-          />
+              again, it waits for `ctx.data`. objectstack#35019 — a details
+              body folds its entirely empty sections into one closing line,
+              on an authored page as on the default one. */}
+          <EmptySectionsLineContext.Provider value>
+            <DetailView
+              schema={synthesized}
+              dataSource={ctx.dataSource}
+              inlineEdit={inlineEditDefault}
+              recordFromHost
+            />
+          </EmptySectionsLineContext.Provider>
         </RecordFieldAccessForRecord>
       </RecordPageProvenanceContext.Provider>
     </div>

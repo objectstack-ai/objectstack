@@ -26,7 +26,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, act, within } from '@testing-library/react';
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', () => ({
@@ -76,6 +76,9 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     DropdownMenuLabel: Pass,
     DropdownMenuSeparator: () => null,
     DropdownMenuGroup: Pass,
+    DropdownMenuSub: Pass,
+    DropdownMenuSubTrigger: Pass,
+    DropdownMenuSubContent: Pass,
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,
@@ -160,12 +163,14 @@ vi.mock('../../providers/AdapterProvider', () => ({ useAdapter: () => fakeAdapte
 
 import { AppHeader } from '../AppHeader';
 
-/** Lets the async posture/config gates resolve and React flush before reading an absence. */
+/**
+ * Lets the async posture/config gates resolve and React flush before reading an
+ * absence. A macrotask, not an element to wait on: on a single-tenant
+ * deployment the resolved config REMOVES the avatar menu's organization
+ * entries, so no element marks "resolved" in every case.
+ */
 async function settle() {
-  await waitFor(() => expect(screen.getByTestId('header-my-organizations')).toBeInTheDocument());
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 }
 
 beforeEach(() => {
@@ -183,8 +188,8 @@ describe('AppHeader — organization context at one membership (#5287)', () => {
   it('isolated posture: names the organization read-only, with no switcher', async () => {
     render(<AppHeader variant="home" />);
 
-    expect(await screen.findByTestId('current-organization-indicator')).toBeInTheDocument();
-    expect(screen.getByText('Titanwind EHR')).toBeInTheDocument();
+    const indicator = await screen.findByTestId('current-organization-indicator');
+    expect(within(indicator).getByText('Titanwind EHR')).toBeInTheDocument();
 
     // The counter-probe that keeps the pre-fix zero honest: this bar renders
     // session data. Before the fix, this line passed and the two above did not.
@@ -196,12 +201,14 @@ describe('AppHeader — organization context at one membership (#5287)', () => {
     expect(screen.queryByText('Switch organization')).not.toBeInTheDocument();
   });
 
-  it('multiple memberships: unchanged — the switcher renders and the indicator stands down', async () => {
+  it('multiple memberships: the switcher is the avatar menu\'s, the bar draws none, and the indicator still names the organization', async () => {
     organizations = [SOLO, SECOND];
     render(<AppHeader variant="home" />);
 
-    expect(await screen.findByTestId('workspace-switcher')).toBeInTheDocument();
-    expect(screen.queryByTestId('current-organization-indicator')).not.toBeInTheDocument();
+    const indicator = await screen.findByTestId('current-organization-indicator');
+    expect(within(indicator).getByText('Titanwind EHR')).toBeInTheDocument();
+    expect(screen.getByTestId('header-switch-organization')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-switcher')).not.toBeInTheDocument();
   });
 
   it('single-tenant posture: nothing new renders — no organization name anywhere', async () => {

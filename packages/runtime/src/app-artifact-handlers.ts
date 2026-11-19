@@ -250,7 +250,7 @@ export interface AppArtifactHandlerBindingOptions {
      */
     withholdHooksWithoutBody?: boolean;
     /**
-     * [#26170] The `i18n` service a hook's declared refusal is translated
+     * [#26170] The `i18n` service a hook's (and, #34273, an action's) declared refusal is translated
      * through, read at refusal time. Absent, a declared refusal is answered
      * with its declared message.
      */
@@ -483,6 +483,8 @@ export function bindAppArtifactHandlers(
                     ql,
                     logger,
                     appId,
+                    // [#34273] An action's declared refusal is translated as a hook's is.
+                    i18n: options.i18n,
                     getService: options.getService,
                     originPackageId: handlerOwnerPackage(actionOwner),
                 });

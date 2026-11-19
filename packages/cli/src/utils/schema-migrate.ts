@@ -2016,7 +2016,9 @@ export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): 
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
     const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
-    parts.push(`${cols} temporal column(s) to converge in place (~${formatRows(rows)} rows)`);
+    // [#34973] "column(s)", not "temporal column(s)": the boolean storage
+    // convergence (`normalize_boolean_storage`) is counted here too.
+    parts.push(`${cols} column(s) to converge in place (~${formatRows(rows)} rows)`);
   }
   // [#30636] Named only when there are some, like the in-place count above.
   const rebuilds = pending.filter((p) => p.kind === 'rebuild_table').length;

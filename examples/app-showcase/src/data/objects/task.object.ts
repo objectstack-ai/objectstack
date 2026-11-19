@@ -115,6 +115,10 @@ export const Task = ObjectSchema.create({
       // — an authored message is emitted verbatim unless the bundle carries
       // that key, and the bundle wins once it does (#14518).
       message: 'Invalid task status transition.',
+      // A task is created on the board's first two columns: `backlog` (the
+      // default) or `todo`. Updates only, so this states the entry rather
+      // than checking it on create.
+      initialStates: ['backlog', 'todo'],
       transitions: {
         backlog: ['todo'],
         todo: ['in_progress', 'backlog'],

@@ -307,7 +307,8 @@ graph TD
 - **Scope depth** — grant a permission set `readScope: 'unit'` /
   `'unit_and_below'`; the owner-match widens to the caller's unit (or its
   subtree). A position assignment's `business_unit_id` anchor decides *which*
-  unit that means for multi-unit users (ADR-0090 Addendum).
+  unit that means for multi-unit users (ADR-0090 Addendum). Enterprise edition
+  only: on the open edition these scopes behave as owner-only.
 - **Sharing-rule recipients** — share with
   `{ type: 'unit_and_subordinates', value: 'east' }` to reach everyone in the
   East subtree, or `{ type: 'position', value: 'sales_manager' }` to reach a

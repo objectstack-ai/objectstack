@@ -204,7 +204,7 @@ describe('grid groups follow a select field\'s declared option order (objectui#1
       const ds = renderServerGrouped([{ field: 'status' }]);
       await settled(ds, 7);
       await vi.waitFor(() =>
-        expect(groupLabels()).toEqual([...DECLARED_STATUS, 'legacy', '(empty)']),
+        expect(groupLabels()).toEqual([...DECLARED_STATUS, 'legacy', 'Empty']),
       );
     });
 
@@ -218,7 +218,7 @@ describe('grid groups follow a select field\'s declared option order (objectui#1
       const ds = renderServerGrouped([{ field: 'status', order: 'desc' }]);
       await settled(ds, 7);
       await vi.waitFor(() =>
-        expect(groupLabels()).toEqual([...DECLARED_STATUS].reverse().concat(['legacy', '(empty)'])),
+        expect(groupLabels()).toEqual([...DECLARED_STATUS].reverse().concat(['legacy', 'Empty'])),
       );
     });
 
@@ -234,7 +234,7 @@ describe('grid groups follow a select field\'s declared option order (objectui#1
       const ds = renderClientGrouped([{ field: 'status' }]);
       await settled(ds, 7);
       await vi.waitFor(() =>
-        expect(groupLabels()).toEqual([...DECLARED_STATUS, 'legacy', '(empty)']),
+        expect(groupLabels()).toEqual([...DECLARED_STATUS, 'legacy', 'Empty']),
       );
     });
 
@@ -242,7 +242,7 @@ describe('grid groups follow a select field\'s declared option order (objectui#1
       const ds = renderClientGrouped([{ field: 'status', order: 'desc' }]);
       await settled(ds, 7);
       await vi.waitFor(() =>
-        expect(groupLabels()).toEqual([...DECLARED_STATUS].reverse().concat(['legacy', '(empty)'])),
+        expect(groupLabels()).toEqual([...DECLARED_STATUS].reverse().concat(['legacy', 'Empty'])),
       );
     });
 
@@ -289,7 +289,7 @@ describe('the hook\'s option order, below the grid (objectui#11809)', () => {
     const statusRows = ROWS.map((r) => ({ ...r }));
     const { result } = renderHook(() => useGroupedData({ fields: [{ field: 'status' }] }, statusRows));
     expect(result.current.groups.map((g) => g.label)).toEqual([
-      '(empty)',
+      'Empty',
       'backlog',
       'done',
       'in_progress',

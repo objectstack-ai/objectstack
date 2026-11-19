@@ -477,6 +477,12 @@ export type PromptInputProps = Omit<
   onError?: (err: {
     code: "max_files" | "max_file_size" | "accept";
     message: string;
+    /**
+     * The files this refusal turned away, so a host can name them to the
+     * user. Set on `max_file_size`: every over-size file of the pick, whether
+     * the rest of the pick attached or not.
+     */
+    files?: File[];
   }) => void;
   onSubmit: (
     message: PromptInputMessage,
@@ -554,11 +560,21 @@ export const PromptInput = ({
       const withinSize = (f: File) =>
         maxFileSize ? f.size <= maxFileSize : true;
       const sized = accepted.filter(withinSize);
-      if (accepted.length > 0 && sized.length === 0) {
+      const oversized = accepted.filter((f) => !withinSize(f));
+      // Report EVERY over-size file, a mixed pick included: the rest of the
+      // pick still attaches, and an over-size file dropped without a report
+      // just fails to appear, with no reason given (objectstack#34463).
+      if (oversized.length > 0) {
         onError?.({
           code: "max_file_size",
-          message: "All files exceed the maximum size.",
+          message:
+            sized.length === 0
+              ? "All files exceed the maximum size."
+              : "Some files exceed the maximum size and were not added.",
+          files: oversized,
         });
+      }
+      if (sized.length === 0) {
         return;
       }
 

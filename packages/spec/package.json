@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/spec",
-  "version": "18.5.0",
+  "version": "18.6.0",
   "description": "ObjectStack Protocol & Specification - TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "license": "Apache-2.0",
   "type": "commonjs",
@@ -314,6 +314,7 @@
     "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
+    "check:skill-served-sections": "tsx scripts/check-skill-served-sections.ts --self-test && tsx scripts/check-skill-served-sections.ts",
     "check:skill-examples": "tsx scripts/check-skill-examples.ts --self-test && tsx scripts/check-skill-examples.ts",
     "check:yaml-examples": "tsx scripts/check-yaml-examples.ts --self-test && tsx scripts/check-yaml-examples.ts",
     "check:template-manifests": "tsx scripts/check-template-manifests.ts --self-test && tsx scripts/check-template-manifests.ts",

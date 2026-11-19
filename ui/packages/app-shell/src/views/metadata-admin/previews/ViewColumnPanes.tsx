@@ -147,6 +147,14 @@ export function ColumnChip({
 /* ───────────────────────── Field list row (vertical) ──────────────────── */
 
 /**
+ * The default of {@link FieldListRow}'s `nameOnHover` for the rows below it.
+ * Studio's list-view panel provides `true` around the list it hosts, so its
+ * rows keep the machine name on hover only; nothing else provides it, so the
+ * Setup designers' rows are unchanged.
+ */
+export const FieldListRowNameOnHover = React.createContext(false);
+
+/**
  * FieldListRow — a full-width, vertically-stacked variant of {@link ColumnChip}
  * for the right-panel Fields list. Same HTML5 drag-and-drop contract (click to
  * select, drag the handle to reorder, × to remove) but laid out as a list row
@@ -169,6 +177,7 @@ export function FieldListRow({
   onDragOverRow,
   onDropRow,
   copilotAdded,
+  nameOnHover: nameOnHoverProp,
 }: {
   index: number;
   label: string;
@@ -189,7 +198,14 @@ export function FieldListRow({
    * the row carries the copilot's draft chip. Absent, the row is unchanged.
    */
   copilotAdded?: boolean;
+  /**
+   * Show the machine name only on hover (the label's title), not as the
+   * secondary text beside it. Omitted, {@link FieldListRowNameOnHover} decides.
+   */
+  nameOnHover?: boolean;
 }) {
+  const nameOnHoverDefault = React.useContext(FieldListRowNameOnHover);
+  const nameOnHover = nameOnHoverProp ?? nameOnHoverDefault;
   // The designer locale, read as this file's `AddFieldPopover` reads it
   // (objectui#10862): both hosts (`FieldsListEditor`, `ReportDefaultInspector`)
   // render the popover beside these rows.
@@ -253,7 +269,7 @@ export function FieldListRow({
         {copilotAdded && (
           <DraftChip locale={locale} testId="studio-draft-element-chip" of={fieldName} />
         )}
-        {fieldName && fieldName !== label && (
+        {fieldName && fieldName !== label && !nameOnHover && (
           <code className="max-w-[7rem] shrink-0 truncate text-[10px] text-muted-foreground">
             {fieldName}
           </code>

@@ -57,6 +57,7 @@ const COLUMN_MIRRORS: Record<ListViewVisualization, ColumnMirror | null> = {
   map: null,
   chart: null,
   tree: null,
+  timesheet: null,
 };
 
 /**

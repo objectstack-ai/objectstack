@@ -59,7 +59,7 @@ import {
 import { isActionSwitchedOff, type ActionDef } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
+import { ChevronDown, Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 // Straight from `@object-ui/react`, NOT through `../providers/MetadataProvider`
@@ -1060,7 +1060,13 @@ const DeclaredActionsToolbar: React.FC<
             {/* As in the override fold: the trigger appears once a folded
                 lever is actually shown, so no empty menu is left behind. A
                 neutral control — the amber shield marks the exception path
-                only. */}
+                only.
+
+                objectstack#35016 — the entry is NAMED, at every width, with a
+                disclosure chevron and no `⋯`: the record page's header row
+                (and, on a phone, its bottom bar) keeps the page's one `⋯`, so
+                the two menus on one screen are told apart by look before
+                either is opened. */}
             {foldDecisionOthers && decisionOthersDrawn && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1068,13 +1074,11 @@ const DeclaredActionsToolbar: React.FC<
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-11 shrink-0 gap-1 px-2 sm:h-9"
-                    aria-label={moreLabel}
-                    title={moreLabel}
+                    className="h-11 shrink-0 gap-1 px-3 sm:h-9"
                     data-testid="declared-actions-decision-menu"
                   >
-                    <MoreHorizontal className="h-4 w-4" />
-                    <span className="hidden sm:inline">{String(t('common.more', { defaultValue: 'More' }))}</span>
+                    <span>{moreLabel}</span>
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-48">

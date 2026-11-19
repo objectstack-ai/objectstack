@@ -1,5 +1,335 @@
 # @objectstack/platform-objects
 
+## 18.6.0
+
+### Minor Changes
+
+- e53e02e: feat(console): a Mobile App page in the account app shows the code that connects the ObjectOS mobile app to this server
+  
+  Clause-②: yes (widening) — a new account-app navigation entry and component (`account:mobile_app`), a new `mobileApp` namespace in the `@object-ui/i18n` packs, and a new optional `features.publicBaseUrl` served on `GET /api/v1/auth/config` (declared in `AuthFeaturesConfigSchema`, registered in `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`, typed on `AuthPublicConfig`); nothing that worked before is refused
+  Metadata-protocol: added
+  
+  The account app (avatar menu → Profile) gains a **Mobile App** entry after Profile. Its page shows a QR code that encodes `objectos://connect?server=<this server's public base URL, URL-encoded>`, the same link as copyable text, and one line saying the code holds only the server's address, never the account.
+  
+  `GET /api/v1/auth/config` now serves `features.publicBaseUrl`: the base URL the auth layer builds every link from (`OS_AUTH_URL`, then `BETTER_AUTH_URL`, then `OS_BASE_URL`), with any sub-path mount, as an address only (scheme, host and path; a credential, query or fragment in the setting is never served). The page encodes that URL. The page normalises it the same way again before use, so the code carries the server's address and nothing else. The browser's own address is never used, because it can be an internal or proxied host. When that URL names `localhost` or a private address, or a public host on plain `http:` (the mobile app signs in through it, so it must be HTTPS), the page shows no code and says how to fix it: set `OS_AUTH_URL` on the server to its public `https://` address and restart it. A server that does not publish the field gets a page saying it does not offer this yet.
+  
+  No app-store links are shown: no setting carries them today.
+
+### Patch Changes
+
+- 84e6bbb: feat(app-shell): the action result dialog draws a `table` answer field as rows, and Import Users shows its result per row in one
+  
+  Clause-②: yes (widening) — the console now draws `format: 'table'` fields (declared since the spec half) instead of their label alone, and `sys_user.import_sso_users` draws its per-row report as a table instead of JSON; no input is refused that was accepted before
+  Metadata-protocol: none
+  
+  The console's action result dialog, and the param dialog's preflight panel that shares its field renderer, draw a field with `format: 'table'` as a table: one row per element of the array, one cell per entry of the field's `columns`, in order, under the column's `label` (or its `path`). A cell reads its `path` in the element; a missing key or a `null` draws an empty cell, a value that fits the column's `format` draws in it, and anything else draws as one line of JSON. An element that is not a plain object draws as JSON in its row's first cell. An empty array draws the header over a "No rows to display" line. The dialog widens when it draws a table.
+  
+  A `code-list` field now draws as a code list only when its value is an array of strings, as the renderer contract says; any other array draws as JSON.
+  
+  `@objectstack/platform-objects`: on a cloud-managed environment, the Import Users result shows one row per CSV line, with the email, whether it succeeded, whether the address was already pending, whether the hosting organization was told and why not, why a row was not added, the columns that were not applied, and a manager that was not linked. The summary counts stay above it.
+  
+  `@objectstack/spec`: `columns` is no longer marked `[PLANNED — not yet rendered]`, and the renderer contract now says that a `null` cell value draws an empty cell and that only a plain object is read by column paths (an array or `null` element draws as JSON). It also says that inside a table cell `text` and `code-list` draw the value alone with no copy control, while `secret` keeps its mask, reveal and copy and `qrcode` keeps its code and copy. Its liveness rows are `live`.
+  
+  `@object-ui/core`: `ResultDialogFieldSpec` gains `columns`, derived from the contract's answer-field row like its `label` and `format`, so the console's table renderer reads it off the runner's own type.
+- fb79d47: fix(plugin-auth): Set Manager refuses only a person a SCIM directory holds, so an admin can change the manager of someone who signs in through SSO
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/admin/set-user-manager` refused every user whose `sys_user.source` is `idp_provisioned` with `403 PERMISSION_DENIED`, saying a directory owns their manager. ADR-0135 D4 stamps that value on every sign-in through an identity provider by a person with no local password: the platform's own SSO on a hosted environment, and any social or enterprise OIDC provider. Those people have no directory behind them. So after their first sign-in, nobody could change their manager, and approvals routed to the manager could not follow a reorganisation.
+  
+  The endpoint now refuses only a person a SCIM directory holds: `source` is `idp_provisioned` and a SCIM connection has provisioned or linked them (a `sys_scim_subject` row). The answer is unchanged for them (`403 PERMISSION_DENIED`, `details.reason: 'idp_provisioned'`), and its message says to change the manager in the directory. Everyone else gets the answer a local user gets. The admin user import's `manager_id` column runs the same check, so an SSO-only row's manager link now lands. The self-assignment, cycle, depth and cross-organization refusals are unchanged. Nothing that was accepted before is refused now.
+  
+  `sys_user`'s **Set Manager** action is now offered to a platform admin on every user row. It used to be hidden on `idp_provisioned` rows. A SCIM-held row is refused by the endpoint, which names the directory.
+  
+  `os explain approval-approvers-may-resolve-empty` now says the admin operation refuses an identity a SCIM directory holds, and that an identity that only signs in through SSO is set like any other.
+  
+  The `idp_provisioned` stamp itself (ADR-0135 D4) and the password refusals are unchanged.
+- d1ab592: fix(platform-objects): the Sessions page subtitle no longer says "active" on the revoked view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_session`'s object description was "Active user sessions", and the console draws an object's description as the subtitle of every list view, so Setup → Sessions → Revoked (the audit view of ended sessions) was titled as active sessions. The description is now the neutral "User sessions", in the source and in all eleven locale bundles. No key, field, view or action changes; the toolbar's "Sign out other devices" action is unchanged and still shows on every session view.
+- 5326028: feat(spec): the Studio hook form offers a refusal's `reasons` and `params`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The hook form (`hookForm`) lays out a refusal entry as `message`, `status`, `reasons` and `params`, so a Studio author can declare the several sentences under one code and the named params that a hook's refusal catalogue accepts. `reasons` is a record keyed by the snake_case reason the body throws beside the code, each `{ message }`; it takes the same key-only record control as the catalogue, and the reason key rule it checks is the one the served `HookSchema` declares. `params` is a name list. The entry's `message` help text now says a `{{ name }}` hole fills a declared param, where it said the sentence takes no placeholders. The three new rows and the changed help text are translated in the ten locales of the platform's metadata-form bundles (`@objectstack/platform-objects`), and the console's zh-CN form labels (`@object-ui/app-shell`, shipped in `@object-ui/console`) name the three rows for the Pending changes sheet.
+  
+  Nothing a metadata author can write changes: `reasons` and `params` were already accepted on a refusal entry; only the form now offers them. A catalogue that uses them already kept them through a Studio edit, and still does. A refusal with only `message` and `status` saves exactly as before.
+  
+  In the metadata form (`@object-ui/app-shell`), removing the last entry of an optional record row now leaves the key absent rather than writing `{}`. The two read differently, though both draw the same empty list: an entry's `reasons: {}` refuses every reason the body throws under that code, where an absent `reasons` does not read the thrown reason; and a hook's `refusals: {}` refuses every code its body throws, where an absent catalogue leaves its throws as they were. A required record row, such as an object's `fields`, keeps `{}` as before.
+- db3bbd3: Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → Invitations no longer offers **Resend Invitation** on a cloud-managed environment. A resend is a call to invite-member, which a cloud-managed environment refuses with `409 RESOURCE_CONFLICT`, so the action now carries the same `features.cloudManaged != true` gate as the four Invite User mirrors and Copy Invite Link, and is booked in `PUBLIC_AUTH_FEATURES.cloudManaged.gatedInputs`. Off a managed environment it is offered exactly as before.
+- 9f32c0f: fix(platform-objects): Setup → Users offers Ban User and Unban User on environments without the better-auth admin plugin
+  
+  Clause-②: no — offering an existing action in more kernels widens no accepted input set or public export; the dev measures the gaining kernels and the seat amends if the diff reads otherwise
+  Metadata-protocol: none
+  
+  `sys_user.ban_user` and `sys_user.unban_user` no longer carry `requiresFeature: 'admin'`. Their doors, `POST /api/v1/auth/admin/ban-user` and `POST /api/v1/auth/admin/unban-user`, already work without the better-auth admin plugin: the ban is written through the data engine and the banned person's next session is refused with `403 BANNED_USER`. The two actions were still hidden wherever `features.admin` is off, so a platform administrator could not deactivate or reactivate a person from the console there.
+  
+  They are now offered on every environment that runs without the admin plugin, self-hosted and cloud-managed alike, to a platform administrator only, and still one at a time by the row's `banned` state. Nothing else changes: `requiredPermissions` and the predicates stay as they were, environments with the admin plugin (or SCIM, which turns it on) see no difference, and `unlock_user`, `create_user`, `set_user_password` and `impersonate_user` keep their admin-plugin gate.
+  
+  `PUBLIC_AUTH_FEATURES.admin.gatedInputs` in `@objectstack/spec/kernel` no longer lists `sys_user.actions.ban_user` and `sys_user.actions.unban_user`, since neither is gated on that flag any more.
+- fdfccbf: fix(spec): the hook form's refusal catalogue help names the handler beside the JavaScript body
+  
+  Clause-②: no — help text only
+  Metadata-protocol: none
+  
+  The Studio hook form's `refusals` row ended its help with "JavaScript (L2) bodies only", while `HookSchema` answers a refusal catalogue on a sandboxed `js` body and on an in-process `handler` alike, and refuses it on an `expression` body. The help now reads "For a JavaScript (L2) body or a handler; refused on an expression body", and says the code is the one the hook throws rather than the body. The translated copies in the ten metadata-form bundles of `@objectstack/platform-objects` carry the same correction. No behaviour changes: what a hook may declare, and what is refused, is exactly as before.
+- 021abd4: fix(settings)!: a cloud-managed environment does not offer its file storage or AI provider settings
+  
+  Clause-②: no (narrowing) — narrowed, in a cloud-managed process (`OS_CLOUD_MANAGED=1`) only: `GET /api/settings` no longer lists `storage`, and serves `ai` without its provider, per-provider model and credential, generation-default (`temperature`, `max_tokens`, `request_timeout_ms`) and embedder keys; `GET` / `PUT /api/settings/storage` and `POST /api/settings/storage/:actionId` answer `409 RESOURCE_CONFLICT` with `details.managedBy: 'platform'`; `GET /api/settings/ai` serves the conversation-title and observability keys only; a `PUT /api/settings/ai` that names a hidden key answers the same 409 and writes nothing; `POST /api/settings/ai/test`, `ai/test_embedder` and `ai/reset` answer the same 409; the data API's reads of `sys_setting`, `sys_platform_setting` and their audit objects leave out every `storage` row and every row of a hidden `ai` key for a caller that is not the system; the Setup entry `nav_settings_storage` carries `visible: 'features.cloudManaged != true'`. A self-hosted deployment answers exactly as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the hosted settings doors or the storage / AI settings pages.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is which settings a cloud-managed runtime's doors serve. Stored rows are untouched and the settings registry stays whole, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a caller of a cloud-managed environment: its file storage and its AI provider are provided and configured by the hosting platform, so the settings doors no longer show or change them. The registry stays whole: the storage and AI services, which read these settings in process, keep reading every value. The refusal is `409 RESOURCE_CONFLICT`, as at every other cloud-managed door, with `details.managedBy: 'platform'` so a console can tell it apart from `404 UNKNOWN_NAMESPACE`.
+  
+  What to do: nothing on a self-hosted deployment. A client of a hosted environment that read or wrote `storage.*`, or the hidden `ai.*` keys, stops doing so: those values are the hosting platform's.
+- e0670b9: fix(platform-objects): Setup → Users offers Unlock Account on environments without the better-auth admin plugin
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_user.unlock_user` no longer carries `requiresFeature: 'admin'`. Its door, `POST /api/v1/auth/admin/unlock-user`, already works without the better-auth admin plugin: the sign-in lockout is ObjectStack's own (`sys_user.locked_until` / `failed_login_count`), and the unlock clears it through the data engine. The action was still hidden wherever `features.admin` is off, so a platform administrator there could not release a locked-out person early and had to wait for the lock to expire.
+  
+  It is now offered on every environment that runs without the admin plugin, self-hosted and cloud-managed alike, to a platform administrator only, and only on an account that has a lock stamp or two-factor enabled. Nothing else changes: `requiredPermissions` and the predicate stay as they were, environments with the admin plugin (or SCIM, which turns it on) see no difference, and `create_user` and `impersonate_user` keep their admin-plugin gate (Set Password is released the same way, in its own note).
+  
+  `PUBLIC_AUTH_FEATURES.admin.gatedInputs` in `@objectstack/spec/kernel` no longer lists `sys_user.actions.unlock_user`, since it is no longer gated on that flag.
+- e0670b9: fix(platform-objects): Setup → Users offers Set Password on self-hosted environments without the better-auth admin plugin
+  
+  Clause-②: no (as #33989 and #34124 judge a gate drop)
+  Metadata-protocol: none
+  
+  `sys_user.set_user_password` no longer carries `requiresFeature: 'admin'`. Its door, `POST /api/v1/auth/admin/set-user-password`, is ObjectStack's own wrapper and already works without the better-auth admin plugin: it hashes and writes the password through better-auth's core, which every environment carries. The action was still hidden wherever `features.admin` is off, so a platform administrator there could not set or reset a person's password from the console.
+  
+  It is now offered to a platform administrator on every environment that runs without the admin plugin and is not cloud-managed. Its other rule is unchanged: it stays hidden on a cloud-managed environment, whose door refuses every target, and the door's own refusals (a pending person, SSO-only mode) answer as before. `create_user` and `impersonate_user` keep their admin-plugin gate.
+  
+  `PUBLIC_AUTH_FEATURES.admin.gatedInputs` in `@objectstack/spec/kernel` no longer lists `sys_user.actions.set_user_password`, since it is no longer gated on that flag.
+  
+  The `features.admin` description in `@objectstack/spec` (`AuthFeaturesConfigSchema`, and the generated auth-endpoints reference page) no longer says the console shows Unlock Account and Set Password only when it is true: whether the console offers banning, unbanning, unlocking or setting a password does not depend on it.
+- 842637a: feat(auth): an invitation is accepted in one step with the proof its mail carries
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The invitation mail carries a mailbox proof.** The accept link in the mail carries a single-use proof bound to the invitation, its address and its expiry; a resend retires it. The proof is never at rest in clear, the stored mail row never holds the proof, and the console's copy-link action answers the link without it. The invitation mail is sent inline, never through the durable mail queue, because the queue delivers from the stored row.
+  - **One door redeems it.** `POST /api/v1/auth/organization/accept-invitation-one-step` takes the invitation id, the proof, a name and a password. In one request it creates the account (or sets the password of an account whose address is not verified, ending every session that account had with the reason a password reset records, in an order that matches the vendor's order), verifies the address, accepts the invitation and signs in. The password-age stamp and the forced-change clear that every password change writes are written too. On an account whose password it replaces, the password history is consulted before the proof is spent and extended after, as the reset door does. The proof is spent only by a request that passed every gate; one server process serializes concurrent redemptions of a proof, and across server processes single use is as strong as the store's consume. A bad proof gets one `INVALID_TOKEN` refusal that does not say which check failed, and the real proof stays usable. The door is rate-limited per client network address and per invitation, and runs the sign-up gates before anything is written: email sign-up switched off, SSO-only mode, password length, complexity and breach checks, a name for a new account, and who may sign up. A refused request leaves the proof usable.
+  - **An address with an account signs in as today.** The door sets a password on an existing account only when it reads all of these: the address is not verified; the account's only sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the account's sessions are revoked and before the password is written; an account that no longer passes then answers `sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification covers what this plugin mounts and nothing another package mounts.
+  - **`sys_device_code` gains an index on `user_id`** (`@objectstack/platform-objects`), so the door reads a user's device authorizations by an indexed lookup, as it reads every other standing grant.
+  - **A cloud-managed environment refuses it.** With `OS_CLOUD_MANAGED=1` the door sets no local password: a request carrying a proof answers `409 RESOURCE_CONFLICT`, the cloud-managed refusal, before the proof is read. `CLOUD_MANAGED_REFUSAL_MESSAGES` gains the door's message. A process without the variable is unaffected.
+  - **Without the proof, a session must hold the verified invited address.** Called with a session and no proof, the door accepts only when the session's address is the invited one and verified, and otherwise answers `verify_email`. A copied link still owes the verification mail.
+  - **`SendTemplateInput.deliverOnlyData`** (`@objectstack/spec`): render values delivered with the message and never written to the stored mail row, which gives no sign they were overlaid. Required template variables are checked against `data` alone. A send carrying them is delivered inline, never through the durable queue, so its sender gives up queued delivery where a queue is mounted. Only the server-side template send declares the key; `POST /email/send` and a script's `ctx.email.send` take a `SendEmailInput`, which has none.
+  - **The accept page offers one form.** A signed-out visitor whose link carries the proof sees a name and password form, or a provider sign-in, in place of the sign-in redirect. The accept page does not keep the proof in its address. A provider sign-in returns to the page, which redeems the invitation for the new session. A link without the proof keeps today's path. The `@object-ui/auth` client gains `acceptInvitationOneStep`, with the types `AuthInvitationOneStepInput` and `AuthInvitationOneStepOutcome`.
+- 758bbe7: feat(spec, lint, i18n): an action answer table's column headers have a translation bundle key
+  
+  Clause-②: yes (widening) — `ActionResultDialogTranslationSchema` and the action `preflight` translation node accept a new optional `columns` map, `columns.<field path>.<column path>` (both keys literal, dots included), beside `fields`; every bundle that parsed before parses unchanged and reads the same.
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A `format: 'table'` field in an action's `resultDialog.fields` or `preflight.fields` declares `columns: [{ path, label }]`, and each column's `label` is translatable, but no bundle key carried it, so a table's headers stayed in the authored language in every locale. The key is `objects.<object>._actions.<action>.resultDialog.columns.<field path>.<column path>` (and `….preflight.columns.…`; `globalActions.<action>.…` for an object-less action):
+  
+  ```ts
+  resultDialog: {
+    fields: { rows: '逐行结果' },
+    columns: { rows: { email: '邮箱', 'error.message': '未添加的原因' } },
+  }
+  ```
+  
+  - `os i18n extract` lists one key per labelled column, `os validate` refuses a column key that names no declared table field or column (`translation-target-unknown`), and `resolveActionResultDialog` / `resolveActionPreflight` (so `translateAction` and the served metadata) and the console's `useObjectLabel` overlay the translated header; a column with no key keeps its authored label.
+  - The platform bundles carry the nine column headers of `sys_user.import_sso_users`'s result table in every shipped locale.
+- c81f498: fix(app-shell,console): the invitation inbox's accept routes an unverified address to verification, and the verify screen no longer says a link was sent before it was
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Follow-ups to the rule that, while a deployment delivers mail, accepting an invitation needs a verified address (`403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`).
+  
+  - **The invitation inbox's Accept** (`@object-ui/app-shell`). When the `sys_invitation` `accept_invitation` action is refused with that code, the console's `type: 'api'` action handlers (`useConsoleActionRuntime` and `RecordDetailView`, through the action door or the direct call alike) now open the verification-mail screen, `/verify-email-prompt`, for the account's address, with the mail's link returning to that invitation's accept page, instead of showing the vendor's sentence in a toast. Every other refusal still reads as before. The rule is keyed on the code alone; no action metadata key, spec field or server route changes.
+  - **The action's AI description** (`@objectstack/platform-objects`). `sys_invitation.accept_invitation`'s `ai.description` now states the condition: while the deployment delivers email, the caller's address must be verified, and an unverified caller is refused with that code and nothing is written. The text is the agent-facing description only; no translated bundle carries it.
+  - **The verify screen's copy** (`@object-ui/console`, `@object-ui/i18n`). `/verify-email-prompt` said "We sent a verification link" on every arrival, but only the sign-up sends a mail before arriving there. The sign-in arrival (refused `EMAIL_NOT_VERIFIED`, which sends nothing unless the deployment sets `emailVerification.sendOnSignIn`) and both accept-invitation arrivals send nothing. The sign-up arrival now marks itself with `?sent=1` and keeps its copy; every other arrival reads "Your email address has not been verified yet. Send a verification link to ADDRESS…", offers "Send verification email", and shows "Sent to:" and the spam hint only once the button has sent the mail. Two keys are added to the `auth.verifyEmail` namespace in every built-in locale: `sendDescription` and `sendButton`.
+  
+  **A host that embeds the accept page or the console action runtime declares `/verify-email-prompt`.** `DefaultAcceptInvitationPage` and the action handlers above navigate there with `email` and `redirect` query keys; `apps/console` mounts its own `VerifyEmailPromptPage` at that route, and a host without it sends the person to a route that does not exist. The `@object-ui/app-shell` README states the route and its query keys ("Hosting the invitation pages").
+- 6c1f9b3: feat(studio): an installed app's action is switched on or off on the action itself, in Studio; Setup › Packaged Actions retires (ADR-0146 D4, amended 2026-11-17)
+  
+  Clause-②: yes (narrowing: Setup's `nav_packaged_actions` entry and its `automation:packaged-actions` console page retire, and `PackagedActionsPage` leaves the private `@object-ui/app-shell`; widening: new studio-namespace locale keys, an optional `options` argument and the exported `TurnedOffPackagedItemOptions` on `@objectstack/types`' `describeTurnedOffPackagedItem`, and `ActionActivationProjection.disabledPackageOf` plus an optional `platform` argument on `describeDisabled` in `@objectstack/objectql`)
+  Metadata-protocol: none (no spec schema changes; `platform-objects` serves one fewer Setup navigation item, and one `.describe()` sentence changes)
+  
+  **BREAKING** for an administrator who used Setup › Packaged Actions, and for a nav entry or link that names its `automation:packaged-actions` page: the Setup entry and page are gone. An installed app's action is now switched on or off on the action itself in Studio (the object's Actions view, or a standalone action's page), and an old link to the page opens Studio. A platform action (one a kernel package ships) has no switch in the console any more; it is switched through the activation door, `POST /api/v1/actions/_activation/<object>/<action>`, and the `409 ACTION_DISABLED` message for one now says so.
+  
+  Before this change, the deployment's on/off switch for an installed app's actions lived on a separate Setup page, "Packaged Actions", away from where the action is read. It now sits on the action:
+  
+  - On the object's Actions view in Studio, a read-only app package's vendor action carries a "Switched on / off for this deployment" switch, the flow switch's twin. A switched-off action is marked in the list. A refusal is the server's sentence, shown verbatim; a caller the deployment's posture walls off sees the switch disabled with the reason.
+  - A standalone `action` item's page in Studio's "All metadata" area carries the same switch.
+  - The platform's own actions (any action a kernel package ships) carry no switch anywhere. When the package list cannot be read, no switch is offered.
+  - Studio's landing leads to them: an app's "N switched off" count opens the switched-off action (one) or the action list (several), and when that does not land on an action (several, or flows among them), the line names each switched-off action as a link, three at most, then a "more" link to the list. An action its object holds opens on that object's Actions view (a new `?action=<name>` beside `?surface=object:<object>` in the Data pillar selects it), since an action declared inside its object has no page of its own; any other action opens its own page. The landing's "Customizations in this environment" panel links its switched-off action rows the same way.
+  
+  The doors are unchanged: the read is the `sys_metadata_activation` ledger, the write is `POST /api/v1/actions/_activation/:object/:action` with body `{ enabled }`.
+  
+  Setup › Packaged Actions is removed in the same change. A bookmark of `/apps/setup/component/automation/packaged-actions` redirects to Studio (to the package's Data pillar when the URL names `?package=`). The runtime's "turned off" sentence for a dispatched app action now points at the action in Studio, and the `disabledActions` description in `@objectstack/spec` says the same; no schema shape changes.
+  
+  **Platform actions already switched off.** The retired page also listed the platform's own actions (those a kernel package ships, such as `sys_user`'s Ban User), so a deployment may hold ledger rows that switch one off. Those rows stay in force: no boot or upgrade step turns them back on, and the activation door is unchanged. Because Studio has no switch for them, the `409 ACTION_DISABLED` sentence for a platform action now names the activation door instead of Studio. To find them on a deployment, as a platform operator:
+  
+  1. `GET /api/v1/data/sys_metadata_activation?top=1000` and keep the rows with `metadata_type: "action"` and `active: false`. If the response says `hasMore: true`, the list is incomplete; page through it before concluding.
+  2. `GET /api/v1/packages`: a row whose `package_id` belongs to a package with `manifest.scope` `system` or `cloud` is a switched-off platform action.
+  
+  To turn one on again: `POST /api/v1/actions/_activation/<object>/<action>` with body `{"enabled": true}` (use `global` as `<object>` for an action that belongs to no object). The `packagedAutomation.*` console locale keys the page read are no longer read and are left in place for a later sweep.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what retires is a Setup navigation entry, its console page and the PackagedActionsPage export of the private @object-ui/app-shell package. Ledger rows, the activation door and authored metadata are unchanged, so there is nothing for objectstack migrate meta to rewrite. -->
+- b85dff0: docs(skills): the automation skill says who an `admin_rescue` request opens on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-automation's `references/state-machines-and-approvals.md` no longer says that under `onEmptyApprovers: 'admin_rescue'` "only a privileged admin can act via Reassign". The row now says what the runtime does: the request opens on the organization's administrators. Nothing else in the row changes.
+  
+  No runtime change. In-code descriptions (one of them a comment that ships in `@objectstack/platform-objects`' build output) of the approval request's served `viewer` block now name its four leaves (`can_act`, `is_submitter`, `can_override`, `can_override_approve`) and say that Approve reads `can_override_approve` while Reject, Reassign and Recall read `can_override`.
+- 2f656af: feat(platform-objects): the System Overview datasets give their seven members synonyms and a description
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The five System Overview datasets (`sys_user_metrics`, `sys_organization_metrics`, `sys_session_metrics`, `sys_package_installation_metrics`, `sys_audit_log_metrics`) had no business words on their seven members. A question asked in an administrator's own words therefore found only a member's name or its label in the caller's locale. Each member now declares ADR-0149 D1 `synonyms`, Chinese and English in one array, and a one-sentence `description`:
+  
+  - measures `user_count`, `org_count`, `session_count`, `package_count`, `event_count`;
+  - dimensions `action` and `user_id` on `sys_audit_log_metrics`.
+  
+  Synonyms are match input, so no bundle translates them. Each description has a bundle entry at `datasets.<name>.{measures,dimensions}.<member>.description` in all eleven Setup bundle locales, and a recorded source digest in each translated locale.
+  
+  `list_datasets` compares a term by equality after normalization. So `list_datasets({ terms: ['用户数'] })` and `list_datasets({ terms: ['how many users'] })` now each match `sys_user_metrics.measures.user_count` on a synonym, and nothing else. A word that no member declares still matches nothing. No synonym is a word of another measure in any of the five datasets, in any locale.
+- e2a4c66: fix(auth)!: on a cloud-managed environment every organization door that writes or deletes a membership row refuses, add-member excepted; membership is managed by the hosting organisation
+  
+  Clause-②: no (narrowing) — narrowed: on a cloud-managed environment only (`OS_CLOUD_MANAGED=1`), six organization doors that write or delete a membership row now answer `409 RESOURCE_CONFLICT` to every request and write nothing, where they changed membership: `POST /organization/remove-member`, `POST /organization/update-member-role` (Make Owner calls it), `POST /organization/leave`, `POST /organization/accept-invitation`, `POST /organization/create` (it made the caller the new organization's owner) and `POST /organization/delete` (it ended every membership of the organization). Six refusal sentences are added (`CLOUD_MANAGED_REFUSAL_MESSAGES.removeMember`, `.updateMemberRole`, `.leaveOrganization`, `.acceptInvitation`, `.createOrganization`, `.deleteOrganization`). Their seven actions are hidden while `features.cloudManaged` is on, as the invite actions are (`sys_member.update_member_role`, `remove_member`, `transfer_ownership`; `sys_organization.leave_organization`, `create_organization`, `delete_organization`; `sys_invitation.accept_invitation`), and `PUBLIC_AUTH_FEATURES.cloudManaged.gatedInputs` books the seven paths.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the organization membership doors or the cloud-managed mode; `content/docs/permissions/authentication.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: seven paths join a feature-flag registry list, and the moved answers are runtime refusals at six auth doors under a deployment switch that only hosted environments set, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a cloud-managed environment (`OS_CLOUD_MANAGED=1`, set only on hosted containers): membership and membership tiers are managed by the organisation that hosts the environment. Every organization door that writes or deletes a membership row refuses every request with `409 RESOURCE_CONFLICT` and writes nothing, as `POST /organization/invite-member` already did: Remove Member, Change Role and Make Owner, Leave Organization, Accept Invitation, Create Organization and Delete Organization. Their actions are hidden there.
+  
+  Who moves: an owner (or administrator) of a cloud-managed environment who changed membership from inside the environment, and a member who left, accepted an invitation, or created or deleted an organization there. Make the change in the hosting organisation instead.
+  
+  Unchanged: every self-hosted deployment (the variable unset), where every door answers as before; `POST /organization/add-member`, which on a managed environment admits exactly a platform administrator, adding a membership, to restore one the environment lost; and the organization doors that write no membership row (teams, invitations, the active organization, the organization's own fields) or only read.
+- a6c2b83: fix(cloud-connection): a sample row a tenant deleted stays deleted when install-local reinstalls, upgrades, heals or replays the package
+  
+  Clause-②: no (the door starts honouring the loader's existing `landedKeys` guard, #31021; no accepted shape or public export widens; the dev confirms)
+  Metadata-protocol: none
+  
+  install-local's seed loads now keep, and honour, the per-organization record of which seed rows landed (`sys_seed_landed_key`, registered by `@objectstack/platform-objects`). Before, the door built its seed loader without the `landedKeys` option, so it neither read nor wrote that record: a seed row a person deleted (a demo account, a demo order) was inserted again by the next reinstall, upgrade, restart heal or per-organization replay.
+  
+  - The install and the upgrade (in the installing person's organization under an organization wall, otherwise in the install's sole organization), the restart heal of an empty database, the per-organization replay of a new organization and an unmanaged copy's first load honour the record: a seed row whose key landed in that organization before and whose row is now gone is not inserted again. A key that never landed still lands, so a row an upgrade adds to the seed is inserted, and a new database, which holds no record, is healed whole. A row the record keeps out is counted in `skipped`.
+  - The sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`, for a ledgered package and for an unmanaged copy alike) is the deliberate re-seed: it inserts every missing row whatever the record says, and records it again. Its answer is unchanged.
+  - The `seed-replayer` service this door registers when no app has registered one now takes `{ reseed: true }`, as the AppPlugin replayer does: that call inserts every missing row; any other call honours the record.
+  
+  Every row a load lands is recorded, whether it inserted, updated or matched the row. An existing install keeps no record until its next install, upgrade, reseed, replay or restart heal, so a row a person deletes before that load, after this release too, comes back once on it, and stays deleted from then on.
+  
+  A restart heal that withholds every row (a seed a person emptied, or a purge then a reinstall) reports a settled seed: the withheld rows are counted in `skipped` and logged at `info`, not recorded as an empty install, so the boot banner, `objectstack:seed-settled`, `GET /ready` and `os verify` read it as settled. The split reads the loader's `skipped`, which also counts an `update` seed row with no match, so a heal whose only skips are those also reports settled. A heal that lands nothing and skips nothing, or errors, is still the empty install.
+  
+  `@objectstack/spec`: the `mode` description of a seed dataset no longer says a package install keeps no record: a seed publish is the load that keeps none, and the sample-data reseed is named beside `seed-replayer(organizationId, { reseed: true })` as the deliberate re-seed.
+  
+  `@objectstack/platform-objects`: the `sys_seed_landed_key` object's description names install-local's loads among the record's writers and readers, and its sample-data reseed beside `seed-replayer` as the deliberate re-seed.
+  
+  `@objectstack/metadata-protocol`: the seed loader's `info` line for withheld rows names an installed package's sample-data reseed beside `seed-replayer` with `{ reseed: true }` as the way back.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/metadata-core@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes
@@ -131,7 +461,7 @@
   Clause-②: yes (widening) — two new `sys_user` actions, `add_sso_user` (target `POST /api/v1/auth/admin/add-sso-user`) and `import_sso_users` (target `POST /api/v1/auth/admin/import-sso-users`), each offered only to a platform administrator on a cloud-managed environment (`current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true`) and declaring `requiredPermissions: ['manage_users']`; their labels, descriptions, params and result dialogs are new translation keys in the `sys_user` bundles. Nothing that was offered before is hidden: off a managed environment both new actions are hidden and every existing action answers as before.
   Metadata-protocol: none
   
-  On a cloud-managed environment (`OS_CLOUD_MANAGED=1`) the password and invitation actions stay hidden, as before: `create_user`, `set_user_password` and the four `invite_user` mirrors. In their place a platform administrator now sees **Add User** (email, name, and optionally a position, a permission set and the manager's email address) and **Import Users** (CSV text with the columns `email`, `name`, `positions`, `permission_sets` and `manager_id`, at most 500 rows). Each adds a pending person ahead of their first sign-in, stored with `sys_user.source` = `idp_pending` and no password, who then signs in through the hosting organisation's identity provider. The Add User result names an address that was already pending (the hosting organisation is told again, and the position, permission set or manager sent with it is not applied), a manager that could not be linked, and an invitation the hosting organisation was not told about. The Import Users result shows how many rows were added, already pending or not added, and the answer for each row.
+  On a cloud-managed environment (`OS_CLOUD_MANAGED=1`) the password and invitation actions stay hidden, as before: `create_user`, `set_user_password` and the four `invite_user` mirrors. In their place a platform administrator now sees **Add User** (email, name, and optionally a position, a permission set and the manager's email address) and **Import Users** (CSV text with the columns `email`, `name`, `positions`, `permission_sets` and `manager_id`, at most 500 rows). Each adds a pending person ahead of their first sign-in, stored with `sys_user.source` = `idp_pending` and no password, who then signs in through the hosting organisation's identity provider. The Add User result names an address that was already pending (the hosting organisation is told again, unless the person is deactivated, in which case nothing is sent; either way the position, permission set or manager sent with it is not applied), a manager that could not be linked, and an invitation the hosting organisation was not told about. The Import Users result shows how many rows were added, already pending or not added, and the answer for each row.
   
   Neither action is exposed to AI agents (no `ai` block): both are human-only until assessed.
 - Updated dependencies [f229dfd]
