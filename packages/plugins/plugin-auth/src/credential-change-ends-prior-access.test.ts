@@ -577,21 +577,30 @@ describe('a check that cannot read its record refuses', () => {
       return (original as (...a: unknown[]) => Promise<unknown>)(...args);
     });
 
+    // The session sign-up opened stands throughout; the refused sign-in adds none to it.
+    const tokens = async () => (await s.liveSessions()).map((row) => row.token).sort();
+    const sessionsBefore = await tokens();
     const refused = await s.signIn(EMAIL, FIRST);
 
     expect(refusedReads, 'the first reading was the one that failed').toBe(1);
     expect({ status: refused.status, code: refused.code }).toEqual({ status: wrong.status, code: wrong.code });
     expect(refused.handsOutSession).toBe(false);
-    expect(await s.liveSessions()).toEqual([]);
+    expect(await tokens()).toEqual(sessionsBefore);
+
+    // The control: with both readings taken, the same sign-in stands and adds its session.
+    const fine = await s.signIn(EMAIL, FIRST);
+    expect(fine).toMatchObject({ status: 200, handsOutSession: true });
+    expect(await s.whoIs(fine.bearer!)).toBe(s.userId);
+    expect((await tokens()).length).toBe(sessionsBefore.length + 1);
   }, 60_000);
 });
 
-describe('the clock needs no data engine', () => {
-  it('on the vendor in-memory adapter: a link of an account that never changed its password verifies; one minted before a change does not', async () => {
+describe('the clock and the sign-in readings need no data engine', () => {
+  it('on the vendor in-memory adapter: a link of an account that never changed its password verifies; one minted before a change does not; both password doors sign in', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'info').mockImplementation(() => {});
     // No `dataEngine`: the manager runs on better-auth's own in-memory adapter.
-    const manager = new AuthManager({ secret: SECRET, baseUrl: ORIGIN } as never);
+    const manager = new AuthManager({ secret: SECRET, baseUrl: ORIGIN, plugins: { admin: true, phoneNumber: true } } as never);
     const mail: Array<{ template: string; to?: { address?: string }; data: Record<string, unknown> }> = [];
     manager.setEmailService({
       sendTemplate: async (input: any) => {
@@ -599,6 +608,7 @@ describe('the clock needs no data engine', () => {
         return { status: 'sent' };
       },
     } as never);
+    manager.setSmsService({ send: async () => ({ id: 'sms', status: 'sent' }), isConfigured: () => true } as never);
     const app = new Hono();
     const ctx = mockCtx();
     const plugin = new AuthPlugin({ secret: SECRET });
@@ -621,13 +631,22 @@ describe('the clock needs no data engine', () => {
       await vi.waitFor(() => expect(sent().length).toBe(before + 1));
       return String(sent()[before].data.token);
     };
-    const signedUp = await fire('/sign-up/email', { email: EMAIL, password: FIRST, name: EMAIL });
-    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+
+    // Without a data engine no sign-up door admits an account (no posture can
+    // prove a first run or resolve a grant there): the account is created the
+    // operator's way, by the administrator's create-user called in-process.
+    const api: any = await manager.getApi();
+    await api.createUser({ body: { email: EMAIL, name: EMAIL, password: FIRST } });
+    const auth: any = await manager.getAuthContext();
+    const internal = auth.internalAdapter;
+    const userId = String((await internal.findUserByEmail(EMAIL))?.user?.id);
+    await auth.adapter.update({ model: 'user', where: [{ field: 'id', value: userId }], update: { phoneNumber: PHONE, phoneNumberVerified: true } });
+
     const signedIn = await fire('/sign-in/email', { email: EMAIL, password: FIRST });
     expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+    expect(handsOutSession(signedIn), 'the email door hands out a session').toBe(true);
     const bearer = String(signedIn.headers.get('set-auth-token'));
-    const internal = (await manager.getAuthContext()).internalAdapter;
-    const addressNow = async () => (await internal.findUserByEmail(NEW_ADDRESS)) ? NEW_ADDRESS : 'unchanged';
+    const addressNow = async () => ((await internal.findUserByEmail(NEW_ADDRESS)) ? NEW_ADDRESS : 'unchanged');
     const neverIssued = await verify('a-token-never-issued');
 
     // Never changed: the link verifies.
@@ -640,6 +659,11 @@ describe('the clock needs no data engine', () => {
     expect(changed.status, await changed.clone().text()).toBe(200);
     expect(await verify(before)).toEqual(neverIssued);
     expect(await addressNow()).toBe('unchanged');
+
+    // The phone door's first reading names its account through the vendor's adapter too.
+    const byPhone = await fire('/sign-in/phone-number', { phoneNumber: PHONE, password: SECOND });
+    expect(byPhone.status, await byPhone.clone().text()).toBe(200);
+    expect(handsOutSession(byPhone), 'the phone door hands out a session').toBe(true);
   }, 60_000);
 });
 

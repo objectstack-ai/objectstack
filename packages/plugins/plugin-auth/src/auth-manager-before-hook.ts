@@ -64,7 +64,7 @@ import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
 import { AuthManager } from './auth-manager.js';
-import { findPhoneSignInAccount, passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-in-lockout.js';
+import { passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
   endEmailChangeTokenIssuedBeforeCredentialChange,
@@ -968,15 +968,16 @@ export async function globalBeforeHook(
     if (passwordDoor.identifier) await this.admitSignInAttempt(passwordDoor.identifier, ctx, passwordDoor.door);
     // A sign-in during which the account's password changes is refused: the
     // first of its two readings (`credential-change-ends-prior-access.ts`).
+    // Each door's account is the one the vendor's own lookup at that door
+    // names, read through the vendor's adapter, so the reading needs no data
+    // engine.
     const { door, identifier } = passwordDoor;
     await noteSignInCredential(ctx, async () => {
       if (!identifier) return undefined;
-      if (door === 'phone') {
-        const engine = this.getDataEngine();
-        return engine ? (await findPhoneSignInAccount(engine, identifier, []))?.id : undefined;
-      }
-      const found = await ctx.context.internalAdapter.findUserByEmail(identifier.toLowerCase());
-      const id: unknown = found?.user?.id;
+      const id: unknown =
+        door === 'phone'
+          ? (await ctx.context.adapter.findOne({ model: 'user', where: [{ field: 'phoneNumber', value: identifier }] }))?.id
+          : (await ctx.context.internalAdapter.findUserByEmail(identifier.toLowerCase()))?.user?.id;
       return typeof id === 'string' && id.length > 0 ? id : undefined;
     });
     return;
