@@ -425,6 +425,11 @@ export interface InPlaceViewPicks {
  * One body for both scopes: it is what one of the reader's own views stores
  * as `config`, and what the add-view door creates a shared view from. The
  * fold refusal of Save as my view applies unchanged.
+ *
+ * A type whose block carries a field list of its own gets the body's columns
+ * there when the block holds none, as the add-view door's builder does
+ * (`buildNewViewSpec`): a kanban's `columns` (required by the spec), a
+ * gallery's `visibleFields` (its card body).
  */
 export function buildInPlaceViewConfig(
   objectName: string,
@@ -439,5 +444,24 @@ export function buildInPlaceViewConfig(
     ...(picks.block && Object.keys(picks.block).length > 0 ? { [picks.type]: { ...own, ...picks.block } } : {}),
   };
   const listState: PersonalViewListState = 'url' in state ? state : { url: {}, preference: state.preference };
-  return buildPersonalViewConfig(objectName, draft, listState);
+  const built = buildPersonalViewConfig(objectName, draft, listState);
+  if (!built.ok) return built;
+  const mirrorKey = IN_PLACE_COLUMN_MIRRORS[picks.type];
+  if (mirrorKey) {
+    const block = isRecord(built.config[picks.type]) ? (built.config[picks.type] as Record<string, unknown>) : {};
+    const held = block[mirrorKey];
+    if (!Array.isArray(held) || held.length === 0) {
+      const names = (Array.isArray(built.config.columns) ? built.config.columns : [])
+        .map(columnName)
+        .filter((n): n is string => !!n);
+      built.config[picks.type] = { ...block, [mirrorKey]: names };
+    }
+  }
+  return built;
 }
+
+/** The view types whose spec block lists fields of its own, by that list's key. */
+const IN_PLACE_COLUMN_MIRRORS: Record<string, string | undefined> = {
+  kanban: 'columns',
+  gallery: 'visibleFields',
+};
