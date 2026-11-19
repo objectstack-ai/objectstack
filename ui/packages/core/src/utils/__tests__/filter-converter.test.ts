@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { convertFiltersToAST, convertOperatorToAST, type FilterNode } from '../filter-converter';
+import { parseFilterAST } from '@objectstack/spec/data';
+import { convertFiltersToAST, convertOperatorToAST, FilterOperatorError, type FilterNode } from '../filter-converter';
 
 describe('Filter Converter Utilities', () => {
   describe('convertOperatorToAST', () => {
@@ -152,5 +153,51 @@ describe('Filter Converter Utilities', () => {
       });
       expect(result).toBeUndefined();
     });
+  });
+});
+
+describe('the nested-relation node (objectstack#34990)', () => {
+  /** The refusal a call throws, captured so its envelope can be asserted. */
+  const refusalOf = (run: () => unknown): FilterOperatorError => {
+    try {
+      run();
+    } catch (error) {
+      return error as FilterOperatorError;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('lowers a condition on the related record to one equality node the spec lowers back to the nested form', () => {
+    const node = convertFiltersToAST({ account: { owner: 'u1' } });
+    expect(node).toEqual(['account', '=', { owner: 'u1' }]);
+    expect(parseFilterAST(node)).toEqual({ account: { owner: 'u1' } });
+  });
+
+  it('carries a deeper relation and the related condition\'s own operators verbatim', () => {
+    const filter = { account: { parent: { kind: { $in: ['a', 'b'] } }, region: { $ne: 'x' } } };
+    const node = convertFiltersToAST(filter);
+    expect(node).toEqual(['account', '=', filter.account]);
+    expect(parseFilterAST(node)).toEqual(filter);
+  });
+
+  it('sits beside plain conditions and inside a combinator like any other leaf', () => {
+    expect(convertFiltersToAST({ status: 'open', account: { owner: 'u1' } }))
+      .toEqual(['and', ['status', '=', 'open'], ['account', '=', { owner: 'u1' }]]);
+    expect(convertFiltersToAST({ $or: [{ account: { owner: 'u1' } }, { status: 'won' }] }))
+      .toEqual(['or', ['account', '=', { owner: 'u1' }], ['status', '=', 'won']]);
+  });
+
+  it('CONTROL: a map that mixes operators and plain keys is still an operator map, and is refused', () => {
+    const refusal = refusalOf(() => convertFiltersToAST({ account: { $eq: 'a1', owner: 'u1' } }));
+    expect(refusal).toBeInstanceOf(FilterOperatorError);
+    expect({ code: refusal.code, status: refusal.httpStatus, operator: refusal.operator, field: refusal.field })
+      .toEqual({ code: 'INVALID_FILTER', status: 400, operator: 'owner', field: 'account' });
+  });
+
+  it('CONTROL: an operator map and an empty map keep their answers', () => {
+    expect(convertFiltersToAST({ age: { $gte: 18 } })).toEqual(['age', '>=', 18]);
+    const refusal = refusalOf(() => convertFiltersToAST({ account: {} }));
+    expect({ code: refusal.code, status: refusal.httpStatus, field: refusal.field })
+      .toEqual({ code: 'INVALID_FILTER', status: 400, field: 'account' });
   });
 });
