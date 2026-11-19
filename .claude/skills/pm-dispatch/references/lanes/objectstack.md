@@ -8,7 +8,7 @@
 - 每席照 area-lease.md 分区运作:区线程、L1 线程、区内落地;本文只写全仓与多席特有者。
 - ⛔ 非单车道仓席:cross-repo-coordination.md 单车道仓条、seat-lifecycle.md 单车道仓行不适用。
 - 首触与 `domain:*` 归分诊(`triage-duties.md`);本车道立卡带 area/type/级,⛔ 不产、不改 `domain:*`。
-- ⛔ 不给卡挂 `repo:objectstack` 标签:按仓认卡;该标签已退流通,H14 仍作缝卡读。
+- ⛔ 不给卡挂 `repo:objectstack` 标签:按仓认卡;该标签已退流通。
 
 ## 范围
 

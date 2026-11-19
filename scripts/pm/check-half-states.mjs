@@ -3785,9 +3785,9 @@ export function h12OrphanLanding(pr, nowMs = Date.now()) {
  * triage sweep's disjunct ③: any of these makes the card visible to a named
  * reader (queue view, lane view, unlock scan, decision inbox, finding
  * grading round, epic index, seat registry), so their absence — with routing
- * already present — is the invisible half-annotated shape. `pm:blocking` is
- * deliberately NOT here: it is a derived priority cache, not a state, and a
- * card carrying only it is exactly as invisible to candidate queries.
+ * already present — is the invisible half-annotated shape. The retired
+ * `pm:blocking` label is deliberately NOT here: it was never a state, and a
+ * card still carrying only it is exactly as invisible to candidate queries.
  */
 export const PM_STATE_LABELS = [
   'pm:queue',
@@ -7754,16 +7754,16 @@ export function h77BlockNamesNoOpenTarget(issue, resolutions, commentBodies, own
   if (h19BlockOutlivedBlocker(issue, rows, ownerRepo) !== null) return null;
 
   // What is left carries a line, names nothing open, and nothing it names
-  // closed as done. The carrier split is H19's own, so the two agree on which
-  // targets this card's authoritative channel states.
+  // closed as done or went unread — so every target its authoritative carrier
+  // states is a PR that closed UNMERGED, or it states none. The carrier split
+  // is H19's own, so the two agree on which targets that carrier names.
   const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
   const carries = (r) => bodyKeys.size === 0 || bodyKeys.has(r.key);
   const judged = rows.filter(carries);
   const archive = rows.filter((r) => !carries(r));
-  // Unreachable from the sweep (the two guards above leave only unmerged PRs in
-  // the judged set); a row of any other shape is one this predicate cannot
-  // vouch for, and silence is the direction that never invents a verdict.
-  if (judged.some((r) => !(r.state === 'closed' && r.unmerged === true))) return null;
+  // A body that names targets none of which was resolved is a reading this
+  // predicate was not handed (the sweep always resolves the body's own set):
+  // silence, the direction that never invents a verdict.
   if (rows.length > 0 && judged.length === 0) return null;
 
   const where = hasBlockedByLine(issue?.body) ? 'its body' : 'a comment';
@@ -26237,6 +26237,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // beside its positive twin, the threshold boundary, the governing stamp, the
   // re-entry line, the owing seat, the live record shapes, the text, the band.
   'H73 ruled card in the decision box': 25,
+  // Registered with the blocking-relation rows, pin just under the count: for
+  // each of H77–H81 the firing case beside the control that silences it, the
+  // stand-down for the neighbouring row (H4/H19 for H77, H73 for H81), the
+  // unreadable inputs, the text, the band and the wiring; H19's full-discharge
+  // sentence both ways; the grade ladder; the cycle finder over rings, chains
+  // and a 4000-card ring; and the retirement of H14/H15 read off the registry.
+  'H77-H81 blocking relation read from the lines': 97,
   // Registered with the first-touch audit row, pin just under the count: the
   // firing case with both record shapes as its positive controls, the body
   // channel, every exemption beside a non-exempt twin, the population edges,
@@ -27927,11 +27934,11 @@ async function selfTest() {
   // #4690 in miniature, same as H10–H13: unreadable must not read as fresh.
   t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
   t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], undefined), NOW), 'string');
-  // Report-only, ordinary row in both media — never loud (H14–H16's own
+  // Report-only, ordinary row in both media — never loud (H16's own
   // property, and the card's explicit requirement for this item).
   t('H18: not a loud finding', isLoudFinding(h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
 
-  // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
+  // -- The `Blocked-by:` parser and the reverse index (2026-08-19) -----------
   // The fixtures below are REAL lines from the 2026-08-19 census of this board
   // (234 open cards, 17 `Blocked-by:` body lines), so the parser is pinned
   // against the shapes seats actually write rather than against invented ones.
@@ -27980,7 +27987,7 @@ async function selfTest() {
   // it does the sweeper starts indexing its own report.
   t(
     'blockedByTargets: a rendered finding row does not parse as a Blocked-by line',
-    numbersOf(blockedByTargets('- **H14** [#5](https://example.test/5) — targeted by 1 open card(s)\' `Blocked-by:` body line (#7)')),
+    numbersOf(blockedByTargets('- **H78** [#5](https://example.test/5) — `priority:p3` on a card that 1 open card(s) name in a `Blocked-by:` line, graded BELOW 1 of them: #7 (`priority:p1`).')),
     '',
   );
   // Deliberately NOT stripped, unlike H7/H8/H13: this models a machine reader
@@ -29495,6 +29502,169 @@ async function selfTest() {
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
   b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
+
+  // -- H77–H81: the blocking relation, read from the `Blocked-by:` lines.
+  //    Every firing case sits beside the control that would make it FAIL: the
+  //    same card with the one fact changed is silent, so no case here can pass
+  //    by a predicate that fires on everything — or on nothing.
+  const BATTERY_REL = 'H77-H81 blocking relation read from the lines';
+  const relIdx = (cards, comments) =>
+    buildBlockingIndex(cards, { repo: REPO_OS, ...(comments ? { comments: new Map(comments) } : {}) });
+  const byNo = (cards) => new Map(cards.map((c) => [c.number, c]));
+  const graded = (number, rung, more = [], body = '') =>
+    carded(number, [...(rung ? [`priority:${rung}`] : []), ...more], body);
+
+  // H77 — a line exists, and names nothing open. H4 and H19 each stand down
+  // for it on purpose; the cases pin that it stands down for THEM.
+  const unmergedPr = (n) => target(n, 'closed', { unmerged: true });
+  const h77 = (...args) => h77BlockNamesNoOpenTarget(...args);
+  const row77 = (...args) => String(h77BlockNamesNoOpenTarget(...args) ?? '');
+  const noRef77 = blockedCard(1, 'Blocked-by: the next platform release');
+  b(BATTERY_REL, 'H77 fires: a `Blocked-by:` line that names no card or PR', typeof h77(noRef77, [], [], REPO_OS), 'string');
+  b(BATTERY_REL, 'H77 row: the head, where the line sits, and what it names', ['names NO OPEN TARGET', 'in its body', 'names no card or PR other than this card itself'].every((x) => row77(noRef77, [], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, 'H77 row: the remedy names each real state by what the card waits for', ['`pm:awaiting-maintainer` with a `Maintainer-action:` line', 'the decision box, with options and a recommendation', '`pm:on-hold` with a `Restart-when:` line', 'back to `pm:queue`'].every((x) => row77(noRef77, [], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, '⛔ H77 control: the same card naming an OPEN target is silent', h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open')], [], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77: NO line at all is H4\'s row, never both', `${h77(blockedCard(1, 'waiting on upstream'), [], ['triage note'], REPO_OS)}/${typeof h4BlockedNoBlockedBy(blockedCard(1, 'waiting on upstream'), ['triage note'])}`, 'null/string');
+  b(BATTERY_REL, '⛔ H77: a target closed as done is H19\'s row, never both', `${h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], [], REPO_OS)}/${typeof h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS)}`, 'null/string');
+  b(BATTERY_REL, '⛔ H77: an UNREADABLE judged target is H19\'s UNJUDGED row', h77(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' })], [], REPO_OS), null);
+  b(BATTERY_REL, 'H77 fires: every target is a PR that closed UNMERGED — the gap H19 leaves by design', `${typeof h77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], [], REPO_OS)}/${h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], REPO_OS)}`, 'string/null');
+  b(BATTERY_REL, 'H77 row: …and names the abandoned PR as closed UNMERGED', ['`#2` (closed UNMERGED)', 'it will never merge'].every((x) => row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2)], [], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, '⛔ H77 control: one unmerged PR beside one OPEN target is silent', h77(blockedCard(1, 'Blocked-by: #2, #3'), [unmergedPr(2), target(3, 'open')], [], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77 control: a LIVE blocker parked in a comment beside a body of unmerged PRs is silent — the re-park shape', h77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'open')], ['Blocked-by: #3'], REPO_OS), null);
+  b(BATTERY_REL, '⛔ H77: resolutions that do not cover the body\'s own targets are not judged', h77(blockedCard(1, 'Blocked-by: #2'), [target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), null);
+  b(BATTERY_REL, 'H77: a line naming only the card ITSELF names nothing', row77(blockedCard(500, 'Blocked-by: #500'), blockerTargetsFor(blockedCard(500, 'Blocked-by: #500'), [], REPO_OS), [], REPO_OS).includes('other than this card itself'), true);
+  b(BATTERY_REL, '⛔ H77: the label gate — the same line without `pm:blocked` is out of scope', h77(blockedCard(1, 'Blocked-by: the next platform release', ['pm:queue']), [], [], REPO_OS), null);
+  b(BATTERY_REL, 'H77: a line parked in a COMMENT is named as such', row77(blockedCard(1, 'no line here'), [], ['Blocked-by: an upstream fix, no card yet'], REPO_OS).includes('in a comment'), true);
+  b(BATTERY_REL, 'H77: an UNREADABLE thread still fires on the body line, and says the thread was not read', row77(noRef77, [], null, REPO_OS).includes('comment thread could NOT be read'), true);
+  b(BATTERY_REL, '⛔ H77 control: …and a thread that WAS read carries no such clause', row77(noRef77, [], [], REPO_OS).includes('could NOT be read'), false);
+  b(BATTERY_REL, 'H77: archive-only targets beside a body of unmerged PRs are NAMED, never judged', ['only through the comment archive', '`#3` (closed)', 'none of them is open'].every((x) => row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS).includes(x)), true);
+  b(BATTERY_REL, 'H77: …and one of them that could not be read is said to be unread, not closed', row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'unresolved', { detail: 'HTTP 404' })], ['Blocked-by: #3'], REPO_OS).includes('1 could not be read this sweep — unread, not closed'), true);
+  b(BATTERY_REL, 'H77: a missing issue and absent inputs do not crash', `${h77(undefined)}/${typeof h77(noRef77, undefined, undefined)}`, 'null/string');
+  b(BATTERY_REL, 'H77: report-only and quiet — never loud, never the UNJUDGED rank', `${isLoudFinding(row77(noRef77, [], [], REPO_OS))}/${isUnjudgedFinding(row77(noRef77, [], null, REPO_OS))}/${row77(noRef77, [], [], REPO_OS).includes('never a label or a line written from this script')}`, 'false/false/true');
+  b(BATTERY_REL, 'H77 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H77')}/${familyRegistryCoverage().emitted.includes('H77')}`, 'stall/true');
+
+  // (b) — every target closed as done: H19, which this script reports and does
+  // not act on. The row names the act the rule gives the daily scan.
+  b(BATTERY_REL, 'H19 full discharge: the row names the daily scan\'s release back to `pm:queue`', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS).includes('it returns the card to `pm:queue` with one comment, or rewrites the line to the next real blocker'), true);
+  b(BATTERY_REL, '⛔ H19 control: a PARTIAL discharge names no such release', h19row(blockedCard(1, 'Blocked-by: #2, #3'), [target(2, 'closed'), target(3, 'open')], REPO_OS).includes('returns the card to `pm:queue`'), false);
+  b(BATTERY_REL, '⛔ H19 control: …nor does a discharge a PR closed UNMERGED withholds', h19row(blockedCard(1, 'Blocked-by: #2, #3'), [target(2, 'closed'), unmergedPr(3)], REPO_OS).includes('returns the card to `pm:queue`'), false);
+  b(BATTERY_REL, 'H19 full discharge: …and the release is still not this script\'s to make', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed')], REPO_OS).includes('never a label written from this script'), true);
+
+  // H78 — the grade ladder, then the row.
+  b(BATTERY_REL, 'H78 ladder: a grade label reads as its rung, the top one first', [gradeRung(graded(1, 'p0')), gradeRung(graded(1, 'p3')), gradeRung(carded(1, ['priority:p2', 'priority:p1']))].join(), '0,3,1');
+  b(BATTERY_REL, 'H78 ladder: no grade label is NULL, and so are unreadable labels — never a rung', [gradeRung(carded(1, ['pm:queue'])), gradeRung({ number: 1 }), gradeRung(undefined)].join(), ',,');
+  const cards78 = [graded(5, 'p3'), graded(10, 'p1', ['pm:blocked'], 'Blocked-by: #5'), graded(11, 'p2', ['pm:blocked'], 'Blocked-by: #5')];
+  const h78 = (card, cards = cards78, comments) => h78BlockerBelowBlockedGrade(card, relIdx(cards, comments), byNo(cards));
+  const row78 = (...args) => String(h78(...args) ?? '');
+  b(BATTERY_REL, 'H78 fires: a p3 blocker under a p1 card it blocks', typeof h78(cards78[0]), 'string');
+  b(BATTERY_REL, 'H78 row: its own grade, the higher dependents highest first, and the grade it takes', ['`priority:p3` on a card that 2 open card(s) name', 'graded BELOW 2 of them: #10 (`priority:p1`), #11 (`priority:p2`)', "this card's grade is `priority:p1`"].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, 'H78 row: names the read that decides who acts — the fleet\'s grade is raised, a hand-set one ⛔ not moved', ['last `labeled` event', 'triage raises it', 'hand-set grade', '⛔ not moved', 'reports to him'].every((x) => row78(cards78[0]).includes(x)), true);
+  b(BATTERY_REL, '⛔ H78 control: the same blocker graded p1 is silent', h78(graded(5, 'p1'), [graded(5, 'p1'), cards78[1], cards78[2]]), null);
+  b(BATTERY_REL, '⛔ H78: a blocker graded ABOVE everything it blocks is silent', h78(graded(5, 'p0'), [graded(5, 'p0'), cards78[1], cards78[2]]), null);
+  b(BATTERY_REL, 'H78: only the dependents graded ABOVE are named', `${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('graded BELOW 1 of them: #10 (`priority:p1`).')}/${row78(graded(5, 'p2'), [graded(5, 'p2'), cards78[1], cards78[2]]).includes('#11 (')}`, 'true/false');
+  b(BATTERY_REL, 'H78: an UNGRADED blocker sits below every rung', row78(carded(5, ['pm:queue']), [carded(5, ['pm:queue']), cards78[2]]).includes('no grade label on a card that 1 open card(s) name'), true);
+  b(BATTERY_REL, '⛔ H78: …except a generated anchor and a seat post, which take no grade', `${h78(carded(5, ['tracking']), [carded(5, ['tracking']), cards78[1]])}/${h78(carded(5, ['pm:seat']), [carded(5, ['pm:seat']), cards78[1]])}`, 'null/null');
+  b(BATTERY_REL, 'H78 control: …while an anchor that DOES carry a lower grade is reported like any card', typeof h78(carded(5, ['tracking', 'priority:p3']), [carded(5, ['tracking', 'priority:p3']), cards78[1]]), 'string');
+  b(BATTERY_REL, '⛔ H78: an UNGRADED dependent contributes nothing', h78(cards78[0], [cards78[0], carded(10, ['pm:blocked'], 'Blocked-by: #5')]), null);
+  b(BATTERY_REL, '⛔ H78: a card nothing waits on is silent, whatever its grade', h78(graded(99, 'p3'), [...cards78, graded(99, 'p3')]), null);
+  b(BATTERY_REL, '⛔ H78: unreadable labels on the blocker are never read as ungraded', h78BlockerBelowBlockedGrade({ number: 5 }, relIdx(cards78), byNo(cards78)), null);
+  b(BATTERY_REL, 'H78: a COMMENT-borne edge counts like a body one', typeof h78(cards78[0], [cards78[0], graded(10, 'p1', ['pm:blocked'], 'no line here')], [[10, ['Blocked-by: #5']]]), 'string');
+  b(BATTERY_REL, '⛔ H78: a cross-repo line founds nothing here — the index holds this repo\'s edges', h78(cards78[0], [cards78[0], graded(10, 'p0', ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5')]), null);
+  b(BATTERY_REL, 'H78 row: …and every row says that scope', row78(cards78[0]).includes('THIS repo\'s open cards only'), true);
+  const fan78 = [graded(5, 'p3'), ...Array.from({ length: 7 }, (_, i) => graded(100 + i, 'p0', ['pm:blocked'], 'Blocked-by: #5'))];
+  b(BATTERY_REL, 'H78: a large fan-out names the cap and counts the rest', [`graded BELOW 7 of them`, `+${7 - BLOCKING_DEPENDENT_LIST_CAP} more`].every((x) => row78(fan78[0], fan78).includes(x)), true);
+  b(BATTERY_REL, 'H78: a missing index and a PR row do not crash or fire', `${h78BlockerBelowBlockedGrade(cards78[0], undefined, undefined)}/${h78BlockerBelowBlockedGrade({ ...cards78[0], pull_request: {} }, relIdx(cards78), byNo(cards78))}`, 'null/null');
+  b(BATTERY_REL, 'H78 band: registered as `state`, the sweep pushes it, and it is not loud', `${familyBand('H78')}/${familyRegistryCoverage().emitted.includes('H78')}/${isLoudFinding(row78(cards78[0]))}`, 'state/true/false');
+
+  // H79 — a hold on one side of a block only.
+  const h79 = (card, cards, comments) => h79HoldMismatch(card, blockersByDependent(relIdx(cards, comments)).get(card.number), byNo(cards));
+  const row79 = (...args) => String(h79(...args) ?? '');
+  const held5 = carded(5, ['pm:on-hold'], 'Restart-when: closed #1');
+  const queued5 = carded(5, ['pm:queue']);
+  const dep79 = carded(10, ['pm:blocked'], 'Blocked-by: #5');
+  const heldDep79 = carded(10, ['pm:on-hold'], 'Blocked-by: #5\nRestart-when: closed #5');
+  b(BATTERY_REL, 'H79 inverse index: each dependent lists the local cards it names, ascending', JSON.stringify([...blockersByDependent(relIdx([carded(10, [], 'Blocked-by: #7, #5'), carded(11, [], 'Blocked-by: #5')]))]), '[[10,[5,7]],[11,[5]]]');
+  b(BATTERY_REL, 'H79 inverse index: a missing index is an empty map', blockersByDependent(undefined).size, 0);
+  b(BATTERY_REL, 'H79 fires: the blocker is on hold and the card it blocks is not', typeof h79(dep79, [held5, dep79]), 'string');
+  b(BATTERY_REL, 'H79 row: states the default — the blocked card follows its blocker onto hold', ['HOLD MISMATCH: this card is not `pm:on-hold`', '(#5)', 'the blocked card follows its blocker onto hold', 'unless the maintainer said otherwise on the card'].every((x) => row79(dep79, [held5, dep79]).includes(x)), true);
+  b(BATTERY_REL, '⛔ H79 control: BOTH on hold is consistent', h79(heldDep79, [held5, heldDep79]), null);
+  b(BATTERY_REL, '⛔ H79 control: NEITHER on hold is silent', h79(dep79, [queued5, dep79]), null);
+  b(BATTERY_REL, 'H79 fires the REVERSE way: the blocked card is on hold and none of its open blockers is', ['HOLD MISMATCH, the reverse way', '(#5)', 'No default in this direction'].every((x) => row79(heldDep79, [queued5, heldDep79]).includes(x)), true);
+  const dep79two = carded(10, ['pm:blocked'], 'Blocked-by: #5, #6');
+  b(BATTERY_REL, 'H79: one held blocker among several is enough, and only IT is named', `${row79(dep79two, [held5, carded(6, ['pm:queue']), dep79two]).includes('1 open card(s) its `Blocked-by:` line names is (#5)')}/${row79(dep79two, [held5, carded(6, ['pm:queue']), dep79two]).includes('#6')}`, 'true/false');
+  b(BATTERY_REL, '⛔ H79: a held card with at least ONE held blocker is consistent', h79({ ...dep79two, labels: [{ name: 'pm:on-hold' }] }, [held5, carded(6, ['pm:queue']), { ...dep79two, labels: [{ name: 'pm:on-hold' }] }]), null);
+  b(BATTERY_REL, '⛔ H79: a CLOSED blocker is not in the open listing and founds nothing (that is H19\'s)', h79(dep79, [dep79]), null);
+  b(BATTERY_REL, '⛔ H79: a card that names no local card is silent — no line, or a cross-repo one', `${h79(carded(10, ['pm:queue']), [held5, carded(10, ['pm:queue'])])}/${h79(carded(10, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5'), [held5, carded(10, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#5')])}`, 'null/null');
+  b(BATTERY_REL, '⛔ H79: unreadable labels are never read as not-held — on the card or on its blocker', `${h79HoldMismatch({ number: 10 }, [5], byNo([held5]))}/${h79HoldMismatch(dep79, [5], byNo([{ number: 5 }]))}`, 'null/null');
+  b(BATTERY_REL, 'H79: a COMMENT-borne edge counts like a body one', typeof h79(carded(10, ['pm:blocked'], 'no line here'), [held5, carded(10, ['pm:blocked'], 'no line here')], [[10, ['Blocked-by: #5']]]), 'string');
+  b(BATTERY_REL, 'H79 band: registered as `state`, the sweep pushes it, and it is not loud', `${familyBand('H79')}/${familyRegistryCoverage().emitted.includes('H79')}/${isLoudFinding(row79(dep79, [held5, dep79]))}`, 'state/true/false');
+
+  // H80 — cards that wait on each other.
+  const wait = (number, on) => carded(number, ['pm:blocked'], on.length ? `Blocked-by: ${on.map((n) => `#${n}`).join(', ')}` : 'no line here');
+  const cyc = (cards, comments) => JSON.stringify(blockingCycles(relIdx(cards, comments)));
+  const mutual80 = [wait(1, [2]), wait(2, [1])];
+  const ring80 = [wait(1, [2]), wait(2, [3]), wait(3, [1])];
+  b(BATTERY_REL, 'H80 cycles: a mutual block is ONE group of two, with its path', cyc(mutual80), '[{"members":[1,2],"path":[1,2,1]}]');
+  b(BATTERY_REL, 'H80 cycles: a three-card ring is ONE group, reported once, path spelled in waits-on order', cyc(ring80), '[{"members":[1,2,3],"path":[1,2,3,1]}]');
+  b(BATTERY_REL, '⛔ H80 control: a plain chain is no cycle', cyc([wait(1, [2]), wait(2, [3]), wait(3, [])]), '[]');
+  b(BATTERY_REL, '⛔ H80 control: the same ring with ONE line removed is no cycle', cyc([wait(1, [2]), wait(2, [3]), wait(3, [])]) === cyc(ring80), false);
+  b(BATTERY_REL, 'H80 cycles: a card that waits INTO a ring is not a member of it', cyc([...ring80, wait(4, [1])]), '[{"members":[1,2,3],"path":[1,2,3,1]}]');
+  b(BATTERY_REL, 'H80 cycles: two disjoint groups are two entries, lowest member first', cyc([wait(8, [7]), wait(7, [8]), ...mutual80]), '[{"members":[1,2],"path":[1,2,1]},{"members":[7,8],"path":[7,8,7]}]');
+  b(BATTERY_REL, '⛔ H80: a self-reference never reaches the index, so it is never a cycle', cyc([wait(5, [5])]), '[]');
+  b(BATTERY_REL, 'H80 cycles: the SHORTEST cycle through the lowest card is the one spelled', cyc([wait(1, [2]), wait(2, [3, 1]), wait(3, [1])]), '[{"members":[1,2,3],"path":[1,2,1]}]');
+  b(BATTERY_REL, 'H80 cycles: a COMMENT-borne edge closes a cycle like a body one', cyc([wait(1, [2]), wait(2, [])], [[2, ['Blocked-by: #1']]]), '[{"members":[1,2],"path":[1,2,1]}]');
+  b(BATTERY_REL, '⛔ H80: a cross-repo line of the same number closes nothing', cyc([wait(1, [2]), carded(2, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#1')]), '[]');
+  const long80 = Array.from({ length: 4000 }, (_, i) => wait(i + 1, [i === 3999 ? 1 : i + 2]));
+  b(BATTERY_REL, 'H80 cycles: a 4000-card ring is found without exhausting the stack', `${blockingCycles(relIdx(long80)).length}/${blockingCycles(relIdx(long80))[0].members.length}/${blockingCycles(relIdx(long80))[0].path.length}`, '1/4000/4001');
+  b(BATTERY_REL, 'H80 cycles: a missing index is no cycle', blockingCycles(undefined).length, 0);
+  const rows80 = (cards) => h80BlockingCycleRows(relIdx(cards), byNo(cards));
+  b(BATTERY_REL, 'H80 rows: ONE row per group, on its lowest-numbered card', rows80([wait(8, [7]), wait(7, [8]), ...ring80]).map((r) => r.issue.number).join(), '1,7');
+  b(BATTERY_REL, 'H80 row: a pair is named a MUTUAL BLOCK, both cards and the path', ['MUTUAL BLOCK: #1 and #2 each name the other', '#1 → #2 → #1'].every((x) => rows80(mutual80)[0].message.includes(x)), true);
+  b(BATTERY_REL, 'H80 row: a larger group is named a CYCLE, with its size, members and path', ['BLOCKING CYCLE among 3 open cards (#1, #2, #3)', '#1 → #2 → #3 → #1'].every((x) => rows80(ring80)[0].message.includes(x)), true);
+  b(BATTERY_REL, 'H80 row: says what a block between fleet cards may be — the same file, never a preference order', ['only when they edit the same file', 'a list on the epic', 'No close can release a card in it'].every((x) => rows80(ring80)[0].message.includes(x)), true);
+  b(BATTERY_REL, '⛔ H80 control: no cycle, no row', rows80([wait(1, [2]), wait(2, [])]).length, 0);
+  b(BATTERY_REL, 'H80 rows: a missing index and a missing listing do not crash', `${h80BlockingCycleRows(undefined, undefined).length}/${h80BlockingCycleRows(relIdx(mutual80), undefined).length}`, '0/0');
+  b(BATTERY_REL, 'H80 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H80')}/${familyRegistryCoverage().emitted.includes('H80')}/${isLoudFinding(rows80(mutual80)[0].message)}`, 'stall/true/false');
+
+  // H81 — a question in the decision box with no answer. One governing-record
+  // reader with H73, so a card is exactly one row's.
+  const NOW81 = Date.parse('2026-11-19T12:00:00Z');
+  const card81 = (extra = {}) => ({
+    number: 35001,
+    state: 'open',
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'priority:p2' }],
+    body: '## 维护者速读\n\n- 问题:…',
+    created_at: '2026-11-15T12:00:00Z',
+    updated_at: '2026-11-18T12:00:00Z',
+    ...extra,
+  });
+  const h81 = (extra = {}, nowMs = NOW81) => h81DecisionUnanswered(card81(extra), nowMs);
+  const row81 = (extra = {}, nowMs = NOW81) => String(h81(extra, nowMs) ?? '');
+  const RULED81 = 'Ruled: 6566731522 · letter A · 2026-11-15T00:00Z';
+  b(BATTERY_REL, 'H81 fires: a decision card with no ruling, open four days', typeof h81(), 'string');
+  b(BATTERY_REL, 'H81 row: the age, the threshold, what it is counted from and the last touch', ['open ~4 day(s) (threshold 3)', 'counted from the day the card was filed', 'last touched ~24h ago'].every((x) => row81().includes(x)), true);
+  b(BATTERY_REL, 'H81 constants: three days', DECISION_UNANSWERED_STALE_DAYS, 3);
+  b(BATTERY_REL, '⭐ H81: the threshold boundary — exactly three days is silent, a minute past it fires', [h81({ created_at: '2026-11-16T12:00:00Z' }), typeof h81({ created_at: '2026-11-16T11:59:00Z' })].join(), ',string');
+  b(BATTERY_REL, '⛔ H81 control: the same card without the decision label is silent', h81({ labels: [{ name: 'pm:queue' }, { name: 'priority:p2' }] }), null);
+  b(BATTERY_REL, '⛔ H81: a card whose body carries a governing `Ruled:` record is ANSWERED — H73\'s row, never both', `${h81({ body: `${RULED81}\n\nthe question` })}/${typeof h73RuledCardStillInBox(card81({ body: `${RULED81}\n\nthe question` }), NOW81)}`, 'null/string');
+  b(BATTERY_REL, '⛔ H81: …and conversely the unanswered card is never H73\'s', h73RuledCardStillInBox(card81(), NOW81), null);
+  b(BATTERY_REL, 'H81: a card that RE-ENTERED the box is unanswered again, counted from the earlier ruling', ['open ~4 day(s)', 'counted from the newest earlier ruling its `Prior rulings on this card:` line names'].every((x) => row81({ created_at: '2026-10-01T00:00:00Z', body: `${RULED81}\n\nPrior rulings on this card: 6566731522 — letter A ruled the old question; this is a new one.` }).includes(x)), true);
+  b(BATTERY_REL, '⛔ H81 control: …and a re-entry under three days old is silent, however old the card', h81({ created_at: '2026-10-01T00:00:00Z', body: 'Ruled: 6566731522 · letter A · 2026-11-18T00:00Z\n\nPrior rulings on this card: 6566731522 — a new question.' }), null);
+  b(BATTERY_REL, 'H81: a `Ruled:` line inside a FENCE is a citation — the card is still unanswered', typeof h81({ body: `quoting another card:\n\`\`\`\n${RULED81}\n\`\`\`\n` }), 'string');
+  b(BATTERY_REL, 'H81: an unreadable `created_at` FIRES, never reads as fresh', row81({ created_at: 'not-a-date' }).includes('for a time this sweep could not read'), true);
+  b(BATTERY_REL, 'H81: an absent `created_at` likewise', typeof h81({ created_at: undefined }), 'string');
+  b(BATTERY_REL, 'H81: an unreadable `updated_at` is said, not guessed', row81({ updated_at: undefined }).includes('last-touched time unreadable'), true);
+  b(BATTERY_REL, '⛔ H81: `updated_at` is NOT the clock — a card nudged an hour ago still lists', row81({ updated_at: '2026-11-19T11:00:00Z' }).includes('last touched ~1h ago'), true);
+  b(BATTERY_REL, '⛔ H81: a CLOSED card, a PR row and unreadable labels are all out', [h81({ state: 'closed' }), h81({ pull_request: {} }), h81({ labels: undefined }), h81DecisionUnanswered(undefined)].join(), ',,,');
+  b(BATTERY_REL, 'H81 row: the answer is the maintainer\'s alone, and the script moves nothing', ['no seat answers for him and no script moves the card', 'the decision thread the coordinator opens for it', 'never a label written from this script'].every((x) => row81().includes(x)), true);
+  b(BATTERY_REL, 'H81 governing record: the newest readable stamp governs, for H73 and H81 alike', `${governingRuledRecord('Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z').id}/${governingRuledRecord('Ruled: 6400000001 · letter B\nRuled: 6566731522 · letter A').id}/${governingRuledRecord('no record here')}`, '6566731522/6400000001/null');
+  b(BATTERY_REL, 'H81 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H81')}/${familyRegistryCoverage().emitted.includes('H81')}/${isLoudFinding(row81())}`, 'stall/true/false');
+
+  // The retirement, pinned from the registry side, and the rows' shared text rule.
+  b(BATTERY_REL, '⛔ retired: H14 and H15 sit in no band and no sweep line pushes them', `${familyBand('H14')}/${familyBand('H15')}/${familyRegistryCoverage().emitted.includes('H14')}/${familyRegistryCoverage().emitted.includes('H15')}`, `${UNREGISTERED_FAMILY_BAND}/${UNREGISTERED_FAMILY_BAND}/false/false`);
+  b(BATTERY_REL, 'registry: no code is left unregistered, and none is registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
+  b(BATTERY_REL, '⛔ text: no new row carries an angle bracket the body sanitizer could eat', [row77(noRef77, [], null, REPO_OS), row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), row78(cards78[0]), row79(dep79, [held5, dep79]), row79(heldDep79, [queued5, heldDep79]), rows80(mutual80)[0].message, rows80(ring80)[0].message, row81(), row81({ created_at: 'not-a-date' })].some((row) => row.length === 0 || /[<>]/u.test(row)), false);
+  b(BATTERY_REL, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY_REL) && SELF_TEST_BATTERIES[BATTERY_REL] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H74: an open `pm:queue` / `pm:blocked` card with no triage audit record in
   //    either channel. One card WITH an audit comment and one WITHOUT, as the
