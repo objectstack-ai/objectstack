@@ -458,3 +458,57 @@ describe('objectui#7349 — the production chain, end to end', () => {
     expect(await selectedIds(filter)).toEqual(['a', 'c']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The nested-relation node is refused by name in both dialects
+// ---------------------------------------------------------------------------
+
+/**
+ * `convertFiltersToAST` lowers the nested relation condition
+ * `{ profile: { verified: true } }` to `['profile', '=', { verified: true }]`,
+ * the node a server data source serves as a subquery. This matcher does not
+ * descend into relations. The object form was already refused by name; the
+ * AST form reached the `=` arm, which compared the condition object by
+ * reference, so no row matched and nothing was logged. Both forms now give
+ * the same refusal sentence. The `=` answer was the empty set on both trees,
+ * so the discriminant there is the logged refusal; `!=` answered EVERY row
+ * before the arm existed, so its row set discriminates on its own.
+ */
+describe('the nested-relation node is refused by name in both dialects', () => {
+  const NESTED = { profile: { verified: true } };
+  const REFUSAL =
+    "filter condition on field 'profile' carries the non-operator key 'verified'; "
+    + 'the in-memory matcher does not descend into a nested relation constraint';
+
+  it('the AST form and the object form are refused alike, with one sentence', async () => {
+    const node = toFilterNode(NESTED);
+    expect(node).toEqual(['profile', '=', { verified: true }]);
+
+    const astWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(node)).toEqual([]);
+    expect(astWarn).toHaveBeenCalledTimes(1);
+    const astLine = String(astWarn.mock.calls[0]?.[0]);
+    astWarn.mockRestore();
+
+    const objectWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(NESTED)).toEqual([]);
+    expect(objectWarn).toHaveBeenCalledTimes(1);
+    const objectLine = String(objectWarn.mock.calls[0]?.[0]);
+
+    expect(astLine).toContain(REFUSAL);
+    expect(astLine).toBe(objectLine);
+  });
+
+  it('`!=` on the node is refused too, rather than answering every row', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['profile', '!=', { verified: true }])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+  });
+
+  it('CONTROL: a scalar `=` still matches, with nothing logged', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['role', '=', 'admin'])).toEqual(['a', 'c']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
