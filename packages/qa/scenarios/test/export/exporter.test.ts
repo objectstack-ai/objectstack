@@ -10,8 +10,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -473,9 +472,44 @@ describe('exportGallery — ⛔ the default guard: origin `generic`, tier `start
   });
 });
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-/** The blank scaffold's config: the shape every generated app's `objectstack.config.ts` starts from. */
-const SCAFFOLD_CONFIG = resolve(HERE, '../../../../create-objectstack/src/templates/blank/objectstack.config.ts');
+/**
+ * The shape every generated app's `objectstack.config.ts` starts from: the
+ * blank scaffold's config (create-objectstack's `templates/blank`), abridged —
+ * imports, a module-level helper, comments between the keys, a `manifest`
+ * literal and barrel lists. Inline, not read from that package, so this suite
+ * declares no input outside its own package.
+ */
+const SCAFFOLD_SHAPED_CONFIG = `import { defineStack } from '@objectstack/spec';
+import { ConnectorRestPlugin } from './src/plugins';
+import * as objects from './src/objects';
+import * as views from './src/views';
+
+// Every value a barrel exports, as the list a stack key takes.
+const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);
+
+// This file is a MODULE, and the whole module is the stack.
+export default defineStack({
+  manifest: {
+    id: 'com.example.demotravel',
+    namespace: 'demotravel',
+    version: '0.1.0',
+    type: 'app',
+    name: 'Travel Expense',
+    // Protocol compatibility range.
+    engines: { protocol: '^18' },
+  },
+
+  requires: ['automation', 'triggers'],
+
+  // Generic connector executors, default-present.
+  plugins: [
+    new ConnectorRestPlugin(),
+  ],
+
+  objects: exportsOf(objects),
+  views: exportsOf(views),
+});
+`;
 
 /** The `defineStack({ … })` literal's property names, and the module's import specifiers, read back with the compiler. */
 function stackShape(text: string): { keys: string[]; imports: string[]; data?: string } {
@@ -530,8 +564,8 @@ describe('exportGallery — the trial package: listing text, facet and sample da
     expect(readme).toContain("- Sample data: the card's 8 seed rows in 2 objects, without `account.owner` (a user handle of the run's own environment, left unset)");
   });
 
-  it("the blank scaffold's config gains one import and one `data:` property; the rest of the file is byte for byte", () => {
-    const scaffold = readFileSync(SCAFFOLD_CONFIG, 'utf8');
+  it("a scaffold-shaped config gains one import and one `data:` property; the rest of the file is byte for byte", () => {
+    const scaffold = SCAFFOLD_SHAPED_CONFIG;
     const edited = withSampleData(ts, scaffold);
     const before = stackShape(scaffold);
     const after = stackShape(edited);
@@ -539,6 +573,7 @@ describe('exportGallery — the trial package: listing text, facet and sample da
     expect(after.imports).toEqual([...before.imports, `./${SAMPLE_DATA_FILE}`]);
     expect(after.data).toBe(SAMPLE_DATA_BINDING);
     expect(before.keys).not.toContain('data');
+    expect(edited.replace(`\nimport ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';`, '').replace(/\n  \/\/ The card's seed rows[^\n]*\n  data: gallerySampleData,/, '')).toBe(scaffold);
     expect(edited.length - scaffold.length).toBe(
       `\nimport ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';`.length + `\n  // The card's seed rows, the sample data an install loads (added by the gallery export).\n  data: ${SAMPLE_DATA_BINDING},`.length,
     );
