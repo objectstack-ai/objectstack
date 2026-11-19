@@ -117,6 +117,9 @@ const PRINT_PAGE = {
   label: 'Invoice',
   type: 'record',
   object: OBJECT_NAME,
+  // Declared the default, as the showcase invoice's is: the implicit
+  // declaration-order fallback no longer picks a print page (objectstack#35250).
+  isDefault: true,
   print: { paperSize: 'A4' },
   regions: [
     { name: 'header', components: [{ type: 'text', value: 'ACME Ltd' }] },

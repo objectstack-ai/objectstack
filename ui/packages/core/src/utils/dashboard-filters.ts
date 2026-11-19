@@ -24,7 +24,7 @@ import type { DashboardComponentSchema, DashboardWidgetSchema, I18nLabel, PageVa
 import { liftLegacyGlobalFilterDefault } from '@object-ui/types';
 import { DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName } from '@objectstack/spec/data';
 import { DATE_RANGE_PRESETS, DashboardSchema as SpecDashboardSchema } from '@objectstack/spec/ui';
-import { resolveDateMacros } from './date-macros.js';
+import { resolveDateMacros, resolvePeriodKeyTokens } from './date-macros.js';
 
 /** Reserved filter name for the dashboard's built-in date range. */
 export const DATE_RANGE_FILTER_NAME = 'dateRange';
@@ -383,6 +383,32 @@ function normalizeDateDefault(type: DashboardFilterDef['type'], defaultValue: un
 }
 
 /**
+ * Resolve a non-date filter's default when it is a period-key placeholder
+ * (`PERIOD_KEY_TOKENS` in `@objectstack/spec/data`): `{current_iso_week}`
+ * seeds the filter with the current ISO week's key, `2026-W47`, each time the
+ * defs are resolved, which is each time the dashboard opens.
+ *
+ * Resolved HERE, before the value seeds the filter variable, because the
+ * variable is what the control displays: seeding the token would show the
+ * text `{current_iso_week}` in the filter box, and a user who edits it would
+ * be editing a placeholder rather than a week. Resolved, the box shows the
+ * key, the user can change it, and the condition built from it is the
+ * `$contains` any typed text gets.
+ *
+ * A `date` / `dateRange` default is never resolved here: a week key is not a
+ * date. The spec refuses the placeholder on a date filter, and one that
+ * reaches this module anyway stays as written, which `buildFilterCondition`
+ * skips with a warning rather than compare a date against it. A literal key
+ * (`'2026-W47'`), any other placeholder and any non-string default pass
+ * through unchanged.
+ */
+function resolvePeriodKeyDefault(type: DashboardFilterDef['type'], defaultValue: unknown): unknown {
+  if (type === 'date' || type === 'dateRange') return defaultValue;
+  if (typeof defaultValue !== 'string') return defaultValue;
+  return resolvePeriodKeyTokens(defaultValue);
+}
+
+/**
  * Normalize a filter's static `options` declaration to `{ value, label }`
  * pairs — the @objectstack/spec `GlobalFilterSchema.options` form, and the
  * only form this function emits. Rendering an un-normalized option crashes
@@ -562,8 +588,9 @@ export function resolveDashboardFilterDefs(
       optionsFrom: f.optionsFrom,
       // framework#4475 — same preset-name lifting the built-in `dateRange`
       // above already does; see normalizeDateDefault for why a bare string is
-      // the only thing an author can declare here.
-      defaultValue: normalizeDateDefault(type, f.defaultValue),
+      // the only thing an author can declare here. A non-date default that is
+      // `{current_iso_week}` seeds the resolved key (resolvePeriodKeyDefault).
+      defaultValue: resolvePeriodKeyDefault(type, normalizeDateDefault(type, f.defaultValue)),
       targetWidgets: f.targetWidgets,
     });
   }
