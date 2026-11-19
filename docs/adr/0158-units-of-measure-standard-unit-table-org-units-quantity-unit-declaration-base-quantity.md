@@ -44,7 +44,7 @@ Four kinds of text feed this record. Each section says which kind it carries.
 
 2. **Left to this record.** The ruling hands this record three items ("Left to the ADR"), and U6 hands it one more
    sentence. Each is a section of [Left to this record](#left-to-this-record) that states the question as ruled. L3
-   carries the owning seat's settlement, marked as such; L1, L2 and L4 carry no settlement yet. The consequences
+   and L4 carry the owning seat's settlement, marked as such; L1 and L2 carry no settlement yet. The consequences
    noted under U3 are the same seat's, and are not new rules.
 3. **The card.** The business reason and the review questions in #35339's body. They are the analysis the ruling
    answered; a detail that appears only there is not ruled.
@@ -109,7 +109,7 @@ adoption is deferred ([Non-goals](#non-goals)).
 - **Decimal places on a number.** The `scale` key of `packages/spec/src/data/field.zod.ts#FieldSchema` declares a
   `number` field's decimal places and is enforced on writes. An absent `scale` declares no fixed width; consumers
   resolve the effective width through `packages/spec/src/data/field-scale.ts#resolveFieldScale`. U6 asks this record
-  to state how a unit's decimal places interact with it ([L4](#l4--u6s-decimals-and-the-fields-scale)).
+  to state how a unit's decimal places interact with it; [L4](#l4--u6s-decimals-and-the-fields-scale) settles it.
 
 ### 3. The pattern mirrored
 
@@ -194,7 +194,8 @@ admitted by this record.
 > **U6 · Decimals.** A unit's decimal places are an org-editable default, not platform-fixed: Rec 20 defines none,
 > and BOM scrap quantities need decimals. The ADR states how this interacts with the field's `scale`.
 
-The last sentence is [L4](#l4--u6s-decimals-and-the-fields-scale).
+The last sentence is settled under [L4](#l4--u6s-decimals-and-the-fields-scale): the field's `scale` governs storage
+and is the ceiling, and a unit's decimal places are only its display default.
 
 ### U7 — Releases
 
@@ -223,8 +224,8 @@ The last sentence is [L4](#l4--u6s-decimals-and-the-fields-scale).
 The ruling leaves three items to this record under "Left to the ADR", and U6's last sentence leaves a fourth. Each
 section below states its question as ruled.
 
-**PENDING: L1, L2 and L4.** Their settlement comes from the seat, with the maintainer's pick where an item is a
-product choice; until then each states its question and nothing else. L3 is settled.
+**PENDING: L1 and L2.** Their settlement comes from the seat, with the maintainer's pick where an item is a product
+choice; until then each states its question and nothing else. L3 and L4 are settled.
 
 ### L1 — The ratio lock
 
@@ -316,13 +317,21 @@ The values are illustrations: which codes U1 holds, and the dimension vocabulary
 
 ### L4 — U6's decimals and the field's `scale`
 
-<!-- PENDING: settlement from the seat -->
-
 > The ADR states how this interacts with the field's `scale`.
 
 From U6, where "this" is "A unit's decimal places are an org-editable default, not platform-fixed". The ruling's
 "Left to the ADR" list does not name this sentence; U6's own text hands it to this record, so it is held here beside
 the three.
+
+**Settled on 2026-11-19 by the owning seat (repo:objectstack#5), as a technical item.** This is the seat's
+settlement, not ruling text:
+
+> The field's `scale` governs storage and is the ceiling. A unit's decimal places (U6, org-editable) are only the
+> display default for that unit and never exceed the field's `scale`. Nothing is rounded at write by a unit's decimal
+> places. In R2, the projected base quantity rounds to the base field's `scale`.
+
+The `scale` it names is the existing key, enforced on writes of a `number` field
+([Context](#2-what-the-platform-has-today-read-at-3819afec) §2).
 
 ## Releases
 
@@ -338,7 +347,7 @@ U7 is the ruled plan; this table restates it and adds nothing.
 
 - U7 lists the readers of each release, not the declarations they read: U1's constant, U3's `sys_unit` and U4's unit
   declaration. U8 binds each key to its reader: "No unit key ships ahead of the engine that reads it" ([Open
-  items](#open-items) 7).
+  items](#open-items) 6).
 - The ruling's "Next": "An ADR records U1–U8. The R1 cards follow it."
 - Suite adoption is no release's member ([Non-goals](#non-goals)).
 
@@ -356,6 +365,8 @@ U7 is the ruled plan; this table restates it and adds nothing.
 - **No standard code can ever collide with an organization code** (U3): org codes are at least 4 characters or carry
   an underscore, and Rec 20 codes are at most 3 alphanumerics.
 - **A stored unit is a code, never an id** (U4), in exact uppercase.
+- **A unit's decimal places never round a stored value** (L4). The field's `scale` governs storage; a unit's decimal
+  places only set how its values display. R2's base quantity rounds to the base field's `scale`.
 - **R2 refuses rather than guesses** (U7 R2): with no ratio and no factor, the write is refused; affine units take no
   ratio conversion.
 
@@ -378,12 +389,11 @@ Also outside this record:
 
 ## Open items
 
-The ruling does not decide the items below, and this record does not settle them. Items 2–7 belong to the card that
+The ruling does not decide the items below, and this record does not settle them. Items 2–6 belong to the card that
 builds the piece, settled under that card's review; this record is amended with each answer, the way ADR-0144's open
 items were.
 
-1. **[L1](#l1--the-ratio-lock), [L2](#l2--organization-unit-label-translation) and
-   [L4](#l4--u6s-decimals-and-the-fields-scale)**, pending in this draft.
+1. **[L1](#l1--the-ratio-lock) and [L2](#l2--organization-unit-label-translation)**, pending in this draft.
 2. **U1's membership.** Which Rec 20 common codes the curated subset holds, each one's dimension and ratio, and which
    package codes it lists. U2 fixes one code (`H87`) and refuses two (`C62`, `EA`).
 3. **`sys_unit`'s owning package, and its fields** beyond what U3, U6 and U7 R2 name, against
@@ -398,8 +408,7 @@ items were.
    and the output field get two different names (the owning seat's settlement, 2026-11-19). The rest of the R2
    block's spelling, the base-quantity field's declaration included, is the R2 card's, the way ADR-0144 left
    `rateDate` and `rateField` to its card.
-6. **How R2 rounds a projected base quantity.** Not ruled.
-7. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
+6. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
    ([Releases](#releases)).
 
 ## Verification notes
