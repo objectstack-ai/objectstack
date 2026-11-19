@@ -17,8 +17,8 @@ import {
 
 const TITLE = { title: { type: 'text', label: 'Title' } };
 const MASTER = { parent: { type: 'master_detail', reference: 'deal', required: true } };
-/** An ADR-0015 `external` object: the remote database owns its storage. */
-const EXTERNAL = { external: { remoteName: 'customers' } };
+/** An ADR-0015 `external` object on a non-managed datasource: the remote database owns its storage. */
+const EXTERNAL = { datasource: 'legacy_crm', external: { remoteName: 'customers' } };
 
 function objectWith(extra: Record<string, unknown>, fields: Record<string, unknown> = TITLE) {
   return { name: 'deal_note', label: 'Probe', fields, ...extra };
@@ -87,7 +87,7 @@ describe('isTransferEligible — the structural test', () => {
     expect(isTransferEligible(unmapped)).toBe(false);
     expect(transferIneligibilityReason(unmapped)).toContain('external object');
     expect(transferIneligibilityReason(unmapped)).toContain('external.columnMap');
-    const mapped = objectWith({ external: { remoteName: 'customers', columnMap: { account_owner: 'owner_id' } } });
+    const mapped = objectWith({ ...EXTERNAL, external: { remoteName: 'customers', columnMap: { account_owner: 'owner_id' } } });
     expect(isTransferEligible(mapped)).toBe(true);
     const declared = objectWith(EXTERNAL, { ...TITLE, owner_id: { type: 'lookup', reference: 'sys_user' } });
     expect(isTransferEligible(declared)).toBe(true);
@@ -220,6 +220,7 @@ describe('ObjectSchema — userActions.transfer at parse', () => {
       expect(issues[0]!.message).toContain('no owner is provable');
     }
     const mapped = ObjectSchema.safeParse(objectWith({
+      ...EXTERNAL,
       external: { remoteName: 'customers', columnMap: { account_owner: 'owner_id' } },
       userActions: { transfer: true },
     }));
