@@ -530,6 +530,48 @@ function declaredRefusalAnswer(
 }
 
 /**
+ * [#34583, #34846] Both sides of a re-install folded through the artifact
+ * resolver FIRST, by the fold the upgrade comparison reads them by
+ * ({@link packageUpgradeSideOf}), so a body the resolver refuses is answered
+ * ({@link declaredRefusalAnswer}) before any reader that would throw it: the
+ * resolver is deterministic over the same bytes, so a reader after this never
+ * meets its refusal. Each side on its own, the incoming body first: a refusal
+ * of the installed copy (stored by an earlier install, read to compare
+ * against) is answered naming that copy, never as "Package 'X' cannot be
+ * installed", which blames the incoming one. `installed` `null` (a fresh
+ * install) or `undefined` (none can be read) folds no installed side.
+ *
+ * The one pre-resolve of the two readers of both sides: step 2c″'s declared
+ * renames ({@link MarketplaceInstallLocalPlugin.evaluateDeclaredRenames}) and
+ * the dry run's `planUpgrade` (`answerUpgradeDryRun`), so a dry-run re-install
+ * answers the refusal the real install answers. `undefined` when neither side
+ * is refused; an undeclared throw out of the resolver is rethrown, never
+ * relabelled.
+ */
+function upgradeSideRefusal(
+    manifestId: string,
+    converted: unknown,
+    installed: unknown,
+): ReturnType<typeof declaredRefusalAnswer> {
+    try {
+        packageUpgradeSideOf(converted);
+    } catch (err: unknown) {
+        const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
+        if (!refused) throw err;
+        return refused;
+    }
+    if (installed === null || installed === undefined) return undefined;
+    try {
+        packageUpgradeSideOf(installed);
+    } catch (err: unknown) {
+        const refused = declaredRefusalAnswer(manifestId, err, 'installed');
+        if (!refused) throw err;
+        return refused;
+    }
+    return undefined;
+}
+
+/**
  * [#21490] The one `protocol` verb this plugin calls: the runner of the
  * uninstall cleanups domain plugins register through
  * `registerUninstallCleanup` — the same registry, through the same runner,
@@ -4691,26 +4733,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // throws is answered as the table read's. Without this, the
         // resolver's 422 was answered as the 503 below and its author was told
         // to retry once the database answers.
-        // [#34583] Each side in its own `try`, the incoming body first: a
-        // refusal of the installed copy (stored by an earlier install, read
-        // here to compare against) is answered naming that copy, never as
-        // "Package 'X' cannot be installed", which blames the incoming one.
-        try {
-            packageUpgradeSideOf(converted);
-        } catch (err: unknown) {
-            const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
-            if (!refused) throw err;
-            return { tables: [], refusal: refused };
-        }
-        if (installed !== null && installed !== undefined) {
-            try {
-                packageUpgradeSideOf(installed);
-            } catch (err: unknown) {
-                const refused = declaredRefusalAnswer(manifestId, err, 'installed');
-                if (!refused) throw err;
-                return { tables: [], refusal: refused };
-            }
-        }
+        // [#34583] Each side on its own, the incoming body first
+        // ({@link upgradeSideRefusal}).
+        const sideRefused = upgradeSideRefusal(manifestId, converted, installed);
+        if (sideRefused) return { tables: [], refusal: sideRefused };
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
@@ -6899,7 +6925,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A runtime whose `manifest` service answers no `planUpgrade` answers 503:
      * a preview that could not run is never answered as an empty one. A
      * ledger entry that will not parse is said so, and the plan is then
-     * against no installed version.
+     * against no installed version. [#34846] A side the artifact resolver
+     * refuses — the incoming body, or the installed copy stored by an earlier
+     * install — is answered with that refusal, as the real install answers it
+     * at step 2c″ ({@link upgradeSideRefusal}), never thrown.
      */
     private answerUpgradeDryRun = async (
         c: any,
@@ -6922,7 +6951,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const ledgerRead = this.ledger.read(manifestId);
         const installedEntry = ledgerRead.entry;
         const installed = installedEntry?.manifest ? this.convertPackageBodyForward(ctx, installedEntry.manifest) : undefined;
-        const reading = await service.planUpgrade(installed, this.convertPackageBodyForward(ctx, manifest)) as {
+        const incoming = this.convertPackageBodyForward(ctx, manifest);
+        // [#34846] `planUpgrade` folds both sides through the artifact
+        // resolver, so a side it refuses is answered here first, as step 2c″
+        // answers it on the real install ({@link upgradeSideRefusal}): the
+        // refusal's own 422 naming whose body was refused. Before, the refusal
+        // was thrown out of the door, which the transport answers 500.
+        const refused = upgradeSideRefusal(manifestId, incoming, installed);
+        if (refused) return c.json(refused.body, refused.status);
+        const reading = await service.planUpgrade(installed, incoming) as {
             plan: unknown;
             environment: unknown;
         };
