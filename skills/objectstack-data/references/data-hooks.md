@@ -128,14 +128,7 @@ const myHook = defineHook({
 #### `body` — Implementation
 
 A `source` of statements against `ctx`; a throw aborts the write
-([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)):
-
-```typescript
-body: {
-  language: 'js',
-  source: `if (ctx.input.email) ctx.input.email = ctx.input.email.trim().toLowerCase();`,
-}
-```
+([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)).
 
 #### `condition` — Declarative Filtering
 
@@ -228,7 +221,7 @@ CEL has no overload for does **not** degrade to "the hook did not fire" — it
 ```jsonc
 body: {
   language: 'js',                 // 'js' = L2 sandboxed script | 'expression' = L1 pure formula
-  source: "/* function body */",  // the FUNCTION BODY only — not a module
+  source: "/* function body */",
   capabilities: ['api.read', 'api.write', 'log'],  // default: []
   timeoutMs: 250,                 // optional, ≤ 30000 (hook default 250ms, action 5000ms)
   memoryMb: 32,                   // optional, ≤ 256 (best-effort under QuickJS)
@@ -261,9 +254,10 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
-| `ctx.email` | `{ send }` | Gated by `email.send`; not in a hook body. |
+| `ctx.email` | `{ send }` | Gated by `email.send`. |
 | `ctx.activity` | `{ append }` | Gated by `activity.append`. |
 | `ctx.notice` | `(message) => void` | **Tell the saver what this save set in motion** — answered as the create/update `notice`, shown on the save toast. No capability; insert/update only; last call wins. [`rules/lifecycle.md` § Save Notice](../rules/lifecycle.md#save-notice). |
+| `ctx.text` | `(key, params?) => Promise<string>` | A declared sentence in the organization's language — [`texts`](#declared-texts-texts). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
@@ -329,9 +323,9 @@ set of legal tokens (`HookBodyCapability`) is exactly seven:
 
 | Token | Unlocks |
 |:--|:--|
-| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
+| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`. |
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` |
-| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
+| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on the default datasource**: commit on return, rollback on throw. A write in it to an object on any other datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit already open (the one the hook's write runs in, or a caller's) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 | `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
@@ -407,12 +401,9 @@ const fillPositionOnHire = defineHook({
   body: {
     language: 'js',
     source: `
-      // afterUpdate → ctx.result is the PARTIAL patch. Gate on the field this
-      // write actually set, then re-query for the lookup FK it does NOT carry.
       if (!ctx.result || ctx.result.stage !== 'hired') return;
       const rec = await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
       if (!rec || !rec.position_id) return;
-      // Cross-object write — needs the acting user to be able to edit 'position'.
       await ctx.api.object('position').update({ id: rec.position_id, status: 'filled' });
       ctx.log.info('position filled', { position: rec.position_id });
     `,
@@ -444,11 +435,8 @@ export default fillPositionOnHire;
 
 ## Hook Context API
 
-> **Sandbox vs in-process.** The `ctx` documented below is the **in-process
-> `handler`** context (full Node; `handler` is deprecated). A metadata-native **`body`** sees a
-> capability-gated *subset* of it inside an isolated VM — see
-> [Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)
-> for exactly what is and isn't available there.
+> The `ctx` below is the deprecated in-process `handler`'s; a `body` sees the
+> [sandbox subset](#what-lives-on-the-sandbox-ctx).
 
 The engine's `HookContext` provides:
 
@@ -483,7 +471,7 @@ interface HookContext {
   // Engine access
   ql: IDataEngine;       // ObjectQL engine instance
   api?: ScopedContext;   // Cross-object CRUD API
-  notice?: (message: string) => void; // Save notice: rules/lifecycle.md § Save Notice
+  notice?: (message: string) => void;
 
   // User info shortcut (undefined for system / unauthenticated writes)
   user?: {
@@ -497,10 +485,7 @@ interface HookContext {
 
 ### Reading the current organization
 
-The value a hook usually wants when it needs "the current org to filter/scope
-by" is the caller's **active organization** — the same value that lives in the
-`organization_id` column, in `current_user.organizationId` inside RLS/sharing
-predicates, and in seed rows. Read it as **`organizationId`**:
+To scope by the caller's **active organization**, read **`organizationId`**:
 
 ```typescript
 // ✅ Blessed — matches columns, RLS `current_user`, and seed data
@@ -696,12 +681,7 @@ const maskSensitiveData = defineHook({
   handler: async (ctx) => {
     // Exempt the engine's own elevated reads (`isSystem`) — internal writes
     // and self-reads must see the real values.
-    //
-    // ⚠️ Never gate this on a session claim: `ctx.session?.roles?.includes(…)`
-    // is always `undefined` (see the ctx table above), so a mask written that
-    // way never exempts anyone. A per-permission-set or per-position exemption
-    // belongs in field-level permissions (the callout above), which the read
-    // path applies for you.
+    // ⚠️ Never a session claim (`ctx.session.roles` is gone, ctx table above).
     const isElevated = ctx.session?.isSystem === true;
 
     if (!isElevated) {
@@ -877,6 +857,29 @@ export default defineHook({
 - An undeclared code (or none), or a reason missing from a code's `reasons`, is
   refused: at save if thrown literally, else as a `500`. Unchanged `ctx.api`
   errors and crashes pass through.
+
+### Declared texts (`texts`)
+
+A sentence the hook writes into a record (a task's subject, a logged summary) is
+read by the whole organization: declare it in `texts` and ask for it with
+`ctx.text(key, params?)` — no capability; a `js` body or a `handler`, never an
+`expression` body.
+
+```typescript
+texts: { follow_up_subject: { message: 'Follow up with lead: {{ lead }}', params: ['lead'] } },
+// afterInsert body (capabilities: ['api.write']):
+const subject = await ctx.text('follow_up_subject', { lead: ctx.input.name });
+await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.result.id });
+```
+
+- In the **organization's** language (Setup → Localization, else the app's
+  `i18n.defaultLocale`), never the saver's.
+- Translated first, then the `{{ }}` holes are filled from `params` (holes as in `refusals`).
+- A missing translation never fails the hook: the declared `message` is written.
+- An unreadable Localization setting rejects `ctx.text`; catch it to write anyway.
+- Only declared keys: another is refused at save if asked for literally, else as
+  a `500`. A string the hook builds itself is written as it is.
+- Translation key `hooks.<hook>.texts.<key>.message`; the bundle: [objectstack-i18n](../../objectstack-i18n/SKILL.md).
 
 ---
 

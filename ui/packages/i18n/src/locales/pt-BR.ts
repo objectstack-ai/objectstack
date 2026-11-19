@@ -5370,6 +5370,7 @@ const pt = {
     loading: "Carregando suas configurações de notificação…",
     loadFailed: "Não foi possível ler suas configurações de notificação. Recarregue a página para tentar novamente.",
     saveFailed: "A alteração não foi salva: {{reason}}",
+    readOnly: "Você pode ver estas configurações, mas suas permissões não permitem alterá-las. Um administrador da sua organização pode alterá-las por você.",
     general: "Geral",
     generalWarning: "Alterar o resumo ou o horário silencioso salva sua própria configuração geral. A partir daí ela vale para todo tópico e canal que você não configurou, no lugar dos padrões da sua organização.",
     digest: "Resumo",

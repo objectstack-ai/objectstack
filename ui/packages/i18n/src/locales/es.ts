@@ -5375,6 +5375,7 @@ const es = {
     loading: "Cargando tu configuración de notificaciones…",
     loadFailed: "No se pudo leer tu configuración de notificaciones. Recarga la página para intentarlo de nuevo.",
     saveFailed: "El cambio no se guardó: {{reason}}",
+    readOnly: "Puedes ver estos ajustes, pero tus permisos no te permiten cambiarlos. Un administrador de tu organización puede cambiarlos por ti.",
     general: "General",
     generalWarning: "Al cambiar el resumen o las horas de silencio se guarda tu propia configuración general. A partir de entonces se aplica a cada tema y canal que no hayas configurado tú, en lugar de los valores predeterminados de tu organización.",
     digest: "Resumen",

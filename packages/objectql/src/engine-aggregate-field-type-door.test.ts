@@ -40,6 +40,7 @@ import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   FieldType,
   MULTI_CAPABLE_TYPES,
+  VIRTUAL_FIELD_AGGREGATE_REMEDY,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
   type EngineAggregateOptions,
@@ -186,14 +187,14 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(reads).toHaveLength(0);
   });
 
-  it('refuses sum over a json, text, select, formula, tags, percent and datetime field, and a select with multiple: true — the row the census held, released — with INVALID_FIELD / 400 naming the accepted types — no read', async () => {
+  it('refuses sum over a json, text, select, tags, percent and datetime field, and a select with multiple: true — the row the census held, released — with INVALID_FIELD / 400 naming the accepted types — no read', async () => {
     // Flipped from the CONTROL below, where `sum meta` and `sum title` reached
     // the driver while the row was held: in memory they answered `0`.
     const cases: ReadonlyArray<readonly [string, string]> = [
       ['meta', 'json field — a structured-JSON value'],
       ['title', 'text field'],
       ['status', 'select field'],
-      ['expected', 'formula field'],
+      // `sum` over the `formula` takes the virtual-field remedy instead — the describe below.
       ['labels', 'tags field — a multi-value field'],
       ['pct', 'percent field'],
       ['due', 'datetime field'],
@@ -327,5 +328,45 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(judge(PROBE, [{ function: ['max'], field: 'meta' }])).not.toThrow();
     expect(judge(PROBE, 'meta')).not.toThrow();
     expect(judge(PROBE, [])).not.toThrow();
+  });
+});
+
+describe('the aggregate door answers sum / avg / min / max over a formula with the virtual-field remedy, not a count', () => {
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(PROBE as any, 'test');
+    reads.length = 0;
+  });
+
+  it('refuses each value-reading function over a formula with INVALID_FIELD / 400 whose route is the spec\'s remedy sentence verbatim, inside the 500 characters the REST door keeps — no read', async () => {
+    for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+      const label = `${fn}(expected)`;
+      const err = await refusalOf(engine.aggregate(OBJECT, { aggregations: agg(fn, 'expected') }));
+      expect(envelopeOf(err), label).toEqual(ENVELOPE);
+      expect({ field: err?.field, fields: err?.fields, param: err?.param }, label)
+        .toEqual({ field: 'expected', fields: ['expected'], param: 'aggregations' });
+      expect(err!.message, label).toBe(
+        `aggregate('${OBJECT}'): aggregations[0].field ${DOES[fn]} 'expected', a declared formula field, `
+        + `which the engine ${DOES_NOT[fn]}. The query was NOT run. ${VIRTUAL_FIELD_AGGREGATE_REMEDY}`,
+      );
+      expect(err!.message.slice(0, 500), label).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      expect(err!.message, label).not.toContain('count the rows with count');
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+  });
+
+  it('CONTROL a refused pair over a stored field keeps its own route — sum over a text names the accepted types, never the remedy', async () => {
+    const err = await refusalOf(engine.aggregate(OBJECT, { aggregations: agg('sum', 'title') }));
+    expect(envelopeOf(err)).toEqual(ENVELOPE);
+    expect(err!.message).toContain(`sum ${ACCEPTS_SUM}`);
+    expect(err!.message).not.toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    expect(reads).toHaveLength(0);
   });
 });

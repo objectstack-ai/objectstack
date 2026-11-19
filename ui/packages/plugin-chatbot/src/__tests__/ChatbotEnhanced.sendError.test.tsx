@@ -12,6 +12,9 @@
  * restores its own last typed submit and no chip text.
  * A file the composer refuses for size names itself and the limit in the same
  * band above the composer, and is not attached (objectstack#34463).
+ * The accept list reads the HTML `accept` grammar (`.ext` / `type/*` / exact
+ * MIME), and a file it refuses names itself and the accepted list in that same
+ * band (objectstack#35276).
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -392,5 +395,122 @@ describe('ChatbotEnhanced composer — a file over maxFileSize is named to the u
     expect(notice).toHaveTextContent(zhLead);
     expect(notice).toHaveTextContent('big.png');
     expect(notice).not.toHaveTextContent(enLead);
+  });
+});
+
+describe('ChatbotEnhanced composer — the accept list reads the HTML accept grammar, and a refused type is named to the user (objectstack#35276)', () => {
+  const DEFAULT_ACCEPT_SHOWN = 'image/*, .pdf, .doc, .docx, .txt, .csv, .tsv, .xlsx, .xlsm';
+  const file = (name: string, type: string, bytes = 10) => new File([new Uint8Array(bytes)], name, { type });
+
+  beforeEach(() => {
+    // jsdom has no object URLs; the composer makes one per attached file.
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:attached') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  });
+
+  function pick(container: HTMLElement, files: File[]) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { configurable: true, value: files });
+    fireEvent.change(input);
+  }
+
+  /** A non-image attachment chip shows the file name as its own text. */
+  const attached = (name: string) => screen.queryByText(name, { selector: 'span' });
+
+  it('a CSV and a PDF picked with the default accept list attach, with no notice', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload />);
+    pick(container, [file('data.csv', 'text/csv'), file('report.pdf', 'application/pdf')]);
+
+    expect(attached('data.csv')).toBeInTheDocument();
+    expect(attached('report.pdf')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-attachment-refused')).toBeNull();
+  });
+
+  it('a `.ext` token matches the name case-insensitively, whatever type the browser reported', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload />);
+    pick(container, [file('EXPORT.CSV', ''), file('Book.XLSX', 'application/octet-stream')]);
+
+    expect(attached('EXPORT.CSV')).toBeInTheDocument();
+    expect(attached('Book.XLSX')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-attachment-refused')).toBeNull();
+  });
+
+  it('extension, wildcard and exact-MIME tokens each admit their own files and nothing else', () => {
+    const { container } = render(
+      <ChatbotEnhanced placeholder="Ask…" enableFileUpload acceptedFileTypes="image/*,.CSV,application/pdf" />,
+    );
+    pick(container, [
+      file('photo.png', 'image/png'), // image/* — MIME prefix
+      file('data.csv', 'text/csv'), // .CSV — extension, upper-case token
+      file('doc.bin', 'application/pdf'), // application/pdf — exact MIME, the name does not matter
+      file('clip.mp4', 'video/mp4'), // no token admits it
+      file('scan.pdf', 'application/x-pdf'), // exact MIME is not a prefix and no `.pdf` token is listed
+    ]);
+
+    expect(screen.getByAltText('photo.png')).toBeInTheDocument();
+    expect(attached('data.csv')).toBeInTheDocument();
+    expect(attached('doc.bin')).toBeInTheDocument();
+    expect(attached('clip.mp4')).toBeNull();
+    expect(attached('scan.pdf')).toBeNull();
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent('clip.mp4');
+    expect(notice).toHaveTextContent('scan.pdf');
+    expect(notice).not.toHaveTextContent('photo.png');
+  });
+
+  it('a refused type shows a notice naming the file and the accepted list, and is not attached', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload />);
+    pick(container, [file('setup.exe', 'application/x-msdownload')]);
+
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveAttribute('role', 'alert');
+    expect(notice).toHaveTextContent('setup.exe');
+    expect(notice).toHaveTextContent(DEFAULT_ACCEPT_SHOWN);
+    expect(attached('setup.exe')).toBeNull();
+  });
+
+  it('a mixed pick attaches the accepted file and names only the refused one', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload />);
+    pick(container, [file('setup.exe', 'application/x-msdownload'), file('data.csv', 'text/csv')]);
+
+    expect(attached('data.csv')).toBeInTheDocument();
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent('setup.exe');
+    expect(notice).not.toHaveTextContent('data.csv');
+  });
+
+  it('one pick refused for type AND for size names both files', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload maxFileSize={1024} />);
+    pick(container, [file('setup.exe', 'application/x-msdownload'), file('big.png', 'image/png', 1025)]);
+
+    const notice = screen.getByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent('setup.exe');
+    expect(notice).toHaveTextContent('big.png');
+  });
+
+  it('CONTROL: a .png picked with the default accept list attaches with no notice', () => {
+    const { container } = render(<ChatbotEnhanced placeholder="Ask…" enableFileUpload />);
+    pick(container, [file('small.png', 'image/png')]);
+
+    expect(screen.getByAltText('small.png')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-attachment-refused')).toBeNull();
+  });
+
+  it('under zh the notice is the zh pack sentence, not the English one', async () => {
+    const zhLead = zh.fields.file.typeNotAccepted.split('{{name}}')[1].split('{{')[0];
+    const enLead = en.fields.file.typeNotAccepted.split('{{name}}')[1].split('{{')[0];
+    expect(zhLead).not.toBe(enLead);
+    const { container } = render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+        <ChatbotEnhanced placeholder="Ask…" enableFileUpload />
+      </I18nProvider>,
+    );
+    await screen.findByPlaceholderText('Ask…');
+    pick(container, [file('setup.exe', 'application/x-msdownload')]);
+
+    const notice = await screen.findByTestId('chat-attachment-refused');
+    expect(notice).toHaveTextContent(zhLead.trim());
+    expect(notice).toHaveTextContent('setup.exe');
+    expect(notice).not.toHaveTextContent(enLead.trim());
   });
 });

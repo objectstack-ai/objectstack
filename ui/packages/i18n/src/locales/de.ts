@@ -5226,6 +5226,7 @@ const de = {
     loading: "Ihre Benachrichtigungseinstellungen werden geladen…",
     loadFailed: "Ihre Benachrichtigungseinstellungen konnten nicht gelesen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
     saveFailed: "Die Änderung wurde nicht gespeichert: {{reason}}",
+    readOnly: "Sie können diese Einstellungen ansehen, aber Ihre Berechtigungen erlauben keine Änderung. Eine Administratorin oder ein Administrator Ihrer Organisation kann sie für Sie ändern.",
     general: "Allgemein",
     generalWarning: "Wenn Sie Zusammenfassung oder Ruhezeiten ändern, wird Ihre eigene allgemeine Einstellung gespeichert. Sie gilt dann für jedes Thema und jeden Kanal, die Sie nicht selbst festgelegt haben, anstelle der Standardwerte Ihrer Organisation.",
     digest: "Zusammenfassung",
