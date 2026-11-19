@@ -232,9 +232,14 @@ describe('one page load, one get-session, started at parse time', () => {
 
 describe('every safety of the preflight is kept', () => {
   it('blocked storage: no parse-time request, and the script does not throw', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    // Blocked storage throws on access. Spied on the window's accessor: this
+    // test environment's `localStorage` does not reach `Storage.prototype`,
+    // and a read answering `null` is the no-token case, which now asks the
+    // cookie session's question (objectstack#35455).
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError');
     });
+    expect(() => window.localStorage.getItem('auth-session-token')).toThrow();
     expect(() => runEarlySessionCheck()).not.toThrow();
     expect(fetchStub).not.toHaveBeenCalled();
   });
@@ -419,8 +424,12 @@ describe('no stored token: the cookie session is asked at parse time and handed 
     expect(await screen.findByText('Ada')).toBeTruthy();
     await act(async () => { await settle(); });
 
-    // The handed-on answer belonged to the cookie question; AuthProvider asked.
-    expect(sessionCalls()).toHaveLength(2);
+    // The handed-on answer belonged to the cookie question; AuthProvider asked
+    // itself, with the token now stored.
+    const calls = sessionCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(new Headers(calls[0]![1]?.headers).has('authorization')).toBe(false);
+    expect(new Headers(calls[calls.length - 1]![1]?.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
   });
 });
 
