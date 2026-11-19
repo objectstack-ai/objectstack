@@ -71,7 +71,8 @@ function renderGrid(opts?: Record<string, any>) {
  * They are therefore separately observable, and each case below asserts both.
  */
 const COLUMN_COPY: Record<string, string[]> = {
-  compact: ['px-3', 'py-1', 'h-9', 'text-[13px]', 'leading-tight'],
+  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and its line.
+  compact: ['px-3', 'py-1', 'h-8', 'text-[13px]', 'leading-tight'],
   short: ['px-3', 'py-1', 'h-9', 'text-[13px]', 'leading-normal'],
   medium: ['px-3', 'py-1.5', 'h-11', 'text-[13px]', 'leading-normal'],
   tall: ['px-3', 'py-2.5', 'h-14', 'text-sm'],
@@ -87,7 +88,7 @@ const TABLE_COPY: Record<string, string[]> = {
 };
 
 /** Every `h-*` floor the column copy can emit — exactly one may be present. */
-const ALL_HEIGHTS = ['h-9', 'h-11', 'h-14', 'h-16'];
+const ALL_HEIGHTS = ['h-8', 'h-9', 'h-11', 'h-14', 'h-16'];
 /** Every vertical padding the table copy can emit — exactly one may be present. */
 const ALL_PADDINGS = ['py-1', 'py-1.5', 'py-2.5', 'py-3.5'];
 
