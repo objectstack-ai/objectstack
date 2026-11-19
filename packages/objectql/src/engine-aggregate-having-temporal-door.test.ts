@@ -410,6 +410,22 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     }
   });
 
+  // [#35394] A context token IS this door's verdict: it resolves to a user or
+  // organization id, which no temporal rule reads, so core's predicate judges
+  // it as written and it takes the literal id's refusal, before any read —
+  // the same answer as on `where`.
+  it('a context {placeholder} on a temporal aggregated column is refused as written: INVALID_FILTER, before any read', async () => {
+    for (const path of ['native', 'rows'] as const) {
+      for (const token of ['{current_user_id}', '{current_org_id}']) {
+        const { engine, reads } = await makeEngine(path, ROWS);
+        const { err } = await outcome(() => engine.aggregate(OBJECT, query(path, { last_placed: { $lt: token } })));
+        expect({ code: err?.code, status: err?.status }, `${path} ${token}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+        expect(err?.message, `${path} ${token}`).toContain(`"${token}" at having.last_placed.$lt`);
+        expect(reads, `${path} ${token}`).toEqual({ aggregate: 0, find: 0 });
+      }
+    }
+  });
+
   it('a coarser bucket is a text label, and is not judged', async () => {
     const kept = await keptGroups(
       { m: { $gt: 'not-a-date' } },
