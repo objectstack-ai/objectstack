@@ -188,9 +188,10 @@ export function LocalizationFetchProvider({
           // The boot read's first attempt takes the seed's answer to this very
           // request when it settled earlier in this page load
           // (objectstack#35455); a re-read never does.
-          const handed = !reread && attempt === 0 ? takeSettledSeedAnswer(endpoint, init) : null;
-          const json = (handed as MeLocalizationResponse | null)
-            ?? await sharedGetJson<MeLocalizationResponse>(endpoint, init);
+          const handed = !reread && attempt === 0
+            ? (takeSettledSeedAnswer(endpoint, init) as MeLocalizationResponse | null)
+            : null;
+          const json = handed !== null ? handed : await sharedGetJson<MeLocalizationResponse>(endpoint, init);
           // Refresh the UI-language seed cache (objectui#4035) — the
           // "revalidate" half of stale-while-revalidate. This boot has already
           // committed to a language; what this write buys is the NEXT one, so a

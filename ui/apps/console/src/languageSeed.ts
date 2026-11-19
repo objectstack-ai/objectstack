@@ -125,7 +125,7 @@ let preferredLocale: Promise<string | undefined> | null = null;
  * (objectstack#35455): the request it answered, as `inflightGetKey` spells it,
  * and the session owner it was asked for. See {@link takeSettledSeedAnswer}.
  */
-let settledSeed: { key: string; owner: number; body: unknown } | null = null;
+let settledSeed: { key: string; owner: number; body: object } | null = null;
 /** Whether the boot read has already been offered the seed's answer. */
 let settledSeedSpent = false;
 
@@ -146,7 +146,7 @@ let settledSeedSpent = false;
  * to the user's own row — asks the server, and an answer that settles after
  * the boot read started (which joined it in flight instead) is never held.
  */
-export function takeSettledSeedAnswer(url: string, init: RequestInit): unknown | null {
+export function takeSettledSeedAnswer(url: string, init: RequestInit): object | null {
   const held = settledSeed;
   settledSeed = null;
   settledSeedSpent = true;
@@ -277,7 +277,9 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     cacheLanguageSeed(json?.locale);
     // Held for the provider's boot read (objectstack#35455), unless that read
     // has already started: it then joined this request in flight.
-    if (!settledSeedSpent) settledSeed = { key: inflightGetKey(url, init), owner: ownerAtRequest, body: json };
+    if (!settledSeedSpent && json && typeof json === 'object') {
+      settledSeed = { key: inflightGetKey(url, init), owner: ownerAtRequest, body: json };
+    }
   } catch {
     // Offline, blocked, malformed — the boot simply goes unseeded.
   }
