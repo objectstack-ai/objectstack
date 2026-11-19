@@ -26,6 +26,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 import { AdapterCtx, SchemaRendererProvider } from '@object-ui/react';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
 import { MY_PREFERENCES_URL } from './myPreferences';
@@ -252,5 +253,116 @@ describe('the account app names the page', () => {
     const Registered = entry!.component;
     render(<Registered />, { wrapper: host(apiFetch, { create: vi.fn(), update: vi.fn() }) });
     expect(await screen.findByTestId('notification-settings-matrix')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Who may change the page: the caller's grant on `sys_notification_preference`,
+ * read from the real `MePermissionsProvider` over each persona's `/me/permissions`
+ * answer, shaped as the default sets serve it (plugin-security
+ * `default-permission-sets.ts`): `external_default` names no row for the
+ * object and carries no `'*'`, `member_default` grants create and edit on it,
+ * and `organization_admin` reaches it through its `'*'` row.
+ */
+describe('the caller\'s grant on sys_notification_preference decides whether the page writes', () => {
+  function served(objects: MePermissionsAuthenticatedResponse['objects'], positions: string[]): MePermissionsAuthenticatedResponse {
+    return {
+      authenticated: true,
+      userId: 'alice',
+      tenantId: null,
+      positions,
+      hasAnyQueue: false,
+      objectsUsingQueues: [],
+      permissionSets: [],
+      objects,
+      fields: {},
+    } as MePermissionsAuthenticatedResponse;
+  }
+
+  const EXTERNAL = served(
+    {
+      sys_user: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
+      sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      sys_notification_receipt: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+    },
+    ['org_external'],
+  );
+  const MEMBER = served(
+    { sys_notification_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },
+    ['org_member'],
+  );
+  const ORG_ADMIN = served(
+    {
+      '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
+    },
+    ['org_admin'],
+  );
+
+  function hostAs(
+    permissions: MePermissionsAuthenticatedResponse,
+    apiFetch: ReturnType<typeof vi.fn>,
+    adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> },
+  ) {
+    const Inner = host(apiFetch, adapter);
+    return ({ children }: { children: ReactNode }) => (
+      <MePermissionsProvider initialPermissions={permissions}>
+        <Inner>{children}</Inner>
+      </MePermissionsProvider>
+    );
+  }
+
+  it('an external member sees every control disabled with the reason, and no write is sent', async () => {
+    const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
+    const apiFetch = vi.fn(async () => json(answer(false, undefined, orgQuiet)));
+    const adapter = { create: vi.fn(), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: hostAs(EXTERNAL, apiFetch, adapter) });
+
+    const reason = await screen.findByTestId('notification-settings-read-only');
+    expect(reason).toHaveTextContent('«notificationSettings.readOnly»');
+    const reasonId = reason.querySelector('[id]')!.id;
+
+    const cell = screen.getByTestId('notification-settings-cell-task.assigned-email');
+    const digest = screen.getByTestId('notification-settings-digest');
+    const save = screen.getByTestId('notification-settings-quiet-hours-save');
+    for (const control of [cell, digest, save]) {
+      expect(control).toBeDisabled();
+      expect(control).toHaveAttribute('aria-describedby', reasonId);
+    }
+    // The quiet hours read as text, not as inputs to edit.
+    expect(screen.queryByTestId('quiet-hours-start')).toBeNull();
+    // What is in force is still drawn.
+    expect(screen.getByTestId('notification-settings-topic-task.assigned')).toHaveTextContent('«notificationSettings.sourceDefault»');
+
+    fireEvent.click(cell);
+    fireEvent.change(digest, { target: { value: 'weekly' } });
+    fireEvent.click(save);
+    expect(adapter.create).not.toHaveBeenCalled();
+    expect(adapter.update).not.toHaveBeenCalled();
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['a member (member_default grants create and edit)', MEMBER],
+    ['an organization administrator (the wildcard row)', ORG_ADMIN],
+  ])('%s sees no change: no reason, and a switch writes', async (_persona, permissions) => {
+    const apiFetch = vi.fn().mockResolvedValueOnce(json(answer(false))).mockResolvedValueOnce(json(answer(true, 'row-new')));
+    const adapter = { create: vi.fn(async () => ({ id: 'row-new' })), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: hostAs(permissions, apiFetch, adapter) });
+
+    const cell = await screen.findByTestId('notification-settings-cell-task.assigned-email');
+    expect(screen.queryByTestId('notification-settings-read-only')).toBeNull();
+    expect(cell).not.toBeDisabled();
+    expect(cell).not.toHaveAttribute('aria-describedby');
+    expect(screen.getByTestId('notification-settings-digest')).not.toBeDisabled();
+
+    fireEvent.click(cell);
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: 'task.assigned',
+        channel: 'email',
+        enabled: true,
+      }),
+    );
   });
 });
