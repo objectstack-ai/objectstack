@@ -15,7 +15,7 @@
     "area:cloud",
     "bug",
     "domain:cloud",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2",
     "repo:cloud"
   ],
@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T14:03:57Z",
-  "updated_at": "2026-11-18T16:39:38Z",
+  "updated_at": "2026-11-19T00:57:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34411",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nBlocked-by: #33824\n\n(Parked by the cloud lane after asks 1–2 and the same-family round landed: comment 6925406034. The original filing follows unchanged.)\n\n---\n\nrepo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\n## Problem\n\nCard #33824 (p1, ruled p1 6918081689): an AI 问数 answer shows internal values and API names, such as `urgent`, `in_progress`, `e9gv_ticket` and `priority = urgent`. An org owner is also told that the result covers only the records they may see.\n\no1-E's dev measured this on objectstack `cfcba539` (os-dev report 6918536912 on #33824). The answer text and its 来源 line come from the cloud AI service's `resultSourceBlock()` and the agent prompt, and this repo produces neither. The framework already serves what the producer needs:\n- object, field and option labels, through `describe_object` and `translateObject`, in the request locale;\n- the restriction fact, through `ISecurityService.getReadFilter(object, ctx)`, which answers `undefined` when this caller has no row restriction on this object.\n\nThe framework half is the `ObjectQuerySourceSchema.scope` widening (seat route A, 6918602381 on #33824). It adds `'all_records'` beside `'visible_to_you'` and is built in objectstack under #33824.\n\n## Change (cloud)\n\n1. **`resultSourceBlock()` line:** compose `line` from the object's label, each filter field's label, and each option value's label, read from the same translated object it already reads for `label`. Keep machine names and stored values only in `object` and `filter`; the console's collapsed 计算方式 block draws those. For example, `工单（e9gv_ticket） · 条件 priority = urgent` should read `工单 · 条件 优先级 = 紧急`.\n2. **Ask tools** (`query_records`, `query_data`, `get_record`, `aggregate_data`): give the agent each select value's label beside the stored value, from the same served object in the request locale. Otherwise the prompt must call `describe_object` before answering. Either way, the prompt says to answer in labels and never to print API names, option values or the line's machine names.\n3. **Once the framework `scope` widening is released:** set `scope` per call from `await security.getReadFilter(object, ctx) === undefined` (`'all_records'` when undefined, else `'visible_to_you'`). The prompt mentions access filtering only when `scope` says a restriction applied.\n\n## Acceptance\n\n- On staging, the same question an org owner asked gets an answer and 来源 line with labels only, and no access caveat.\n- A member whose rows are restricted on that object still sees the caveat and 仅包含你可见的记录.\n\nBlocks: #33824 closing (its framework half is Part of the same card).\n"

@@ -15,18 +15,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "lease:ux-1",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T20:05:04Z",
-  "updated_at": "2026-11-18T16:33:28Z",
+  "updated_at": "2026-11-19T00:15:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34122",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #33864 dev (os-dev report 6899087689 on PR #34088, carrier: seat), class a (reach read in code, not measured live).\nReader: `domain:ui` (`ui/packages/app-shell/src/views/metadata-admin/inspectors/**`, `ConditionBuilder` mounts). Grade suggestion: p3 (the same `ux-conventions.labels-over-machine-names` defect #33864 is p3 for).\nDedupe: `is:issue is:open ConditionBuilder labelSubjects` — none; #33864 turns it on for the flow Entry condition only.\nBlocked-by: #33864\n\n## 维护者速读\n\nStudio 里编辑条件（Hook 条件、操作的显示/禁用条件、页面区块条件、小组件条件）时，字段下拉仍只显示机器名（如 `status`），而不是字段标签。#33864 已在流程「进入条件」和对象校验里改为「标签为主、机器名在旁」，其余几个编辑入口还没打开同一个开关。\n\n## Facts (read on PR #34088 head `62626866`)\n\n- `ConditionBuilder` (`inspectors/ConditionBuilder.tsx:849`) takes `labelSubjects = false`; with it on, a field reads by its label with its spelling as the hint (l.967–969).\n- It is on in `FlowNodeConfigField.tsx:735` (#34088) and `studio-design/ObjectValidationsPanel.tsx:755`.\n- It is off (default) in the mounts in `HookDefaultInspector.tsx`, `ActionDefaultInspector.tsx`, `PageBlockInspector.tsx` and `metadata-admin/widgets.tsx`.\n\n## Ask\n\nTurn on `labelSubjects` at each remaining mount where the subject is a field of a known object, or say per mount why the spelling must stay primary; then decide whether the default should flip to `true`. Pin each mount (option found by its label-first accessible name, hint = spelling); ablate red. Existing tests that find options by spelling move with it (as #34088's forced edits did).\n\n⛔ Not a claim."

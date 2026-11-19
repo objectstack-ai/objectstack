@@ -2,8 +2,8 @@
   "number": 33824,
   "kind": "issue",
   "title": "AI 问数回答里直接出现内部值和 API 名（urgent、in_progress、e9gv_ticket、priority = urgent）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:44:09Z",
-  "updated_at": "2026-11-18T09:45:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T02:05:44Z",
+  "closed_at": "2026-11-19T02:05:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33824",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM，在 AI 搭建的「工单管理」应用里打开助手，问：「现在有几张紧急优先级的工单？分别是什么状态？只回答，不要修改应用。」\n\n## 现象\n\n答案正确（2 张，5 秒），但写成：\n\n> 当前有 2 张紧急（urgent）优先级的工单：广州分公司网络频繁断开：状态为 新建（new）；财务报表导出后金额显示异常：状态为 处理中（in_progress）\n> 来源：工单（e9gv_ticket） · 条件 priority = urgent\n> 注意：这个结果只包含你有权限查看的工单……\n\n- 选项值 `urgent`、`new`、`in_progress` 和对象 API 名 `e9gv_ticket`、字段名 `priority` 直接给到业务用户。\n- 提问人是组织所有者、能看全部记录，回答仍附「只包含你有权限查看的」套话。\n\n## 业务理由\n\n问数是业务人员最常用的 AI 入口；内部名让回答像调试输出，自动生成的 `e9gv_` 前缀尤其让人困惑。\n\n## 修复方向\n\n回答与「来源」行使用对象/字段/选项的显示名；需要给技术读者的细节放进「计算方式」折叠区。权限提示只在查询确实被行级权限过滤时出现。\n\n## 验收\n\n1. 同一问题的回答正文和来源行不含选项值、对象或字段的 API 名。\n2. 组织所有者提问时不出现权限套话；受限成员提问且被过滤时出现。\n\n## Reader\n\nobjectstack AI 问答车道（`area:ai`），回答模板与来源行渲染。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack AI answer api name option value label urgent` → 150 条（含 closed）；最近的 objectstack#30209（Setup 里用名称代替 id）是 Setup 页面，不涉及 AI 回答。"

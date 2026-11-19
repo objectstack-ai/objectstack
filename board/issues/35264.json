@@ -1,0 +1,32 @@
+{
+  "number": 35264,
+  "kind": "issue",
+  "title": "Maintainer action: run one door-mode scenario round at five repetitions per arm and file it as an eval-run (split from #34780)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T00:39:58Z",
+  "updated_at": "2026-11-19T00:51:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35264",
+  "body": "sweep#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 00:32Z in the objectstack priorities discussion thread: 「可以拆的都同意。」 (the split list's item 2: move #34780's door-mode eval round to its own maintainer card). Rule: #35259 item 7.\n\nFiling gate: ③ a task the maintainer dispatched. Child of epic #35152, beside #34780. Reader: the maintainer (a live model key; the lane's containers are keyless). Dedupe: open `eval-run` cards for door mode — none.\n\nGrade: p2 · area:cloud · Task · inherits #34780's grade\n\n## Why\n\n#34780's build landed: PR #35241 (`02a1e2f29c5`) adds `os-scenarios --modes door` with a skills arm and a rules arm. The card's done-when needs one live round, which no fleet container can run (no model key). #34780 itself stays open only for the rules-corpus port, which is fleet work.\n\nMaintainer-action: run one door-mode round at five repetitions per arm (skills on/off, named rule set on/off; the command is in `packages/qa/scenarios/README.md`, door mode section) and file it as an `eval-run` — done when an `eval-run` record for door mode at five repetitions per arm is linked on this card.\n\n## Note\n\nIf the round runs before #34780's corpus port lands, the rules arm reads a rules file supplied at run time (see #34780 comment 6988054411).\n"
+}

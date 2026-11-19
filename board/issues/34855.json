@@ -2,8 +2,8 @@
   "number": 34855,
   "kind": "issue",
   "title": "mcp read_file: when the worker ceiling cuts a read before page 1, the answer is content none with a note saying \"after page 0 … so the text is partial\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:00:08Z",
-  "updated_at": "2026-11-18T16:01:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T01:56:31Z",
+  "closed_at": "2026-11-19T01:55:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34855",
   "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class a, an out-of-scope finding of the #34758 dev round (PR #34853, report 6950149326), measured by that dev through `read_file` under synthetic load. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p3 · a misleading sentence on a rare path; no data is lost\n\n## 维护者速读\n\n- 现象:AI 通过 MCP 读一个 PDF 时，如果 worker 在读完第 1 页之前就被墙钟上限掐断，回答是「没有内容」，但附带的说明写着「在第 0 页后停在 CPU 预算上，所以文字是部分的」。实际一个字都没给，说明却说给了一部分。\n- 为什么要修:agent 会照这句话去理解结果(以为拿到了部分文本),说法和实际不符。\n- 需要你做的：无(分诊定级)。\n\n## What (measured by the dev, not re-measured by the seat)\n\nUnder load, `read_file` through `MCPServerRuntime.callTool` answered `content: 'none'` with the note `Reading stopped at the CPU-time budget for one file (30 ms) after page 0 of 120, so the text is partial.` Landing point named by the dev: `packages/mcp/src/file-content.ts`, `stoppedExtractionAnswer` → `pdfAnswer([], numPages, note)` when the worker's wall-clock ceiling (5 budgets of real time) fires before the first page. The docx path is analogous. Without load, a PDF whose page 1 outruns 5 budgets of wall time reaches it.\n\n## Done when\n\nA ceiling stop before the first page answers with a sentence that does not claim partial text (and says the read stopped before any page), pinned for PDF and Word with a deterministic clock, as PR #34853 does for the budget case.\n\n## Notes\n\nLands after PR #34853 (same test file).\n\nDedupe: `stoppedExtractionAnswer` (1 hit, #34758 itself); `\"after page 0\"` (58 hits, phrase too generic to match; none names this note)."

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:39:43Z",
-  "updated_at": "2026-11-18T16:12:37Z",
+  "updated_at": "2026-11-19T00:53:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34820",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: ADR bookkeeping owed by PR #34738 (#32115), should-fix S1 of its contract review (comment 6946949332). Dedupe: `ADR-0135 D4 SCIM write order`; no open card.\n\nSuggested-grade: p2 (inherits #32115) · domain:skills (`docs/adr/**`, governed ⇒ Tier H) · documentation · Blocked-by #32115\n\n## What goes stale\n\n`docs/adr/0135-identity-and-access-architecture.md`, the D4 note on the SCIM provisioning writer, says the order of the writes is the contract and that, for the active state, the mark is written first and fails closed. After PR #34738 the active-state call that lifts the directory's ban removes local credentials before the mark is written. The guarantee the sentence serves still holds; the sentence no longer describes the order.\n\n## What is wanted\n\nAn add-only, dated note under D4 (cite the merge commit of #34738) stating: on re-activation the credential removal precedes the mark; a removal that does not complete leaves the user banned (fail-closed) and what is committed in that case. Ride along: ADR-0134 D3 may name what a directory deactivation now does beyond the ban (review nit N6). Text only.\n"

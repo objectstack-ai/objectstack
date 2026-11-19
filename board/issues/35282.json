@@ -1,0 +1,28 @@
+{
+  "number": 35282,
+  "kind": "issue",
+  "title": "Invite no-mail outcome copy: the QA checklist row and the ObjectView invite-outcome test fixture still quote the old Copy Invite Link sentence (follow-up to #34889)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T01:44:57Z",
+  "updated_at": "2026-11-19T01:44:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35282",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② out-of-scope finding owed by the L1 ACCEPT of PR #35274 (comment 6997094395, 范围外去向). ⛔ Not a claim; triage sets lane and grade.\n\n## What PR #35274 makes false\n\nPR #35274 (#34889) rewrote the no-mail `link_only` outcome of the four `invite_user` mirrors and `resend_invitation` in `packages/platform-objects/src/identity/invite-outcome-messages.ts`: it no longer tells the admin to \"Use Copy Invite Link on the invitation to share it.\"; it states the verified-address rule and the operator path. Two in-repo readers still quote the old sentence:\n\n1. `docs/qa/platform-checklist/areas/ux-conventions.json` (~line 27), a `knownGaps` entry \"FIXED, regression row, expected PASS (objectui#11817)\", quotes the old `link_only` toast word for word as the expected copy. The next checklist run of that row on a no-mail deployment will score FAIL against a correct product.\n2. `ui/packages/app-shell/src/views/ObjectView.inviteOutcome-27797.test.tsx` keeps a local `LINK_ONLY_TAIL` fixture with the old sentence. It stays green (it does not read the producer) but no longer mirrors what the server answers.\n\nNeither is published.\n\n## Done when\n\n- The checklist row's expected toast quotes the current producer text (or names the outcome by key rather than by sentence, so it does not drift again).\n- The test fixture mirrors the current `link_only` text, or reads it from the producer.\n\n## Reader\n\nWhoever holds `docs/qa/platform-checklist/**` and `ui/packages/app-shell` invite-outcome tests. Size XS, text/test only.\n\nDedupe: open-issue search `ux-conventions.json Copy Invite Link` and `LINK_ONLY_TAIL` → none."
+}

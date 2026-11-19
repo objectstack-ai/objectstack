@@ -1,0 +1,36 @@
+{
+  "number": 35269,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a long text summary roll-up wraps on the record page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T00:58:31Z",
+  "updated_at": "2026-11-19T01:41:35Z",
+  "closed_at": "2026-11-19T01:41:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T01:41:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35269",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg48yiCyRmnqoUoHcQ9VbBp6)_\n\nFixes #34182\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:记录详情页里,汇总(summary)字段改用它自己的只读展示 `SummaryField` 绘制,长文本汇总完整显示并自动换行;`SummaryField` 的文字颜色从写死的灰色改为主题前景色。\n- 为什么改:文本型汇总此前在记录页只显示一行加省略号,完整值只在悬停提示里;公式字段已经这样修过,汇总是剩下的一半。原来的固定灰色在暗色模式下不变,直接换过去会让数字汇总在暗色下发暗。\n- 风险与回滚:只影响记录详情页的汇总行和汇总字段的只读展示;列表/表格行仍是一行截断,高亮条不变。回滚即还原本 PR 两处源码改动。\n- 先看:`ui/packages/plugin-detail/src/DetailSection.tsx`(新增的 `summary` 分支,紧挨 `formula` 分支);`ui/packages/fields/src/widgets/SummaryField.tsx`(颜色类)。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.textReadWraps-25897.test.tsx packages/fields/src/__tests__/summaryFaces.numberFace-11752.test.tsx`,预期 2 个文件、143 个测试全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `SummaryField`'s read display takes the theme token `text-foreground` in place of the fixed `text-gray-700`, so a roll-up follows dark mode. `text-foreground` is the token the record page's value row itself sets. The sibling read faces (`FormulaField`, `CurrencyField`, `NumberField`) set no colour and inherit it.\n- `DetailSection` reads a `summary` through `SummaryField`, beside the `formula` branch that reads through `FormulaField`. It matches on renderer identity and type, so a host that registered its own `summary` face keeps it. The raw value goes in and the record goes in as `dependentValues`, which a `record`-mode currency needs.\n- Grid rows keep `FormulaCellRenderer` (one line, the whole value in `title`). The highlights strip is untouched.\n\n## Tests\n\nThe new pins go into the existing shared harness files as top-level `describe` blocks. No new file is added.\n\n- `record-details.textReadWraps-25897.test.tsx`, `objectstack#34182` blocks:\n  - at 1440 px and at phone width, a 120-character text summary cell holds exactly the markup `SummaryField` renders, shows the whole value, has no one-line utility between the text and the row, and has no `title`;\n  - CONTROLS: `getCellRenderer('summary')` is still `FormulaCellRenderer`, which still renders `truncate` with the whole value as `title`; a number summary still reads `1,234.50`; a host's own `summary` face is kept.\n- `summaryFaces.numberFace-11752.test.tsx`: the read display carries `text-foreground` and no fixed `text-gray-*`/`slate`/`zinc`/`neutral`/`stone` shade, for a number value and for a text value.\n\n## Acceptance notes\n\n- `AutoNumberField`'s read display also hard-codes `text-gray-700` with no `dark:` variant. This was only read in the code: on the record page `auto_number` reads through `TextField`, so the defect is limited to the form widget. It is outside this card's file surface, so this PR does not change it, and no card is filed.\n- Mechanism note: the card asks for \"the token the other read displays use\". Those read displays set no colour token and inherit one. This PR uses `text-foreground`, the token on the record row's value container, so the face carries a dark-mode colour in any container.\n\n## Verification\n\n<details><summary>Ablation (two legs, both red, restored by hash)</summary>\n\nBoth mutations went through `scripts/ablation-replace.mjs` (each anchor hit 1 time, then 0 times; the blob changed). The `@object-ui/fields` specifier is aliased to `src` in `ui/vitest.config.mts`, so no `dist` rebuild sits between a mutation and the run.\n\n- Leg A: the summary branch in `DetailSection.tsx` is switched off (type `summary-ablated`). Result: `Tests 2 failed | 141 passed (143)`. The two failures are the desktop and phone cases \"a summary cell holds the read display SummaryField renders, in full, and wraps\". All controls stay green.\n- Leg B: `text-foreground` is changed back to `text-gray-700` in `SummaryField.tsx`. Result: `Tests 2 failed | 141 passed (143)`. The two failures are both cases of \"the summary read display carries a dark-mode colour\".\n- Restore: `git diff HEAD` is 0 bytes, and the working-tree blob equals the HEAD blob for both files.\n</details>\n\n<details><summary>Local runs</summary>\n\n- Dependency closure build (`--filter '@object-ui/plugin-detail^...' --filter '@object-ui/fields^...'`): lock VERDICT command-exit 0.\n- Both touched test files: `Test Files 2 passed (2)`, `Tests 143 passed (143)`.\n- `packages/fields/` plus `packages/plugin-detail/`: `Test Files 693 passed | 2 skipped (695)`, `Tests 8142 passed | 25 skipped (8167)`.\n- `type-check` for `@object-ui/fields` and `@object-ui/plugin-detail` (`tsc --noEmit && tsc -p tsconfig.test.json`): lock VERDICT command-exit 0.\n- Derived gate list (`dispatch-gates.mjs --commands`, 38 commands): 36 exit 0. `check:type-check-debt` is NOT MEASURED because its closure build never got a turn on the lock (exit 3, PREREQUISITE NOT MET); it is re-running. `pnpm --dir ui exec vitest run scripts/`: `Tests 5092 passed | 2 skipped`.\n- `check:new-line-citations`: 0 new citations.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

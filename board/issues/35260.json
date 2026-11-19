@@ -1,0 +1,34 @@
+{
+  "number": 35260,
+  "kind": "pull_request",
+  "title": "feat(scaffold): new projects run their tests in CI",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T00:37:51Z",
+  "updated_at": "2026-11-19T02:17:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35260",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8Na6HfgLSzUXJakidM4aJmV)_\n\nFixes #35218\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：脚手架生成的项目在 CI 里跑 `pnpm test`。`npm create objectstack` 模板的 `ci.yml` 在 validate、lint、typecheck 之后加一步 `pnpm test`；`os init -t app` 和 `-t empty` 加上 `test: vitest run`、`vitest` 开发依赖和一个样板测试（`app.test.ts`、`project.test.ts`，只读项目定义，不启动引擎）。技能 `objectstack-project` §2 改成「脚手架 CI 四步都跑」。\n- **为什么改**：#35218 的最后一项（「新脚手架的应用在 CI 里跑测试」）。#35221 里单加 CI 步骤会让 cli 的两条脚手架钉子测试变红：`os init` 的模板要声明 CI 跑的每个脚本，且声明了 `test` 就必须带一个能过的样板测试（空测试集必须失败，不能用 `--passWithNoTests`）。\n- **风险与回滚**：只改脚手架模板和文本，不动运行时；已有项目不受影响。`os init -t app/empty` 新项目多装一个 vitest。回滚即 revert。\n- **先看**：`packages/cli/src/commands/init.ts`（app/empty 两个模板）；`packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml`；`skills/objectstack-project/SKILL.md` §2 第一段。\n- **两分钟验证**：`pnpm --filter @objectstack/cli exec vitest run test/scaffold-test-script-passes.test.ts test/scaffold-ci-script-parity.test.ts` 通过（需先构建 cli 的依赖）；`pnpm --filter create-objectstack exec vitest run src/template-ci-workflow.test.ts` 通过。\n- **需要你做的**：改了 `skills/**`，Tier H，需 os-zhuang 在 GitHub 上 Approve。\n\n## What changes\n\n- **Bundled template** (`create-objectstack`): `.github/workflows/ci.yml` runs `pnpm test` after `typecheck`; `template-ci-workflow.test.ts` now requires the `test` step beside `validate`, `lint` and `typecheck`.\n- **`os init`** (`packages/cli/src/commands/init.ts`): the `app` and `empty` templates declare `test: 'vitest run'` and `vitest` (the shared `SCAFFOLD_VITEST_RANGE`), and ship one starter test each, shaped like the `plugin` template's `package.test.ts`: importing the config runs `defineStack()`, and the test asserts the manifest type (and, for `app`, that every object `src/objects` exports is handed to the stack). The comment points at `@objectstack/verify` `bootStack` for tests that need the engine. The `empty` description says it now carries one starter test.\n- **Pins adjusted to the new shape**: `init-scaffold-authoring-rules.test.ts` picks the templates that emit an object file (it used \"has any `srcFiles`\", which `empty` now has with no object); `generate-scaffold-wiring.test.ts`'s two `empty` cases assert no file under `src/` rather than no file at all. `scaffold-test-script-passes.test.ts` derives its roster from `TEMPLATES` and now runs `app` and `empty` too; its header's spawn count is updated.\n- **Skill**: `objectstack-project` §2 says a scaffolded project's CI runs all four checks, an older scaffold may lack the `pnpm test` step, and a project adds vitest, the `test` script and `@objectstack/verify` (for `bootStack`) where missing. 2901 tokens against its ceiling of 2901 (row unchanged).\n- **Docs**: `content/docs/deployment/cli.mdx` template table, `empty` row.\n\n## Contract review\n\nRound 1 on ef3f4b5b: PASS with two should-fixes (the test budget, and the skill's `@objectstack/verify` sentence), both fixed in bffdcfc9; delta review on bffdcfc9: PASS, nothing open.\n\n## Tests\n\n- `@objectstack/cli` (after building its workspace deps), every `init*` and `scaffold*` test file: 302 passed, 2 skipped; the two `*-mcp-stdio-early-initialize.integration` files need a built `packages/cli/dist` and fail to load on the base tree the same way locally.\n- `scaffold-test-script-passes.test.ts`: `os init -t app`, `-t plugin` and `-t empty` each pass their emitted `test` script in a sandbox; the empty-suite control fails as required.\n- `create-objectstack`: 25 files / 381 tests pass.\n- Skill gates: token ratchet, `check:role-word`, `check:skill-links`, `check:skill-compatibility`, `check:skill-identifier-liveness`, `check:skill-frame-sync`; `check:scaffold-emission-policy`; changeset gates.\n\n## Acceptance notes\n\n- The card's \"Done when\" items: `@objectstack/skills` ships the skill (#35221, merged); a freshly scaffolded app runs its tests in CI and its AGENTS.md points at the skill (this PR + #35221). The third, trimming hotcrm's `docs/PRIORITIES.md`, belongs to hotcrm's rollout (objectstack-ai/hotcrm#2661), as #35221 stated.\n- `scaffold-test-script-passes.test.ts` now spawns ten times instead of eight. Its budget is re-declared at 30: measured locally at 11.6 s with eight spawns and 16.4 s with ten (x 1.41), applied to the 14.9 s CI reading, about 21.0 s, x 1.25, rounded up. Any CI reading from 16 s to 24 s gives the same 30.\n- `Fixes #35218` closes the card on merge. Its third \"Done when\" item, hotcrm's `docs/PRIORITIES.md`, is hotcrm's own work under objectstack-ai/hotcrm#2661, not this repository's.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWfVxrJ6N3xZaG1Eoe\n\n<!-- signed: epic:#35205#2 · os-warren · session_01JQwxbWfVxrJ6N3xZaG1Eoe -->\n"
+}

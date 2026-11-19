@@ -13,18 +13,18 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:blocked",
+    "pm:on-hold",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:33:22Z",
-  "updated_at": "2026-11-18T16:03:02Z",
+  "updated_at": "2026-11-19T00:57:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33933",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ④→已裁定。维护者 2026-11-15 原话：「知识库 根本还没开始开发」「知识库甚至不应该加载这个插件，目前不是本项目的重点」，并同意协调席「所有部署形态都整体隐藏知识库入口」的建议。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（pin `181ad7d4`），环境 `os-6hf1jq` → 系统设置：\n\n- 「知识库」页：「适配器* 内存（仅开发/测试）· 已有索引不会迁移」「搜索时强制 RLS」。\n- 「AI 与向量化」页底部「向量化」一段：「知识库和 RAG 使用的文本→向量提供商」，提供商「禁用（不做向量化）」、「测试向量化」按钮；页头说明也写着「平台 AI 与知识库服务使用的…」。\n\n## 机制（origin/main `895783a1e8`）\n\n- 运行时本身**没有**挂知识库服务：仓内注册 `KnowledgeServicePlugin` 的只有 `examples/app-todo`（依赖 `@objectstack/service-knowledge`、`@objectstack/knowledge-memory`）。\n- 但设置清单无条件注册：`packages/services/service-settings/src/manifests/index.ts` 的 `builtinSettingsManifests` 固定含 `knowledgeSettingsManifest`；导航 `packages/platform-objects/src/apps/setup-nav.contributions.ts:177` 固定有 `nav_settings_knowledge`。\n- `ai.manifest.ts` 的 `embedder_*` 字段（约 271–295 行）和「测试向量化」动作也总是出现。\n\n所以用户看到的是一个没有服务在后面的设置页。\n\n## 修复方向\n\n1. `knowledgeSettingsManifest` 和 `nav_settings_knowledge` 不再默认注册，改为由 `service-knowledge`（或知识库适配器插件）加载时自己贡献。\n2. `ai.manifest.ts` 的向量化一段和「测试向量化」同样只在知识库服务存在时出现；页头说明去掉「知识库」字样。\n3. `examples/app-todo` 是否继续带知识库依赖由车道判断（示例不是交付面，可以保留）。\n4. 不删除 `service-knowledge` / `knowledge-*` 包本身，只是不默认加载、不默认展示。\n\n## 验收\n\n1. 不挂知识库服务的部署（本地 `os serve`、staging 托管环境）里，Setup 导航和设置总览都没有「知识库」；「AI 与向量化」页没有向量化一段，说明里没有「知识库」。\n2. 直接访问 `/apps/setup/system/settings/knowledge` 显示「页面不存在」或等价提示，不是表单。\n3. `examples/app-todo`（若保留知识库依赖）里这两处照常出现。\n\n## 关系\n\n- objectstack#33891（托管环境隐藏自托管设置）里的「知识库」一项由本卡取代，那张卡只管文件存储和 AI 提供商。\n- cloud 侧的向量化器启动绑定另立 cloud 卡。\n\n## Reader\n\nobjectstack service-settings / `domain:ui` 车道。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack knowledge settings hide` → 0 条（含 closed）；`knowledge plugin not loaded` → 0；`知识库 隐藏` → 0；`embedder settings knowledge Setup` → 0。\n- `knowledge in:title` → 15 条，最近的 #28069（知识库帮助文案）、#24769（测试按钮无服务端处理）、#23839（清单警告文案）都在修这一页，没有一张讨论「不该默认出现」。"

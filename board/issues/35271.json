@@ -1,0 +1,37 @@
+{
+  "number": 35271,
+  "kind": "pull_request",
+  "title": "fix(mcp): a read_file stop before the first page or paragraph never calls its text partial",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T01:08:21Z",
+  "updated_at": "2026-11-19T01:55:34Z",
+  "closed_at": "2026-11-19T01:55:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T01:55:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35271",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg1XdbbGasMNVx41tq3hZKV4)_\n\nFixes #34855\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:MCP `read_file` 读 PDF / Word 时，如果在第 1 页(或第一批段落)读回来之前就被停下，回答仍是「没有内容」，但说明改为「在读到第 1 页之前就停了，没有拿到任何文字」;读过的页都没有文字时，说明改为「已读部分没有找到文字」。读到了文字的情况，说明不变(仍说「文字是部分的」)。\n- 为什么改：原来的说明写「在第 0 页后停下，所以文字是部分的」,实际一个字都没给;外部 agent 会照这句话以为拿到了部分文本。\n- 风险与回滚：只改一个文件里的说明文字和分支，不动数据、不动接口形状(`content`、`truncated`、`note` 字段不变);回滚即 revert 本 PR。\n- 先看:`packages/mcp/src/file-content.ts`(`cpuBudgetNote` 与 `stoppedExtractionAnswer` 的两个分支),`packages/mcp/src/mcp-file-tools.test.ts` 末尾新增的 describe。\n- 两分钟验证:`pnpm --filter @objectstack/mcp exec vitest run src/mcp-file-tools.test.ts`,预期 52 个测试全绿，其中新增的「before page 1 of 120 was read, so no text came back」那条通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`packages/mcp/src/file-content.ts`:\n\n- `cpuBudgetNote` now takes where the read stopped (`after` the pages or paragraphs read, or `before` the first one) and whether any text came back. It calls the text partial only when text came back.\n- `stoppedExtractionAnswer` (the wall-clock ceiling's overrun answer) branches on \"no page / no paragraphs came back\": a PDF says `before page 1 of M was read, so no text came back` (`before page 1 was read` when the PDF had not opened yet), a Word document says `before the first paragraph was read, so no text came back`. A stop after page 1 or later keeps the partial-text note.\n- `pdfAnswer` / `docxAnswer` build the note themselves, so a `content: none` answer can never carry the partial-text sentence. A stop after parts that held no text (a scanned PDF, blank paragraphs) now says `after page P of M, and no text was found in what was read`.\n\nThe second bullet is the card. The third is a bounded in-place fix of the same defect class in the same function family (same file, same gate families, no claim elsewhere on the file): before it, a budget stop on the in-process path after page 1 of an image-only PDF answered `content: none` with `after page 1 of 3, so the text is partial`. The new pin `out of CPU budget after pages or paragraphs that held no text` reproduces that answer on `origin/main`'s logic (ablation A below).\n\n## Tests\n\nAll in the shared harness file `packages/mcp/src/mcp-file-tools.test.ts`:\n\n- New top-level describe `read_file: a worker stopped at its wall-clock ceiling before the first page answers no text, never partial text`. A stand-in worker sends back exactly the progress a test scripts (the real `ExtractionProgress` messages) and never answers, so the pool's own overrun path builds the answer and how far the read got is fixed by the script, not by machine load. The clock only decides when the read stops, never where. Pins: PDF opened then stopped before page 1, PDF stopped before it opened, Word stopped before its first paragraphs, and a CONTROL (stop after page 1, and after 64 paragraphs, keep `truncated: true` and the partial-text note).\n- In the CPU-budget describe, one new pin with the existing stepping CPU clock: an image-only PDF and a blank Word body stopped at the budget answer `content: none` with the no-text-found note.\n\n<details><summary>Test runs at a94ee5a0</summary>\n\n```\npnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/mcp-file-tools.test.ts\n Test Files  1 passed (1)\n      Tests  52 passed (52)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @objectstack/mcp typecheck && pnpm --filter @objectstack/mcp test\n Test Files  77 passed (77)\n      Tests  1404 passed (1404)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Ablations (fix committed first; each restore proven blob == HEAD, git diff HEAD empty)</summary>\n\nThe tests import `./file-content.js` from source and the stand-in worker is a `data:` module, so no `dist/` is involved.\n\nA: `return gotText` replaced with `return true` (every stop calls its text partial). Expected red on the no-text pin only:\n\n```\n× out of CPU budget after pages or paragraphs that held no text: no text, and a note that never calls the text partial\nTests  1 failed | 51 passed (52)\n```\n\nB: `pages.length === 0` and `paragraphs === 0` made never true (the before-first branch gone). Expected red on the two before-first pins, CONTROL green:\n\n```\n× a PDF opened but stopped before page 1, and one stopped before it opened, answer no text and say so\n-   \"note\": \"... (100 ms) before page 1 of 120 was read, so no text came back. ...\"\n+   \"note\": \"... (100 ms) after page 0 of 120, and no text was found in what was read. ...\"\n× a Word document stopped before its first paragraphs came back answers no text and says so\n+   \"note\": \"... (100 ms) after 0 paragraphs, and no text was found in what was read. ...\"\nTests  2 failed | 50 passed (52)\n```\n\nA and B together are `origin/main`'s behaviour.\n\n</details>\n\n## Acceptance notes\n\n- The note still names the CPU-time budget when the wall-clock ceiling (5 budgets of real time) is what stopped the read. That shape is deliberate (`stoppedExtractionAnswer` answers \"the same shape an extraction stopped at its budget answers\") and is left as is.\n- The note text is not translated anywhere: it appears only in `file-content.ts`, its tests and the released `CHANGELOG.md`, so no i18n surface moves.\n\n## Verification\n\n<details><summary>Derived gate families at a94ee5a0 (dispatch-gates --commands, 65 commands)</summary>\n\n`dispatch-gates --ran` with recorded exit codes: 65 derived, 63 run, 2 NOT-MEASURED, 0 UNRUN. 63 exited 0.\n\n- NOT MEASURED: `node scripts/check-plugin-teardown-shape.mjs --self-test`, reason: PREREQUISITE NOT MET, the positive control is pinned to a commit a shallow checkout cannot reach (it grades the checker, not this diff).\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET, it reads every package's `dist/` and only the mcp closure was built here. CI runs it.\n\n`node scripts/pm/overlap-check.mjs --branch=HEAD`: `VERDICT clean exit 0` (merges cleanly with origin/main, 0 PR heads overlap).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CazXu8zyYD5PC6J2u7\n"
+}

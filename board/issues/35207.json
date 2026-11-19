@@ -2,8 +2,8 @@
   "number": 35207,
   "kind": "issue",
   "title": "pm-dispatch + scripts: grade by lookup table, triage sets area and issue type, new area label set",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:fleet",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T14:47:55Z",
-  "updated_at": "2026-11-18T19:07:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T00:27:57Z",
+  "closed_at": "2026-11-19T00:24:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35207",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1 on the maintainer's 「立一张专题卡，开始执行」 (2026-11-18 14:43Z). Source order: /mnt/project-files/pm-orders/objectstack/seat1/priorities-rollout-2026-11-18.md. ⛔ Not a claim.\n\n## What changes\n\npm-dispatch and its scripts follow the new rules in #35205:\n- `references/filing-gate.md`: replace the grading criteria section with the lookup tables.\n- Triage:\n  - First touch sets the `area:*` and the issue type.\n  - Delete the \"key re-grade\" step.\n  - Rewrite `references/triage.md`:24 (\"public cards only grade security+p1\") to the new security table.\n- Claim order: p0, then p1, then the area or sub-epic the maintainer named.\n- Delete \"pause means demote to p3\" and the Restart-grade demotion.\n- New rules:\n  - A card blocking another repo's p1 takes the same grade.\n  - In-flight cards are not regraded.\n  - A public card's grade line never names a security mechanism.\n- `scripts/pm/ensure-pm-labels.sh`:634-684 moves to the new area set. The objectui repository no longer exists, so drop it.\n- `SKILL.md`:128: the area description follows.\n- Platform checklist: in each of the 16 areas, the `\"axis\"` field moves to the new area. The PR writes the old-to-new mapping.\n- Scripts that read the old `bug` type label (`check-half-states.mjs`:3672 and others) move to the issue type first. The old type labels retire after that.\n\n## Done when\n\n- One PR (Tier H: `.claude/skills/**`). `pm:awaiting-merge` and a review request go out the moment it is ready. The maintainer merges.\n- Every gate that reads area or type labels is green on the new set."

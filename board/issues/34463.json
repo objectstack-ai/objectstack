@@ -2,8 +2,8 @@
   "number": 34463,
   "kind": "issue",
   "title": "chat composer: a file over maxFileSize is refused with only a console.warn, so the user sees the file silently not attach",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "lease:ux-2",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T20:49:00Z",
-  "updated_at": "2026-11-18T16:29:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T02:09:32Z",
+  "closed_at": "2026-11-19T02:08:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34463",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5obaLbqgzRUR9xXfft\n\nFiling gate: ① reproducible defect, read from code (not measured in a browser), on main before PR #34459. Named by L1-b record 6928835635 on PR #34459.\n\n## Symptom\n\nIn the chat composer (used by the console AI chat), a picked, pasted or dropped file over `maxFileSize` (default 10 MiB) is refused with only a `console.warn`. The user sees nothing: the file just does not attach, with no reason given.\n\n## Location\n\nThe prompt-input composer in `ui/packages/plugin-chatbot` (the `maxFileSize` check on attach).\n\n## Acceptance\n\n1. A refused file shows the user a visible, translated message naming the file and the size limit.\n2. Pins: an over-size file shows the message and is not attached; CONTROL: a file under the limit attaches with no message.\n\n## Related\n\n#32749, PR #34459 (Acceptance notes).\n\nDedupe: searched open issues on 2026-11-16 for `composer maxFileSize console.warn` (1 hit: #32749) and `chat attachment too large silent` (6 hits, all PM seat posts); none reports this."

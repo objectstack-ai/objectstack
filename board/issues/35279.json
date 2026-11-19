@@ -1,0 +1,33 @@
+{
+  "number": 35279,
+  "kind": "pull_request",
+  "title": "docs(skills): the objectstack-ui router names action refusals",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T01:23:42Z",
+  "updated_at": "2026-11-19T02:16:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35279",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg1XdbbGasMNVx41tq3hZKV4)_\n\nFixes #35178\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`objectstack-ui` 技能入口路由表的 Actions 行加上「refusing by code (`refusals`)」,与 `rules/actions.md` 该节标题同词;同文件 First checks 第 3 条删去一处复述(\": it decides what to write\"),token 棘轮该行 2277 → 2279。\n- 为什么改:规则文件已教授动作的 `refusals` 声明(按码拒绝并返回翻译后的消息),但路由表没提,找「动作被拒时的提示」的模型不会被导向该规则。\n- 风险与回滚:只动发布技能的一行路由文字、一处删句、棘轮一行与 changeset;无运行时影响。回滚 = revert 本 PR。\n- 先看:① `skills/objectstack-ui/SKILL.md` 路由表 Actions 行与 First checks 第 3 条(被删的从句是否确属复述);② `scripts/check-skills-token-ratchet.mjs` 的 objectstack-ui SKILL.md 行注释与 +2 上调。\n- 两分钟验证:`node scripts/check-skills-token-ratchet.mjs`,预期 `skills/objectstack-ui/SKILL.md is 2279 tokens (ceiling 2279; headroom 0)` 且末行 ✓。\n- 需要你做的:审阅并合并(`skills/**` 属 Tier H 受管面)。\n\n## What changes\n\n- `skills/objectstack-ui/SKILL.md`, routing table: the Actions row (\"A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`\") gains \", refusing by code (`refusals`)\" — the words of `rules/actions.md`'s heading \"Refusing by code (`refusals`)\" — so a model looking for a refused action's message is routed to that rule (+31 bytes).\n- Same file, paid down first: First checks 3 drops \": it decides what to write\" (-26 bytes), which restates First checks 1's \"where they differ, the installed contract is right\". The paragraph is reflowed over the same four lines (a re-wrap moves no bytes and pays nothing).\n- `scripts/check-skills-token-ratchet.mjs`: the `skills/objectstack-ui/SKILL.md` row moves by the measured remainder, 2277 -> 2279, pinned AT the measurement (zero headroom), with its row note.\n- `.changeset/35178-ui-router-names-refusals.md`: `@objectstack/skills` patch, carrying both declaration lines.\n\nRaise authority, quoted verbatim and untranslated — the standing ruling of 2026-10-27 「A:先削重复,余额按实测提高」, made the gate-recognised path by ruling record 6513306068 (letter B): restatement in the same file is cut first, the remainder moves by measurement.\n\nRatchet row: 9128 bytes (9108 priced) / 2277 tokens -> 9133 bytes (9113 priced) / 2279 tokens; measured remainder +2, `ceil((9133 - 20) / 4) == 2279`.\n\nSkill size readings (tree `objectstack-ai/objectstack`, base `f4dbcc21` -> head `8254c29b`):\n\n| Reading | Before | After |\n|:--|--:|--:|\n| `skills/objectstack-ui/SKILL.md` lines | 169 | 169 |\n| `skills/objectstack-ui/SKILL.md` bytes / priced tokens | 9128 / 2277 | 9133 / 2279 |\n| All published `skills/*/SKILL.md` lines (sum) | 4830 | 4830 |\n| All published `skills/*/SKILL.md` bytes (sum) | 253765 | 253770 |\n\n## Tests\n\nText-only change to served skill text and one ratchet row; no tested behaviour changed, so no ablation.\n\n<details><summary>Token ratchet, gate and self-test (head 8254c29b)</summary>\n\n```\nnode scripts/check-skills-token-ratchet.mjs                -> exit 0\n✓ check-skills-token-ratchet: skills/objectstack-ui/SKILL.md is 2279 tokens (ceiling 2279; headroom 0).\n✓ check-skills-token-ratchet: 59 authored bundle file(s) within their ceilings; 10 generator-owned file(s) and 38 eval fixture(s) measured, not ratcheted.\nnode scripts/check-skills-token-ratchet.mjs --self-test    -> exit 0\n✓ check-skills-token-ratchet self-test: 104 cases pass.\n```\n\nBefore re-pinning the row, the same gate read `2279 / 2277 (+2)` and exited 1 — the remainder this PR carries.\n</details>\n\n## Acceptance notes\n\n- `Most traps below pass it.` (First checks 4) sits next to the Traps heading \"each parses, then fails at run time\"; not cut, because passing `os validate` is a wider claim than parsing.\n- The frontmatter description lists `*.action.ts` while the routing table's In column says `src/actions/*.actions.ts`; `examples/` uses both spellings (2 vs 1). Noted only.\n\n## Verification\n\nLocal gate union derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at head `8254c29b` (3 paths, 67 commands); every family CI runs is read from this PR's check-runs.\n\n<details><summary>Local run, reconciled with --ran (head 8254c29b)</summary>\n\n```\nRun reconciliation — 67 derived, 65 run, 2 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 67 derived famil(ies) accounted for — 65 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3).\n```\n\n- 65 run, exit 0, including `check:skill-docs`, `check:skill-served-sections` (24 served sections, 10 JSON fences pass), `check:skill-identifier-liveness`, `check:skill-links` (267 links, 138 fragments), `check:doc-authoring`, `check:pm-skill-id-lint`, `check:nul-bytes`, `check:doc-formula-expressions` (after building the `@objectstack/lint` closure), `check:pm-dispatch-gates` (fast tier, 2249 cases).\n- `pnpm --filter @objectstack/spec run check:skill-refs` -> exit 0, \"9 generated files in sync with packages/spec\": no skill generator output changes.\n- NOT MEASURED: `check:dual-build-cjs-loads`, `check:lean-entry-closure`, reason: PREREQUISITE NOT MET (exit 3) — they load every package's built `dist/`, which this docs-only diff does not build; CI runs them.\n- No package `test` / `typecheck` owed: the diff touches no package source.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CazXu8zyYD5PC6J2u7\n"
+}

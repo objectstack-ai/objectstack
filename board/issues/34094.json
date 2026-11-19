@@ -2,8 +2,8 @@
   "number": 34094,
   "kind": "issue",
   "title": "Marketplace package page: the suggested-binding prompt and toasts name the permission set by its machine name (same class as #33864 item 1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "lease:ux-1",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T18:27:17Z",
-  "updated_at": "2026-11-18T16:35:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T01:56:49Z",
+  "closed_at": "2026-11-19T01:55:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34094",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #33864 dev (os-dev report 6899087689 on PR #34088), class a.\nReader: `domain:ui` (`ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx`, the `SuggestedBindingsPanel` mount). Grade suggestion: p3 (the same `ux-conventions.labels-over-machine-names` defect #33864 is p3 for).\nDedupe: `is:issue is:open suggested binding marketplace label` — only #33864, whose Studio Access half is fixed by PR #34088.\n\n## 维护者速读\n\n应用市场的包详情页安装后，同样会出现「建议把权限集授权给所有人」的横幅和提示，但这里仍然用权限集的机器名（如 `qa_note_readers`）而不是标签（如「QA Note Readers」）。#33864 在 Studio → 访问 里修好了同一个横幅，这一处是同一个组件的另一个挂载点，没改到。\n\n## Facts (read on the PR #34088 head)\n\n- `SuggestedBindingsPanel` (`ui/packages/app-shell/src/components/SuggestedBindingsPanel.tsx`) draws every string through callbacks its mount passes.\n- PR #34088 makes the Studio Access mount name the set by the label the pillar's rail reads (`suggestedSetLabel` in `StudioDesignSurface.tsx`).\n- The Marketplace package page mount passes `s.permission_set_name` into its prompt and toasts, so it still names the set by machine name.\n\n## Ask\n\nName the set by its label (machine name at most secondary text) on the Marketplace package page mount. If that page holds no permission-set labels, say where the label is read from; if the suggestion payload itself should carry the label, stop and report rather than editing `packages/**`. Consider one shared label helper with the Studio mount instead of a second copy. Pins: the label is shown in the prompt and in the Grant/Dismiss/Revoke toasts; ablate red.\n\nBlocked-by: #33864"

@@ -2,8 +2,8 @@
   "number": 34377,
   "kind": "issue",
   "title": "cloud: a managed install or upgrade rebuild never relaxes a NOT NULL column the new package version declares storage.notNull:false (call relaxInstallDeclaredNotNull after schema sync)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:cloud",
     "bug",
     "domain:cloud",
-    "pm:blocked",
     "priority:p1",
     "repo:cloud"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T10:37:21Z",
-  "updated_at": "2026-11-18T16:39:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T01:56:07Z",
+  "closed_at": "2026-11-19T01:56:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34377",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nBlocked-by: #33724\n\n(Parked by the cloud lane after the cloud half landed: comment 6921328530. The original filing follows unchanged.)\n\n---\n\nrepo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nCarries the cloud half of #33724; #33724 keeps the framework half (the Turso REMOTE face skipping the relax, which waits on a maintainer decision).\n\nPath: none\n\n**Downstream symptom.** On 18.5.0 hosted, after a package upgrade declares `storage.notNull: false` on a column that was NOT NULL, re-saving a record without that field still answers `VALIDATION_` (\"… is required\"), which is the database NOT NULL refusal (#33724, comment of 2026-11-16 01:43Z).\n\n**Why this is the control plane's half** (reading 6913887597 on #33724, from `origin/main` `719b6b53722d`):\n- The framework's relax step, `relaxInstallDeclaredNotNull` (PR #33769, exported from `@objectstack/cloud-connection` \"so a host's own install door can call the same step after its schema sync\"), is called only by the self-hosted `install-local` door after `syncSchemas`.\n- A hosted MANAGED install passes the control plane's answer straight through and never reaches `install-local` (`cloud-connection-plugin.ts`, around lines 1422–1455); `os deploy` to ObjectOS Cloud waits for the environment to rebuild, which in framework terms is a fresh boot.\n- A boot never relaxes a column by design (ADR-0113 D5; `reconcileAndWarnDrift` alters nothing under `NODE_ENV=production`).\n\n**Ask (one executable criterion).** The control plane's managed install and upgrade rebuild calls `relaxInstallDeclaredNotNull` after its schema sync whenever the installed package version changed, and a hosted re-save of a record omitting a field the new version declares `storage.notNull: false` succeeds.\n\n**Also confirm, as a fact for #33724:** whether hosted tenant databases (including the downstream demo environment) are on the Turso REMOTE face. If they are, the call above is skipped by the framework until #33724's framework half lands (`relax_not_null: 'needs-table-rebuild'` on that face).\n\nFiled under the maintainer's rule 「需要转给 cloud的，应该立 cloud 车道卡」. Grade p1, inherited from #33724 (zh-CN hosted demo).\n"

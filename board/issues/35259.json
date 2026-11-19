@@ -1,0 +1,32 @@
+{
+  "number": 35259,
+  "kind": "issue",
+  "title": "fleet: blocked states follow the Blocked-by lines — blockers take the top grade, holds match, pm:blocked releases itself, pm:blocking retires, the maintainer's step gets its own card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T00:34:20Z",
+  "updated_at": "2026-11-19T00:35:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35259",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 in the objectstack priorities discussion thread: 00:26Z 「先立卡改机制，排查现有的卡改状态」; 00:28Z 「这种问题也应该优化 skills： 等维护者做的那一步，单独立一张维护者卡；开发卡关掉，被挡的卡放开。」; 00:32Z 「可以拆的都同意。」; 00:32Z 「如果需要技能优化也要处理」\n\nFiling gate: ③ a task the maintainer dispatched (his words above). Child of epic #35205. Reader: the objectstack seat that takes #35205's steps (pm-dispatch text + `scripts/pm/**`). Dedupe: open cards under #35205 and `pm:blocking` / `Blocked-by` in titles — #35246 (stop ranking `pm:blocking` above p1) overlaps item 5 and is read together with this card; no other hit.\n\nGrade: p2 · area:fleet · Task · fleet machinery, no product surface\n\n## 维护者速读\n\n- 要做什么：让「被挡/挡路」状态只跟着卡正文的 `Blocked-by:` 行走：挡路卡全关后自动放回队列；挡路卡取被挡卡里最高的级别；暂停要一致；撤 `pm:blocking` 手打标签；车队卡只在改同一文件时互挡；开发卡做完只差维护者动作时，另立维护者卡、开发卡关掉、被挡的卡放开；只挡一部分就把那部分拆出去；每日报互挡和成环；等你做产品选择的卡进决定清单，挂超 3 天每日列出。\n- 为什么：2026-11-19 00:16Z 快照里三仓 73 张 `pm:blocked`，16 张写明的挡路卡早已关闭仍挂着，25 张正文没写挡在谁后面，还有 p1 卡被 p3 暂停卡挡着、开发卡挂在维护者动作后面挡住五张卡。\n- 需要你做的：无（规则 PR 是 Tier H，到时请你批）。\n\n## What changes (pm-dispatch text and scripts)\n\n1. **The `Blocked-by:` line is the only source.** A `pm:blocked` card carries a line-start `Blocked-by:` naming an open card or an unmerged PR (cross-repo as `owner/repo#N`). A wait on the maintainer's own action is `pm:awaiting-maintainer` with a `Maintainer-action:` line, never `pm:blocked`. A wait on a platform release is `pm:on-hold` with `Restart-when:` (already the rule). A card with neither is reported by the daily scan.\n2. **Self-release.** The daily scan (triage first-touch sweep or `check-half-states.mjs`) finds `pm:blocked` cards whose every `Blocked-by:` target is closed (PRs: merged), applies the existing cross-repo installable check, and moves them back to `pm:queue` with one comment, or rewrites the line to the next real blocker.\n3. **A blocker takes the top grade.** A blocker's grade is the highest of its own and every open card it blocks, same repo or cross-repo alike (today only \"blocks a p1 in another repo\"). A grade the maintainer set by hand is not moved: the scan reports it to him instead.\n4. **Holds match.** When a blocker is `pm:on-hold` and a card it blocks is not (or the reverse), the daily scan reports it; by default the blocked card follows its blocker onto hold, unless the maintainer said otherwise on the card.\n5. **Retire the `pm:blocking` label.** The blocking relation is read from the `Blocked-by:` lines by script; nobody types the label any more. Read together with #35246.\n6. **Fleet cards do not chain.** Cards the fleet files for one topic block each other only when they edit the same file (the same test the area lease uses for file conflicts). Ordering by preference is a list on the epic, not a `Blocked-by:` chain.\n7. **The maintainer's step gets its own card.** When a dev card's code has landed and only a maintainer action remains (a staging read, a dashboard setting, an upstream PR, an eval round), the seat files one maintainer card (`pm:awaiting-maintainer` + `Maintainer-action:`), closes the dev card, and releases the cards the dev card blocked. A card that truly needs the result of that action points its `Blocked-by:` at the new maintainer card.\n8. **Block only the part that waits.** When a blocker holds back only part of a card, the waiting part is split into its own card and the rest queues as usual. A dev report of `blocked` names which part can go first (filing gate and `os-dev`).\n9. **Mutual blocks and cycles.** The daily scan reports cards that block each other or form a cycle.\n10. **Product choices reach the maintainer's list.** A card waiting on the maintainer's product choice puts the question where he reads decisions (`needs-user-decision`, with options and a recommendation), never parks it under `pm:blocked` or `pm:awaiting-maintainer`; the daily scan lists such questions open more than 3 days.\n\n## Done when\n\n- `references/state-machine.md` and the 〈状态模型〉 rows say items 1–4, 7 and 10; item 5 removes `pm:blocking` from the vocabulary script and its readers (with #35246); items 6 and 8 are in the filing gate, and item 8's report rule in `.claude/agents/os-dev.md`.\n- `check-half-states.mjs` (or the triage sweep) reports: blocked with no open target, blocked with closed targets (and releases them), blocker below the grade it blocks, hold mismatch, mutual blocks and cycles, product questions open more than 3 days. Self-tests cover each.\n- No card number or dated quote enters the skill text (ID lint); the PR body quotes the sources.\n\n## Already done by hand (2026-11-19 sweep)\n\nThe existing cards in objectstack, cloud and hotcrm were swept by hand under the same order; each touched card carries a comment with its old state and the reason. The summary is posted on #35205.\n"
+}

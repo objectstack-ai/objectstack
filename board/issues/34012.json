@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:07:31Z",
-  "updated_at": "2026-11-18T17:33:05Z",
+  "updated_at": "2026-11-19T01:19:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34012",
   "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #34006 append here. Dedupe: no open issue names PR #34006 apart from its card #33923.\n\n## review follow-ups of PR #34006 (card #33923, the `scenario-eval` internal skill and the `eval-run` record)\n\nRecord: 6897354155 (at-tier review on head `3d9dedb1`; items outside that PR's file surface).\n\n- [ ] S1 the `eval-run` record label is unknown to the sweeps. The skill forbids priority, `domain:*` and `pm:*` labels on the record for its whole life, as checklist-test does for `qa-run`, but only `qa-run` is exempt in code: `scripts/pm/first-touch-sweep.mjs` `EXCLUDED_LABELS`, and `H13_EXEMPT_LABELS` / `H74_EXEMPT_LABELS` in `scripts/pm/check-half-states.mjs`. An `eval-run` record left open while a finding waits is owed a first touch the skill forbids. Add `eval-run` beside `qa-run` in each list (with a self-test pin each) and in the triage rule phrase that names `qa-run`.\n- [ ] R1 `.claude/skills/scenario-eval/SKILL.md` has no row in `scripts/pm/check-skill-line-ratchet.mjs` `CEILINGS` (an enumeration; nothing derives `.claude/skills/*/SKILL.md` from the tree, so the gate cannot red on it). Seed a row at the measured line count; 26 of its lines exceed 120 bytes, so the width pin seeds at the measurement; the header's \"the four other `.claude/skills/` playbook SKILL.md files\" becomes five.\n\n`scripts/pm/**` tooling; `skip-changeset`; `Clause-②: no`. Waits for PR #34006.\n\n⛔ Not a claim. Grading is triage's.\n\nBlocked-by: #34110\n\n<!-- signed: domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19 -->\n"

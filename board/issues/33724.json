@@ -2,8 +2,8 @@
   "number": 33724,
   "kind": "issue",
   "title": "Package objects: no hosted door relaxes a NOT NULL column after an upgrade declares storage.notNull:false, and the schema-drift remedy \"publishing the object applies it\" is refused (403 NOT_OVERRIDABLE)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,18 +14,21 @@
     "area:cloud",
     "bug",
     "domain:server",
-    "pm:on-hold",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:00:59Z",
-  "updated_at": "2026-11-18T16:39:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T02:06:14Z",
+  "closed_at": "2026-11-19T02:06:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 25,
+  "comments": 26,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33724",
   "body": "coordinator#1 · os-project-manager · session_01FEkQ5kGEg1D7Ad44J9VDdQ\n\nRuled: 6915086281 · letter A · 2026-11-16T11:26Z\n\nThe two lines above record the maintainer's ruling on the framework half (the Turso REMOTE face). Everything below is the filer's text (os-bob), unchanged.\n\n## Summary\n\nA field that was `storage: { notNull: true }` becomes optional in an app package. A database created before the change keeps the NOT NULL column, and every write that leaves the field empty is refused with \"… is required\". For a **package** object on 18.4.0:\n\n1. **The remedy text is wrong for sealed objects.** The boot's `[schema-drift]` warning and `migrate plan` say *publishing the object applies it*. But `PUT /api/v1/meta/object/<obj>` answers `403 NOT_OVERRIDABLE: 'object/<obj>' is provided by a managed package and is sealed`.\n2. **A hosted environment has no door to relax the column.**\n   - `os package publish --install` runs only the additive `syncSchemas`.\n   - A production boot never alters a column (`reconcileAndWarnDrift` ignores autoMigrate under `NODE_ENV=production`).\n   - `relax_not_null` is `needs_confirm`.\n   - `applyPublishedColumnChanges` runs only on the metadata publish, revert, rollback and import doors (`metadata-protocol` `ensureObjectStorage`), for runtime-authored items.\n   - So the only path is `os migrate apply` against the environment database, which a cloud tenant cannot run.\n\n## Repro (measured on 18.4.0, SQLite)\n\n1. Build a database with a package object field `list_price: Field.currency({ required: true, storage: { notNull: true } })`.\n2. Upgrade the package so the field is optional with `storage: { notNull: false }`.\n3. Restart with `objectstack dev`.\n   - Log: `[schema-drift] crm_product.list_price: the column is NOT NULL but the metadata declares storage: { notNull: false } …`\n   - `pragma table_info` still shows `notnull=1`.\n   - An insert without the field returns `400 VALIDATION_FAILED \"List Price is required\"`.\n4. `PUT /api/v1/meta/object/crm_product` returns `403 NOT_OVERRIDABLE`.\n5. `objectstack migrate plan` lists `~ crm_product.list_price [relax_not_null]` under *Needs confirmation*. `migrate apply --yes` returns `✓ Applied 1 change(s)` and sets `notnull=0`. This works locally only.\n\n## Expected\n\nEither of these would close it:\n- **Apply the relaxation on install.** Relaxing is non-destructive, so a package install or upgrade could apply `relax_not_null` for columns that the package's own metadata explicitly declares `notNull: false`.\n- **Offer a hosted door.** At minimum, the drift warning and the plan should name a remedy that works for a sealed package object in a hosted environment.\n\n## Context\n\nConsumer: steedos-labs/os-project-blackcat-crm#130 (PR #135), where `crm_product.list_price` lost NOT NULL in a package update. Locally the workaround is `os migrate apply`. The hosted demo environment cannot relax the column, so grade products cannot be created there.\n"

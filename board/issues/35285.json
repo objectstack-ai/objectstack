@@ -1,0 +1,34 @@
+{
+  "number": 35285,
+  "kind": "issue",
+  "title": "platform skill: \"Declaring is a demand\" says a missing declared provider is a hard boot error, but os serve only warns for hierarchy-security",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:skills",
+    "finding",
+    "lease:ai-1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T02:05:13Z",
+  "updated_at": "2026-11-19T02:05:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35285",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: out-of-scope note from the dev of #35171 (PR #35281 Acceptance notes), confirmed by its contract review (comment 6997435800), filed by seat 5. ⛔ Not a claim. Related, not a duplicate: #35172 (runtime fallback logs nothing outside the CLI).\n\n## What is wrong\n\n`skills/objectstack-platform/SKILL.md:332-334` teaches: \"A capability YOU declared whose provider package is absent is a hard boot error; one the platform auto-injects for you stays best-effort (warn and continue).\" `os serve` only warns for a declared `hierarchy-security` with no provider, and for cloud-only capability tokens (`packages/cli/src/commands/serve.ts:5472-5497`, the reviewer's reading on the PR head); the runtime then falls back to owner-only scope. An agent following the skill tells a user their app will refuse to boot when it will in fact start with narrowed visibility.\n\n## Do\n\nRead `serve.ts` and the capability preflight on main and cite them. Correct the skill line to name the exceptions (or the rule the code actually follows); if the maintainer's intent is that a declared provider is always a hard error, say so in the PR instead and leave the code question to a separate card. Pay the ratchet with a same-file restatement cut.\n\n## Done when\n\nThe skill states what `os serve` does for a declared capability with no provider, with code cited; skill gates pass; contract review (governed `skills/**`)."
+}

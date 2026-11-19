@@ -2,8 +2,8 @@
   "number": 34779,
   "kind": "issue",
   "title": "verify: run a flow locally and report the node trace, before it is submitted",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:cloud",
     "domain:server",
-    "lease:o1-B",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:14:57Z",
-  "updated_at": "2026-11-18T20:07:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T21:00:16Z",
+  "closed_at": "2026-11-18T20:59:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34779",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nA flow is the item most often saved clean and dead at run time, and the one a static check sees least of. Nothing lets an author trigger it once against a local runtime and read what each node did.\n\nWho acts: the server lane (`packages/verify`, `packages/cli`, `packages/services/service-automation`). Reader: an author, or an AI client, before submitting a flow.\n\n## Evidence\n\n- `os verify` boots the stack and proves CRUD, row-level security, reference shapes, delete behaviour, unique scope and dashboard windows (`packages/cli/src/commands/verify.ts`); none of its proofs runs a flow.\n- The hosted product has a flow test tool and withholds it from the MCP door.\n\n## Scope\n\n- A local flow run: given a flow and a triggering record or input, run it against the booted stack and print each node's status, the first failure with its code, and what the run wrote.\n- A flow that would write runs against the ephemeral stack only.\n- Only this piece of the local export, simulate and submit loop is built now (E3 = phased).\n\n## Done when\n\n- A flow whose node type has no executor, and one whose trigger never binds, are both reported by the local run with the node named.\n\n## Relations\n\n- Parent: #34659. Ruling: E3 = phased.\n- Dedup, open and closed: none found for `flow local test run`."

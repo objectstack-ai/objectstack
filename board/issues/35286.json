@@ -1,0 +1,33 @@
+{
+  "number": 35286,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): query_dataset never pairs an empty answer with a group count",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T02:07:32Z",
+  "updated_at": "2026-11-19T02:13:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35286",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg1XdbbGasMNVx41tq3hZKV4)_\nFixes #35204 — the two contract-review nits (N5, N6). The card's main route (the ObjectQL face handing its cut to the engine's order-and-cut) is closed by seat ruling 6997569008 (route C: the face's in-memory `totalGroups` is already exact); the database top-N and its ordering question moved to #35287.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`query_dataset` 带 `totals` 时,若 totals 那次读取遇到「源表不存在」被降级成空结果,不再同时返回主网格的 `totalGroups`;另在 `dataset-group-count.ts` 头注释写明「整网格证明」止于策略自己的读取接缝。\n- 为什么改:合约评审 6982207184 的 N6:空答案(`rowCount: 0`)与已写入的分组数配对,AI 会读到一个从未返回的网格的分组数;N5 是一句说明边界的注释。\n- 风险与回滚:风险低,只改了计数写回调用方槽位的时机(整次调用成功后才写);回滚即 revert 本 PR。\n- 先看:`packages/services/service-analytics/src/dataset-executor.ts` 的 `execute()`(`counted` 局部槽位与末尾写回两处),其次新测试。\n- 两分钟验证:`pnpm --filter @objectstack/service-analytics exec vitest run --maxWorkers=2 src/__tests__/dataset-tools.test.ts -t \"missing source serves no count\"`,预期 2 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **N6** (`dataset-executor.ts`). `execute` now hands `executeSelection` a local group-count request and copies its outcome into the caller's slot only after the `totals` groupings have run. Before, the slot was written while the primary grid was read; a `totals` read that then threw a missing-source error made `answerDataset` serve `{ rows: [] }`, and `query_dataset` answered `rowCount: 0` beside the primary grid's `totalGroups`. Any throw after the count now leaves the slot empty.\n- **N5** (`dataset-group-count.ts` header). One sentence: the whole-grid proof stops at the strategy's own read seam (`ctx.executeRawSql`, `ctx.executeAggregate`); a host-supplied bridge or an out-of-repo driver that silently truncates an unwindowed read is counted as whole. No in-repo seam cuts one.\n- Changeset: `@objectstack/service-analytics` patch.\n\n## Tests\n\nNew top-level describe in the shared `query_dataset` harness, `src/__tests__/dataset-tools.test.ts`: `[query_dataset totalGroups] a totals read that meets a missing source serves no count`. Real SQLite engine through `AnalyticsServicePlugin`; the second statement of the call fails as `no such table`.\n\n- CONTROL: totals served, `{ rowCount: 3, truncated: false, totalGroups: 3 }`, two statements, the first carrying `COUNT(*) OVER ()`.\n- The fix: totals read fails, the empty answer (`rowCount: 0`) and no `totalGroups`; the primary statement still ran and counted.\n\n## Acceptance notes\n\n- **The route is not in this PR.** Measured on `origin/main` `f4dbcc21`: the engine writes the group count to the caller's own request (`request.outcome.totalGroups`, `aggregate-order-cut.ts`), but the ObjectQL face's only read seam, `ctx.executeAggregate` (the spec's `StrategyContext` and the plugin's auto-bridge), carries no read option, and the engine REFUSES (throws `INVALID_QUERY` / 400 before reading) wherever it cannot serve the cut rather than declining. Routing the face's cut therefore needs a new consumer-local bridge (`plugin.ts`, `strategies/types.ts`, `analytics-service.ts`, outside this card's file surface) and either a catch around the engine's refusal or an objectql decline mode, and it changes which rows a text-ordered top-N answers (database collation instead of `applyOrdering`). Returned to the seat as a decision.\n- `totalGroups` on the ObjectQL face is already the exact count today (the whole grid's length, before the face's own in-memory cut); nothing on that face is approximated.\n\n## Verification\n\nHead `cd688d97c`.\n\n<details><summary>Package: build, typecheck, test (under the shared verify lock)</summary>\n\n- `pnpm --filter @objectstack/service-analytics build && … typecheck && … test`: `VERDICT command-exit 0`; `Test Files 218 passed (218)`, `Tests 5605 passed | 345 skipped (5950)`.\n\n</details>\n\n<details><summary>Ablation (one-shot, not kept)</summary>\n\n- `node scripts/ablation-replace.mjs` replaced `this.executeSelection(compiled, selection, context, counted);` with the pre-fix `…, options?.groupCount);` (anchor 1 to 0, blob `1e56cd1b5e95` to `9ab686e51c1b`). The pin turned red: `AssertionError: expected { rows: [], fields: [], …(7) } to not have property \"totalGroups\"`, `Tests 1 failed | 1 passed`. Restore proven: blob equals HEAD, `git diff HEAD` empty. No dist leg: the suite imports the executor from `src`.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates, 66)</summary>\n\n- 64 exit 0. 2 exit 3, NOT MEASURED: `check-plugin-teardown-shape.mjs --self-test` (shallow clone cannot reach its pinned fixture commit), `check:dual-build-cjs-loads` (reads every package's built output; only the closure was built). CI runs both.\n- `dispatch-gates --ran`: `66 derived famil(ies) accounted for — 64 run, 2 NOT-MEASURED`.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CazXu8zyYD5PC6J2u7\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CazXu8zyYD5PC6J2u7 -->\n"
+}

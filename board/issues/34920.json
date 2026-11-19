@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T16:14:50Z",
-  "updated_at": "2026-11-18T17:59:14Z",
+  "updated_at": "2026-11-19T00:55:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34920",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659, filed by the session the maintainer set to file this epic's cards. Ruling: the maintainer, in that session's chat, 2026-11-17, verbatim: 「两件都同意：构建提交进仓库，#34894 选 A」, on the open point (a) of the test plan on #34687 (comment 6951987764) and this session's review of it (comment 6952197238).\n\n## Why\n\nThe daily ask round measures the MCP door, not authoring. It needs the same build every day; cloud containers are ephemeral; rebuilding each round costs about $50 a day for two cards by the plan's estimate and puts build noise into the reading.\n\n## Evidence\n\n- The test plan on #34687 (comment 6951987764), open point a: the round cannot start without a home for the verified builds.\n- `scenario-eval` keeps run products out of the repository tree. The maintainer has now ruled that a verified build an ask round runs on is a fixture, committed.\n\n## Scope\n\n- One verified build per dataset card, committed beside the card, with its sha256, the runner sha and the model that built it recorded next to it.\n- It changes only by a PR, when the card or the runner changes; a daily round never writes it.\n- `--template` reads it from the tree; the `eval-run` record names its sha256.\n- One line in `scenario-eval/SKILL.md` stating the distinction: records, recordings and logs stay out of the tree; a verified build that rounds run on is a fixture and is in it.\n- File surface: `docs/qa/scenarios/**` or the runner's fixtures directory, as the devx lane places it; `.claude/skills/scenario-eval/SKILL.md`.\n\n## Done when\n\n- A fresh container runs the ask round on both dataset cards with no build step.\n\n## Relations\n\n- Parent: #34659. Related: #34687, #34869.\n- Governed surface: `.claude/**` for the skill line, Tier S."

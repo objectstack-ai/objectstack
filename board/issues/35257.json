@@ -1,0 +1,34 @@
+{
+  "number": 35257,
+  "kind": "issue",
+  "title": "stillShownBy: narrow the formula-retype sentence and close the pin gaps left by PR #35239",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T22:10:09Z",
+  "updated_at": "2026-11-19T00:52:42Z",
+  "closed_at": "2026-11-19T00:52:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35257",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nNits that contract review 6992416034 on PR #35239 (card #35147) left open. None affects what `stillShownBy` answers today.\n\n- **N9.** The `stillShownBy` describe in `packages/spec/src/api/protocol.zod.ts` says a filter on a field retyped to `formula` is not named. That is too wide. A text operator on a formula whose `returnType` is `number`, `boolean` or `date` IS named: the module passes `returnType`, and `filter-operator-field-type-fit.test.ts` pins `unfit`. Narrow the sentence to what the code does. The review record gives replacement wording.\n- **N10.** Pin gaps:\n  - The lint-entry test walks relative edges only, and its pattern needs `from`. A bare `import '@objectstack/lint'`, or a static import in another workspace package, would pass.\n  - Both answer schemas are plain `z.object`, so the `safeParse` case passes an undeclared key. It also parses no `operator` entry.\n  - \"Not computed\" is pinned only for an unreadable listing, not for a judge that throws or a failed load.\n  - The listing bound counts `view` reads only.\n- **Also recorded:** N3 (the stand-in object is named from the body's `name`), N4 (entries keyed `type:name:via` merge across packages), N5 (the judges run once per removed field), and N7 (the module declares its own `DestructiveFinding` rather than the spec type).\n\n## Scope\n\n- Narrow the describe for N9, and regenerate the reference.\n- Tighten the four pins for N10.\n- Take N3, N4, N5 and N7 only where cheap.\n\nBlocked until #35239 merges.\n\n## Origin\n\nContract review records 6989169773 and 6992416034 on PR #35239.\n\nRe-check: `git grep -n \"retyped to .formula\" origin/main -- packages/spec/src/api/protocol.zod.ts`"
+}

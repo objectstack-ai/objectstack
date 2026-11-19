@@ -15,18 +15,21 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
+    "lease:ux-3",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:58:24Z",
-  "updated_at": "2026-11-18T16:23:34Z",
+  "updated_at": "2026-11-19T01:50:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34806",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRfW5u1LRmhWwaYHRp\n\nFinding from the L1 review of #34784 (#33952), comment 6946048217, deviation D1. A seat-filed card; grading and `domain:*` are triage's.\n\nSuggested-grade: p2 · domain:server · size S–M\n\n## What the code does\n\nOn `origin/main` 6091b645, `packages/rest/src/form-routes.ts` translates the public form's object schema (around line 383) and the matched view (around line 419) with `translateMetadataDocument(…, bundle, { ...translateOptionsFor(i18n, locale), packagedBase })`. Neither call passes `pairBundle`.\n\nThe `/meta` reads in `packages/rest/src/meta-item-read-gate.ts` do pass it (`pairTranslationBundleOf(protocol, type, document)`, lines ~3561–3570 and ~3640–3644; #30062, ADR-0146 D2). That is the first rank of a changed slot: a `.custom` pair's own `translation` rows for the text its declared override wrote.\n\n## What follows from that (read from code, not measured live)\n\nA string that a `.custom` pair's override changed on an object or a form view is translated from the pair's own translations on `/meta`, but on `GET /forms/:slug` the anonymous visitor gets the override text as written, in every locale. The same document, two surfaces, two answers. #33952 (PR #34784) adds the patch rank to the form route; the pair rank under it is still missing there, and that is older than #34784.\n\n## Notes for whoever picks it up\n\n- The form route rebuilds the object schema as `{ name, label, fields }` before it translates. `servedOverrideBaseOf(type, document)` reads the envelope the read stamped on the served document, so it probably has to be asked about the object as served (`obj`), not about the rebuilt `objectSchema`. Check this before wiring.\n- The pin would sit beside `packages/rest/src/public-form-section-i18n.test.ts`: a pair override's zh-CN row served on the form, with a CONTROL leg on the same fixture through `/meta`.\n- Not measured: whether a pair override of a form view's section headings reaches the form the same way."

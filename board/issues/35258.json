@@ -1,0 +1,32 @@
+{
+  "number": 35258,
+  "kind": "issue",
+  "title": "build probes: the dangling seed-reference fix names a repair that does nothing under the default seed mode, and two seeds of one object are judged as one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T00:08:36Z",
+  "updated_at": "2026-11-19T00:51:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35258",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## Why\n\nPR #35244 (cards #34776 and #35146) adds the build probes `seed_reference_unresolved` and `rollup_never_computed`. Its last contract review (PR comment 6995403690, head `812290548f`) passed with two should-fix points and three nits open. They are carried here so the PR could land.\n\nWho acts: the server lane (`packages/metadata-protocol/src/build-probes.ts`, `build-probes.user-text.ts`). Reader: an author, or an AI client, right after a build.\n\n## Evidence\n\n- **Repair text under `ignore` (should-fix).** The finding's `fix` and its 11 `userMessage` texts say to correct the seed and republish. Under the default seed mode `ignore`, the replay leaves the rows it created earlier as they are, so the stored value still names no row. Those rows are now in `landed.matched`, which the probe does not read under `ignore`, so the next receipt comes back clean with nothing repaired.\n- **Two seeds of one object (should-fix).** `seedApplied.landed` merges every seed of an object into one `matched` list. With seed A (`ignore`) and seed B (`upsert`) on the same object, a row only A matched is read and judged under B's rule. Each seed also emits its own finding over the same rows, so one dangling value is reported once per seed.\n- Same family: under `upsert` or `update`, a matched row's column the seed does not write (`applyOn: 'create'`, or a column the records do not carry) is reported, and `fix` says to correct it in the seed, which does not reach it.\n- Nits: the roll-up `message` says \"of one organization\" on every path, including the pass that is not split by organization; the roll-up `userMessage` (11 locales), the changeset and the PR table say blank on \"every\" parent while the verdict is one organization's sampled parents; the organization discovery samples 50 child rows where a distinct read could push down, and the code gives no reason.\n\n## Scope\n\n- `fix` and `userMessage` name the repair that works for the seed's mode: correct or delete the stored rows, or declare `upsert`.\n- Read `matched` only when every published seed of the object declares a writing mode; emit one finding per object and column.\n- Skip, or word for, a matched row's column the seed does not write.\n- Fix the three nit texts, or state the reason for the sample.\n\n## Done when\n\n- A republish under `ignore` after a dangling reference either repairs it or keeps reporting it with a repair that works.\n- Two seeds of one object, one `ignore` and one `upsert`, yield one finding per object and column, judged only on rows a writing seed landed.\n\n## Relations\n\n- Origin: contract review 6995403690 on PR #35244; L1 delta ACCEPT 6995388753.\n- Related: #34776, #35146, #35251, #35256.\n\nRe-check: `git grep -n \"seed_reference_unresolved\" origin/main -- packages/metadata-protocol/src`"
+}

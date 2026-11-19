@@ -1,0 +1,32 @@
+{
+  "number": 35262,
+  "kind": "issue",
+  "title": "Hosted verification: after a managed upgrade declares storage.notNull:false, re-saving without the field is not refused (closes the read owed by #34377 and #33724)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T00:39:55Z",
+  "updated_at": "2026-11-19T00:51:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35262",
+  "body": "sweep#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 00:32Z in the objectstack priorities discussion thread: 「可以拆的都同意。」 (the split list's item 1: close #34377 and #33724, file one hosted verification card). Rule: #35259 item 7.\n\nFiling gate: ③ a task the maintainer dispatched. Reader: whoever can sign in to a hosted (staging) environment; no fleet seat can, so this is a maintainer card. Dedupe: open cards naming `relaxInstallDeclaredNotNull` or `storage.notNull:false` on hosted — none besides the two closed in this stroke.\n\nGrade: p2 · area:cloud · Task · the C-section grade Warren approved for the pair (00:27Z 「34377 同意」)\n\n## Why\n\nBoth halves are on main and in cloud's pin:\n- framework: PR #34408 (`69949aedc1`, the Turso REMOTE face relaxes a NOT NULL column in place), closing #33724's framework half;\n- cloud: cloud PR #4753 (`7ae780348`), the hosted kernel rebuild calls `relaxInstallDeclaredNotNull` after schema sync, closing #34377's cloud half.\n\nCloud's pin `958ee0359496` (objectstack 18.6.0, cloud PR #4867) carries `69949aedc1` (compare: pin is ahead). Nothing is left to build; only a hosted read is owed.\n\nMaintainer-action: on staging (cloud main at or after `0ea8652e4`, the 18.6.0 pin), install a package version whose object declares a field `storage: { notNull: true }`, create a record, upgrade the installation to a version declaring that field `storage: { notNull: false }`, then save a record that leaves the field empty — done when a comment here records the save's answer (pass: saved, no `VALIDATION_` \"… is required\" refusal) and the environment's build log line for the relax.\n\n## Done when\n\nThe reading is on this card. Pass ⇒ close completed. Fail ⇒ the reader files a defect card with the answer and links it here.\n"
+}

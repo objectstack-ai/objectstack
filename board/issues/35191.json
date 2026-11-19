@@ -13,18 +13,21 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "lease:ai-1",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T11:31:23Z",
-  "updated_at": "2026-11-18T16:03:45Z",
+  "updated_at": "2026-11-19T02:16:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35191",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbWDsbbJizuYnDwBxT8\n\nFollow-up of #35137 (PR #35179), from L1-b's nit 2 (comment 6977289014 on #35179). PR #35179 adds `withheldFields` and a one-sentence note to `query_records` and `get_record` results when field-level security withheld a field the caller's served schema shows. The served ask skill does not teach the member yet, so a model may still call such a field blank.\n\n## Change\n\n`skills/objectstack-ask/SKILL.md`, section 4 \"Fallback: object queries\", gains one bullet (wording from the #35137 dev report 6976419490):\n\n> - `withheldFields` on a `query_records` or `get_record` answer names fields that exist but are hidden from you: say they are not visible to you, never that they are empty.\n\nA second line for the same section, from #35144 (PR #35193, dev report 6980284856): after the bullet that begins \"Use `aggregate_records` for a count, sum, average or breakdown.\" and its sentence \"`truncated: true` on its answer means groups were cut off: say so.\", add:\n\n> For a top or bottom N, pass `orderBy` (an aggregation alias or a group key) and `limit: N`, so the database ranks and cuts the groups, and cite `totalGroups` as how many groups existed before the cut.\n\n## Done when\n\n- Both lines are in the skill; the generated `packages/mcp/src/ask-skill.generated.ts` and the skills reference page are regenerated.\n- `scripts/check-skills-token-ratchet.mjs`: the `skills/objectstack-ask/SKILL.md` row has no headroom, so the line pays for itself in the same file (ruling record 6513306068, letter B).\n- Text-only change to served skill text: `Clause-②: no` (seat ruling kept by seat 1).\n\n## Order\n\nTier H (`skills/**`). Starts after PR #35179 and PR #35193 merge, and after the maintainer's ruling on #35137's bound is recorded there (the wording above fits option A; recheck it against the ruling). Shares the file with #35158; whichever runs second re-measures the ratchet row.\n"

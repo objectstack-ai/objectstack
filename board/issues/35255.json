@@ -1,0 +1,32 @@
+{
+  "number": 35255,
+  "kind": "issue",
+  "title": "verify: the os verify CRUD phase may write into an app's declared external datasource",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T20:32:56Z",
+  "updated_at": "2026-11-18T21:46:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35255",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nSource: fleet\n\nFiling gate: owed follow-up of landed work, named by L1 6990771676 on PR #35243 (card #34779), item C1; the dev noted it in 6987214963. ⛔ Not a claim.\n\nGrade: p2 · area:build · Bug · data wrong × rare · test rows can reach a real external database for an app that declares a writable external datasource; the reach at a public door has not been measured\n\n## What happens\n\nThe `os verify` header promises the harness \"never touches a real database\". But `packages/verify/src/derive.ts:236-244` lets writable objects on an app's declared external datasource into the CRUD phase. So a verify run on such an app may insert, update and delete rows in that external database.\n\n## Expected\n\nThe CRUD phase writes only to the ephemeral stack. An object on an external datasource is either left out of the write phases and named as \"external, not exercised\", or bound to the ephemeral store for the run. Whichever shape is chosen, the docs and the header say exactly what happens. Per the scope rule, this card adds no new flag or interface.\n\n## Done when\n\nA test with a writable external datasource shows that no write reaches it, and the header and docs match what the test shows."
+}
