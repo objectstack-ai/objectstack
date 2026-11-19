@@ -28,9 +28,7 @@ import {
   type FieldRulePredicate,
   recordDisplayValueAt,
   evalFieldPredicate,
-  resolveFieldRuleState,
   resolveNameField,
-  toPredicateRecord,
   withoutDeniedFields,
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
@@ -41,6 +39,7 @@ import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
 import { recordBindingBlock } from './recordBinding';
+import { dropFieldPredicateHidden, lazyPredicateRecord } from '../fieldPredicateVisibility';
 
 /** Normalize a field entry (string | {field} | {name}) to its machine name. */
 const fieldName = (entry: any): string | null => columnIdentity(entry) ?? null;
@@ -169,37 +168,6 @@ function fillSectionHeadingCount(heading: string, count: number): string {
 }
 
 /**
- * The record a section's `visibleWhen` is evaluated against — assembled the
- * way the entry form assembles its own (objectui#11630).
- *
- * The form's `ruleRecord` (`@object-ui/components`' form renderer) seeds every
- * declared field to `null` and then overlays the DEFINED values it holds, so a
- * predicate naming a column the read did not return compares against `null`
- * instead of faulting on a missing key. This does the same over the object's
- * declared fields and the bound record.
- *
- * Relations are collapsed back to their stored foreign key first
- * (`toPredicateRecord`): the edit form reads its record without `$expand`, so
- * `record.owner == 'u1'` sees the id there, while this page's record may arrive
- * expanded. Without the collapse one predicate would reach two verdicts on the
- * same record.
- */
-function sectionPredicateRecord(
-  data: Record<string, unknown> | null | undefined,
-  objectFields: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (objectFields && typeof objectFields === 'object' && !Array.isArray(objectFields)) {
-    for (const name of Object.keys(objectFields)) out[name] = null;
-  }
-  const row = toPredicateRecord(data ?? {}, objectFields) as Record<string, unknown>;
-  for (const key of Object.keys(row)) {
-    if (row[key] !== undefined) out[key] = row[key];
-  }
-  return out;
-}
-
-/**
  * Does a field GROUP's ADR-0089 `visibleWhen` admit its section on this
  * record? (objectui#11630 — "the detail page evaluates `visibleWhen` per group
  * exactly as the form does".)
@@ -224,9 +192,9 @@ function sectionPredicateRecord(
  * (`sectionGateVisible` in `@object-ui/components`' form renderer), with the
  * same three inputs it passes —
  *
- *  - `record` — {@link sectionPredicateRecord}; values bind under `record.`
- *    only, so a bare `kind == 'pro'` is an unbound identifier on both
- *    surfaces;
+ *  - `record` — `assemblePredicateRecord` (`../fieldPredicateVisibility`);
+ *    values bind under `record.` only, so a bare `kind == 'pro'` is an
+ *    unbound identifier on both surfaces;
  *  - `previous` — the SAME record. An edit form binds `previous` to the
  *    persisted row, and the row this page shows IS the persisted row, so a
  *    `previous.*` predicate reaches the verdict it reaches on that record's
@@ -260,38 +228,6 @@ function sectionPredicateVisible(
   return evalFieldPredicate(visibleWhen, record, false, record, scope, {
     context: `visibleWhen of ${where} — fail-closed, the group is hidden`,
   });
-}
-
-/**
- * Does a FIELD's own `visibleWhen` (`@objectstack/spec` `Field.visibleWhen`:
- * "field is shown only when TRUE (else hidden)") admit its row on this record?
- *
- * Asked of every field this body draws, whatever section carries it — a
- * `{ group }` reference, an enumerated section (the default page's ungrouped
- * bucket and its no-`fieldGroups` split are enumerated sections, the same
- * shape an authored page writes) or the flat `fields` list. The predicate is
- * the OBJECT's declaration of the field, read by name, never a key on the
- * section entry.
- *
- * ⭐ The form's judge, called the form's way: `resolveFieldRuleState` from
- * `@object-ui/core`, the call the form renderer makes for a field's
- * `visibleWhen`, so the fault direction is the field rule's
- * (`VISIBLE_WHEN_FAULTED`, ADR-0137 D3): a predicate that cannot be evaluated
- * SHOWS the field and warns once. That is the opposite of a group's gate
- * ({@link sectionPredicateVisible}, fail-closed), deliberately — each slot
- * keeps the direction the form gives it. The inputs are the ones the group
- * gate passes: {@link sectionPredicateRecord} as `record` and as `previous`,
- * and the host predicate scope.
- *
- * Display only, as on the form: the record API serves the field either way.
- */
-function fieldPredicateVisible(
-  visibleWhen: FieldRulePredicate,
-  record: Record<string, unknown>,
-  scope: Record<string, unknown>,
-  where: string,
-): boolean {
-  return resolveFieldRuleState({ visibleWhen }, record, {}, record, scope, where).visible;
 }
 
 /**
@@ -912,29 +848,22 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   // The record a group's or a field's `visibleWhen` is evaluated against —
   // assembled only when a predicate is actually declared, so a body without
   // one does no extra work and renders exactly as before.
-  let sectionRecord: Record<string, unknown> | undefined;
-  const predicateRecord = (): Record<string, unknown> =>
-    (sectionRecord ??= sectionPredicateRecord(ctx.data, objSchemaFields));
+  const predicateRecord = lazyPredicateRecord(ctx.data, objSchemaFields);
 
   /**
    * Drop every row whose field's own `visibleWhen` is FALSE for this record —
-   * see {@link fieldPredicateVisible}. Applied to every list this body draws,
-   * after the other folds, so it reads only the rows that would be drawn.
+   * `dropFieldPredicateHidden` (`../fieldPredicateVisibility`), the one
+   * implementation the highlights strip and `DetailView` call too. Applied to
+   * every list this body draws, after the other folds, so it reads only the
+   * rows that would be drawn.
    */
-  const dropPredicateHidden = (list: any[] | undefined): any[] | undefined => {
-    if (!list) return list;
-    return list.filter((e) => {
-      const n = fieldName(e);
-      const visibleWhen = n ? objSchemaFields?.[n]?.visibleWhen : undefined;
-      if (visibleWhen == null) return true;
-      return fieldPredicateVisible(
-        visibleWhen as FieldRulePredicate,
-        predicateRecord(),
-        predicateScope,
-        `field '${n}' of record:details on object '${objectName}'`,
-      );
+  const dropPredicateHidden = (list: any[] | undefined): any[] | undefined =>
+    dropFieldPredicateHidden(list, {
+      objectFields: objSchemaFields,
+      record: predicateRecord,
+      scope: predicateScope,
+      where: (n) => `field '${n}' of record:details on object '${objectName}'`,
     });
-  };
 
   // ── The declared fallback body (objectui#12433) ─────────────────────────
   //

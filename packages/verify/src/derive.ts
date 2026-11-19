@@ -205,6 +205,8 @@ interface Draft {
  * Required relational fields no longer block the object outright: the referenced
  * target is created first (topological order) and the runner threads its real id
  * in. Only genuinely unsatisfiable shapes are `blocked`:
+ *  - an object on an external datasource (never written: verify writes only to
+ *    its ephemeral store), or
  *  - a required relation whose target is missing from the app config (external), or
  *  - a required-reference cycle (incl. a required self-reference), or
  *  - a required relation whose target is itself blocked (cascade), or
@@ -214,9 +216,10 @@ export function deriveCrudCases(config: any): CrudCase[] {
   // ADR-0130 D4 (#15229): the flattened top level answers first and
   // `packages[]` supplies only what it lacks, so a multi-package app under
   // option B derives its cases instead of deriving NONE and passing. Both reads
-  // go through the same resolver — `objects` alone would leave the federated
-  // write gate below judging against an empty datasource map, which reports an
-  // app's write-opted-in external objects as read-only and silently skips them.
+  // go through the same resolver — `objects` alone would leave the external
+  // branch below judging against an empty datasource map, which misses an
+  // object bound to an external datasource by `schemaMode` alone and names a
+  // write-opted-in external object read-only.
   const objects: any[] = declaredCollection(config, 'objects');
   const byName = new Map<string, any>();
   for (const o of objects) if (o?.name) byName.set(o.name, o);
@@ -233,18 +236,26 @@ export function deriveCrudCases(config: any): CrudCase[] {
       name: obj.name, body: {}, asserts: [], skippedFields: [], relationalRefs: [], requiredTargets: [],
     };
 
-    // Federated (external) objects are read-only unless BOTH the datasource and
-    // the object opt into writes (ADR-0015 write gate). The CRUD probe insert is
-    // correctly rejected by the gate for them, so mark the case blocked (skipped)
-    // rather than letting a guaranteed-rejected insert surface as a failure.
-    if (obj.external) {
-      const ds = obj.datasource ? dsByName.get(obj.datasource) : undefined;
+    // An object on an external (federated, ADR-0015) datasource is never
+    // written by verify. The boot connects every datasource the app declares,
+    // the way `os dev` does (ADR-0062 D1/D2), so a probe insert would go to the
+    // real database behind it whenever its write gate is open: BOTH the
+    // datasource's `external.allowWrites` and the object's `external.writable`.
+    // Every write family (CRUD, RLS, reference shapes, delete behaviours,
+    // unique scopes, parent write reach, dashboard windows) builds its records
+    // from this case, so one blocked case keeps all of them off the object.
+    // The datasource counts as external the way the engine's write gate counts
+    // it: a declared `schemaMode` other than `managed`, or an object carrying
+    // an `external` block. The reason names the gate's state, so the report
+    // says when a write was possible and was withheld.
+    const ds = obj.datasource ? dsByName.get(obj.datasource) : undefined;
+    if (obj.external || (typeof ds?.schemaMode === 'string' && ds.schemaMode !== 'managed')) {
       const writable = ds?.external?.allowWrites === true && obj.external?.writable === true;
-      if (!writable) {
-        d.blocked = `external read-only object (federated datasource "${obj.datasource ?? 'default'}"; no inserts)`;
-        drafts.set(obj.name, d);
-        continue;
-      }
+      d.blocked =
+        `external datasource "${obj.datasource ?? 'default'}" (${writable ? 'writes allowed' : 'read-only'}): ` +
+        'not exercised — verify writes only to its ephemeral store';
+      drafts.set(obj.name, d);
+      continue;
     }
 
     for (const [name, f] of Object.entries(fields)) {
