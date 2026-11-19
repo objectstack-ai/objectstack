@@ -61,14 +61,17 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('@object-ui/components', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@object-ui/components')>();
   const Pass = (p: { children?: React.ReactNode }) => <div>{p.children}</div>;
+  const Item = (p: { children?: React.ReactNode; onSelect?: () => void }) => (
+    <button type="button" onClick={() => p.onSelect?.()}>{p.children}</button>
+  );
   return {
     ...mod,
     DropdownMenu: Pass,
     DropdownMenuTrigger: Pass,
     DropdownMenuContent: Pass,
-    DropdownMenuItem: (p: { children?: React.ReactNode; onSelect?: () => void }) => (
-      <button type="button" onClick={() => p.onSelect?.()}>{p.children}</button>
-    ),
+    DropdownMenuItem: Item,
+    DropdownMenuRadioGroup: Pass,
+    DropdownMenuRadioItem: Item,
   };
 });
 vi.mock('@object-ui/react', async (importOriginal) => {
