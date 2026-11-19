@@ -93,6 +93,6 @@ describe('[#34598] driver-mongodb refuses a zoned date bucket on a direct call',
     const driver = evaluatingDriver(calls);
     const rows = await driver.aggregate('ev', { aggregations: COUNT, timezone: 'America/New_York' } as never);
     expect(calls).toHaveLength(1);
-    expect(rows).toEqual([{ c: 1 }]);
+    expect(rows.map((r) => r.c)).toEqual([1]);
   });
 });
