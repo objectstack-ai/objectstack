@@ -16245,7 +16245,7 @@ export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
 // TOKEN CLASS bound to the Claude Code ACCOUNT rather than to the session — it
 // is read back from each write and can flip between two writes of ONE session
 // with no seat act behind it
-// (`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段).
+// (`.claude/skills/pm-dispatch/references/readings-channels.md`).
 //
 // So the half-state is an artefact whose text asserts seat/dev provenance —
 // a claim, a report, a contract review, a filing header — while carrying no
@@ -16685,7 +16685,7 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
     `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because one ` +
     'protocol identity is shared by every agent here and the token class behind that login follows the Claude ' +
     'Code ACCOUNT rather than the session (`.claude/skills/pm-dispatch/SKILL.md`, ' +
-    '`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段). The two ' +
+    '`.claude/skills/pm-dispatch/references/readings-channels.md`). The two ' +
     'carriers disagree about one live artefact: the text says a seat or a dev wrote it, and nothing says which ' +
     'session, so a reader who needs the author of this act has nobody to ask and no branch to read.' +
     `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact gives it its session ` +
@@ -29707,7 +29707,7 @@ async function selfTest() {
   t('H64 row: …a PR as a pull request', row64(text64('pull request', pr18051({ body: BODY18051_NOID }))).includes('this open pull request'), true);
   t('H64 row: …and a card as a card', row64(text64('card', card9404({ body: BODY9404_NOID }))).includes('this open card'), true);
   t('H64 row: it cites the rule by FILE rather than by issue number', row64(claim64()).includes('`.claude/skills/pm-dispatch/SKILL.md`'), true);
-  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/platform-readings.md`'), true);
+  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/readings-channels.md`'), true);
   t('H64 row: the remedy is the artefact\'s own session id', row64(claim64()).includes('gives it its session id'), true);
   t('H64 row: …an edit in place is enough where the owner can edit', row64(claim64()).includes('an edit in place is enough'), true);
   t('H64 row: …and the original STAYS as history', row64(claim64()).includes('the original STAYS as history'), true);
