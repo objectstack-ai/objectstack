@@ -134,7 +134,7 @@ const ROWS = Array.from({ length: ${ROW_COUNT} }, (_, i) => ({
   account: '客户 ' + ((i % 17) + 1),
   stage: STAGES[i % STAGES.length],
   amount: 10000 + i * 1000,
-  probability: 20 + (i % 4) * 20,
+  probability: (20 + (i % 4) * 20) / 100,
   owner: '销售 ' + ((i % 5) + 1),
   close_date: '2027-01-' + String((i % 28) + 1).padStart(2, '0'),
 }));
@@ -273,6 +273,8 @@ async function tailwindFor(candidates: string[]): Promise<string> {
 
 let bundle = '';
 const compiled = new Set<string>();
+/** The last stylesheet compiled: a mount starts from it (see `mount`). */
+let stylesheet = '';
 
 /** Compile the stylesheet until the page's class set stops growing. */
 async function styleUntilStable(page: Page): Promise<void> {
@@ -288,6 +290,7 @@ async function styleUntilStable(page: Page): Promise<void> {
     if (round === 6) throw new Error('the page kept adding classes; the stylesheet never caught up');
     candidates.forEach((cls) => compiled.add(cls));
     const css = await tailwindFor([...compiled]);
+    stylesheet = css;
     await page.evaluate((text) => {
       let sheet = document.getElementById('tailwind');
       if (!sheet) {
@@ -301,12 +304,40 @@ async function styleUntilStable(page: Page): Promise<void> {
   }
 }
 
+/**
+ * The fixture page at a real origin: the list keeps its scroll position in
+ * session storage, which an `about:blank` page (an opaque origin) refuses.
+ */
+const FIXTURE_URL = 'http://list-fixture.test/apps/sales/opportunity/view/open';
+async function openFixturePage(page: Page, html: string): Promise<void> {
+  await page.route(FIXTURE_URL, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  await page.goto(FIXTURE_URL);
+  await page.unroute(FIXTURE_URL);
+}
+
 async function mount(page: Page, viewport: { width: number; height: number }, c: Case = {}): Promise<void> {
   await page.setViewportSize(viewport);
-  await page.setContent('<!doctype html><html><head><style>html,body{margin:0}</style></head><body><div id="root"></div></body></html>');
-  await page.evaluate((value) => {
+  // The list asks for its next window while its scroll box is near its end,
+  // which an unstyled box (no height bound) always is: a page mounted before
+  // its stylesheet would load every row at once, which the console, whose
+  // stylesheet is there first, never does. So the page is styled BEFORE the
+  // list mounts: the first mount of a worker is a throwaway that collects the
+  // page's classes, and every mount then starts from the compiled sheet.
+  if (!stylesheet) {
+    await page.setContent('<!doctype html><html><head><style>html,body{margin:0}</style></head><body><div id="root"></div></body></html>');
+    await page.evaluate((value) => {
+      (window as unknown as { __case: Case }).__case = value;
+    }, c);
+    await page.addScriptTag({ content: bundle, type: 'module' });
+    await page.getByText('商机 1', { exact: true }).waitFor({ timeout: 30_000 });
+    await styleUntilStable(page);
+  }
+  await openFixturePage(page, '<!doctype html><html><head><style>html,body{margin:0}</style><style id="tailwind"></style></head><body><div id="root"></div></body></html>');
+  await page.evaluate(({ value, css }) => {
     (window as unknown as { __case: Case }).__case = value;
-  }, c);
+    document.getElementById('tailwind')!.textContent = css;
+    try { window.sessionStorage.clear(); } catch { /* a fresh page holds nothing */ }
+  }, { value: c, css: stylesheet });
   await page.addScriptTag({ content: bundle, type: 'module' });
   await page.getByText('商机 1', { exact: true }).waitFor({ timeout: 30_000 });
   await styleUntilStable(page);
@@ -415,6 +446,7 @@ for (const viewport of VIEWPORTS) {
       });
       await expect.poll(() => loadedRows(page)).toBe(100);
       await page.locator('thead').getByRole('checkbox').click();
+      await styleUntilStable(page);
       const bar = page.getByTestId('list-selection-page-bar');
       await expect(bar.getByTestId('list-selection-count')).toHaveText('已选 100 条');
       await expect(bar.getByTestId('list-selection-select-all')).toHaveText('选择全部 120 条');
