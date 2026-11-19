@@ -6,6 +6,7 @@
 #   scripts/pm/os-verify-lock.sh -- pnpm --filter @objectstack/core test
 #   scripts/pm/os-verify-lock.sh --status        # holder, how long it has held, the queue,
 #                                                # and whether each recorded process still exists
+#   scripts/pm/os-verify-lock.sh --depth         # arrival depth vs LOCK_DEPTH_HOLD: exit 0 go, 1 wait
 #   scripts/pm/os-verify-lock.sh --show-budget   # the acquisition budget this call would use
 #   scripts/pm/os-verify-lock.sh --self-test     # verify this script
 #
@@ -19,7 +20,8 @@
 # `--status` is the one mode with an exit code of its own: 3 means the liveness
 # control at the foot of its output failed, so it printed no reading at all
 # rather than one it cannot stand behind. It takes no lock, so 99 is not
-# something it can ever mean.
+# something it can ever mean. `--depth` shares that 3 and adds 0 (go) and 1
+# (wait) -- see `mode_depth`.
 #
 # A host with no usable `flock` runs in DECLARED UNLOCKED MODE (see the block
 # below): the command runs and its own exit code passes through, so 99 keeps
@@ -2288,6 +2290,8 @@ usage:
   os-verify-lock.sh -c '<shell command>'    run it under the shared verify lock
   os-verify-lock.sh -- <argv...>            same, without a shell
   os-verify-lock.sh --status                who holds the lock, for how long, who is queued
+  os-verify-lock.sh --depth                 arrival depth vs LOCK_DEPTH_HOLD before the next
+                                            dispatch: exit 0 go, 1 wait, 3 cannot read
   os-verify-lock.sh --show-budget           the acquisition budget this call would use
   os-verify-lock.sh --report                aggregate the ledger: waits, holds, queue depth,
                                             which commands own the lock-seconds, and the
@@ -2615,6 +2619,52 @@ mode_status() {
   printf '%s\n' "$LIVENESS_CONTROL_LINE"
   liveness_verdicts
   return 0
+}
+
+# --- depth ------------------------------------------------------------------
+
+# The dispatching seat's hold: before the 2nd and every later dev of a batch,
+# it waits while the arrival depth is at or above this. pm-dispatch
+# `references/execution-duties.md` names the value, and the self-test holds the
+# two equal.
+readonly LOCK_DEPTH_HOLD=2
+
+# `--depth`: the arrival depth a dispatching seat used to count by eye off
+# `--status`. Depth = live `queue N:` tickets + 1, the dev about to be
+# dispatched counting as an arrival; the `state:` holder and every parked slot
+# are NOT counted -- the holder has arrived already and a parked place blocks
+# nobody. Exit 0 go (depth below the hold), 1 wait, 3 when the liveness probe
+# that decides which tickets are live is not lit, or the lock cannot operate
+# on this host: ⛔ an unread depth is never read as 1.
+mode_depth() {
+  local q=0 p=0 file
+  if ! liveness_control; then
+    printf '%s
+' "$LIVENESS_CONTROL_LINE"
+    printf 'depth: CANNOT READ — the probe that decides which tickets are live is not lit; ⛔ never read as depth 1.
+'
+    return "$LIVENESS_REFUSAL_EXIT"
+  fi
+  if ! preflight; then
+    printf 'depth: CANNOT READ — this host cannot operate the lock (`--status` names why); ⛔ never read as depth 1.
+'
+    return "$LIVENESS_REFUSAL_EXIT"
+  fi
+  if [[ -d "$QUEUE_DIR" ]]; then
+    while IFS= read -r file; do
+      [[ -n "$file" ]] && q=$((q + 1))
+    done < <(queue_live)
+    while IFS= read -r file; do
+      [[ -n "$file" ]] && p=$((p + 1))
+    done < <(queue_parked)
+  fi
+  local depth=$((q + 1)) verdict=go
+  ((depth >= LOCK_DEPTH_HOLD)) && verdict=wait
+  printf 'depth %d (queue %d + 1) · hold at %d → %s · not counted: the holder, %d parked slot(s)
+' \
+    "$depth" "$q" "$LOCK_DEPTH_HOLD" "$verdict" "$p"
+  [[ "$verdict" == go ]] && return 0
+  return 1
 }
 
 # --- report -----------------------------------------------------------------
@@ -4333,6 +4383,39 @@ FAKEDATE
     "$(printf '%s\n' "$lvout" | grep -cE '^liveness (holder|waiter|parked)')" 0
   rm -rf "$lvq" "${lvl}"*
 
+  # `--depth` — the arrival depth a dispatching seat counted by eye off
+  # `--status`. Driven as a CHILD against a private lock, like the liveness
+  # cases above, because the surface a seat runs is what is owed.
+  local dl dq dout drc dstart
+  dl="${tmp}/depth-lock"
+  dq="${dl}.q"
+  mkdir -p "$dq"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth on an empty queue reads depth 1 (the dev about to be dispatched) and goes' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 1 (queue 0 + 1) · hold at 2 → go')" '0|1'
+  dstart="$(proc_starttime "$$")"
+  printf '%s %s %s depth-holder\n' "$$" "$dstart" "$(now_s)" > "${dl}.holder"
+  printf '0 %s %s depth-parked\n' "$(now_s)" "$(now_s)" > "${dq}/00000000000000000001-sdepthslot"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth counts neither the holder nor a parked slot' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 1 (queue 0 + 1) .* 1 parked slot')" '0|1'
+  printf '%s %s %s depth-waiter\n' "$$" "$dstart" "$(now_s)" > "${dq}/00000000000000000002-$$"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth counts a live waiter: depth 2 reaches the hold and exits 1 (wait)' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 2 (queue 1 + 1) · hold at 2 → wait')" '1|1'
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" OS_VERIFY_LOCK_SIM_LIVENESS=alive bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth with an unlit probe exits 3 and is never read as depth 1' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth: CANNOT READ')|$(printf '%s\n' "$dout" | grep -c '^depth [0-9]')" '3|1|0'
+  local duties
+  duties="$(dirname "$SELF")/../../.claude/skills/pm-dispatch/references/execution-duties.md"
+  st_case 'LOCK_DEPTH_HOLD equals the value the dispatch rule names, and the rule points at --depth' \
+    "$(grep -c "os-verify-lock.sh --depth\`.*LOCK_DEPTH_HOLD\`(= ${LOCK_DEPTH_HOLD})" "$duties" 2> /dev/null)" 1
+  rm -rf "$dq" "${dl}"*
+
   # arrival stamps sort lexically in arrival order — the FIFO claim rests on it.
   # A host with only whole-second stamps (no EPOCHREALTIME, no GNU `date +%N`,
   # no perl) cannot promise STRICTLY increasing, and says so via --status rather
@@ -4677,6 +4760,10 @@ main() {
       ;;
     --status)
       mode_status
+      exit $?
+      ;;
+    --depth)
+      mode_depth
       exit $?
       ;;
     --show-budget)
