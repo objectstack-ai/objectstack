@@ -16,6 +16,13 @@
  * a name, `{ field }`, or a bucket — naming a VIRTUAL field, which no driver
  * stores a column for — {@link assertGroupByTargetsAreStored}.
  *
+ * [#34886] …and, in the same walk and ahead of it, a `groupBy` entry naming a
+ * dotted path through relations (`purchase_order.requisition.name`): `groupBy`
+ * serves the object's own columns, 0 hops deep. Measured on `origin/main`
+ * `b3247ddbdc` through the HTTP MCP bridge over `SqlDriver` on SQLite: one or
+ * two hops came back as the driver's missing-column backstop (400, advising a
+ * schema sync), three or four hops as `DATABASE_ERROR` / 500.
+ *
  * ## What ran before this door, measured on `origin/main` `cb0a2fcf4f`
  *
  * Through `findData` (the `POST /api/v1/data/:object/query` door) over three
@@ -98,7 +105,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { isVirtualSearchField } from '@objectstack/spec/data';
+import { isVirtualSearchField, referenceTargetOf } from '@objectstack/spec/data';
 import { declaredFieldClasses } from './having-filter.js';
 
 type ShapeRefusal = Error & {
@@ -155,10 +162,52 @@ function virtualGroupMessage(object: string, path: string, field: string, type: 
 }
 
 /**
+ * The object a declared field references, or `undefined` — read only to word a
+ * refusal, so a reference carrier the spec cannot read words it as a
+ * non-relation instead of replacing the refusal with the reader's own throw.
+ */
+function relationTargetOf(declared: unknown): string | undefined {
+  try {
+    return referenceTargetOf(declared);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#34886] The refusal of a `groupBy` entry naming a path through relations
+ * (`purchase_order.requisition.name`): the position, the path and its depth,
+ * the depth `groupBy` serves (0 hops: the aggregated object's own columns),
+ * then the two ways to ask instead.
+ */
+function relationPathGroupMessage(
+  object: string, position: string, path: string, head: string, headIsRelation: boolean,
+): string {
+  const hops = path.split('.').length - 1;
+  return `aggregate('${object}'): ${position} groups by '${path}', a path ${hops} relation `
+    + `hop${hops === 1 ? '' : 's'} deep, but groupBy groups by the columns of '${object}' itself — `
+    + 'the deepest path it serves is 0 hops, so a related record\'s column cannot be a grouping target. '
+    + 'The query was NOT run. '
+    + (headIsRelation
+      ? `Group by the relation field '${head}' itself (one group per related record), or aggregate `
+        + 'the related object and group by its own field there.'
+      : `'${head}' is not a relation field of '${object}': name a field of '${object}' itself.`)
+    + ' A dotted path reached the database as a qualified column name that no table here has: a '
+    + 'backend refused it as a missing column or as a statement it could not run, and an engine that '
+    + 'aggregates in memory put every row into one null group.';
+}
+
+/**
  * Refuse a `groupBy` entry of any form — a name, `{ field }`, or a
  * `{ field, dateGranularity }` bucket — naming a field the object declares
  * VIRTUAL (`formula`; the spec's `isVirtualSearchField`), `INVALID_FIELD` /
  * 400 at the position it names. See the module header.
+ *
+ * [#34886] …and, first, an entry naming a DOTTED path the object does not
+ * declare (a path through relations): `groupBy` serves the object's own
+ * columns, 0 hops deep — the REST query door's rule at ingress, held here
+ * for the callers that reach the engine past that door (the MCP bridge, a
+ * flow, a hook). `INVALID_FIELD` / 400 at `groupBy.N` or `groupBy.N.field`.
  */
 export function assertGroupByTargetsAreStored(
   object: string,
@@ -174,7 +223,21 @@ export function assertGroupByTargetsAreStored(
     const { field, dateGranularity } = named
       ? { field: entry, dateGranularity: undefined }
       : entry as { field?: unknown; dateGranularity?: unknown };
-    if (typeof field !== 'string' || !Object.prototype.hasOwnProperty.call(fields, field)) continue;
+    if (typeof field !== 'string') continue;
+    if (field.includes('.') && !Object.prototype.hasOwnProperty.call(fields, field)) {
+      const position = named ? `groupBy.${i}` : `groupBy.${i}.field`;
+      const head = field.split('.')[0];
+      const headField = Object.prototype.hasOwnProperty.call(fields, head)
+        ? (fields as Record<string, unknown>)[head]
+        : undefined;
+      const headIsRelation = headField !== undefined && relationTargetOf(headField) !== undefined;
+      throw refusal(
+        'INVALID_FIELD',
+        relationPathGroupMessage(object, position, field, head, headIsRelation),
+        { field, fields: [field], object, param: 'groupBy', path: position },
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) continue;
     const declared = (fields as Record<string, { type?: unknown }>)[field];
     if (!isVirtualSearchField(declared as never)) continue;
     const type = String(declared?.type);
