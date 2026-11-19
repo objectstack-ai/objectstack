@@ -212,6 +212,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// AppContent reaches the console's dynamic `@objectstack/lint` imports; their
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 /** `?form=new` is the URL contract that opens the global record-form overlay. */

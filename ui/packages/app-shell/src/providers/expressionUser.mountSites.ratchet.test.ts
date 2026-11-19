@@ -50,6 +50,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildExpressionUser } from './expressionUser';
+// AppContent reaches the console's dynamic `@objectstack/lint` imports; their
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 // The back-compat re-export. objectui#6515 moved the function out of this
 // module; `toBe` (identity, not shape) is what proves the name still resolves
 // to the SAME function rather than to a second copy that could drift.
