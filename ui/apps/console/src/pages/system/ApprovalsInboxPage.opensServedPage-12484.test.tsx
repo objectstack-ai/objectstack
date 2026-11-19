@@ -365,7 +365,7 @@ describe('the approvals inbox opens a request on its served page (objectui#12484
   });
 });
 
-describe('a request opens in the app that owns its record, not the app it was asked from (objectstack#32667)', () => {
+describe('a request opened from no app (the deep link) opens in the app that owns its record (objectstack#32667); a queue row stays in the inbox\'s app (objectstack#35412)', () => {
   /** The app the reader is in (Home's host app, the notification's): it lists another object only. */
   const CALLER = { name: APP, navigation: [{ type: 'object', objectName: 'leave_request' }] };
   /** The app that lists the request's record, inside an area. */
@@ -394,14 +394,23 @@ describe('a request opens in the app that owns its record, not the app it was as
     expect(where()).toBe(`/apps/${APP}/home`);
   });
 
-  it('a row of the queue opens under the owner app, from the row it already holds', async () => {
+  it('a row of the queue opens in the app the inbox is mounted in, though another app owns the record', async () => {
     setApps([CALLER, OWNER, SETUP]);
     renderAt([INBOX]);
     fireEvent.click(await inboxRow());
 
     await servedPage();
-    expect(where()).toBe(pageUnder('com.example.finance'));
+    expect(where()).toBe(REQUEST_PAGE);
     expect(approvalsApiStub.getRequest).not.toHaveBeenCalled();
+  });
+
+  it('a row of the queue whose object no app lists stays in the inbox\'s app, never Setup', async () => {
+    setApps([CALLER, SETUP]);
+    renderAt([INBOX]);
+    fireEvent.click(await inboxRow());
+
+    await servedPage();
+    expect(where()).toBe(REQUEST_PAGE);
   });
 
   it('no app lists the object: the request opens under Setup, never under the unrelated app', async () => {
