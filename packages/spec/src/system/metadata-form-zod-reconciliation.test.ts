@@ -464,17 +464,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'homeAmount',
     why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
   },
-  // #34273 — an action's refusal catalogue lands in the action's source
-  // first, as a hook's declared texts did (#34374). The Studio row (a
-  // key-only record, with its help text in the eleven metadata-forms
-  // bundles) is a follow-up, so this row records why the key is not offered.
-  {
-    kind: 'omit',
-    type: 'action',
-    path: ROOT_PATH,
-    key: 'refusals',
-    why: "live, not yet offered in the Studio — the refusals a `script` action's `js` body throws by code (answered with the declared sentence in the caller's locale) are validated at parse (SCREAMING_SNAKE codes, the hook entry's closed-scope holes over declared `params`, a literal code or reason the catalogue does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that throws them. The Studio row, a key-only record, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `refusals` through the metadata API or its package source",
-  },
   // #27946 — an action's pressed-state predicate lands spec-first the same
   // way: `planned` in the liveness ledger, drawn by no action surface until
   // the console card that draws `aria-pressed` on the header buttons.

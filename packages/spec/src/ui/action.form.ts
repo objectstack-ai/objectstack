@@ -63,6 +63,36 @@ export const actionForm = defineForm({
             { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
           ],
         },
+        // The action's refusal catalogue sits beside the body that throws its
+        // codes, as on the hook form, and takes that form's row: a record keyed
+        // by the code, an entry with no member that echoes its key, so the
+        // key-only record control; an entry's `reasons` is the same shape one
+        // level down. The entry is the hook entry, built by the one factory
+        // (`declaredRefusalEntrySchema`), so its four controls are the hook
+        // row's. Gated like `body`: the parse refuses `refusals` on every
+        // action but a `script` one (and on its `expression` body, which the
+        // help text says).
+        {
+          field: 'refusals',
+          type: 'record',
+          widget: 'key-only-record',
+          visibleWhen: "data.type == 'script'",
+          helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the action's body throws (e.g. SIGN_IN_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a script action's JavaScript (L2) body; refused on an expression body",
+          fields: [
+            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },
+            { field: 'status', type: 'number', helpText: 'HTTP status of the refusal (400–499). Absent: 400' },
+            {
+              field: 'reasons',
+              type: 'record',
+              widget: 'key-only-record',
+              helpText: 'Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry\'s; a reason not declared here is refused. Absent: a thrown reason is not read',
+              fields: [
+                { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry\'s params' },
+              ],
+            },
+            { field: 'params', type: 'tags', helpText: 'Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text' },
+          ],
+        },
         // The action's declared texts sit beside the body that asks for them,
         // as on the hook form, and take its row: a record keyed by the
         // snake_case key the code asks for, an entry `{ message, params? }`
