@@ -684,6 +684,37 @@ describe('value envelope — the date-text family at registerFlow (#34451)', () 
     expect(() => engine.registerFlow('loan_due_parent', parent as never)).not.toThrow();
   });
 
+  // [ruling 7023700548] A flow with its OWN record trigger stays refused even
+  // when a parent registered first also starts it (its trigger hands it the
+  // typed row on every run it starts), and the refusal names the rewrite; the
+  // same flow with no trigger of its own registers.
+  it.each([
+    ['subflow', { flowName: 'loan_due_child' }],
+    ['map', { flowName: 'loan_due_child', collection: { dialect: 'cel', source: '[record]' }, itemObject: 'event' }],
+  ])('a record-triggered child a parent also starts through `%s` stays refused, naming the rewrite', (type, config) => {
+    const engine = engineWith(true);
+    engine.registerFlow('event_parent', {
+      name: 'event_parent', label: 'Event parent', type: 'record_change',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: 'event', triggerType: 'record-after-update' } },
+        { id: 'call', type, label: 'Call', config },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    } as never);
+    const child = { ...loanFlow('update_record', REFUSED), name: 'loan_due_child' };
+    const error = catchError(() => engine.registerFlow('loan_due_child', child as never));
+    expect(error.message).toContain(SLOT_PATH.update_record);
+    expect(error.message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+    expect(error.message).toContain('move them into a child flow with no trigger of its own');
+    // The stored pass lists the same sentence at the slot.
+    expect(engine.canonicalizeStoredFlow('loan_due_child', child as never).todos.map((t) => t.reason).join('\n'))
+      .toContain('move them into a child flow with no trigger of its own');
+    // CONTROL: the same child with no trigger of its own registers.
+    const triggerless = { ...loanFlow('update_record', REFUSED, { objectName: 'library_loan' }), name: 'loan_due_child', type: 'autolaunched' };
+    registersClean(engine, 'loan_due_child', triggerless, 'trigger-less child');
+  });
+
   it('CONTROL: a record-triggered flow that declares a `record` variable is not typed — registers', () => {
     for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
       const flow = { ...loanFlow(slot, REFUSED), variables: [{ name: 'record', type: 'object' }] };

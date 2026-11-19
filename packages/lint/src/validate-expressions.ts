@@ -367,6 +367,29 @@ function withAttachedBlocks(
  */
 const BOUND_RECORD_ROOTS = ['record', 'previous'] as const;
 
+/**
+ * [ruling 7023700548] The codes of the date-text verdict a flow value envelope
+ * gets only when typed (`ExprSchemaHint.flowValueEnvelope`): the family whose
+ * refusal names {@link SHARED_STEPS_REWRITE}.
+ */
+const TYPED_VALUE_ENVELOPE_CODES: ReadonlySet<string> = new Set([
+  'date-text-call-value-run-may-fail',
+  'date-text-arithmetic-value-run-may-fail',
+]);
+
+/**
+ * [ruling 7023700548] The rewrite the typed date-text refusal names, appended
+ * after the verdict's own fix. The typing holds only on a flow with its own
+ * record trigger or sweep, which stays refused when a parent also starts it;
+ * a flow with no trigger of its own is judged untyped. The engine's
+ * `registerFlow` appends the same sentence (`flow-registration-checks.ts`).
+ */
+const SHARED_STEPS_REWRITE =
+  'This flow has its own record trigger, which hands it a row of that object on every run it starts, so this '
+  + 'stands even where another flow also starts it through a `subflow` or `map` node. To share these steps with '
+  + 'such a flow, move them into a child flow with no trigger of its own, which is judged untyped because its '
+  + '`record` is whatever each caller hands it, and start that child from both flows.';
+
 /** Minimal structural view of a `parseCelToAst` node (`{ op, args }`). */
 type CelNodeLike = { op?: string; args?: unknown };
 
@@ -3155,7 +3178,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
     );
     for (const e of res.errors) {
-      issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
+      const rewrite = fieldTypes && e.code && TYPED_VALUE_ENVELOPE_CODES.has(e.code) ? ` ${SHARED_STEPS_REWRITE}` : '';
+      issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}${rewrite}`, source: e.source, severity: 'error' });
     }
     for (const w of res.warnings) {
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
@@ -3338,9 +3362,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // one too), `previous` by a NODE row only — the collector asked without
     // `flow.variables` — since `seedRunVariables` sets `previous` over a
     // declared variable of that name. Elsewhere (an inbound hook, a schedule,
-    // a flow a parent's `subflow` / `map` starts) `record` holds whatever the
-    // entrance handed the run, and the envelope is judged untyped. The
-    // engine's `registerFlow` stands down on the same set
+    // a flow with no trigger of its own that a parent's `subflow` / `map` or a
+    // caller starts) `record` holds whatever the entrance handed the run, and
+    // the envelope is judged untyped. A flow with its own record trigger or
+    // sweep stays typed even when a parent also starts it: its own entrance
+    // still hands it the typed row on every run it starts, so the verdict
+    // stands, and its sentence names the rewrite ({@link SHARED_STEPS_REWRITE};
+    // ruling 7023700548). The engine's `registerFlow` judges the same set
     // (`flow-registration-checks.ts` `flowRebindsRunRowRoots`).
     const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName
       && !declaredVariables.has('record')

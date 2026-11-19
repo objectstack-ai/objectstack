@@ -724,6 +724,29 @@ const BRACE_RULE_REFUSAL_CODES: ReadonlySet<ExprValidationCode> = new Set<ExprVa
     'template-dialect-mismatch',
 ]);
 
+/**
+ * [ruling 7023700548] The codes of the date-text verdict a value envelope gets
+ * only when typed (`valueEnvelopeFieldTypes`): the family whose refusal names
+ * {@link SHARED_STEPS_REWRITE}.
+ */
+const TYPED_VALUE_ENVELOPE_CODES: ReadonlySet<ExprValidationCode> = new Set<ExprValidationCode>([
+    'date-text-call-value-run-may-fail',
+    'date-text-arithmetic-value-run-may-fail',
+]);
+
+/**
+ * [ruling 7023700548] The rewrite the typed date-text refusal names, appended
+ * after the verdict's own fix — the sentence `@objectstack/lint`'s
+ * `validate-expressions.ts` appends at `objectstack validate` (that package is
+ * not a dependency of this one, so each door spells it, and each door's test
+ * pins it).
+ */
+const SHARED_STEPS_REWRITE =
+    'This flow has its own record trigger, which hands it a row of that object on every run it starts, so this '
+    + 'stands even where another flow also starts it through a `subflow` or `map` node. To share these steps with '
+    + 'such a flow, move them into a child flow with no trigger of its own, which is judged untyped because its '
+    + '`record` is whatever each caller hands it, and start that child from both flows.';
+
 /** Whether an expression-judge refusal is one the braces rule speaks to. */
 function isBraceRuleCode(code: ExprValidationCode | undefined): boolean {
     return code !== undefined && BRACE_RULE_REFUSAL_CODES.has(code);
@@ -785,10 +808,14 @@ export function validateFlowExpressions(
     // flow rebinds neither root the typing reads, `record` or `previous`
     // ({@link flowRebindsRunRowRoots}: `celScope` resolves both through the
     // variable spread, so an assigned or output one is what the envelope
-    // reads). Anywhere else (an inbound hook, a
-    // schedule, a flow started by a parent's `subflow` / `map` or by hand) the
-    // name holds what the entrance handed the run, and no verdict is given.
-    // `objectstack validate` stands down on the same set.
+    // reads). Anywhere else (an inbound hook, a schedule, a flow with no
+    // trigger of its own that a parent's `subflow` / `map` or a caller
+    // starts) the name holds what the entrance handed the run, and no verdict
+    // is given. A flow with its own record trigger or sweep is typed even when
+    // a parent also starts it — its own entrance hands it the typed row on
+    // every run it starts — and its refusal names the rewrite
+    // ({@link SHARED_STEPS_REWRITE}; ruling 7023700548). `objectstack
+    // validate` judges the same set.
     const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
     const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
     const runBindsTypedRow = bound?.triggerType === 'record_change'
@@ -1036,7 +1063,11 @@ export function validateFlowExpressions(
                         const braces = refusal.code !== undefined
                             ? isBraceRuleCode(refusal.code)
                             : envelopeNamesNonCelDialect(found.value);
-                        refuse(slotPath, slotWhere, refusal.message, refusal.source, braces);
+                        // [ruling 7023700548] The typed verdict names the rewrite.
+                        const rewrite = refusal.code !== undefined && TYPED_VALUE_ENVELOPE_CODES.has(refusal.code)
+                            ? ` ${SHARED_STEPS_REWRITE}`
+                            : '';
+                        refuse(slotPath, slotWhere, `${refusal.message}${rewrite}`, refusal.source, braces);
                     }
                     continue;
                 }
