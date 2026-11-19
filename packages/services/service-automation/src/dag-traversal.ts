@@ -63,6 +63,7 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // `previous.*`, `budget > 100000`, …) skipped its flow. A static import binds the
 // engine at module load in both ESM and CJS builds.
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
+import type { ExprValidationCode } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
@@ -1065,11 +1066,25 @@ export function celScope(
     return { extra: { ...vars, vars, current_user: runUserOf(context) } };
 }
 
+/**
+ * One refusal {@link valueEnvelopeRefusals} returns. `code` is the
+ * expression judge's own refusal code (`@objectstack/formula`), present
+ * exactly when the refusal came from `validateExpression`; a refusal of the
+ * envelope's SHAPE (no envelope, no or blank `source`, a dialect other than
+ * `cel`) carries none. `registerFlow` reads it to say which rule its header
+ * names; the message is unchanged by it.
+ */
+export interface ValueEnvelopeRefusal {
+    readonly message: string;
+    readonly source: string;
+    readonly code?: ExprValidationCode;
+}
+
 /** The body of {@link AutomationEngine.valueEnvelopeRefusals}; that method's docblock is its contract. */
 export function valueEnvelopeRefusals(
     value: unknown,
     fieldTypes?: Readonly<Record<string, string>>,
-): { message: string; source: string }[] {
+): ValueEnvelopeRefusal[] {
     // [#16439] Presence, asked before either primitive, because neither can
     // answer it (see rule 0 above). It is stated HERE and not as a guard in
     // {@link evaluateValueEnvelope} deliberately: a reject reason living
@@ -1122,6 +1137,7 @@ export function valueEnvelopeRefusals(
     return parsed.errors.map((e) => ({
         message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`,
         source: e.source,
+        code: e.code,
     }));
 }
 

@@ -98,7 +98,7 @@ describe('A) the formula branch is retired — no declared returnType buys a res
     // rule does with `returnType`, not about the key going away. #22727 added
     // `currency` — a formula is still VIRTUAL in SQL storage whatever it
     // returns, so the walk below holds it to the same `undefined` as the four.
-    expect([...SPEC_RETURN_TYPES].sort()).toEqual(['boolean', 'currency', 'date', 'number', 'text']);
+    expect([...SPEC_RETURN_TYPES].sort()).toEqual(['boolean', 'currency', 'date', 'number', 'percent', 'text']);
   });
 
   it('⭐ the table REFUSES `min` / `max` over `formula` — the ground the ruling stood on', () => {
