@@ -7870,16 +7870,13 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#23165, ADR-0048] THE package-less write address: which row of an item a
-     * write that names no package addresses, read from the item's stored rows
-     * at `state`. The item's own package when those rows are bound to exactly
-     * one, else the package-unbound row. `candidates` is every distinct
-     * binding, sorted; two or more is a name several packages hold, for which
-     * `packageId` is `null` and which the doors refuse
-     * ({@link packagelessAddressAmbiguityRefusal}) unless the read naming no
-     * package serves the row-held base: there they address the base's row,
-     * as the request naming it does ({@link packagelessRowHeldBaseAddress},
-     * #34681). `unbound` says whether a package-unbound row sits
+     * [#23165, ADR-0048] THE package-less write address: which row of an item a write that
+     * names no package addresses, read from the item's stored rows at `state`. The item's
+     * own package when those rows are bound to exactly one, else the package-unbound row.
+     * `candidates` is every distinct binding, sorted; two or more is a name several
+     * packages hold, which the doors refuse ({@link packagelessAddressAmbiguityRefusal})
+     * and for which `packageId` is `null`, unless the bare read serves the row-held base,
+     * whose row they address (#34681). `unbound` says whether a package-unbound row sits
      * beside them, which is what a delete of a package's row leaves served.
      *
      * The one resolution its three readers take, so they cannot disagree:
@@ -7967,13 +7964,9 @@ export class ObjectStackProtocolImplementation implements
      *    next. Neither present: no draft (`none`), whatever other packages'
      *    drafts are stored; the strict draft read answers `404 NO_DRAFT` here
      *    too, and those drafts are addressed by naming their package.
-     *  - bound to two or more packages: `ambiguous`, refused by both doors
-     *    with the refusal the draft save answers
-     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`),
-     *    except where the read naming no package serves the row-held base:
-     *    there the draft save, the per-item publish and the draft discard
-     *    address the base's draft, as the request naming the base does
-     *    ({@link packagelessRowHeldBaseAddress}, #34681).
+     *  - bound to two or more packages: `ambiguous`, refused by both doors with
+     *    the draft save's {@link packagelessAddressAmbiguityRefusal} (`409`),
+     *    unless the bare read serves the row-held base, whose draft they address (#34681).
      *  - bound to none (an item never published into a package): the
      *    package-unbound draft. With no such draft, the one package's draft
      *    when exactly one package holds a draft (the only draft the read
@@ -9626,14 +9619,11 @@ export class ObjectStackProtocolImplementation implements
      * on a control-plane kernel — appends no `sys_metadata_history` row.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold, or one the bare plain read refuses, is refused
-     * `409` naming every holder when no package is named, except where the
-     * bare read serves the row-held base: there the base's versions are read,
-     * as naming the base reads them (#34681,
-     * {@link packagelessRowHeldBaseAddress}). `packageId`
-     * reads that holder's versions alone: its own, plus those attributed to
-     * no package or to the environment while it is the name's only slot
-     * (`protocol-history-slots.ts`). A name one holder holds reads as before.
+     * name two row slots hold, or one the bare plain read refuses, is refused `409` naming
+     * every holder when no package is named (but the row-held base the bare read serves is
+     * read as named, #34681), and `packageId` reads that holder's versions alone: its own,
+     * plus those attributed to no package or to the environment while it is the name's
+     * only slot (`protocol-history-slots.ts`). A name one holder holds reads as before.
      * `packageId` on any other type is refused `400 VALIDATION_ERROR`.
      */
     async historyMetaItem(request: {
@@ -11069,18 +11059,16 @@ export class ObjectStackProtocolImplementation implements
      * declared override over a row bound to its read-only base.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold is refused `409` naming every holder when no
-     * package is named, with nothing written (so is a name the bare plain
-     * read refuses), except where the bare read serves the row-held base:
-     * there the rollback restores into the base's row, as naming the base
-     * does (#34681, {@link packagelessRowHeldBaseAddress}); `packageId` restores into that holder's row (its own,
-     * its pair's declared override, or the package-less row its read falls
-     * back to), and the version must be that holder's: another holder's, or
-     * one attributed to no package or to the environment while another slot
-     * holds the name, answers 404 `VERSION_NOT_FOUND`. A name one holder
-     * holds, named bare, restores any of its versions as before.
-     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and
-     * one naming no installed package where no row is stored is refused
+     * name two row slots hold is refused `409` naming every holder when no package is
+     * named, with nothing written (so is a name the bare plain read refuses), but the
+     * row-held base the bare read serves is restored as named (#34681); `packageId`
+     * restores into that holder's row (its own, its pair's declared override, or the
+     * package-less row its read falls back to), and the version must be that
+     * holder's: another holder's, or one attributed to no package or to the
+     * environment while another slot holds the name, answers 404 `VERSION_NOT_FOUND`.
+     * A name one holder holds, named bare, restores any of its versions as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and one naming
+     * no installed package where no row is stored is refused
      * `422 WRITABLE_PACKAGE_REQUIRED` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is
