@@ -42,7 +42,7 @@
  * | parameter | values, and the door that takes each |
  * |:--|:--|
  * | `anonymous` | `'guest'`: the runtime / MCP dispatcher. `'fail-closed'`: REST, settings, storage, the `/auth/me` endpoints |
- * | `authGate` | `'withhold'`: the dispatcher (its `enforceAuthGate` re-reads the session; a key's answer leaves through `onAdmission`) and the `/auth/me` endpoints (allow-listed for a gated user). `'resolved'`: settings and the storage download door. `'reread-when-active'`: REST. The storage family's ADR-0069 gate reader, which runs before every storage route, stays hand-written beside this function (#24366) |
+ * | `authGate` | `'withhold'`: the dispatcher (its `enforceAuthGate` judges the posture that leaves through `onAdmission`, a key's or the session read's, and re-reads the session only for a principal no own-session read admitted) and the `/auth/me` endpoints (allow-listed for a gated user). `'resolved'`: settings and the storage download door. `'reread-when-active'`: REST. The storage family's ADR-0069 gate reader, which runs before every storage route, stays hand-written beside this function (#24366) |
  * | `credentials` | `'session-only'`: the `/auth/me` endpoints, which never opened an API-key door. `'api-key-and-session'`: every other door |
  * | `sessionApi` | `'required'`: REST and the `/auth/me` endpoints, which authenticate nobody without a session API. `'optional'`: the dispatcher, settings and storage, which still admit an API key |
  * | `session` | `'request'`: every door. `{ established }` / `'none'`: the dispatcher's `/mcp` face, for a verified / an unverifiable OAuth access token |
