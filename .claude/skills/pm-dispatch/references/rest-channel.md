@@ -61,7 +61,7 @@
 - 行即回读:答 `autoMergeRequest` null、`isDraft` true 即 ✓;答仍挂臂或仍 ready ⇒ 记 5 停。
 - 已入队者回读「in the merge queue」,转 draft 保位照合 ⇒ 反向不踢队;队位只读 timeline。
 - 未入队者审批不掉;已是 draft 再 `pr_draft` 答无 `pullRequest` 记 5:非落地,⛔ 不重试。
-- 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类按账号(`readings-channels.md`),逐写回读;MCP 恒用户。
+- 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见 channels,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `readings-channels.md`
 

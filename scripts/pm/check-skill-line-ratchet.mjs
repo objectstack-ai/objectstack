@@ -1199,10 +1199,12 @@ export const CEILINGS = new Map([
   // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
   // now holds were deleted whole (lowering is always legitimate). Landed count.
   // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // 458 → 14: split by subject (the skills-review order of improvements, step 5) — every
+  // 458 → 14: split by subject (card #35236, step 5 of the skills-review order of improvements,
+  // ordered by the maintainer's 「同意」 of 2026-11-18 16:19Z, quoted on that card) — every
   // reading moved verbatim into the nine `readings-*.md` files below and this file became their
   // index (lowering is always legitimate). Each new row is its file's landed count, headroom 0;
-  // the split's own cost is one title line and one blank per file, plus this index.
+  // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
+  // paid by that ruling and by nothing else.
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
   ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
   ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
@@ -1216,7 +1218,8 @@ export const CEILINGS = new Map([
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
-  // readings. The policy lives in platform-readings.md's quota section; this
+  // readings. The policy lives in readings-channels.md (platform-readings.md's
+  // quota section until the subject split); this
   // file is the lookup table it points at, so the policy flip did not have to
   // grow the hot file. Set at landed line count (headroom 0, same convention
   // as the entries above).
