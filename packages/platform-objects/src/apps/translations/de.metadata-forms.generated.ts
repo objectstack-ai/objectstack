@@ -427,7 +427,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "Benutzeraktionen",
-        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung."
+        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung. „Inhaber ändern“ gehört nicht zu dieser Matrix: sein Standard folgt dem Freigabemodell (siehe seinen Eintrag)."
       },
       "userActions.create": {
         label: "Anlegen",
@@ -448,6 +448,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "CSV exportieren",
         helpText: "Der Eintrag für den CSV-Export. Nicht gesetzt: angezeigt, da jede managedBy-Gruppe den Export anbietet."
+      },
+      "userActions.transfer": {
+        label: "Inhaber ändern",
+        helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
       },
       editMode: {
         label: "Bearbeitungsmodus",

@@ -427,7 +427,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "Ações do usuário",
-        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente."
+        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente. Alterar proprietário não faz parte dessa matriz: seu padrão segue o modelo de compartilhamento (veja sua entrada)."
       },
       "userActions.create": {
         label: "Criar",
@@ -448,6 +448,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "Exportar CSV",
         helpText: "A entrada de exportação CSV. Não definido: exibida, pois todas as categorias do managedBy oferecem exportação."
+      },
+      "userActions.transfer": {
+        label: "Alterar proprietário",
+        helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
       },
       editMode: {
         label: "Modo de edição",

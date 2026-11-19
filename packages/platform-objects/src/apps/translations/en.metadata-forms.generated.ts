@@ -427,7 +427,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "User Actions",
-        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission."
+        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission. Change Owner is not part of that matrix: its default follows the sharing model (see its entry)."
       },
       "userActions.create": {
         label: "Create",
@@ -448,6 +448,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "Export CSV",
         helpText: "The CSV export entry. Unset: shown, since every managedBy bucket offers export."
+      },
+      "userActions.transfer": {
+        label: "Change Owner",
+        helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
       },
       editMode: {
         label: "Edit Mode",
