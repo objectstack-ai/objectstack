@@ -27,6 +27,11 @@ import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 import { SessionUserScope } from '../../../../packages/auth/src/ActiveOrganizationStorage';
+import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
+import { readCachedLanguageSeed, useLocalization } from '@object-ui/i18n';
+import { PLATFORM_LOCALE_READ_ALIASES, PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+import { __resetPreferredLocaleForTests, pickPreferredLocale, seedTenantLanguage } from '../languageSeed';
+import { LocalizationFetchProvider } from '../LocalizationFetchProvider';
 
 const TOKEN = 'tok_valid';
 const EARLY_SLOT = Symbol.for('objectui.earlySessionCheck');
@@ -82,9 +87,13 @@ const urlOf = (input: RequestInfo | URL) =>
   typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
 let sessionAnswer: () => Response | Promise<Response> = () => json(SESSION_BODY);
+let discoveryAnswer: () => Response | Promise<Response> = () => json(null);
+let localizationAnswer: () => Response | Promise<Response> = () => json(null);
 const fetchStub = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
   const url = urlOf(input);
   if (url.includes('/get-session')) return sessionAnswer();
+  if (url.includes('/discovery')) return discoveryAnswer();
+  if (url.includes('/me/localization')) return localizationAnswer();
   if (url.includes('/runtime/config')) return json({ branding: {} });
   if (url.includes('/organization/')) return json([]);
   return json(null);
@@ -108,6 +117,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchStub);
   fetchStub.mockClear();
   sessionAnswer = () => json(SESSION_BODY);
+  discoveryAnswer = () => json(null);
+  localizationAnswer = () => json(null);
   localStorage.clear();
   clearSlots();
 });
@@ -683,5 +694,207 @@ describe('discovery starts at parse time beside get-session, and the console rea
     await readConsoleDiscovery('');
 
     expect(discoveryCalls()).toHaveLength(2);
+  });
+});
+
+describe("the language seed's me/localization starts at parse time beside discovery, and the seed takes it (objectstack#35534)", () => {
+  const DISCOVERY_SLOT = Symbol.for('objectui.earlyDiscovery');
+  const SEED_SLOT = Symbol.for('objectui.earlyLanguageSeed');
+  const ME = '/api/v1/auth/me/localization';
+  const SIGNED_IN = { authenticated: true, locale: 'zh-CN', currency: 'CNY', timezone: 'Asia/Shanghai' };
+  const localizationCalls = () => fetchStub.mock.calls.filter(([input]) => urlOf(input).includes('/me/localization'));
+  const discoveryCalls = () => fetchStub.mock.calls.filter(([input]) => urlOf(input).includes('/discovery'));
+  const statedOf = (call: unknown[]) =>
+    new Headers((call[1] as RequestInit | undefined)?.headers).get('Accept-Language');
+  const serves = (supported: string[]) => () => json({ locale: { default: 'en', supported } });
+  const browserSays = (tag: string) => vi.spyOn(window.navigator, 'language', 'get').mockReturnValue(tag);
+  /** The two parse-time scripts this read needs, in document order. */
+  const parse = (html?: string) => {
+    runScript('startEarlyDiscovery', html);
+    runScript('startEarlyLanguageSeed', html);
+  };
+  const forget = () => {
+    const holder = globalThis as unknown as Record<symbol, unknown>;
+    delete holder[DISCOVERY_SLOT];
+    delete holder[SEED_SLOT];
+    clearSharedDiscoveryCache();
+    resetInflightGetsForTesting();
+    __resetPreferredLocaleForTests();
+  };
+
+  function Value() {
+    const { locale, currency } = useLocalization();
+    return <span data-testid="localization">{`${locale ?? '-'}/${currency ?? '-'}`}</span>;
+  }
+
+  beforeEach(forget);
+  afterEach(forget);
+
+  it('is exactly one inline classic script, after the discovery script it reads', () => {
+    const scripts = inlineScripts(indexHtml);
+    const at = (marker: string) => scripts.findIndex((body) => body.includes(marker));
+    const source = extractScript('startEarlyLanguageSeed');
+    expect(source).toContain("Symbol.for('objectui.earlyLanguageSeed')");
+    expect(source).toContain("Symbol.for('objectui.earlyDiscovery')");
+    expect(source).toContain('%VITE_SERVER_URL%');
+    expect(at('startEarlyLanguageSeed')).toBeGreaterThan(at('startEarlyDiscovery'));
+  });
+
+  it('leaves once discovery answers, before any bundle code runs, stating the supported browser language', async () => {
+    discoveryAnswer = serves(['en', 'zh-CN']);
+    browserSays('zh-CN');
+    parse();
+    // It waits for discovery's `locale.supported`, and for nothing else.
+    expect(localizationCalls()).toHaveLength(0);
+    await settle();
+
+    expect(localizationCalls()).toHaveLength(1);
+    const [url, init] = localizationCalls()[0]!;
+    expect(url).toBe(ME);
+    expect(init).toMatchObject({ credentials: 'include' });
+    expect(new Headers(init?.headers).get('Accept')).toBe('application/json');
+    expect(statedOf(localizationCalls()[0]!)).toBe('zh-CN');
+  });
+
+  it('one cold load, one me/localization: the seed takes the parse-time request and the provider its settled answer', async () => {
+    const SERVER = 'https://api.example.test';
+    discoveryAnswer = serves(['en', 'zh-CN']);
+    localizationAnswer = () => json(SIGNED_IN);
+    browserSays('zh-CN');
+    parse(applyViteHtmlEnv(indexHtml, { VITE_SERVER_URL: `${SERVER}/` }));
+    await settle();
+
+    await seedTenantLanguage(SERVER, 1_000);
+    // The locale still applies before first paint: cached when the race resolves.
+    expect(readCachedLanguageSeed()).toBe('zh-CN');
+    render(
+      <LocalizationFetchProvider endpoint={`${SERVER}${ME}`}>
+        <Value />
+      </LocalizationFetchProvider>,
+    );
+    expect(await screen.findByText('zh-CN/CNY')).toBeTruthy();
+
+    expect(localizationCalls()).toHaveLength(1);
+    expect(localizationCalls()[0]![0]).toBe(`${SERVER}${ME}`);
+    expect(discoveryCalls()).toHaveLength(1);
+  });
+
+  it('states exactly what the seed states, for every platform tag and alias the browser may send', async () => {
+    const codes = [...PLATFORM_LOCALE_TAGS, ...Object.keys(PLATFORM_LOCALE_READ_ALIASES)];
+    const requested = [...codes, ...codes.map((c) => c.toUpperCase()), 'en-GB', 'es-MX', 'pt-PT', 'zh-Hant-US', 'fr-CA', 'xx', ' ja ', ''];
+    const lists = [
+      [],
+      ...codes.map((c) => [c]),
+      ['en', 'zh-CN', 'ja-JP', 'es-ES'],
+      ['zh-CN', 'zh-TW'],
+      ['zh-Hant', 'zh-CN'],
+      ['zh-TW', 'zh-Hans', 'en-US'],
+      ['es-ES', 'es', 'pt', 'pt-BR'],
+      ['EN', 'Zh-cn', 'de-AT'],
+      [...PLATFORM_LOCALE_TAGS],
+    ];
+    const misses: string[] = [];
+    for (const supported of lists) {
+      for (const tag of requested) {
+        forget();
+        fetchStub.mockClear();
+        discoveryAnswer = serves(supported);
+        browserSays(tag);
+        parse();
+        await settle();
+        const sent = statedOf(localizationCalls()[0]!);
+        const seed = pickPreferredLocale(tag, supported) ?? null;
+        if (sent !== seed) misses.push(`${JSON.stringify(tag)} among ${JSON.stringify(supported)}: sent ${sent}, seed ${seed}`);
+      }
+    }
+    expect(misses).toEqual([]);
+  });
+
+  it('CONTROL: a parse-time request the seed would not send is never taken; the seed asks once itself', async () => {
+    discoveryAnswer = serves(['en', 'zh-CN']);
+    localizationAnswer = () => json(SIGNED_IN);
+    browserSays('zh-CN');
+    parse();
+    await settle();
+    // A drifted spelling of the ladder: the slot holds a different request.
+    const slot = (globalThis as unknown as Record<symbol, { init: RequestInit }>)[SEED_SLOT]!;
+    slot.init = { credentials: 'include', headers: { Accept: 'application/json', 'Accept-Language': 'en' } };
+
+    await seedTenantLanguage('', 1_000);
+
+    expect(localizationCalls()).toHaveLength(2);
+    expect(statedOf(localizationCalls()[1]!)).toBe('zh-CN');
+    expect(readCachedLanguageSeed()).toBe('zh-CN');
+  });
+
+  it('CONTROL: a stored language choice still wins: nothing is asked, at parse time or by the seed', async () => {
+    localStorage.setItem('objectui-locale', 'ja-JP');
+    parse();
+    await settle();
+    await seedTenantLanguage('', 1_000);
+    expect(localizationCalls()).toHaveLength(0);
+  });
+
+  it('CONTROL: a cached seed applies at once: nothing is asked at parse time or by the seed', async () => {
+    localStorage.setItem('objectui-locale-seed', 'de-DE');
+    parse();
+    await settle();
+    await seedTenantLanguage('', 1_000);
+    expect(localizationCalls()).toHaveLength(0);
+  });
+
+  it('CONTROL: a signed-out first visit asks once, as the seed did, and caches nothing', async () => {
+    localizationAnswer = () => json({ authenticated: false });
+    parse();
+    await settle();
+    await seedTenantLanguage('', 1_000);
+    expect(localizationCalls()).toHaveLength(1);
+    expect(readCachedLanguageSeed()).toBeNull();
+  });
+
+  it('CONTROL: the race keeps its bound and its fallback; a provider mounted meanwhile joins the request', async () => {
+    let answer!: (response: Response) => void;
+    localizationAnswer = () => new Promise<Response>((resolve) => { answer = resolve; });
+    parse();
+    await settle();
+    expect(localizationCalls()).toHaveLength(1);
+
+    // The request is still open when the race's bound runs out: the boot goes on
+    // unseeded, in the browser's language, and nothing is cached yet.
+    await seedTenantLanguage('', 5);
+    expect(readCachedLanguageSeed()).toBeNull();
+    render(
+      <LocalizationFetchProvider endpoint={ME}>
+        <Value />
+      </LocalizationFetchProvider>,
+    );
+    await settle();
+    answer(json(SIGNED_IN));
+
+    // The late answer is cached for the next boot, and serves the provider.
+    expect(await screen.findByText('zh-CN/CNY')).toBeTruthy();
+    expect(readCachedLanguageSeed()).toBe('zh-CN');
+    expect(localizationCalls()).toHaveLength(1);
+  });
+
+  it('CONTROL: a failed parse-time discovery sends nothing early; the seed asks for both itself, once each', async () => {
+    discoveryAnswer = () => json({ error: 'boom' }, 503);
+    parse();
+    await settle();
+    expect(localizationCalls()).toHaveLength(0);
+
+    discoveryAnswer = serves(['en']);
+    await seedTenantLanguage('', 1_000);
+    expect(discoveryCalls()).toHaveLength(2);
+    expect(localizationCalls()).toHaveLength(1);
+  });
+
+  it('blocked storage asks, as the seed does, and the script does not throw', async () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(() => parse()).not.toThrow();
+    await settle();
+    expect(localizationCalls()).toHaveLength(1);
   });
 });
