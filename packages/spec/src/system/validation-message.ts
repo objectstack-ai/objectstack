@@ -349,7 +349,11 @@ export interface RenderValidationMessageInput {
 export interface RenderValidationMessageOptions {
   /** BCP-47 locale; defaults to `en`. */
   locale?: string;
-  /** Deployment override hook — an `II18nService.t`-compatible lookup. */
+  /**
+   * Deployment override hook — an `II18nService.t`-compatible lookup. It is
+   * asked for the override TEMPLATE with no params (`translate(key, locale)`);
+   * the renderer fills the placeholders once.
+   */
   translate?: ValidationMessageTranslator;
 }
 
@@ -383,14 +387,19 @@ export function renderValidationMessage(
     const key = validationMessageTranslationKey(input.messageKey);
     let override: string | undefined;
     try {
-      override = opts.translate(key, locale, params);
+      // The override TEMPLATE is asked for, without `params`, and interpolated
+      // once below. An `II18nService.t` handed `params` interpolates them
+      // itself, and a second pass here would then expand a placeholder that
+      // arrived inside a VALUE (a written `{{label}}` echoed as `{{value}}`)
+      // instead of printing it as written — the shape `renderOperationMessage`
+      // already has.
+      override = opts.translate(key, locale);
     } catch {
       // A misbehaving i18n service must never turn a 400 into a 500.
       override = undefined;
     }
     // The contract is "returns the key itself if not found" — anything else is
-    // a real translation. Interpolate defensively: an implementation that does
-    // not substitute (or ignores `params`) still yields a filled message.
+    // a real translation, filled here exactly once.
     if (typeof override === 'string' && override.length > 0 && override !== key) {
       return interpolateValidationMessage(override, params);
     }
