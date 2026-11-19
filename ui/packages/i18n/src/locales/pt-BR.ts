@@ -4987,6 +4987,12 @@ const pt = {
       shown: 'Nesta visualização',
       hidden: 'Campos ocultos',
       empty: 'Nenhum campo corresponde',
+      addable: 'Ainda não está na visualização',
+      add: 'Adicionar {{label}}',
+      show: 'Mostrar {{label}}',
+      hide: 'Ocultar {{label}}',
+      move: 'Mover {{label}}',
+      moveHint: 'Arraste, ou use as setas para cima e para baixo, para mudar a ordem',
     },
     filter: {
       advanced: 'Filtro avançado',

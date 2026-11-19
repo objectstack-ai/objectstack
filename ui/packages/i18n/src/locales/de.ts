@@ -4849,6 +4849,12 @@ const de = {
       shown: 'In dieser Ansicht',
       hidden: 'Ausgeblendete Felder',
       empty: 'Kein passendes Feld',
+      addable: 'Noch nicht in der Ansicht',
+      add: '{{label}} hinzufügen',
+      show: '{{label}} einblenden',
+      hide: '{{label}} ausblenden',
+      move: '{{label}} verschieben',
+      moveHint: 'Ziehen oder mit den Pfeiltasten nach oben und unten die Reihenfolge ändern',
     },
     filter: {
       advanced: 'Erweiterter Filter',

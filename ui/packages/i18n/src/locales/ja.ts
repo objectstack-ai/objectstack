@@ -4851,6 +4851,12 @@ const ja = {
       shown: 'ビューに表示',
       hidden: '非表示のフィールド',
       empty: '一致するフィールドがありません',
+      addable: 'まだビューにない',
+      add: '{{label}}を追加',
+      show: '{{label}}を表示',
+      hide: '{{label}}を非表示',
+      move: '{{label}}を移動',
+      moveHint: 'ドラッグするか上下の矢印キーで順序を変更',
     },
     filter: {
       advanced: '詳細フィルター',

@@ -4848,6 +4848,12 @@ const ko = {
       shown: '이 보기에 표시',
       hidden: '숨긴 필드',
       empty: '일치하는 필드 없음',
+      addable: '아직 보기에 없음',
+      add: '{{label}} 추가',
+      show: '{{label}} 표시',
+      hide: '{{label}} 숨기기',
+      move: '{{label}} 이동',
+      moveHint: '드래그하거나 위아래 화살표 키로 순서 변경',
     },
     filter: {
       advanced: '고급 필터',

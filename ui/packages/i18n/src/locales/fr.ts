@@ -4988,6 +4988,12 @@ const fr = {
       shown: 'Dans cette vue',
       hidden: 'Champs masqués',
       empty: 'Aucun champ ne correspond',
+      addable: 'Pas encore dans la vue',
+      add: 'Ajouter {{label}}',
+      show: 'Afficher {{label}}',
+      hide: 'Masquer {{label}}',
+      move: 'Déplacer {{label}}',
+      moveHint: 'Faites glisser, ou utilisez les flèches haut et bas, pour changer l’ordre',
     },
     filter: {
       advanced: 'Filtre avancé',

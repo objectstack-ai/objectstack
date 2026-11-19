@@ -5602,6 +5602,12 @@ const en = {
       shown: 'In this view',
       hidden: 'Hidden fields',
       empty: 'No field matches',
+      addable: 'Not in the view yet',
+      add: 'Add {{label}}',
+      show: 'Show {{label}}',
+      hide: 'Hide {{label}}',
+      move: 'Move {{label}}',
+      moveHint: 'Drag, or press the up and down arrow keys, to change the order',
     },
     filter: {
       advanced: 'Advanced filter',
