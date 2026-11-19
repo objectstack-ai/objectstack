@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ReadableIds, isReadableIds } from '@objectstack/spec/data';
+import { PERIOD_KEY_TOKENS, ReadableIds, isReadableIds } from '@objectstack/spec/data';
+import { bucketDateKey } from './datetime.js';
 import {
   resolveFilterToken,
   resolveFilterTokens,
@@ -545,5 +546,84 @@ describe('filterTokenContextFrom', () => {
     expect(filterTokenContextFrom(undefined)).toEqual({
       now: undefined, userId: undefined, orgId: undefined, timezone: undefined,
     });
+  });
+});
+
+/**
+ * `{current_iso_week}` — the period key (`PERIOD_KEY_TOKENS`): the ISO-8601
+ * week of the reference day, the label `bucketDateKey` writes for an analytics
+ * `week` bucket. The table is the client/server parity pin: the same rows are
+ * asserted against `@object-ui/core`'s `resolvePeriodKeyTokens` in the
+ * `resolvePeriodKeyTokens` block of
+ * `ui/packages/core/src/utils/__tests__/date-macros.test.ts`, which writes the
+ * same week rule again because it cannot import this package. Change a row in
+ * one file and change it in the other.
+ */
+describe('resolveFilterToken — the period key {current_iso_week}', () => {
+  /** instant · reference timezone (none = UTC) · ISO week key */
+  const PARITY_TABLE: ReadonlyArray<readonly [string, string | undefined, string]> = [
+    ['2026-11-19T12:00:00Z', undefined, '2026-W47'],
+    // Year edges: the ISO week-numbering year is the year of the week's Thursday.
+    ['2026-12-31T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-01T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-03T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-04T12:00:00Z', undefined, '2027-W01'],
+    ['2020-12-31T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-03T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-04T12:00:00Z', undefined, '2021-W01'],
+    ['2025-12-29T12:00:00Z', undefined, '2026-W01'],
+    ['2024-12-30T12:00:00Z', undefined, '2025-W01'],
+    // The reference timezone decides the day, and so the week.
+    ['2026-11-22T20:00:00Z', 'Asia/Tokyo', '2026-W48'],
+    ['2026-11-22T20:00:00Z', 'America/New_York', '2026-W47'],
+    ['2026-11-23T03:00:00Z', 'America/Los_Angeles', '2026-W47'],
+    ['2026-11-23T03:00:00Z', undefined, '2026-W48'],
+    ['2027-01-03T23:30:00Z', 'Asia/Shanghai', '2027-W01'],
+    ['2027-01-03T23:30:00Z', undefined, '2026-W53'],
+  ];
+
+  it.each(PARITY_TABLE)('%s in %s is %s', (instant, timezone, key) => {
+    const now = new Date(instant);
+    expect(resolveFilterToken('current_iso_week', { now, timezone })).toBe(key);
+    // One week rule: the analytics week bucket labels the same instant the same way.
+    expect(bucketDateKey(now, 'week', timezone)).toBe(key);
+  });
+
+  it('every token in the spec list resolves to a key, never to a date', () => {
+    expect(PERIOD_KEY_TOKENS.length).toBeGreaterThan(0);
+    for (const token of PERIOD_KEY_TOKENS) {
+      expect(resolveFilterToken(token, { now: NOW }), token).toMatch(/^\d{4}-W\d{2}$/);
+    }
+  });
+
+  it('resolves through the tree walk, both wrappings, beside the other vocabularies on one instant', () => {
+    const ctx = filterTokenContextFrom({ userId: 'usr_1', timezone: 'UTC' }, NOW);
+    expect(resolveFilterTokens({
+      $and: [
+        { cost_week: '{current_iso_week}' },
+        { supply_week: { $in: ['${current_iso_week}', '2026-W27'] } },
+        { day: { $gte: '{current_week_start}' } },
+        { owner: '{current_user_id}' },
+        { note: 'plan {current_iso_week}' },
+      ],
+    }, ctx)).toEqual({
+      $and: [
+        { cost_week: '2026-W29' },
+        { supply_week: { $in: ['2026-W29', '2026-W27'] } },
+        { day: { $gte: '2026-07-13' } },
+        { owner: 'usr_1' },
+        // A placeholder embedded in a longer string is not one: left as written.
+        { note: 'plan {current_iso_week}' },
+      ],
+    });
+  });
+
+  it('a near spelling is refused as unknown, and the refusal names the period key', () => {
+    let refusal: unknown;
+    try { resolveFilterTokens({ cost_week: '{current_week}' }, { now: NOW }); } catch (e) { refusal = e; }
+    expect(refusal).toBeInstanceOf(UnknownFilterTokenError);
+    expect((refusal as UnknownFilterTokenError).code).toBe('FILTER_TOKEN_UNKNOWN');
+    expect((refusal as UnknownFilterTokenError).status).toBe(400);
+    expect((refusal as Error).message).toContain('{current_iso_week}');
   });
 });

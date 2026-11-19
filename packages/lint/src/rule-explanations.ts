@@ -3353,13 +3353,16 @@ const FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
       'resolved just before the query: `{ owner_id: \'{current_user_id}\', created_at: { $gte: ' +
       '\'{week_start}\' } }`. Only a whole-string placeholder counts (`{token}`, or `${token}`); a value ' +
       'that merely contains braces is left alone.',
-    // The context tokens are held equal to `CONTEXT_TOKENS` (`@objectstack/spec/data`) by the rule's test.
-    'Exactly two vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
+    // The context tokens and the period keys are held equal to `CONTEXT_TOKENS` and
+    // `PERIOD_KEY_TOKENS` (`@objectstack/spec/data`) by the rule's test.
+    'Three vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
       '`{current_org_id}`. The date macros: the instants `{today}`, `{yesterday}`, `{tomorrow}` and ' +
       '`{now}`; the start and end of the current, last or next week, month, quarter or year ' +
       '(`{current_quarter_start}`, `{last_year_end}`), with bare aliases for the current period ' +
       '(`{week_start}`, `{month_end}`); and counted offsets in minutes, hours, days, weeks, months or ' +
-      'years (`{30_days_ago}`, `{2_weeks_from_now}`).',
+      'years (`{30_days_ago}`, `{2_weeks_from_now}`). The period keys: `{current_iso_week}`, the ' +
+      'current ISO week\'s key such as `2026-W47`, which is text, not a date, for a field that stores ' +
+      'ISO week keys.',
     'Anything else does not resolve: the data engine refuses the query (`FILTER_TOKEN_UNKNOWN`, 400) ' +
       'rather than compare the placeholder as a literal string, so the surface never shows the data the ' +
       'filter meant. The rule makes that an error at build time, where an author — or an AI correcting ' +
