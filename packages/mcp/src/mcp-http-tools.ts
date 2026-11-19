@@ -1955,11 +1955,8 @@ function recordDeleteConfirmationRefusal(
  * tools' descriptions, so the one-row and many-row text cannot disagree.
  */
 const DELETE_RECYCLE_BIN_FACT =
-  'A deleted business record goes to the recycle bin, where it can be restored until the deployment\'s retention '
-  + 'ends (30 days by default) by a recycle-bin manager of the object, or by you where your permissions let you '
-  + 'restore your own deletes; a record of a platform object (sys_, cloud_, ai_), or any record on a '
-  + 'deployment with no recycle bin, is deleted permanently. No MCP tool restores: tell the human it can be '
-  + 'restored from the recycle bin (the console, or POST /api/v1/data/{objectName}/recycle-bin/{recycleBinEntryId}/restore).';
+  'A deleted business record goes to the recycle bin, which no MCP tool restores; a platform object\'s record '
+  + '(sys_, cloud_, ai_), or any record on a deployment with no recycle bin, is deleted permanently.';
 
 /**
  * When the human's request IS the approval of a `delete_record` (maintainer
@@ -2590,8 +2587,7 @@ const WITHHELD_FIELDS_NOTE =
  * [#35137] The one line `query_records` and `get_record` describe the member with.
  */
 const WITHHELD_FIELDS_DESCRIPTION =
-  'A field that field-level security hides from you is left out of the records and named in withheldFields: '
-  + 'it exists but is not visible to you, which is not the same as empty.';
+  'A field named in withheldFields is hidden from you, not empty.';
 
 /**
  * [#35138] What the object read tools tell the model about the `source`
@@ -2600,9 +2596,7 @@ const WITHHELD_FIELDS_DESCRIPTION =
  * written in the caller's language, to quote as the answer's source.
  */
 const OBJECT_QUERY_SOURCE_DESCRIPTION =
-  'A successful answer carries source: the object, filter, measures and grouping it was computed from, and '
-  + 'source.line, that source already written in the user\'s language: quote source.line as the source of '
-  + 'any figure you give from this answer.';
+  'Quote the answer\'s source.line as the source of any figure you give from it.';
 
 /**
  * [#35138] The caller's locale ladder for a sentence the tools compose into a
@@ -3101,9 +3095,7 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  * and a `recordId` → `id` rename were both refused on this surface, so the
  * hand-off is stated rather than accepted under a second spelling.
  */
-const RECORD_ID_DESCRIPTION =
-  'The record id: the `id` that create_record answers and that each query_records row carries by default, '
-  + 'sent under the name recordId.';
+const RECORD_ID_DESCRIPTION = 'The record\'s `id`, as create_record and query_records answer it.';
 
 /**
  * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
@@ -3686,17 +3678,11 @@ export function registerObjectTools(
       note('describe_object'),
       {
         description:
-          'Get the schema of a data object as you may read it, with what a write needs: its name, label and description '
-          + '(where the author wrote one). Each field: name, type, label, description (where set: the author\'s, or '
-          + 'the platform\'s on a column it injects), '
-          + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
-          + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
-          + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '
-          + 'an insert applies one. A defaultValue may be a token the server resolves (NOW(), current_user) or an '
-          + 'expression object: to get it, omit the field, never copy the value. readonly is the schema\'s, not your '
-          + 'edit permission: a field you may read but not edit shows readonly false, and a write naming it is refused. '
-          + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
-          + 'message is what a refused write answers). Also the enabled features.',
+          'Get the schema of a data object as you may read it, with what a write needs: name, label, description; '
+          + 'each field\'s name, type, label, description (where set: the author\'s, or the platform\'s on a column '
+          + 'it injects), required, readonly (leave it out of a write), system, '
+          + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
+          + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
           { objectName: z.string().describe('The object/table name, e.g. "task"') },
@@ -3725,34 +3711,13 @@ export function registerObjectTools(
       note('validate_expression'),
       {
         description:
-          'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, every ' +
-          'other refusal the publish gate gives there: a reference field read both through the relationship and as a plain ' +
-          'value, more than one hop, a hop to a field the target does not declare or into a stored-metadata table, and at a ' +
-          '`validation` site an unguarded nullable field or a read of `parent`; at a `flow_condition` of a record-triggered ' +
-          'flow, an unguarded nullable `record.`/`previous.` read) and advisory warnings ' +
-          '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
-          '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls; at a `formula`, `validation` or `flow_condition` site, a read ' +
-          'of an external object\'s unprovisioned system column; at a `flow_condition` given the flow\'s `variables`, a ' +
-          'bare read of a variable named like a field; at a `formula` site naming a stored (non-formula) `field`, ' +
-          'a read of another record, the clock, the user or a permission), plus the fields and stdlib ' +
-          'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
-          '`describe_object`. `site` says where the expression will live: a `formula` ' +
-          'field, a `validation`/predicate, or a `flow_condition` (read fields as `record.<field>` there too). ' +
-          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
-          'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
-          'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
-          'another object is refused at publish (`flow-time-relative-object-mismatch`). At a `flow_condition` the verdict ' +
-          'is the runtime publish gate\'s, which a flow saved through MCP or Studio meets: `os validate` also judges a ' +
-          'bare name\'s null guard and unbound roots over the whole flow, which this tool is not handed, so write ' +
-          '`record.<field>` to be judged here. Pass the flow\'s declared `variables` (flow_condition), as the flow ' +
-          'declares them: a bare read of one is the variable, which the run binds before the record\'s fields, so it ' +
-          'is not typed as the field, and a variable named like a field of objectName gets the gate\'s shadowed-read ' +
-          'warning. Without them a bare name is typed as the field and that warning cannot be given. ' +
-          'Pass `field` (formula) to be judged as that field: its type, and the ' +
-          'formula cycle it would close; a field not yet declared is judged as a new formula, so a new stored field gets ' +
-          'its stored-expression warnings only once it is declared.',
+          'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns the ' +
+          'errors and warnings the publish gate gives the expression at its `site` (formula, validation, ' +
+          'flow_condition or template; read fields as `record.<field>`), plus the fields and stdlib functions in scope ' +
+          'so you can self-correct. Pass what the gate reads off the rule or flow so the verdict is the one it gives: ' +
+          '`severity` (validation); `triggerKind`, `startCondition` and `variables` (flow_condition); `field` ' +
+          '(formula). For a time-relative flow, objectName is the object its sweep scans. The served SKILL.md lists ' +
+          'every check by site.',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -3771,33 +3736,27 @@ export function registerObjectTools(
               .enum(['formula', 'validation', 'flow_condition', 'template'])
               .optional()
               .describe(
-                'Where the expression will live. Every site reads fields as `record.<field>`; a bare field name also resolves in a flow_condition, but this tool cannot judge its null guard there. Default: formula.',
+                'Where the expression will live. Default: formula.',
               ),
             severity: z
               .enum(VALIDATION_SEVERITIES)
               .optional()
               .describe(
-                'site validation only: the rule\'s `severity`. A `warning` / `info` rule is advisory, so a fault skips it ' +
-                'instead of refusing the write, and the verdict says so. Default: error, the rule default.',
+                'site validation only: the rule\'s `severity`; a `warning` / `info` rule is advisory. Default: error.',
               ),
             triggerKind: z
               .enum(FLOW_TRIGGER_INPUTS)
               .optional()
               .describe(
                 'site flow_condition only: how the flow is started — record_change (start triggerType record-*), ' +
-                'time_relative, schedule, api, or none (started by hand, an action or a parent flow). A type mismatch ' +
-                'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
-                'on any other. Default: record_change.',
+                'time_relative, schedule, api, or none (by hand, an action or a parent flow). Default: record_change.',
               ),
             sweepObject: z
               .string()
               .optional()
               .describe(
-                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, the object ' +
-                'the sweep scans and whose rows it hands each run as its record. Its conditions are typed against that ' +
-                'object, so it is objectName too. A start whose objectName names another object is refused at publish ' +
-                '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
-                'advisory one for such a flow, a type mismatch warning. Default: objectName.',
+                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, which is ' +
+                'objectName too. Default: objectName.',
               ),
             // [#33147] The two facts the gate reads off the item the expression
             // sits on that `site` does not carry.
@@ -3806,27 +3765,23 @@ export function registerObjectTools(
               .optional()
               .describe(
                 'site flow_condition only: the flow\'s start condition, when the expression is an edge or `decision` ' +
-                'branch condition after it. What it proves non-null holds downstream, as at publish. Omit it when ' +
-                'the expression is the start condition itself.',
+                'branch condition after it. Omit it for the start condition itself.',
               ),
             // [#33176] The third fact the gate reads off the flow.
             variables: z
               .array(FlowVariableSchema)
               .optional()
               .describe(
-                'site flow_condition only: the flow\'s declared `variables`, as the flow declares them (each a `name` ' +
-                'and a `type` at least). A bare read of one is the variable, not the field: it is not typed as the ' +
-                'field, and one named like a field of objectName gets the gate\'s shadowed-read warning. Omitted, ' +
-                'a bare name is typed as the field and that warning cannot be given.',
+                'site flow_condition only: the flow\'s declared `variables`, as the flow declares them. A bare read ' +
+                'of one is the variable, not the field; the shadowed-read warning needs them.',
               ),
             field: z
               .string()
               .regex(/^[a-z_][a-z0-9_]*$/, 'a field name is snake_case, e.g. "due_in_days"')
               .optional()
               .describe(
-                'site formula only: the name of the field the expression is authored on. A declared field is judged ' +
-                'as it is declared: a stored (non-formula) field gets the stored-expression warnings, and a formula ' +
-                'the cycle it would close. Any other name is judged as a new formula field.',
+                'site formula only: the field the expression is authored on, judged as declared; any other name as a ' +
+                'new formula field.',
               ),
           },
         ),
@@ -3966,38 +3921,15 @@ export function registerObjectTools(
       note('query_records'),
       {
         description:
-          'Query records from an object with optional filter, field selection, sorting and pagination. ' +
-          'Runs under the caller\'s permissions and row-level security. ' +
-          // [#35138] A capped page is one page, never the set: the model is
-          // told not to sum, count or rank it as if whole.
-          'The answer is one page of at most limit rows. When more records match, it carries "truncated": true: ' +
-          'the rows are not all of them, so do not sum, count or rank them as if whole; read on with offset, ' +
-          'or, where it is offered, use aggregate_records for totals and breakdowns. ' +
-          // [#35138] The answer's source, written for the answer to quote.
+          'Query records from an object with optional filter, field selection, sorting and pagination, under the ' +
+          'caller\'s permissions. The answer is one page of at most limit rows; "truncated": true means more ' +
+          'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
+          'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
-          'A filter value "{current_user_id}" stands for you. ' +
-          // [#32442] The console's My Pending list, filter for filter: the
-          // participant read alone also serves requests the caller submitted
-          // or already decided, so an agent must not guess "mine" from it.
-          'For example, where the app runs approvals, the ones waiting on you: objectName "sys_approval_request", where ' +
-          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action. ' +
-          // [ruling 6844187236, B] A person field (owner, approver, employee)
-          // holds a user id: the agent finds it on `sys_user`, which serves
-          // the caller the colleagues their console person picker does.
-          // Names repeat (ruling 6867150851), so the text says to tell
-          // namesakes apart by email.
-          'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email. ' +
-          // [latest per group] "each X with its latest Y" in one call.
-          'For "each X with its latest Y", pass latestPer: one record per group, e.g. each account\'s latest deal: ' +
-          'latestPer {"by":["account"],"orderBy":[{"field":"close_date","order":"desc"}]}; ties go by record id. ' +
-          'where filters the records first; limit counts groups; truncated: true means more groups exist than came back. ' +
-          // [#35145] One level of forward relations in the same call.
-          `To read the records a lookup points at in the same call, pass expand: up to ${QUERY_EXPAND_MAX_FIELDS} of the ` +
-          'object\'s lookup, master-detail, user or tree fields, e.g. expand ["account","owner_id"]; each one comes back ' +
-          'as the record it names, under your permissions on that object. One level only. A field whose object this ' +
-          'door does not serve you refuses the call; a record you may not read on a served object is not expanded, ' +
-          'and the field keeps its stored id. ' +
+          'A filter value "{current_user_id}" stands for you. latestPer answers one record per group (the first in ' +
+          'its orderBy; limit then counts groups). ' +
+          `expand returns up to ${QUERY_EXPAND_MAX_FIELDS} lookup fields as the records they name, one level, under ` +
+          'your permissions; one you may not read keeps its id. ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
@@ -4142,18 +4074,10 @@ export function registerObjectTools(
         note('aggregate_records'),
         {
           description:
-            'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
-            'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
-            // [#35138] The two facts the answer carries from the served schema.
-            'Groups of a select field come back in the order the field declares its options. ' +
-            'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
-            'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
-            // [#35138] The name of a lookup group's record, read as the caller.
-            'A group keyed by a lookup or master-detail field carries <key>__label beside the record id: the name of that record, ' +
-            'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
-            'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
-            'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
-            // [#35138] The figures' source, written for the answer to quote.
+            'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, optionally grouped ' +
+            'by fields (dates bucketed by day/week/month/quarter/year). Use it instead of paging query_records for ' +
+            'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
+            'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
             OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
@@ -4165,8 +4089,7 @@ export function registerObjectTools(
             // ranking to one currency.
             'Ranking an amount whose records each carry their own currency compares bare numbers across currencies: ' +
             'rank it inside one currency by filtering where on its currency code field. ' +
-            `At most ${maxLimit} groups come back; truncated: true says more existed. ` +
-            'Runs under the caller\'s permissions, row-level security and field-level security.',
+            `At most ${maxLimit} groups come back; truncated: true says more existed.`,
           inputSchema: strictToolInput(
             {
               surface: 'this aggregate_records call',
@@ -4368,12 +4291,8 @@ export function registerObjectTools(
           'Fetch a single record by id. ' +
           // [#35145] A parent with its children in one call.
           `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
-          'objects, e.g. an account with its deals and activities: related [{"object":"crm_opportunity"},' +
-          '{"object":"crm_activity","field":"account"}]. Name field when the child points at this object through ' +
-          `several fields. Each list holds at most ${relatedMaxRows} rows (limit), filtered only by the link to this ` +
-          'record, under your permissions on that object; fields and orderBy are that object\'s. The answer is then ' +
-          '{ record, related: [{ object, field, records, total, hasMore }] }; a list that carries "truncated": true ' +
-          'has more rows than came back. An object you may not read refuses the call. ' +
+          `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
+          '{ record, related: [...] }. ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
@@ -4557,8 +4476,7 @@ export function registerObjectTools(
           'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
           'confirm: true; nothing is deleted on a refused call. ' +
           `${DELETE_NAMED_RECORD_IS_APPROVAL} ${DELETE_AMBIGUOUS_ASKS_FIRST} ` +
-          `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
-          'without one means this delete was permanent.',
+          `${DELETE_RECYCLE_BIN_FACT} An answer without recycleBinEntryId was a permanent delete.`,
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -4628,16 +4546,12 @@ export function registerObjectTools(
         note(DELETE_RECORDS_TOOL),
         {
           description:
-            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
-            + 'instead of one delete_record per row. Destructive. A call without confirm: true deletes '
-            + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
-            + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
-            + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
-            + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
-            + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
-            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match. '
-            + `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntries lists each deleted record the recycle bin kept `
-            + '(recordId, recycleBinEntryId); a deleted record not listed there was deleted permanently.',
+            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds). '
+            + 'Destructive. A call without confirm: true deletes nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) '
+            + 'with a `preview` (how many match, sample ids); show it to the human and retry with confirm: true only '
+            + `once they approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (the answer's `
+            + 'cap says), each under your permissions and the object\'s delete rules; refused records stay. '
+            + `${DELETE_RECYCLE_BIN_FACT} A deleted record not in the answer's recycleBinEntries was deleted permanently.`,
           inputSchema: strictToolInput(
             {
               surface: 'this delete_records call',
@@ -4805,15 +4719,11 @@ export function registerActionTools(
     note('list_actions'),
     {
       description:
-        'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
-        'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
-        'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
-        'and that the caller\'s permissions allow are returned. Use run_action to invoke one. One name can be ' +
-        'listed on several rows, one per object it is bound to: each row carries its own face, and run_action ' +
-        'takes that face as actionName (or the row\'s name with its objectName and namespace). An action that ' +
-        'carries "unavailable" cannot be run by you as you are connected (your credential, or your role in ' +
-        'this organization): run_action would refuse it with unavailable.code, and unavailable.reason says ' +
-        'why and what would let it run, so tell the user instead of calling it.',
+        'List the business actions you can invoke (those the app author exposed to AI and your permissions ' +
+        'allow): each one\'s name, object, description, whether it needs a record id, whether it is destructive, ' +
+        'and its input parameters. A name bound to several objects is listed once per object, each row with its ' +
+        'own face, which run_action takes as actionName. An action that carries "unavailable" would be refused for ' +
+        'you: unavailable.reason says why, so tell the user instead of calling it.',
       inputSchema: strictToolInput({ surface: 'this list_actions call' }, {}),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
@@ -4838,42 +4748,28 @@ export function registerActionTools(
     note('run_action'),
     {
       description:
-        'Invoke a business action by name (see list_actions). When list_actions lists a name on several rows, ' +
-        'pass the row\'s face as actionName (or the name with the row\'s objectName and namespace); the bare ' +
-        'name alone is refused as ambiguous. Runs the app\'s registered business logic — ' +
-        'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
-        'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
-        'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
+        'Invoke a business action by name (see list_actions); when list_actions lists the name on several rows, ' +
+        'pass the row\'s face as actionName (or the name with its objectName and namespace). Supply recordId for a ' +
+        'record-scoped action and params for its declared inputs. The action runs the app\'s business logic as ' +
+        'trusted code and can mutate data or trigger flows. ' +
         // [#33690] The amended confirmation contract: the caller's `confirm`
         // never counts on an action whose author declared
         // `ai.requiresConfirmation: true`; the person is asked in the app.
-        // [#34209] The member is retired: a call carrying it is refused.
-        'An action its author declared ai.requiresConfirmation: true never runs on this call: the call is ' +
-        'handed to the person you act for, who approves or rejects it in ' +
-        'the app, and you are answered status "pending_confirmation" with a pendingId and a message to pass on. ' +
-        'Nothing has run then; do not retry, tell the user to approve it. Where the server cannot hand it off, ' +
-        'the call is refused ACTION_CONFIRMATION_REQUIRED (details.reason "no_confirmation_service"): the user ' +
-        'performs the action in the app. ' +
-        // [#33712] Step 1: a client that supports elicitation is asked in place.
-        'When your client supports elicitation and this connection can carry it, the user is asked in your ' +
-        'client instead: accept runs the action once; decline, dismissing it or no answer in time refuses it ' +
-        '(ACTION_CONFIRMATION_REQUIRED, details.reason "declined", "cancelled" or "timed_out"); do not retry ' +
-        'unless the user asks. ' +
+        // [#33712] A client that supports elicitation is asked in place.
+        'An action its author declared ai.requiresConfirmation: true never runs on this call: the person you act ' +
+        'for is asked in your client where it supports elicitation (accept runs it once), or else in the app, and ' +
+        'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
+        'it. A refusal ACTION_CONFIRMATION_REQUIRED means nothing ran. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
-        'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
-        'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
-        'ai.requiresConfirmation: false when it is safe unattended. ' +
-        // [#32757] The read order `flowFailureRelaySentence` applies, taught
-        // to the reader as well, as the console reads it.
-        'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
-        'which is for diagnosis: tell the user the reason in the second text block, which is the flow\'s ' +
-        'details.errorMessage, else userMessage, else details.innerRefusal.message — never the flow and node chain.' +
+        'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
+        'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +
+        // [#32757] The answer's second text block carries the reason.
+        'A flow action that fails answers FLOW_FAILED: tell the user the reason in the second text block, never ' +
+        'the flow and node chain.' +
         // [#15705] Named only where `resume_run` is actually registered below,
         // so this description never points an agent at a tool it cannot call.
         (canResume
-          ? ' A flow action can answer result.status "paused" with a runId and a screen (a form to fill ' +
-            'in): the run has stopped to wait for that form, and resume_run submits its field values to ' +
-            'continue it.'
+          ? ' A result.status "paused" with a screen waits for a form: resume_run submits its values.'
           : ''),
       inputSchema: strictToolInput(
         {
@@ -4895,8 +4791,7 @@ export function registerActionTools(
         actionName: z
           .string()
           .describe(
-            'The action name from list_actions, e.g. "complete_task", or a listed row\'s face, e.g. '
-            + '"todo_task-complete_task". Pass the face when list_actions lists the name on several rows.',
+            'The action name from list_actions, or a listed row\'s face when the name is on several rows.',
           ),
         objectName: z
           .string()
@@ -4908,8 +4803,7 @@ export function registerActionTools(
           .string()
           .optional()
           .describe(
-            'The namespace of the package whose action to run, from list_actions. Optional; required only when '
-            + 'two packages hold an action of this name, which is refused without it.',
+            'The package namespace from list_actions; needed only when two packages hold an action of this name.',
           ),
         recordId: z
           .string()
@@ -5017,22 +4911,13 @@ export function registerActionTools(
       {
         description:
           'Continue a flow run that run_action (or an earlier resume_run) answered with result.status ' +
-          '"paused" and a screen: submit the screen\'s field values, keyed by each screen.fields[].name. ' +
-          'The run continues from that screen. The result has run_action\'s shape: the run completes, or ' +
-          'pauses again on its NEXT screen with a new screen to fill (call resume_run again for it). Only ' +
-          'the user whose call started the run can resume it, and it is gated exactly as run_action is ' +
-          '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
-          'the app\'s business logic and can mutate data. When the action that started the run was declared ' +
-          'ai.requiresConfirmation: true, the run does not continue on this call: ' +
-          'it is handed to the person you act for, who approves or rejects it in the app, and you ' +
-          'are answered status "pending_confirmation" with a pendingId; the run stays paused until they ' +
-          'approve. Where the server cannot hand it off, the call is refused ACTION_CONFIRMATION_REQUIRED and ' +
-          'the run stays paused. When your client supports elicitation and this connection can carry it, the ' +
-          'user is asked in your client instead: accept continues the run; any other answer refuses the call ' +
-          'and the run stays paused. Under an AI service account\'s own key the call is refused ' +
-          'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
-          'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
-          'in the error message.',
+          '"paused" and a screen: submit the screen\'s field values, keyed by each screen.fields[].name. The result ' +
+          'has run_action\'s shape: the run completes, or pauses on its next screen. Only the user whose call ' +
+          'started the run can resume it, gated as run_action is: for an action declared ' +
+          'ai.requiresConfirmation: true the person is asked (you are answered status "pending_confirmation") and ' +
+          'the run stays paused until they approve. Under an AI service account\'s own key the call is refused ' +
+          'whatever it sends and the run stays paused. A run that fails: tell the user the reason in the second ' +
+          'text block, never the flow and node chain.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
@@ -5140,14 +5025,12 @@ export function registerFileTools(
       {
         description:
           'Read a file a record carries: one held by a file field (field, plus fileId when the field holds several) ' +
-          'or one of its attachments (attachmentId). Answers the file\'s facts (name, type, size in bytes, the ' +
-          `byte cap read_file reads, ${READ_FILE_MAX_BYTES}) with a short-lived download link, then its content: the ` +
-          'text of a text file, a PDF or a Word (.docx) document, or the image itself. A larger file answers its ' +
-          'facts and the link only. ' +
+          'or one of its attachments (attachmentId). Answers the file\'s facts and a short-lived download link, then ' +
+          `the text of a text file, PDF or Word document, or the image itself, up to ${READ_FILE_MAX_BYTES} bytes. ` +
           (listFn
             ? 'Name neither field nor attachmentId to list the files on the record you can read, with their ids. '
             : '') +
-          'You can read a file only where you can read its record: a record you cannot read answers as not found.',
+          'A record you cannot read answers as not found.',
         inputSchema: strictToolInput(
           {
             surface: 'this read_file call',
@@ -5227,25 +5110,14 @@ export function registerFileTools(
         description:
           'Create a link through which the user uploads a file onto a record: into a file field (field) or ' +
           'as an attachment (attachments: true). A link for a multi-file field takes several files, up to 10, ' +
-          'picked and sent together; a single-file field or the attachments take one. Give the link to the user to ' +
-          'open in a browser where they are signed in to this deployment as themselves; it works only for them, ' +
-          'once (one send, however many files it carries), for this record and this field (or its attachments) ' +
-          'only, and expires (see expiresAt). One file the field does not take refuses the whole send, and nothing ' +
-          'is attached. The upload is stored as the user, so they ' +
-          'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
-          'a field declared read-only (readonly), a field read-only on this record in its current state ' +
-          '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
-          'asks, so a record a pending approval locks still takes attachments. An upload refused when it arrives ' +
-          '(for a field link: the field became read-only, or the record was locked, after the link was made) ' +
-          'answers the reason and attaches nothing.' +
+          'picked and sent together; one file the field does not take refuses the whole send. Give the link to the ' +
+          'user to open where they are signed in to this deployment: it works only for them, once, for this record ' +
+          'and field, until expiresAt. The upload is stored as the user, so they must be able to edit the record ' +
+          '(and, for a field link, write the field).' +
           (newRecordLinkFn
-            ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
-              'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
-              'is stored under. For several files into a multi-file field, send count (how many, up to 10): ' +
-              'fileIds then holds that many ids, and the user must pick exactly that many. Once the user has ' +
-              'uploaded, create the record with the field set to fileIds[0] (the array fileIds, for a multi-file ' +
-              'field). Each id works only for this user\'s own write into that field of that object, in one ' +
-              'record, within an hour of the upload.'
+            ? ' For a record you have not created yet, omit recordId and name the field (count for several files, ' +
+              'up to 10): once the user has uploaded, create the record within an hour with the field set to ' +
+              'fileIds[0] (the array fileIds, for a multi-file field).'
             : ''),
         inputSchema: strictToolInput(
           {
