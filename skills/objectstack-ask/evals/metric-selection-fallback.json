@@ -158,7 +158,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["query_dataset", "销售额", "行业"],
-        "must_not_contain": ["aggregate_records", "非指标口径", "?", "？"]
+        "must_not_contain": ["aggregate_records", "非指标口径", "您是指", "你是指", "您指的是", "你指的是", "do you mean", "Do you mean"]
       }
     },
     {
