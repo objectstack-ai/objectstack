@@ -184,8 +184,8 @@ function relationPathGroupMessage(
   object: string, position: string, path: string, head: string, headIsRelation: boolean,
 ): string {
   const hops = path.split('.').length - 1;
-  return `aggregate('${object}'): ${position} groups by '${path}', a path ${hops} relation `
-    + `hop${hops === 1 ? '' : 's'} deep, but groupBy groups by the columns of '${object}' itself — `
+  const depth = headIsRelation ? `a path ${hops} relation hop${hops === 1 ? '' : 's'} deep` : 'a dotted path';
+  return `aggregate('${object}'): ${position} groups by '${path}', ${depth}, but groupBy groups by the columns of '${object}' itself — `
     + 'the deepest path it serves is 0 hops, so a related record\'s column cannot be a grouping target. '
     + 'The query was NOT run. '
     + (headIsRelation
