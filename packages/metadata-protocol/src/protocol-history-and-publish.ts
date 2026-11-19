@@ -45,7 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
-import { environmentActionPublishSlotRefusal } from './protocol-save.js';
+import { environmentActionPublishSlotRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -202,7 +202,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtif
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
-    static async historyMetaItem(host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
+    static async historyMetaItem(host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'readItemActiveRows' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
             type: string;
             name: string;
             sinceSeq?: number;
@@ -278,6 +278,8 @@ export class ProtocolHistoryAndPublishFacet {
         // holders' rows hold is refused naming both when no package is named,
         // and `?package=` reads that holder's versions alone. A name one slot
         // holds, named bare, reads its whole log as before.
+        // [#34681] A row-held base's name, named bare, reads that base's
+        // versions, as `?package=` naming it does ({@link historySlotOf}).
         const slot = await historySlotOf(host, {
             type: singularType, name: request.name, ...memberOption(member),
             ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
@@ -671,7 +673,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -834,7 +836,17 @@ export class ProtocolHistoryAndPublishFacet {
             // is the 503 the lock read raised before this read moved above it
             // ({@link packagelessAddress} discriminates both).
             const address = await host.packagelessDraftAddress(singularType, request.name, request.member);
-            if (address.kind === 'ambiguous') {
+            // [#34681] Active rows bound to two or more packages where the read
+            // naming no package serves the row-held base: the base's draft, as
+            // the publish naming that base promotes it
+            // ({@link packagelessRowHeldBaseAddress}).
+            const base = address.kind === 'ambiguous'
+                ? await packagelessRowHeldBaseAddress(host, singularType, request.name, request.member)
+                : undefined;
+            if (base !== undefined) {
+                draftKey = base;
+                promoteInto = base;
+            } else if (address.kind === 'ambiguous') {
                 draftKey = null;
                 promoteInto = null;
                 addressRefusal = packagelessAddressAmbiguityRefusal('publish', request.type, request.name, address.candidates);
