@@ -11,7 +11,7 @@ import type { RowCrudPredicates } from './object.zod';
  * ruling 7000907189, point 1). Neither reader exists yet — they are the server
  * card #35402 and the console card #35403 — so nothing at runtime reads the
  * switch today; the liveness ledger grades it `planned` and warns an author
- * who sets it.
+ * who sets it to `true` or uses the object form.
  *
  * ## Visibility is three facts, and only two live here
  *
