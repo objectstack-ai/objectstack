@@ -139,13 +139,14 @@ describe('an active sort shows on the phone bar (objectstack#29057)', () => {
     expect(screen.getByTestId('toolbar-sort-trigger')).toBeVisible();
   });
 
-  it('the Display panel still carries the Sort block while the bar shows the indicator', async () => {
+  it('the Display menu still carries the Sort level while the bar shows the indicator', async () => {
     belowSm();
     mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>);
     await screen.findByTestId('grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const content = await screen.findByTestId('view-settings-content');
-    expect(within(content).getByTestId('display-sort')).toBeInTheDocument();
+    fireEvent.click(within(content).getByTestId('options-row-sort'));
+    expect(await within(content).findByTestId('display-sort')).toBeInTheDocument();
   });
 });
 

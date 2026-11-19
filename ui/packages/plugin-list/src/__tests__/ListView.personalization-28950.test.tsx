@@ -162,6 +162,9 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     const { reported } = mount({}, { defaultRowNumbers: true });
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
+    // Row numbers sit on the Display menu's More level.
+    fireEvent.click(within(content).getByTestId('options-row-more'));
+    await within(content).findByTestId('options-page-more');
 
     fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
     await waitFor(() => expect(reported()).toEqual(['rowNumbers']));
