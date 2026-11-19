@@ -260,7 +260,7 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
           objectName="clm_payment_plan"
           referenceField="contract"
           parentId="c1"
-          filter={opts.filter}
+          filter={opts.filter as any}
           columns={opts.columns.map((field) => ({ field, label: (planFields as any)[field].label }))}
           data={rows as any[]}
           dataSource={{ find: vi.fn(async () => rows), aggregate, getObjectSchema: vi.fn(async () => ({ name: 'clm_payment_plan', fields: planFields })) } as any}

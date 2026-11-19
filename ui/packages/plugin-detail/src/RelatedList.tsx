@@ -808,7 +808,7 @@ function useBodyTableTotals(opts: {
   dataSource: DataSource | undefined;
   referenceField: string | undefined;
   parentId: unknown;
-  listFilterNode: FilterNode | undefined;
+  listFilterNode: Record<string, any> | FilterNode | undefined;
   filterKey: string;
   refreshKey: unknown;
 }): BodyTableTotal[] {

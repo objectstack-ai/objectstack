@@ -39,6 +39,9 @@ const h = vi.hoisted(() => {
 });
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => h.client }));
 
+// The inspector's dynamic imports, paid at collection, not in a clocked case.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { deriveRelatedLists } from '../../../utils/deriveRelatedLists';
 import { t } from '../i18n';
