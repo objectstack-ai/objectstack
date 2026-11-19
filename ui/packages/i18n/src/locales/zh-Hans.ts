@@ -4906,12 +4906,6 @@ const zh = {
       shown: '视图中显示',
       hidden: '隐藏的字段',
       empty: '没有匹配的字段',
-      addable: '尚未加入视图',
-      add: '添加{{label}}',
-      show: '显示{{label}}',
-      hide: '隐藏{{label}}',
-      move: '移动{{label}}',
-      moveHint: '拖动，或按上下方向键，调整顺序',
     },
     filter: {
       advanced: '高级筛选',
