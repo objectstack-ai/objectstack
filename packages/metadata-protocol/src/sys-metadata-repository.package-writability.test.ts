@@ -581,7 +581,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       // The clone route is the catalog's clone door: the data route of the
       // `sys_permission_set` object retired with it (C3 stage 8).
       expect(message).toContain(
-        'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+        'Clone it under a new name to customize it (the "New similar" action on the permission set, '
         + 'or POST /api/v1/security/permission-sets/:name/clone with a new name).',
       );
       expect(message).not.toContain('OS_METADATA_WRITABLE');
@@ -1265,7 +1265,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     + 'operator-only where one install serves several organizations).';
   // The clone route is the catalog's clone door: the data route of the
   // `sys_permission_set` object retired with it (C3 stage 8).
-  const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+  const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "New similar" action on the permission set, '
     + 'or POST /api/v1/security/permission-sets/:name/clone with a new name).';
   const FLOW_PATHS = 'Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, body {name, label}), '
     + 'or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
