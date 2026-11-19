@@ -78,6 +78,29 @@
  * active organization (the grant is stored with none, a global grant) or a
  * composition that registers no `sys_member` — the picker keeps its whole
  * list, as the server does.
+ *
+ * ## A set outside a delegated scope (objectstack#34741, ADR-0090 D6/D12)
+ *
+ * The server's delegated-administration gate decides every grant write, and
+ * this section only reflects what the server reports of the caller's own
+ * authority: `my-delegable-scope`, read through
+ * `useAuth().describeDelegableScope` as the invite dialog reads it. Where that
+ * report names delegated scopes and the set is in none of their
+ * `assignablePermissionSets`, the gate refuses every Add and Remove of the set
+ * (`DELEGATION_SCOPE_VIOLATION`), so neither is offered: no Add, no picker, no
+ * Remove on any row, and no click-Add sentence ({@link outsideDelegatedScope}).
+ * Nothing else is judged here — no business-unit subtree, no package holder,
+ * no containment: a set the report allowlists keeps its controls, and a write
+ * the gate still refuses (a target user outside the delegate's subtree) is
+ * refused by the server, in its own words.
+ *
+ * Every other report keeps the controls as the affordance gate above draws
+ * them: none yet (read in flight), none at all (no runtime serves it, or the
+ * read failed), a tenant-level administrator (`isTenantAdmin`), and a caller
+ * holding no delegated scope — which is how the report draws an organization
+ * administrator. The report does not tell an organization administrator who
+ * also holds a delegated scope from a delegate, so such a caller is read as
+ * the delegate its scopes describe.
  */
 
 import * as React from 'react';
@@ -93,7 +116,7 @@ import {
   Button,
   buttonVariants,
 } from '@object-ui/components';
-import { useAuth } from '@object-ui/auth';
+import { useAuth, type DelegableScope } from '@object-ui/auth';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
 import { RecordPickerDialog } from '@object-ui/fields';
 import { usePermissions } from '@object-ui/permissions';
@@ -365,6 +388,50 @@ function positionLabels(positions: readonly unknown[]): Map<string, string> {
   return out;
 }
 
+/**
+ * Does the caller's delegable-scope report put `setName` outside every
+ * delegated scope it holds (module doc)? Read off the report alone: `true`
+ * only where it names delegated scopes and none of them lists the set among
+ * its `assignablePermissionSets`. No report, a tenant-level administrator and
+ * a caller holding no delegated scope answer `false` — the server decides.
+ */
+export function outsideDelegatedScope(report: DelegableScope | null | undefined, setName: string): boolean {
+  if (!report || report.isTenantAdmin || report.scopes.length === 0) return false;
+  return !report.scopes.some((scope) => scope.assignablePermissionSets.includes(setName));
+}
+
+/**
+ * The caller's delegable-scope report, or `null` while it is read, where no
+ * runtime serves it, and where the read fails. Read again when the active
+ * organization changes, the organization the server resolves the report in;
+ * the reader is held in a ref, never keyed on its identity (ui AGENTS.md #10).
+ */
+function useDelegableScope(
+  describe: (() => Promise<DelegableScope | null>) | undefined,
+  organizationId: string | null,
+): DelegableScope | null {
+  const describeRef = React.useRef(describe);
+  describeRef.current = describe;
+  const [report, setReport] = React.useState<DelegableScope | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    // A report read for another organization narrows nothing here.
+    setReport(null);
+    describeRef.current?.().then(
+      (scope) => {
+        if (!cancelled) setReport(scope);
+      },
+      () => {
+        /* no report: the controls stay as the affordance gate draws them, and the server decides */
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+  return report;
+}
+
 export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding: holdingProp }: AssignedUsersSectionProps) {
   const adapter = useAdapter() as any;
   // The holding by its value: `load` re-keys when the holder changes, never
@@ -427,7 +494,11 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
    */
   const [memberFilter, setMemberFilter] = React.useState<MemberFilter | undefined>(undefined);
   const [openingPicker, setOpeningPicker] = React.useState(false);
-  const activeOrganizationId = useAuth().activeOrganization?.id ?? null;
+  const auth = useAuth();
+  const activeOrganizationId = auth.activeOrganization?.id ?? null;
+  const delegable = useDelegableScope(auth.describeDelegableScope, activeOrganizationId);
+  /** The set is outside every delegated scope the server reports the caller holding (module doc). */
+  const outsideScope = outsideDelegatedScope(delegable, permissionSetName);
 
   /**
    * May the caller add or remove a holder? Each is a write of a
@@ -447,7 +518,8 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
    * repo's pin `organization_admin creates and removes assignment rows, never
    * edits them — both variants`) — so it is offered Add and Remove; what it may
    * create or remove is bounded on the server by the delegated-administration
-   * gate.
+   * gate — and where its report puts the set outside every delegated scope
+   * the caller holds, neither is offered (`outsideScope`, module doc).
    */
   const perms = usePermissions();
   const grantSource = {
@@ -456,8 +528,8 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
     objectName: GRANT_OBJECT,
     perms,
   };
-  const canAdd = resolveAffordance('relatedNew', grantSource).allowed;
-  const canRemove = resolveAffordance('relatedRowDelete', grantSource).allowed;
+  const canAdd = !outsideScope && resolveAffordance('relatedNew', grantSource).allowed;
+  const canRemove = !outsideScope && resolveAffordance('relatedRowDelete', grantSource).allowed;
   const memberOrganization = membershipOrganization(activeOrganizationId, metadataStore.objects);
   /** `sys_user` as the registry serves it, for the picker's column read rule. */
   const userSchema = ((metadataStore.objects ?? []).find((o) => (o as { name?: unknown } | null)?.name === 'sys_user') ??
