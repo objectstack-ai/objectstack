@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T08:29:33Z",
-  "updated_at": "2026-11-19T03:58:50Z",
+  "updated_at": "2026-11-19T15:30:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35158",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbWDsbbJizuYnDwBxT8\n\nFollow-up of #35005, filed by its claim (6972020316). PR #35156 scopes the ask-back in the executor's note and in the two door strings (`LIST_DATASETS_DESCRIPTION`, `DATASET_SELECTION_RULE`). The governed copies of the same rule still state it unscoped, so after #35156 lands the skill and the ADR teach the model to ask about a word the door says never to ask about.\n\n## Rule (copy verbatim from the door strings on #35156)\n\n> A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure.\n\nA word with a measure among its candidates keeps today's rule: ask (beside a matched measure, the matched measure is answered and the word is asked about; with no match, compute nothing).\n\n## Sentences that state it unscoped today (measured by the #35005 dev, report 6973197402)\n\n1. `docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md`, the D3 amendment note: \"**With candidates, the AI asks in rule 3's form and acts on none.**\" and the sentence after it (\"The question lists each candidate's label, dataset label and description...\"). Also rule 1's parenthesis \"(it may be offered in rule 3's question, never acted on)\", if the reviewer reads it as unscoped.\n2. `skills/objectstack-ask/SKILL.md`, step 2 table row \"A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean ... Do not pick one.\" needs the split (a measure among the candidates: ask; all dimensions: a possible grouping, never asked, never stops a matched measure). The step 1 bullet \"A word that matched nothing may have `candidates` ... A candidate is not a match.\" may need the same.\n\n3. `packages/spec`: `ListDatasetsOutputSchema.candidates`' description (\"… for a clarifying question\") and `DatasetTermCandidateSchema`'s jsdoc (\"offers the member for a clarifying question\") say every candidate exists to be asked about. That description is served to every MCP client as `list_datasets`' `outputSchema`, so it must state the same scoped rule; regenerate `content/docs/references/ai/dataset-tools.mdx` (contract review S1 on PR #35156). Text-only: `Clause-②: no`.\n4. ADR-0149 rule 1's parenthesis \"(it may be offered in rule 3's question, never acted on)\" is owed, not optional (contract review N3 on PR #35156).\n\n## Eval cases (carried from #35005's scope)\n\n#35005's scope item \"Eval cases: a matched measure beside a candidate on another word; a dimension-only candidate\" lands here, in the ask skill's eval set: one case with a matched measure beside a word whose candidates are all dimensions (computes, grouped, no question back), one with a bare near-miss measure word (still asks).\n\n## Done when\n\n- Every file above states the scoped rule in the door strings' words; the generated `packages/mcp/src/ask-skill.generated.ts` and skills reference page are regenerated.\n- `scripts/check-skills-token-ratchet.mjs`: the `skills/objectstack-ask/SKILL.md` row has no headroom, so the edit pays for itself in the same file (ruling record 6513306068, letter B).\n- Text-only change to served skill text: `Clause-②: no` (seat ruling kept by seat 1).\n\n## Order\n\nTier H (`skills/**`, `docs/adr/**`); the `packages/spec` description may go in the same PR or a separate non-governed one. Starts after #35156 merges (the sentence to copy lives there) and after #35100 (same SKILL.md) merges.\n"

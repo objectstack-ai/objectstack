@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T11:25:39Z",
-  "updated_at": "2026-11-19T11:50:21Z",
+  "updated_at": "2026-11-19T17:08:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35483",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35253 dev (os-dev-report 7007256219, PR #35478 Acceptance notes), read in code and not driven live. L1-a named it as owed (ACCEPT 7007712812). It is a follow-up of #35253 and is nested under it.\nReader: `domain:ui` (plugin-detail synthesized record page). Suggested grade: p3 (no real object measured; the laid-out page, which is the common case, is fixed by #35478).\nDedupe: `approval band page tabs`, `locked for approval twice`, `lock chip once tabs`. Only #35253 matches, and it covers the laid-out page.\n\n## 维护者速读\n\n- 用户能看到什么变化：极少数无法按栏布局、退回页签形式的系统默认记录页，审批锁定标识可能仍显示多次。\n- 为什么做：前一张卡只修好了按栏布局的默认页，这是同一问题的剩余情形。\n- 出错会怎样：只影响标识显示次数，锁定规则不变；撤回即可。\n- 要你做什么：无。\n\n## Facts (read in code at PR #35478 head `0122020a`, not measured on a real object)\n\n- #35478 makes only the first `record:details` part draw the approval band, through a module-internal context that `RecordPageColumns` sets to false on every later part.\n- When the synthesized page cannot be laid out (`buildDefaultPageColumns` returns null), the host draws its `page:tabs` strip instead, which is not drawn through `RecordPageColumns`, so each details part reads the default `true` and draws its own band.\n\nA related case, worth measuring first (L1-a): if the first details part draws no `DetailView` body (for example every section is empty and folded), the band is suppressed on every later part, so a page could show no band at all. Measure whether that is reachable before deciding it is real.\n\n## Ask\n\nMeasure whether any object reaches the `page:tabs` fallback with more than one details part while approval-locked. If it does, apply #35478's rule there (one band per page), with pins for the tabs fallback and CONTROLs for a single part. Also measure the empty-first-part case above and pin whichever answer holds. `Clause-②: no` and `Metadata-protocol: none` expected.\n\n⛔ Not a claim."

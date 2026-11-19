@@ -1,0 +1,36 @@
+{
+  "number": 35534,
+  "kind": "issue",
+  "title": "console boot: the language seed's me/localization waits 500-790 ms for the eager bundle; start it at parse time beside discovery",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:37:42Z",
+  "updated_at": "2026-11-19T18:57:47Z",
+  "closed_at": "2026-11-19T18:56:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35534",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a measured finding of the #35455 dev (os-dev-report 7012178512, item 1), measured on `origin/main` `92121196` with the built console, 12 loads. It is a child of #35455 (console first-screen round trips, p1) and is nested under it.\nReader: `domain:ui` (console boot, `ui/apps/console`). Suggested grade: p1, the parent's grade (objectstack-ai/cloud#4563 step 2 waits on the family).\nDedupe: `language seed parse time`, `me/localization bundle wait`, `startEarlyDiscovery localization`. Only #35455 matches; the eager-bundle shrink itself is #33581.\n\n## 维护者速读\n\n- 用户能看到什么变化：控制台首屏更快出现，取界面语言的请求不再等整包脚本下载完。\n- 为什么做：托管环境打开页面要 9–10 秒，这是首屏请求串行里的第一段等待。\n- 出错会怎样：语言判断规则不变；出错时界面语言可能先用默认再切换，撤回即可。\n- 要你做什么：无。\n\n## Facts\n\n- The first module-issued call (the seed's `GET /api/v1/auth/me/localization`) leaves at 503-790 ms after navigation, after 105 eager JS files (6.57 MB raw / 1.59 MB br).\n- `runtime/config` and `discovery` already leave at parse time from `index.html` (`startEarlyDiscovery`), and so does `get-session` with a stored Bearer.\n- The cause of the wait is `ui/apps/console/src/main.tsx`'s static import closure (`register-plugins.ts` importing plugin-grid and plugin-detail eagerly, the `register*Components` modules, the app-shell entry).\n\n## Ask\n\nStart the seed's `me/localization` at parse time in `index.html`, beside discovery (it needs discovery's `locale.supported`, already a parse-time read), and have `seedTenantLanguage` take that request. Keep ruling 6915665005 (#33985, letter B) and the bounded seed race unchanged. Pin it in `sessionCheckBootDedup.test.tsx` style: the seed request is issued before the entry module evaluates, and is sent once. About 100-150 lines. Shrinking the eager closure itself stays with #33581.\n\nSerial: after slice 1 of #35455 lands (same files: `languageSeed.ts`, `index.html`).\n\n⛔ Not a claim."
+}

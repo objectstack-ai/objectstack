@@ -2,8 +2,8 @@
   "number": 35079,
   "kind": "issue",
   "title": "cli: os skills install/update writes are not atomic — a failure partway removes the recorded skill directories under the old record, so the next update needs --force (stage and rename)",
-  "state": "closed",
-  "state_reason": "completed",
+  "state": "open",
+  "state_reason": "reopened",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,24 +13,19 @@
   "labels": [
     "area:build",
     "domain:server",
+    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T01:52:34Z",
-  "updated_at": "2026-11-19T13:07:10Z",
-  "closed_at": "2026-11-19T13:06:06Z",
-  "closed_by": {
-    "login": "objectstack-fleet[bot]",
-    "id": 332303061,
-    "type": "Bot"
-  },
+  "updated_at": "2026-11-19T19:03:20Z",
+  "closed_at": null,
+  "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35079",
-  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-G, mailbox #32588, 6966566615), from #34773 / PR #35060. It was a nit in that PR's L2, and not built there.\n\n## What happens\n`applySkillsWrite` (`packages/cli/src/utils/skills-install-state.ts`) removes the recorded skill directories first, then writes the new ones, and writes the record last. If a write fails partway (disk full, permission, an interrupted run), the directories are already gone while the old record still names them. The next `os skills update` then needs `--force`, and a user who only connected an MCP client is left without skills until they find that flag.\n\n## Done when\n- The new directories are staged into a temporary sibling, swapped into place by rename, and the record is written after the swap.\n- A pin covers a failure injected mid-write: the old skills and the record stay usable, and a plain `update` recovers.\n\nGrade: **p2 · domain:cli**. Theme: install, upgrade and uninstall reliability; it is the failure path of the p1 install command #34773. No customer is named, and it only bites on a partial failure. Routed to seat 4 under the p2 scope; seat 3 is winding down."
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-G, mailbox #32588, 6966566615), from #34773 / PR #35060. It was a nit in that PR's L2, and not built there.\n\n## What happens\n`applySkillsWrite` (`packages/cli/src/utils/skills-install-state.ts`) removes the recorded skill directories first, then writes the new ones, and writes the record last. If a write fails partway (disk full, permission, an interrupted run), the directories are already gone while the old record still names them. The next `os skills update` then needs `--force`, and a user who only connected an MCP client is left without skills until they find that flag.\n\n## Done when\n- The new directories are staged into a temporary sibling, swapped into place by rename, and the record is written after the swap.\n- A pin covers a failure injected mid-write: the old skills and the record stay usable, and a plain `update` recovers.\n\nGrade: **p2 · domain:cli**. Theme: install, upgrade and uninstall reliability; it is the failure path of the p1 install command #34773. No customer is named, and it only bites on a partial failure. Routed to seat 4 under the p2 scope; seat 3 is winding down.\n\nBlocked-by: #35611\n"
 }

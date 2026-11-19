@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T11:26:09Z",
-  "updated_at": "2026-11-19T11:50:24Z",
+  "updated_at": "2026-11-19T17:09:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35484",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35253 dev (os-dev-report 7007256219, PR #35478 Acceptance notes), read in code and not driven live. L1-a named it as owed (ACCEPT 7007712812). It is a follow-up of #35253 and is nested under it.\nReader: `domain:ui` (plugin-detail authored record page). Suggested grade: p3 (outside #35253's Expected, which named the synthesized page; no authored page measured).\nDedupe: `authored page two details approval band`, `locked for approval twice authored`. Only #35253 matches, and it covers the synthesized page.\n\n## 维护者速读\n\n- 用户能看到什么变化：自己配置了两个详情区的记录页，审批锁定时每个详情区都会显示一次锁定标识。\n- 为什么做：系统默认页已只显示一次，自定义页面还没统一。\n- 出错会怎样：只影响标识显示次数，锁定规则不变；撤回即可。\n- 要你做什么：无。\n\n## Facts (read in code at PR #35478 head `0122020a`, not measured on a real app)\n\n- #35478 suppresses the band on later details parts only inside `RecordPageColumns` (the laid-out synthesized page). An authored page never mounts it, so each authored `record:details` node reads the default and draws its own band.\n- An authored node can set `lockRecord: false`; that rule (resolveApprovalLock) must keep working per node.\n\n## Ask\n\nDecide by measurement whether an authored page with two or more details nodes should draw one band per page (as the synthesized page now does) and, if so, apply it without dropping the band from a page whose first details node is `lockRecord: false` or draws no body. Pins with CONTROLs for a single authored details node. If the rule needs a product choice (for example \"one band per page\" against \"one per node the author placed\"), route it to the maintainer through the seat instead of guessing. `Clause-②: no` and `Metadata-protocol: none` expected.\n\n⛔ Not a claim."

@@ -1,0 +1,37 @@
+{
+  "number": 35548,
+  "kind": "issue",
+  "title": "列表框架：页面栏 + 视图栏两条、表头 32 / 行高 33、统一 13 号字、合计与列对齐（图 36）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T15:06:09Z",
+  "updated_at": "2026-11-19T18:57:47Z",
+  "closed_at": "2026-11-19T18:56:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35548",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「如果不改外壳，完全按照他的风格改列表，你画个效果图，」；看过图 36 后：「先只改列表」。「你看一下他列表视图有图标代表类型，还有记录数显示在下拉左侧」。\n\n## 目标（图 36）与参照\n\n![36 列表页，外壳不动](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/36-list-keep-shell.png?raw=true)\n\n![参照：Twenty 的列表](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-list.jpg?raw=true)\n\n![我们现在](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-list.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。另在托管环境 `os-4e4qa4.objectos.app` 量过同一组数）\n\n| | 现在 | 目标 |\n|---|---|---|\n| 列表上方（顶栏之下） | 标题行 52 + 工具行 48 | 页面栏 44 + 视图栏 40 |\n| 表头高 / 行高 | 48 / 41 | 32 / 33 |\n| 第一行数据顶边 | 196 | ≤ 168 |\n| 一屏可见数据行 | 约 14 | ≥ 18 |\n| 字号 | 表头 14、单元格 13、标题 18、按钮 14 | 全部 13 |\n| 线 | 行线 1px 明显；首列右侧 2px 竖线 | 行线接近背景色；无竖线 |\n| 页脚 | 一行文字「金额: 合计:2,037,500.00 · 预期收入: 合计:…」，双冒号，不与列对齐 | 每列在自己列下显示 |\n\n代码读数：行高档位 `ui/packages/plugin-grid/src/ObjectGrid.tsx:1781`（`rowHeightMode`）；列表页头分在 `ui/packages/app-shell/src/views/objectViewPageHeader.tsx`、`objectViewTitleSwitcher.tsx`、`objectViewHeaderToolbar.ts`；共用页头 `ui/packages/app-shell/src/layout/PageHeader.tsx`。\n\n## 要做的\n\n1. **页面栏（高 44）**：左边对象图标和对象名；右边「⋮」和「+ 新建」。对象说明文字不再常驻，和导入、导出一起进「⋮」。\n2. **视图栏（高 40）**：左边依次是视图类型图标、视图名、记录数、下拉箭头（整体是视图切换的触发处，下拉内容见子卡 5）；右边三个文字按钮「筛选」「排序」「选项」和搜索图标（各自的面板见子卡 2、3、4，本卡只负责位置和触发）。\n3. **条件行的位置**：视图栏下方预留一行，有筛选或排序时出现，没有时不占高度（内容见子卡 2、3）。\n4. **密度和样式**：表头 32、默认行高 33；表头、单元格、两条栏的按钮统一 13 号字；行线调到接近背景色；去掉首列右侧竖线，冻结列只在横向滚动后显示阴影；两条栏里的按钮高 24–28。\n5. **单元格的呈现**：关联字段的值显示成小标签（首字母或图标 + 名称）；金额、数字列右对齐、等宽数字；选项标签保留颜色、降低饱和度。\n6. **合计行**：每个有统计的列在自己列下显示（如「合计 ¥2,037,500」），最左是「计数 N」；修掉双冒号；任何宽度下不被固定列遮住。\n7. 看板、日历等其他视图类型共用这两条栏，内容区不改。\n\n## 不做的\n\n- 外壳（顶栏、左侧栏）；记录抽屉打开时的列表宽度；768px 以下的手机列表。\n- 筛选、排序、选项、视图下拉各自面板里的内容（子卡 2–5）；操作列和选中后的操作（子卡 6）。\n- 金额小数位、表头里重复的「(%)」属于 HotCRM 字段设置。\n\n## 验收（1280×800，zh-CN，浅色和深色各一遍）\n\n- 第一行数据顶边 ≤ 168px；数据不少于 18 条时一屏至少 18 行。\n- 表头计算高度 32、数据行 33；表头、单元格、两条栏按钮字号都是 13px。\n- 视图切换处从左到右：类型图标、视图名、记录数、下拉箭头。\n- 每个统计值的右边缘与对应列的右边缘对齐（误差 ≤ 1px）；页脚文字里没有相叠的冒号。\n- 看板视图下两条栏与表格视图一致。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-grid/src/ObjectGrid.tsx`、`ui/packages/app-shell/src/views/objectView*.ts(x)`、`ui/packages/app-shell/src/layout/PageHeader.tsx`。\n\nDedupe: `列表页 行高 表头`、`list density row height header toolbar merge`（objectstack，open）→ 0。"
+}

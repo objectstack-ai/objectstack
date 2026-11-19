@@ -1,0 +1,36 @@
+{
+  "number": 35613,
+  "kind": "issue",
+  "title": "Fleet patrol: the first-touch sweep's ③ row reads pm:epic as stateless, while H13 counts it as a state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T17:33:59Z",
+  "updated_at": "2026-11-19T18:41:15Z",
+  "closed_at": "2026-11-19T18:41:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35613",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaAqjP52wVTzs99H5G\n\nFiling gate: ① a defect with a named location, found in landed work's review (PR #35532 contract review, comment 7012326518, ③ boundary flags). Source: fleet. Grading: `area:fleet · Bug · p2 · reach: the daily sweep's ③ row lists 3 open epic cards (#34571, #35547, #35590, measured 2026-11-19 17:40Z on main f981dce3be), up from 1 at 14:27Z, one more per stateless epic · evidence: measured`. Parent: #35470.\n\nBusiness reason: triage runs the sweep to empty every fire, with no per-card waiver (`triage-duties.md:20`). An epic card the maintainer opened with an area and a grade but no dispatch position shows as FOUND on every fire. The only way to clear it today is to write a position onto that epic. Two instruments read the same rule phrase with two vocabularies, so one of them is wrong.\n\nDuplicate search, open and closed: `is:issue first-touch-sweep pm:epic ③` found #35234, #35470, #34366, #35259 and #11904. None is this defect: #35470 removed epics from the type row only and kept the area row on purpose. The source is the review record above.\n\n## What is wrong\n\n- The rule phrase is 「③ `area:*` 无 pm-state」 (`.claude/skills/pm-dispatch/references/triage-duties.md:17`).\n- `scripts/pm/first-touch-sweep.mjs:159` reads it with `PM_EXCLUSIVE_STATE_LABELS` (the six dispatch positions), which leaves `pm:epic` out.\n- H13 reads the same phrase with `PM_STATE_LABELS` (`scripts/pm/check-half-states.mjs:3798`). Its docblock says it mirrors disjunct ③, and it counts `pm:epic`.\n- The rule text leans toward H13: the label table gives `pm:epic` its own meaning, a parent card is never dispatched (`triage-duties.md:72`), and no line asks an epic for one of the six positions.\n\n## What lands\n\n1. ③ counts `pm:epic` as a state, as H13 does (recommended by the review). The other option, a rule line saying an epic owes a position, is the rule owner's call. If the seat picks it, it needs the maintainer, because it changes what epics carry.\n2. Self-test cases: an `area:*` + `pm:epic` card draws no ③ row, and an `area:*` card with no state still does. Run an ablation on each.\n3. `scripts/pm/**` only. `skip-changeset`, `Clause-②: no`, `Metadata-protocol: none`.\n\n## Done when\n\nThe daily sweep lists no `pm:epic` card under ③, and a self-test pins it."
+}

@@ -2,7 +2,7 @@
   "number": 35521,
   "kind": "pull_request",
   "title": "fix(service-analytics): cube door answers a formula total with the virtual-field remedy",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T13:41:26Z",
-  "updated_at": "2026-11-19T14:10:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-19T14:36:09Z",
+  "closed_at": "2026-11-19T14:36:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T14:36:07Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35521",

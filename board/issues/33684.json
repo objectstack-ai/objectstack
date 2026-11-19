@@ -14,7 +14,6 @@
     "area:data",
     "bug",
     "domain:server",
-    "lease:A5",
     "pm:dispatched",
     "priority:p1",
     "security"
@@ -25,7 +24,7 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T06:21:32Z",
-  "updated_at": "2026-11-19T02:58:46Z",
+  "updated_at": "2026-11-19T19:42:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

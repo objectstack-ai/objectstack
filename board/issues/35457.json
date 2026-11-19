@@ -2,8 +2,8 @@
   "number": 35457,
   "kind": "issue",
   "title": "Every framework request resolves the session twice: sys_session and sys_user are each read twice (9-13 SQL queries per request), one remote round trip each on Turso",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T10:08:00Z",
-  "updated_at": "2026-11-19T10:14:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T18:17:01Z",
+  "closed_at": "2026-11-19T18:15:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35457",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a measured defect from step 1 of objectstack-ai/cloud#4563 (p1; a hosted page takes 9–10 s to open). Reader: the `domain:server` lane; the objectstack fleet dispatches its own cards. Dedupe: `getSession twice per request`, `sys_session read twice`, `identity prelude queries`, `per-request auth queries` — no open card.\n\n## Measured\n\nCloud main `8431db621`, objectstack pin `1aac465fe1d0`, local prod-like stack, hosted posture, a plain owner, `X-OS-Debug-Timing: json`:\n- Every framework request runs 9–13 SQL queries.\n- `sys_session` by token and `sys_user` by id each appear twice per request.\n- Two in-process `getSession` calls per request explain it:\n  - the auth gate (runtime `http-dispatcher.ts`, near line 1665);\n  - principal resolution (`security/resolve-session-principal.ts` line 64, reached from `dispatcher-plugin.ts` near line 217).\n- On a remote Turso database each query is a round trip, so the duplicate adds two round trips to every request on hosted.\n- Under a 28-request burst, auth goes from 7 to 227–263 ms (db about 1 ms locally) and get-session from 11 to 341 ms. That is queueing on one event loop, so per-request work multiplies with concurrency.\n\n## Done when\n\nOne request resolves the session and the user once, and the result is shared by the auth gate and principal resolution. A test pins the query count of an authenticated request."

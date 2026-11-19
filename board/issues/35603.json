@@ -1,0 +1,31 @@
+{
+  "number": 35603,
+  "kind": "issue",
+  "title": "lint: state-machine-no-initial-states passes an initialStates list that names every option, which refuses nothing on insert (split from #35251)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T17:05:56Z",
+  "updated_at": "2026-11-19T17:09:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35603",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUZrkMKgGrXXe8zPGq\n\nFiling gate: **(c) a residual a card's review names** — carries the every-option residual of #35251 (scope note 6992730706, from the contract-review delta 6992699203 on PR #35244). #35251 keeps the update-only predicate, the three showcase lists and the negative pin (claim 7016093607); this card carries only the residual below. Split on the seat's order. ⛔ Not a claim; grade left to triage's first touch.\n\n## What happens\n\n`state-machine-no-initial-states` (publish-time rule from PR #35244, `packages/lint/src/validate-inert-object-declarations.ts`) refuses a `state_machine` validation that runs on insert and declares no `initialStates`. An `initialStates` list that names **every** option of the state field satisfies the rule, yet it refuses nothing on insert: the declaration has no effect, the same class of inert metadata the rule exists to catch.\n\nSeen on `crm_opportunity` (app-crm): its `initialStates` lists every option of its state field. That is honest for that app — it records deals already won or lost, and its hook and tests create them — so the example may well keep it.\n\n## Why this needs a route before dispatch\n\nChanging the rule here changes its **visible verdict** on a list it passes today (`crm_opportunity` lists every option). Before any dev starts, the route has to be settled — by the seat, or by the maintainer's ruling if it is a product choice:\n\n- (A) the rule keeps passing an every-option list (no change; document why);\n- (B) an every-option list draws a warning, not a refusal;\n- (C) an every-option list is refused like a missing one.\n\nAnd whether app-crm's `crm_opportunity` keeps its list.\n\n## Re-check\n\n`git grep -n \"STATE_MACHINE_NO_INITIAL_STATES\" origin/main -- packages/lint/src` · the `initialStates` of `crm_opportunity` under `examples/app-crm/`.\n\nDedupe: issue search `initialStates every option`, `state-machine-no-initial-states inert` → only #35251 and #34776."
+}

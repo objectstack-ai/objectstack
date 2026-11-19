@@ -2,8 +2,8 @@
   "number": 35376,
   "kind": "issue",
   "title": "seed: the duplicate-fallback refusal still names \"an upgrade within this process\" as a cause, which the install door no longer produces after #35109",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:package",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T07:01:12Z",
-  "updated_at": "2026-11-19T07:49:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T16:23:27Z",
+  "closed_at": "2026-11-19T16:22:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35376",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): the os-dev round of #35109 (PR #35374, report 7002155117), read from code; outside that card's file surface. ⛔ Not a claim.\nReader: `domain:server` (`packages/metadata-protocol/src/seed-loader.ts`). Suggested-grade: p3 · wording only. Rides the same-file p2 PR of #34857 + #35336 (area pkg-1).\nDedupe: `duplicate fallback refusal upgrade within this process` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：示例数据里「同一对象有两个兜底语种集」的报错，现在不会再说「可能是本进程里升级了包」这个已经不存在的原因。\n- 为什么做：升级后旧版本数据不再留在重放清单上，这句原因已经不成立，会误导排查。\n- 出错会怎样：只是报错文字；改错了最多文字不准，行为不变。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\n`seed-loader.ts` `findDuplicateFallbackSets`' refusal text (~:5536-5537) and docblock (~:5508) name a second cause: \"an upgrade within this process changed a package's marked set (the earlier version's datasets stay on the replay list until the process restarts)\". After PR #35374 (#35109) the install door replaces a package's entries on upgrade, so that cause no longer arises. The remaining cause is two different packages marking one object. Pinned by `seed-loader-locale-scope.test.ts:~486`.\n\n## Expected\n\nThe refusal and docblock name only the cause that still arises; the pin follows. Land after PR #35374."

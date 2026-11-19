@@ -1,0 +1,31 @@
+{
+  "number": 35536,
+  "kind": "issue",
+  "title": "console list page: the first data page is sometimes read twice, byte-identical, 150-380 ms apart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:39:08Z",
+  "updated_at": "2026-11-19T16:08:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35536",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35455 dev (os-dev-report 7012178512), measured on `origin/main` `92121196` with the built console. It belongs to #35455's family (duplicate first-screen reads) and is nested under it.\nReader: `domain:ui` (list view data read; grid). Suggested grade: p2 (not on the path to first paint; a wasted round trip on a daily first screen).\nDedupe: `list data read twice`, `duplicate data read list page`, `populate top=50 sent twice`, `grid refetch after first page`. No open card.\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；列表页首次打开时有时会把同一页数据取两次，修好后少一次请求。\n- 为什么做：首屏请求提速工作中测到的重复读取。\n- 出错会怎样：只影响请求次数；改错可能导致列表不刷新，撤回即可。\n- 要你做什么：无。\n\n## Facts\n\n- Showcase list page `/_console/apps/com.example.showcase/showcase_task`: on 4 of 8 loads, `GET /api/v1/data/showcase_task?populate=project&top=50&select=…` was sent twice, 149-378 ms apart (e.g. 2097 and 2466 ms; 2138 and 2516 ms). On the load captured with full URLs the two are byte-identical.\n- The first answer paints; the second is not on the path to first data.\n\n## Ask\n\nFind which consumer re-issues the read (likely a settle-then-refetch after a dependency such as the personal view or the view's sort settles, beyond the in-flight de-dup), make it read once, and pin it: one data read per cold list load, with a CONTROL that a real filter or sort change still reads again.\n\n⛔ Not a claim."
+}

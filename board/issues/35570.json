@@ -1,0 +1,31 @@
+{
+  "number": 35570,
+  "kind": "issue",
+  "title": "pm-dispatch: \"take area:X\" for a repo the project already seats widens that seat's intake and opens a partition; it does not open a second seat",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T15:42:56Z",
+  "updated_at": "2026-11-19T16:03:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35570",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ③ a task the maintainer dispatched. Ruling-ref: Sales, 2026-11-19, objectstack project chat: 15:30Z 「再开一个 area:fleet」; after the coordinator opened a new seat thread for it (seat 9, #35567), 15:40Z 「你应该用同一个座位，之需要不同的分区啊」 and 「是技能写的有问题吗」. ⛔ Not a claim.\n\nGrade: area:fleet · Task · process fault (a duplicate seat, mailbox and patrol opened for one account's one lane) · every project that holds a `repo:objectstack` seat · read (the texts below at main).\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；以后你说「再开一个 area:X」，已在座的座位把 area:X 加进自己的接卡面、开一个分区，不再另开座位、信箱和巡检。\n- 为什么做：协调者把「再开一个 area:fleet」读成了开新座位（seat 9），你本意是同一座位加分区。\n- 出错会怎样：只是技能文字；改错了可直接撤回。\n- 要你做什么：无；合并规则 PR 时看一眼引文即可。\n\n## What the text says today\n\n- `references/coordinator.md` §一: 「每条车道开一个席位线程，坐该车道空着的座位贴」 and 「新席坐空座、开信箱…」. Read strictly, `repo:objectstack` is one lane, so one project holds one seat thread for it. The text never says so outright, and 「新席坐空座」 reads as \"a new intake ⇒ a new seat\".\n- `references/lanes/objectstack.md` 形态: 「可多席、多账号」 and 「开席、加席、收席由维护者召唤」. It does not say that a seat's `area:*` intake is a property of the seat, nor that a maintainer naming another `area:*` is an intake change, not a 加席.\n- `references/area-lease.md`: 「本模式 = 一席 + 按需分区」. Its 区 are file-cluster leases. The word 区 for those and the `area:*` product labels collide, so 「再开一个 area」 reads as \"open an area\", and the text has no line mapping one to the other.\n\n## What changes\n\nOne added rule, in the skill text only:\n\n1. `references/coordinator.md` §一 and `references/lanes/objectstack.md` 形态: one project holds at most one seat per lane. A maintainer order naming another `area:*` (「接 area:X」「再开一个 area:X」) for a lane this project already seats goes to that seat. The seat adds `area:X` to its post's intake line, and partitions it under `area-lease.md` (its own area thread, or folded into an existing one). The coordinator opens a new seat only when the maintainer says seat (「开座位」「再开一个座位」), or when the lane has no seat of this project.\n2. `references/area-lease.md`: one line saying the lease 区 are file clusters inside a seat, and that an `area:*` label is a card's product area, which a seat's intake names. The two are different words.\n\nThis sits on the same pm-dispatch text as the seats-plus-epics rewrite (#35232, step 4a), so it rides that PR, or follows it on the same chain if #35232 lands first. A standing-rule citation for the PR body: the 15:40Z sentence above, which states how seats work in general, not a one-card instruction.\n\n## Done when\n\nThe skill text says that a new `area:*` for an already-seated lane is an intake change on the same seat, partitioned there, and never a new seat; and it tells file-lease 区 apart from `area:*`."
+}

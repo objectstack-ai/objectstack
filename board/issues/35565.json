@@ -1,0 +1,39 @@
+{
+  "number": 35565,
+  "kind": "pull_request",
+  "title": "feat(spec): a formula field can return percent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T15:33:39Z",
+  "updated_at": "2026-11-19T19:21:22Z",
+  "closed_at": "2026-11-19T19:21:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T19:21:19Z",
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35565",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgEpYDjddvdg2ymktFMmNiYa)_\n\nFixes #35047\n\nClause-②: yes (widening)\nMetadata-protocol: added\nSkills-docs: follow-up #35607 — `skills/objectstack-data/rules/field-types.md` (line 130) lists formula return types without `percent`; skills prose is outside this card's fence\n\n## 维护者速读\n\n1. 用户能看到什么变化：比率类公式字段（如预算使用率、毛利率）可以声明为百分比，记录页和列表里显示为带百分号的数值，与存储的百分比字段一致，而不再是一串裸小数。\n2. 为什么做：客户关系应用里的预算使用率、毛利率等比率公式此前只能显示为裸数字，与旁边存储的百分比字段格式不一致，平台没有其他办法补上。\n3. 出错会怎样：没有声明百分比的公式不受影响；若显示有误，最坏是某个比率按百分比格式显示错位，回滚本次改动即可恢复。\n4. 要你做什么：无。\n\n## What changes\n\n- `@objectstack/spec`: formula `returnType` admits `percent`, mirroring `currency` (#22727). The value is read as a `percent` field reads its stored value: a fraction (`0.25` shows `25%`) unless the formula declares `max` above 1, then percentage points (`percentScaleOf`). `scale` counts the decimal places of the displayed percentage (absent: 0). `percentDisplay` applies to a percent formula too. Declared, never inferred. Readers that switch on `returnType` (display-name eligibility per ADR-0079, filter operator and comparand typing, `stack.zod.ts`, `component.zod.ts`) class `percent` with `number`. The field and object forms offer `Percent`, and the field form's `percentDisplay` row opens for a percent formula.\n- `@objectstack/objectql`: `formulaRoundingScale` rounds a percent formula's fraction result to `scale + 2` places and a whole percentage to `scale`.\n- The same rounding step also serves an existing stored `percent` field computed from its `expression`. Before, its computed fraction was rounded to `scale` itself (0.417 at `scale: 1` was stored 0.4, reading 40.0%); it now keeps `scale + 2` places (0.417, 41.7%). This applies from the next computed write; rows written earlier are not rewritten. The changeset says so too.\n- `@object-ui/fields`: `FormulaField` renders a percent result with the percent formatter. The field and object forms offer `percent` as a return type. `@object-ui/app-shell`: editing the expression in the field inspector keeps a declared `percent` or `currency` unless the new expression proves text, a boolean or a date (an unproven field-over-field quotient no longer clears it).\n- Docs: `content/docs/data-modeling/formulas.mdx` and `field-types.mdx` list `percent` with its convention; the reference pages and the en metadata-forms bundle are regenerated.\n\n## Tests\n\n- New: spec `formula-percent-result.test.ts`; objectql `engine-formula-scale.test.ts` (percent arm); ui `formulaFaces.returnType-11748.test.tsx` and the inspector pins (a `number` verdict, and a field-over-field quotient that proves no type, for `percent` and `currency`; the new arm fails 3 of 11 with the fix taken out).\n- Moved with the enum: the filter operator / comparand declared-type tests, `formula-currency-result.test.ts`, service-analytics `formula-return-type-measure.test.ts`, and the lint shipped-predicate census (63 → 65, the percent formula's `percentDisplay` gate holds two literal comparisons).\n\n### 席位核对\n\n- Head `bc810f4ad9`: the S1 fix round from the contract review (7017037505), `fe974fb467` (inspector keeps a declared `percent` / `currency` under a `number` or unproven verdict, jsdoc and describe, changeset wording) and `bc810f4ad9` (reference docs regenerated), over `03a17ea72f`, which follows a base-only merge of `main` via `os-regen-merge.sh` at `986de618a`. K = 13. +437/−56 over 28 files, not governed.\n- os-dev-report 7016442707: spec 857 files / 27395 tests, objectql 616 / 13911, touched ui tests green, six typechecks exit 0; dispatch-gates 128 derived, 128 run, 0 NOT-MEASURED. overlap-check clean against `origin/main` and PRs #35510, #34817.\n- S1 round, run locally: the inspector pin file 11 passed; with the fix taken out, the 3 new `percent` / `currency` arms fail. `check:generated --fix` regenerated the reference docs; `check-i18n-bundles` in sync after the build closure.\n- CI on `bc810f4ad9`: 61 success, 9 skipped, 0 failed.\n- Two-minute check: `pnpm --filter @objectstack/spec exec vitest run src/data/formula-percent-result.test.ts`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CajiB6BSQKWowy6YLB\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CajiB6BSQKWowy6YLB -->\n"
+}

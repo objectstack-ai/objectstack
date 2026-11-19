@@ -1,0 +1,32 @@
+{
+  "number": 35542,
+  "kind": "issue",
+  "title": "checklist dashboards.cross-object-where-engine-path: re-point acceptance[4] and acceptance[5] and knownGaps[0] to the post-#33626 contract",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:55:21Z",
+  "updated_at": "2026-11-19T16:02:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35542",
+  "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nKind: stale spec, so this is a re-point card (`checklist-test` §5). The product follows the current contract; the item still pins the pre-#33626 refusals. Found by the milestone acceptance #35539 for epic #33631.\n\n**What is stale:**\n- **acceptance[4]** expects `400 INVALID_FILTER` once more than 1,000 parents match. On SQL drivers the read is now an in-database semi-join and is served. Measured on SQLite and PostgreSQL 16 at `92121196`:\n  - 1,003 matching parents: 200, count 13, sum 40, equal to the hand count;\n  - 21,003 matching parents (PostgreSQL): served in 24 ms.\n- **acceptance[5]** expects two hops refused. Up to three relationships are now served; four are refused with `400 INVALID_FIELD` (\"traverses 4 relationships\"). `/data` agrees.\n- **knownGaps[0]** names #33792 as open. It is closed, and `$ne 'open'` gives 5/500 on both the native and the engine paths.\n\n**Re-point:**\n- Keep the `$not` and `$field` refusals.\n- Replace the 1,000-parent refusal with a clause that 1,003 and 21,003 matching parents are served with the hand count.\n- Move the hop refusal to the fourth relationship.\n- Drop or update knownGaps[0].\n- Cite #33626, then bump the revision and add a `history` line.\n\nQA-source: #35539 · dashboards.cross-object-where-engine-path · acceptance[4]\nQA-source: #35539 · dashboards.cross-object-where-engine-path · acceptance[5]"
+}

@@ -12,20 +12,18 @@
   },
   "labels": [
     "area:fleet",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T17:30:24Z",
-  "updated_at": "2026-11-19T12:26:54Z",
+  "updated_at": "2026-11-19T17:57:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35237",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\n\n## What to do\n\nStep 6. Turn the procedures that the skills spell out as prose and that a seat retypes every time into scripts. The reports' section 4 lists the candidates. This includes a card-pick reader by epic and area, which answers which ready cards a seat should take next under the grade rules. Each script replaces its prose with one line naming the command.\n\n## Done when\n\nEach listed procedure is a script with a self-test, the prose is a one-line pointer, and the card-pick reader works against the live board."

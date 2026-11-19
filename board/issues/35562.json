@@ -1,0 +1,32 @@
+{
+  "number": 35562,
+  "kind": "issue",
+  "title": "An object_extension amount whose two-segment currencyField starts with a non-master_detail field is not judged at the save, though an object body refuses the same pointer at parse",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T15:29:06Z",
+  "updated_at": "2026-11-19T16:02:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35562",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect · Source: fleet · out-of-scope finding of PR #35538 (card #33911), named in os-dev-report 7012609865. The L1-a ACCEPT record 7013604382 ruled that a p3 card is owed, with a public-door measurement as its first step. ⛔ Not a claim.\n\nGrade: area:build · Bug · Impeded · uncommon (an extension authoring a record-mode amount that follows a lookup's code) · read from the code, not measured at a public door → p3.\n\n## Business reason\n\nAn author who adds a record-mode currency amount through an object extension, with `currencyField: 'some_lookup.currency_code'`, gets no answer at save time. On an object body the same pointer is refused at parse: `object.zod.ts` refuses a segment 1 that is a `lookup` or any other non-`master_detail` field. On an extension the save probably succeeds (200), and then every write of that amount is refused, with a message that does not name the cause. That is the same class as #33911, which PR #35538 fixes for one-segment pointers.\n\n## What happens\n\n`followRefusalsOf` in `packages/objectql/src/record-currency-aggregate-door.ts` judges (a) two-segment pointers whose first segment resolves to a `master_detail` path, and after PR #35538 (b) one-segment pointers. A two-segment pointer whose first segment is not a `master_detail` of the served object has `path.master === undefined`. Arm (a) skips it, and arm (b) never reaches it because it has two segments, so nothing judges it.\n\n## Expected\n\nThe save refuses it with 422 `INVALID_METADATA` (ADR-0112 `code` + `status`). The message names the field, the pointer and why segment 1 cannot carry a following currency, matching the object-body parse refusal.\n\n## Done when\n\n- First step: measure at the public protocol save door. Use #33911's step 2 with `currencyField: 'some_lookup.currency_code'` on an extension, and record whether the save returns 200 and the first write is refused.\n- If it reproduces: a pin at the batch registration door refuses it (status, code, message, nothing stored), with a control showing that a `master_detail`-led pointer still saves, and an ablation.\n\nWho acts: the area that owns `packages/objectql` record-currency doors (area:build).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open currencyField extension master_detail` → only #33628 (package lifecycle verbs never ask the follow door; a different door); `… currencyField two-segment lookup` → nothing related."
+}

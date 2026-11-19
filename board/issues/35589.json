@@ -1,0 +1,32 @@
+{
+  "number": 35589,
+  "kind": "issue",
+  "title": "An unchanged owner object re-save may answer 409 DESTRUCTIVE_CHANGE while an extension adds a column, reading the extension column as dropped",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T16:39:36Z",
+  "updated_at": "2026-11-19T16:52:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35589",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect, measure first. Source: fleet. This was escalated in section ③ of the contract-review delta record 7015428256 on PR #35538 (card #33911), from the os-dev-report 7015317770. The seat ruled that a card is filed and that triage's first touch sets the grade. ⛔ Not a claim. **Read off the code, not measured, and it predates #35538.**\n\nGrade: area:build · Bug · reach not measured → grade left to triage.\n\n## Business reason\n\nAn admin installs a package that extends an object with a new field (an `object_extension`). Later the admin saves the owner object again without changing it, for example from Studio. That save appears to be refused with 409 `DESTRUCTIVE_CHANGE`, as if the admin were dropping the extension's column. If so, every owner save is blocked while any extension adds a column, and the message points at a drop the author never asked for.\n\n## What happens (read, not measured)\n\nWhile pinning #35538, the dev found that a protocol re-save of the owner, while an extension adds a column, first meets the destructive-change door. In `packages/objectql/src/protocol-save.ts` (about lines 1140 to 1246, before the registration door at about line 1621), that door diffs the incoming body against the item read at the save's own address. It reads the extension's column as one the owner's body would drop, so it answers 409 before any later door is asked. A save with `force: true` passes that door. L1-a read the same order in the source (7015477528).\n\n## Expected\n\nThe destructive-change door compares the owner's body with the owner's own stored layer, or with the served object minus the enabled extensions' fields. A column that an enabled extension contributes is not counted as one the owner's save drops.\n\n## Done when\n\n- First step: measure at the public door. Install a package whose `object_extension` adds a field to an owned object. Then `PUT /api/v1/meta/object/NAME` with the owner's stored body unchanged, without `force`. Record whether it answers 409 `DESTRUCTIVE_CHANGE` and which column it names.\n- If it reproduces: an unchanged owner save answers 200. A pin covers it, with a control that a real owner-side field drop still answers 409, and an ablation.\n\nWho acts: the owner of the objectql protocol save path (`protocol-save.ts` destructive-change door).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open destructive change extension column owner re-save`. Neither the hits listed when this was filed nor the related #35562 and #35566 cover this door."
+}

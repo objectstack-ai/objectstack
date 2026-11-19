@@ -2,8 +2,8 @@
   "number": 33911,
   "kind": "issue",
   "title": "metadata save: an object_extension whose record-mode amount names a one-segment currencyField that the served object does not declare is saved 200, then every write of that amount is refused naming a field that does not exist",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:build",
     "bug",
     "domain:server",
-    "lease:b1-B",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T14:04:30Z",
-  "updated_at": "2026-11-19T12:48:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T17:57:23Z",
+  "closed_at": "2026-11-19T17:56:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33911",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nObserved at objectstack-ai/objectstack b914e7247f69 (v18.5.0), reproduced on two fresh boots, on a stock showcase dev boot (`objectstack dev --seed-admin --no-compile`, file SQLite DB), signed in as the seeded admin.\n\nReproduction (method · path · body):\n1. POST /api/v1/packages/com.example.showcase/ensure-customization (no body) → 201 or 200 (the pair com.example.showcase.custom).\n2. PUT /api/v1/meta/object_extension/showcase_invoice?package=com.example.showcase.custom\n   body {\"extend\":\"showcase_invoice\",\"fields\":{\"fee__c\":{\"type\":\"currency\",\"label\":\"Fee\",\"currencyConfig\":{\"currencyMode\":\"record\",\"currencyField\":\"zz_missing__c\"&#125;&#125;&#125;&#125;\n   → 200 \"Saved object_extension 'showcase_invoice' (… package=com.example.showcase.custom, state=active)\". The served showcase_invoice now carries fee__c following `zz_missing__c`. Neither the base object nor any extension declares that field.\n3. PATCH /api/v1/data/showcase_invoice/&lt;any id> {\"fee__c\":5}\n   → 400 \"Update on 'showcase_invoice' … was REFUSED: 'fee__c' holds an amount in the record's own currency (currencyMode: 'record'), and its currency code field 'zz_missing__c' is blank. The row was not written. Write the record's ISO 4217 code (for example 'USD') into 'zz_missing__c' in the same write…\". The prescribed remedy names a field that does not exist, so no write of fee__c can ever succeed.\n4. Cleanup: DELETE the same object_extension address → 200.\n\nExpected: the save in step 2 is refused 422 INVALID_METADATA, naming the missing field and the served object's code-field candidates (here 'currency_code'), as the object-body twin is refused. A PUT of an object body whose amount names an undeclared currencyField (re-measured: new env object qa_fx_zz, amount currencyField 'zz_missing') answers 422 INVALID_METADATA \"failed spec validation … `amount.currencyConfig.currencyField` names `zz_missing`, but object `qa_fx_zz` declares no other field…\", and since #33621 an extension's two-segment follow pointer is judged against its object as served: `invoice.zz_missing` on a showcase_invoice_line extension → 422 \"…'showcase_invoice' declares no field 'zz_missing'… candidates: 'currency_code'\", and `invoice.invoice_date` → 422.\nActual: the one-segment pointer of an extension is not judged at any save layer. It is saved and served, and the failure first appears at the first data write, with a prescription that cannot be followed.\n\nMechanism: packages/spec/src/data/object.zod.ts `refuseDishonestRecordCurrencyField` (doc at ~line 2027: \"Not judged on `ObjectExtensionSchema`: an extension's fields merge into an object it does not hold, so its pointer may name a field only the owner declares\"). That is right at schema level. But the served-object judge that #33621 added for extensions (packages/metadata-protocol/src/protocol-save.ts object_extension branch → registry.objectRegistrationRefusal → packages/objectql/src/record-currency-aggregate-door.ts `recordCurrencyFollowRefusal`) covers only the two-segment follow pair (a) and the summary pair (c). The one-segment pointer, judged against the object as served, has no asker. The related open issue #33628 covers the follow door on disable/enable/uninstall. It does not cover this case.\n\nDuplicate search (read-only, open issues): \"object_extension currencyField\", \"extension currencyField record\", \"extension record-mode amount currency field\", \"ObjectExtensionSchema currencyField\", \"currencyField extension not judged\" (any state: \"extension currency code field blank\"). Nearest: #33628 (different paths), #33713 (dynamic roll-up admission, different rule).\nRegression vs 18.4.0: not a regression of a shipped refusal. The schema carve-out predates 181ad7d4, and the served judge for extensions is new in this range (#33621) and stops at the two-segment form.\n\nQA-source: #33910 · studio-authoring.currency-field-repointed-refusal · observed beside the clauses"

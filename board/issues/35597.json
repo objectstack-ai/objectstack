@@ -1,0 +1,32 @@
+{
+  "number": 35597,
+  "kind": "issue",
+  "title": "主从子表默认放进记录页概览左侧（关键字段下面），始终显示、带合计；判断规则改为按关系类型",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T17:03:42Z",
+  "updated_at": "2026-11-19T17:55:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35597",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「就是master-detail表类型的子表」「主从 的子表是否应该始终显示？主从的子表是否应该默认出现在概览的左侧区域？关键字段下面。」「包括有多个主子表的时候怎么处理」；看到 Twenty 的主记录区域和页签里都能放关联表格后：「一个客户下面有七八张子表都有记录，感觉都显示页没问题。」\n\n## 目标（图 37）\n\n![图 37 记录页：概览、相关表页签、抽屉](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/37-record.png?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n## 现状\n\n- 关系类型有 `lookup`、`master_detail`、`tree`、`user`（`packages/spec/src/data/field.zod.ts:80-91`）。\n- 哪些相关列表进记录正文由 `isBodyTableRelationship` 决定（`packages/spec/src/data/related-list-body-table.ts:54-60`）：`relatedList: 'primary'`，或「`master_detail` **并且**声明了 `inlineEdit`」。光是主从不算，仍是右栏卡片。\n- 正文表格才有合计（只对父对象用 `summary` 汇总的列，`ui/packages/plugin-detail/src/RelatedList.tsx:697-810`），空了也不折叠。\n- 手写页面不享受正文表格待遇（`RecordDetailView.tsx:5071`，`bodyTableIds` 为空）。\n- HotCRM：`opportunity_line_item.crm_opportunity`、`quote_line_item.crm_quote` 是主从，但都没有声明 `inlineEdit`，所以现在不是正文表格。\n\n## 要做的\n\n1. **规则**：`master_detail` 的子表默认是正文表格，不再要求同时声明 `inlineEdit`。`relatedList: false` 可以关掉，`relatedList: true` 可以降回普通相关列表，`relatedList: 'primary'` 的现有含义不变。\n2. **位置**：概览左侧，通栏的阶段条和关键字段之下、字段分组之上。多张主从子表按对象 `relatedLists` 的顺序依次排。\n3. **始终显示**：一行都没有时也显示表头和一行空状态（「还没有…」加添加入口）。\n4. **行数**：行不多时全部显示；超过一个上限（协调席建议 10，页面定义可改）时先显示前面的，「显示全部 N 条」原地展开；标题旁的「↗」去子对象的列表页并带上「属于这条记录」的条件。\n5. **合计**：有数值列时显示合计行，与列对齐。没有父对象汇总字段时由服务端对该子表按条件汇总，不只算已显示的行。\n6. **只出现在概览这一处**：不进右栏，也不占页签（维护者：「如果主子表已经在 概览中，还需要出现在右侧和顶部tab中吗」）。\n7. **手写页面同样生效**：手写页面里放的主从相关列表也得到正文表格的待遇（合计、空也显示）。\n8. 抽屉里同样排在关键字段下面。\n\n## 不做的\n\n- 编辑和保存（子卡「记录页编辑」）。\n- 普通关联（`lookup`）子表不进概览左侧，仍在页签和右栏。\n- 不改级联删除、共享继承等主从的数据语义。\n\n## 验收\n\n- 一个对象新加一张主从子表、不写任何界面声明：它的记录页概览里，关键字段下面出现这张表；没有行时显示空状态和添加入口。\n- 写 `relatedList: false` 后不出现；写 `relatedList: true` 后只在页签和右栏。\n- HotCRM 报价单（主从子表：报价行）：概览里有报价行表格和合计，合计等于服务端对全部行的汇总；行超过上限时先显示一部分，「显示全部」原地展开；页签行里没有「报价行」这个页签，右栏里也没有它。\n- 一个有两张主从子表的对象：两张依次排在关键字段下面，各有合计。\n- 既有的 `inlineEdit`、`relatedList: 'primary'` 声明行为不变（`RelatedList.bodyTable-27055` 等测试按新规则更新）。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道，规则改动与 `domain:spec` 对齐。`packages/spec/src/data/related-list-body-table.ts`、`ui/packages/plugin-detail/src/RelatedList.tsx`、`synth/buildDefaultPageSchema.ts`、`ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n\nDedupe: `主从 子表 概览`、`master_detail body table record page`（objectstack，open）→ 0。"
+}

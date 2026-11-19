@@ -1,0 +1,37 @@
+{
+  "number": 35626,
+  "kind": "pull_request",
+  "title": "fix(cli): os doctor advises --verbose only when a warning has a fix for it to show",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T18:29:52Z",
+  "updated_at": "2026-11-19T19:21:22Z",
+  "closed_at": "2026-11-19T19:21:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T19:21:20Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35626",
+  "body": "Fixes #35454\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化：开发者在命令行做项目体检时，如果出现的警告都没有修复建议（例如缺少测试文件），结尾不再叫他打开详细模式重跑一次；有修复建议的警告照旧提示。\n2. 为什么做：上一张修复 doctor 结尾提示的卡留下的另一半，开发者第一次用 CLI 时被引去重跑一次，却什么新内容也看不到。\n3. 出错会怎样：最坏情况是某类有修复建议的警告不再带这句提示，警告本身和退出码都不变；撤回本 PR 即恢复原样。\n4. 要你做什么：无。\n\n## What changes\n\n- `packages/cli/src/commands/doctor.ts`: a new `hasVerboseOnlyFix` flag, tracked beside `hasWarnings`. The summary prints \"Run with --verbose to see fix suggestions.\" only when `--verbose` is off AND that flag is set. Each warning path was read and classified:\n  - sets the flag (a fix that only `--verbose` prints): an environment `HealthCheckResult` with `status === 'warning'` and a `fix`; a dashboard-widget warning with a non-empty `hint`; the config-load-failure finding when it carries a `fix`; any `--scan-deprecations` hit (its `replacement` is printed only under `--verbose`).\n  - does not set it, no fix in either mode: missing tests, `@deprecated` usages, circular dependencies, unused objects, orphan views.\n  - does not set it, fix already printed without the flag: the platform-protocol gap (its hint is printed unconditionally) and the isolated-posture unique-scope advisory (its prescription is printed unconditionally).\n- The warnings' own text, the verdict line and exit codes are unchanged. No fix text was added.\n- `.changeset/35454-doctor-verbose-hint-fixless.md`: patch, `@objectstack/cli`.\n\n## Tests\n\n- `packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts`, in the existing `describe('the warnings summary')`, which uses the real `Doctor.run()`: a new case writes `packages/spec/src/a.zod.ts` with no test into the temp cwd and runs plain `os doctor`. It asserts that the \"Missing test\" warning fired, that the summary reached its warnings branch, and that the text after the verdict line does not name `--verbose`.\n- The two existing cases from PR #35377 still cover the fix-bearing side: a `--scan-deprecations` warning still gets the hint without `--verbose` and gets none with it.\n\n## Acceptance notes\n\n- Dashboard-widget warnings whose `hint` is the empty string (`@objectstack/lint` emits `hint: ''` on one path) do not count as fix-bearing here, since `--verbose` would print only a bare arrow for them. That empty arrow line under `--verbose` is not changed here. Observation only, not reproduced at the public door.\n- Environment rows with status `ok` also print their `fix` under `--verbose`. They are not warnings, so they do not count toward the hint. The behaviour is unchanged.\n\n## Verification\n\nReadings are at HEAD `d559e09a` (the fix commit `1dc43d70` merged with origin/main `f981dce3`; the merge brought in no package source).\n\nTwo-minute check: `pnpm --filter @objectstack/cli exec vitest run --project unit src/commands/doctor-deprecation-hint-commands.test.ts`. Expected: 15 passed.\n\nRead first: `packages/cli/src/commands/doctor.ts`, the summary's `if (!flags.verbose && hasVerboseOnlyFix)` and the four places that set the flag. The risk is a fix-bearing path left unclassified.\n\n<details><summary>Red first, then green</summary>\n\n- At `86ec0951` (the new pin on an unmodified `doctor.ts`): Tests 1 failed, 14 passed (15). The new case failed with `expected '\\n   Run with --verbose to see fix su…' not to contain '--verbose'`.\n- At `1dc43d70`: Test Files 1 passed (1), Tests 15 passed (15).\n\n</details>\n\n<details><summary>Ablation (scripts/ablation-replace.mjs, landed on disk and restored)</summary>\n\n- Anchor `if (!flags.verbose && hasVerboseOnlyFix) {` replaced with `if (!flags.verbose) {`. The anchor went from 1 to 0 and the blob from 975d2c65 to ab86dda8. Result: Tests 1 failed, 14 passed. Only \"makes no such advice when the only warnings carry no fix to reveal\" failed.\n- Restore: the blob after restore equals HEAD (975d2c65) and `git diff HEAD` is empty.\n- The test imports the subject as relative source (`./doctor.js`), so the ablation needed no dist rebuild.\n\n</details>\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm run typecheck` in `packages/cli` (tsc, then `check:test-typecheck`) followed by `pnpm exec vitest run --project unit --maxWorkers=2`, as one locked command: VERDICT command-exit 0. Test Files 431 passed (431), Tests 6163 passed (6163).\n- The `integration` tier is left to CI: the diff touches no integration-tier file and no spawn entry.\n\n</details>\n\n<details><summary>Gates (derived set, local)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `d559e09a` derived 69 families. Each one was run, with its exit code captured before any pipe.\n- 67 exited 0. 2 are NOT MEASURED, both exit 3 PREREQUISITE NOT MET because they need dist output across the repo: `pnpm check:dual-build-cjs-loads` (no dist for studio, client-react, connector-slack, ...) and `pnpm check:i18n-coverage` (the app-showcase config imports an unbuilt connector-slack dist). CI runs both.\n- `--ran` reconciliation: \"69 derived famil(ies) accounted for — 67 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)\".\n- `node scripts/pm/overlap-check.mjs`: VERDICT clean exit 0.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTyMahdAdhXSzgy2nt)_\n"
+}

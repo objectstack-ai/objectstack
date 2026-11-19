@@ -2,8 +2,8 @@
   "number": 35400,
   "kind": "issue",
   "title": "metadata save refusal: a refused view or form save lists a bare \"Invalid input\" entry at path '' as issues[0], beside the entries that name the real key (split from #33345 row 60; needs a decision)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:build",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T08:04:06Z",
-  "updated_at": "2026-11-19T14:07:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T16:06:01Z",
+  "closed_at": "2026-11-19T16:04:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35400",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① measured. Split from #33345 row 60 (v18.4.0 sweep, ledger `studio-authoring.removed-key-save-door-refusal`) by the #33345 os-dev report (comment 7003316873, open question 1). PR #35397 fixes the rest of row 60 (empty key text, short-key rename guess) and rows 130, 164, 233; this part waits on a choice, so it is split out rather than holding the PR. ⛔ Not a claim; triage sets lane and grade.\n\n## What the user sees\n\nA refused view or form save returns, as `issues[0]`, an entry `{ path: '', message: 'Invalid input', code: 'invalid_union' }`, next to the entries that name the real key. Studio shows it as a bare \"Invalid\" line with no field. Measured on main `c05a8a01c9` through `getMetadataTypeSchema` + `zodIssuesToMetadataIssues`.\n\n## Why it is not a copy fix\n\n- #5364 recorded the union-branch expansion as \"strictly additive\": `issues[0]` stays where it is. `protocol.save-union-issues.test.ts` and `metadata-diagnostics.union-issues.test.ts` pin it.\n- Studio's `translateValidationMessage` maps the exact text `invalid input` to its localized \"Invalid\".\n- Producer: `packages/metadata-protocol/src/protocol-metadata-issues.ts` (`collectMetadataIssues`).\n\n## Options (from the dev's reading)\n\n- **A.** Drop the wrapper entry when the expansion produced at least one entry. Studio, MCP and API callers see only useful entries. Reverses #5364's rule; about 4 pins rewritten; a changeset declaring the envelope change. 1 PR, size S.\n- **B (dev's recommendation).** Keep the entry, its path and code; replace its message with one sentence pointing at the entries below it. Shape unchanged. Studio must pick its translation by issue code, not exact text, or Chinese users see English: a small `ui/` change alongside. 1 PR, size S, plus the ui change.\n- **C.** Leave the wire; Studio hides a root `invalid_union` entry when more specific entries follow. API, MCP and CLI callers keep the bare line. 1 ui PR, size S.\n\nReader: the seat (an envelope / contract choice), then `domain:server` + ui.\n\nDedupe: issue search `invalid_union Invalid input path root entry`, `bare Invalid input view form save refusal`, `strictly additive union issues` → only #33345."

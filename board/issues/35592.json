@@ -1,0 +1,31 @@
+{
+  "number": 35592,
+  "kind": "issue",
+  "title": "Spec docblock: FilterCondition form 4 says the nested-relation form is served \"the same on every driver\" by reading related ids, but drivers without readableIdsLeaf refuse it and SQL pushes it down as a subquery",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T16:52:45Z",
+  "updated_at": "2026-11-19T16:55:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35592",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Found by the CONTRACT_REVIEW_TIER review of PR #35574 (card #35494), record 7015837933 (§③, the dev's out-of-scope flag); on lines that PR does not change. Dedupe: `\"same on every driver\"` (0 open issues), `readableIdsLeaf docblock` (3 hits: #35494 open, the hop-limit sentence only; #34797 and #33876 closed, refusal message and engine refusal, not this docblock).\n\n## What is false\n`packages/spec/src/data/filter.zod.ts`, the form 4 paragraph of the `FilterCondition` docblock (about lines 2214–2229 at `b65488a8`), ships verbatim in `@objectstack/spec` (`files[]` carries `src/**/*.zod.ts`) and says three things the engine does not do:\n1. \"The query engine SERVES it in `where`, the same on every driver\". On a driver that does not declare `readableIdsLeaf` (MongoDB, OData), a single-valued relation condition on a read verb is refused up front with `INVALID_FILTER` / 400: `packages/spec/src/data/driver.zod.ts:454`–462 and `relationReadDriverRefusal` in `packages/objectql/src/relation-filter-lowering.ts` (about :370). The hand-written page `content/docs/kernel/contracts/data-engine.mdx` already says \"the same on every driver that serves it\" (about :192) and states the refusal (about :225), so two published texts disagree.\n2. \"reads the related object with the condition AS THE CALLER … and matches the relation field against the ids it returns\". On a SQL driver a read verb pushes the condition down as one subquery (PR #35423's verification: one statement, no related-id read), not an id read.\n3. \"A condition matching more related records than the engine's cap is refused rather than truncated\". It holds only where ids are read; the subquery path caps nothing (`relation-filter-lowering.ts` module header, about :34–44).\n\nreach: shipped text an author or agent reads (the docblock reaches the generated schema descriptions); measured by reading the cited code at `b65488a8`, not run.\n\n## Done when\nThe paragraph states, per verb and driver capability, how the form is served (subquery push-down where the driver can, the bounded id read where it cannot prove the subquery, refusal on a driver without `readableIdsLeaf`), the cap sentence is scoped to the id-read path, and it agrees with `data-engine.mdx`. Text only, no behaviour change; a `patch` changeset on `@objectstack/spec` (the file ships).\n\n## Business rationale\nBuilders and AI agents write filters from the spec's own docs. Told \"same on every driver\", an agent writing a MongoDB-backed app writes a nested-relation filter that the engine refuses at query time. Reader: the area:data lane seat that holds the filter docblock (d7-C today), one docs-only PR.\n\nGrade: p2 · area:data · Bug · builders, often · evidence read (same class and reach as #35494, which triage graded p2: \"a wrong sentence in shipped text is a Bug at that reach\")."
+}

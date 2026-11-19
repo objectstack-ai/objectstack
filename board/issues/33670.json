@@ -15,7 +15,6 @@
     "bug",
     "domain:server",
     "finding",
-    "lease:E2",
     "pm:dispatched",
     "priority:p3"
   ],
@@ -25,7 +24,7 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T05:27:10Z",
-  "updated_at": "2026-11-19T02:58:49Z",
+  "updated_at": "2026-11-19T19:44:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

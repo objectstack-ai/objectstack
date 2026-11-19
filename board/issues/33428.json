@@ -13,7 +13,6 @@
   "labels": [
     "area:build",
     "domain:server",
-    "lease:A5",
     "pm:queue",
     "priority:p3"
   ],
@@ -21,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-14T20:25:30Z",
-  "updated_at": "2026-11-19T06:11:40Z",
+  "updated_at": "2026-11-19T15:02:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33428",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\nFound while fixing #32976 (PR #33426, which only makes the test seed fixed ids and does not touch this). Measured at `01321f651` against `packages/cli/bin/run-dev.js`.\n\n## Line\n\n`os migrate stored-references bind` (and any CLI command with a short-char flag) · a string flag whose value is a driver-minted id · 1 in 4096 rows for `bind` · measured.\n\n```\nos migrate stored-references bind --table sys_sharing_rule --id -yQ9zzAbCdEfGhIj --package com.example.crm --yes --json\n→ objectstack: INVOCATION ERROR — Flag --id expects a value   (exit 2, 0 bytes on stdout under --json)\n```\n\nThe `--id=-yQ9zzAbCdEfGhIj` spelling fails the same way. The SQL driver mints row ids as `nanoid(16)`, and that alphabet contains `-`. oclif 5.1.2 `parseFlag` refuses a value that `findFlag` resolves to a declared flag, and `findShortFlag` reads only the second character. `bind` declares `--yes` as `-y`, so any stored row whose id begins `-y` can never be bound, in any spelling. A sweep of all 4096 two-character prefixes after `-` through the bind's real flag set refused exactly 64, all of them `-y`.\n\n## Family\n\nAny CLI string flag that can carry a minted id or other user value, on a command that declares a short char. By grep over `packages/cli/src/commands`: 27 commands declare `-y`, 26 `-t`, 23 `-u`, 16 `-f`.\n\n## Do\n\n- Decide the fix at the family level (for example, a shared value-flag helper or a parse hook that accepts a dash-leading value for flags typed as an id, or upstream oclif behaviour), not per command.\n- Pin by enumeration: walk every command's declared string flags and assert that a value beginning `-<declared char>` parses as a value. Ablate.\n\nReader who acts: `packages/cli/src/commands/**`, oclif flag parsing in `packages/cli`.\nSuggested grade: p3. Lane: `domain:server`.\n"

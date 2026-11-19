@@ -1,0 +1,32 @@
+{
+  "number": 35599,
+  "kind": "issue",
+  "title": "记录页编辑：主记录的字段和主从子表的行一起进入编辑状态，一次保存、同一个事务",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T17:04:28Z",
+  "updated_at": "2026-11-19T17:55:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35599",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「编辑的时候也要能一起编辑和保存」「这个你要具体调研合理性和代码能实现的可行性」。\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n## 现状\n\n- 带子表的**表单**已经支持：`ui/packages/plugin-form/src/MasterDetailForm.tsx`，子对象外键声明 `inlineEdit` 时自动启用（`ui/packages/app-shell/src/providers/MetadataProvider.tsx:714-756`）。新建和编辑都能增、改、删子表的行（:1928-1985）。\n- 保存走一次 `POST /api/v1/batch`，服务端是同一个事务，全成或全不成（`packages/rest/src/batch-routes.ts:218-520`）。批次里每个对象都要开 `bulk`（:373-376）；没开就保存失败（objectstack-ai/objectstack#34566、objectstack-ai/hotcrm#2565 记过）。\n- **记录页**有两条编辑路径：逐字段就地改（`InlineEditProvider`，只覆盖关键字段和明细，`InlineEditSaveBar` 只对主记录发一次更新，`RecordDetailView.tsx:5665`）；「编辑」按钮打开表单弹窗或表单页（`ui/packages/app-shell/src/console/AppContent.tsx:1120-1165`）。记录页上不能和主记录一起改子表的行。\n- 审批锁定：客户端 `resolveApprovalLock`（`RecordDetailView.tsx:2307-2312`）禁用编辑；服务端是主记录上的 `beforeUpdate` 钩子抛 `RECORD_LOCKED`（`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts:615, 224`）。**没有找到锁子表行的逻辑**：商机在审批中，产品明细仍可改。\n\n## 要做的\n\n1. 点「编辑」后，记录页概览进入编辑状态：字段变成输入控件，概览里的主从子表变成可编辑的行（可加行、删行、改行）。头部右边换成「取消」「保存」。\n2. **一次保存**：主记录的改动和所有主从子表的增、改、删打成一个批次提交，复用 `MasterDetailForm` 的批次构造，走 `POST /api/v1/batch`，同一个事务。失败时什么都不落，逐条显示错误并定位到对应字段或行。\n3. 多张主从子表都在同一次保存里。\n4. 「取消」放弃全部改动；有未保存改动时离开页面要确认。\n5. 父对象或子对象没开 `bulk` 时，不出现「能编辑但存不了」：要么平台在声明了主从正文表格时自动放行这条批量路径，要么进入编辑状态前就提示并只允许改主记录。由实现方选一种并写进 PR。\n6. 抽屉里同样适用。\n\n## 需要维护者裁决（协调席的建议写在后面，裁决前先按建议做其余部分）\n\n- **A. 审批锁定是否也锁主从子表的行。** 建议：锁。主记录因审批锁定时，它的主从子表不能增、改、删，客户端禁用，服务端在子对象的写入钩子里检查父记录的锁。理由：审批人批的是「这条记录连同它的明细」，批的过程中明细能改，等于批的内容会变。这一项要动服务端。\n- **B. 逐字段就地改是否保留。** 建议：保留给没有主从子表的对象和简单字段；有主从子表的对象统一走「编辑 → 保存」，避免同一页上两种保存方式并存。\n\n## 不做的\n\n- 不改新建表单；不改表单弹窗本身。\n- 普通关联子表的行不在这次一起编辑的范围内。\n\n## 验收\n\n- HotCRM 报价单：点「编辑」，改一个主记录字段、改一行数量、加一行、删一行，点「保存」：只发一次批量请求；刷新后四处改动都在，合计正确。\n- 同样的操作里把某一行改成不合法的值：保存失败，主记录和其他行都没变，错误定位到那一行。\n- 点「取消」后页面回到编辑前的样子。\n- 裁决 A 若为「锁」：审批中的商机，直接调接口改它的产品明细被拒绝，返回 `RECORD_LOCKED`。\n- 验收条款 `records-forms.master-detail-atomic-save` 同笔更新，覆盖记录页这条路径。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道；裁决 A 若为「锁」，另需 `plugin-approvals` 的服务端改动。`ui/packages/app-shell/src/views/RecordDetailView.tsx`、`InlineEditSaveBar.tsx`、`ui/packages/plugin-form/src/MasterDetailForm.tsx`、`packages/rest/src/batch-routes.ts`、`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts`。依赖子卡「主从子表」。\n\nDedupe: `记录页 编辑 子表 一起保存`、`record page edit master detail batch save`（objectstack，open）→ 0；相关：objectstack-ai/objectstack#34566（已关闭）。"
+}

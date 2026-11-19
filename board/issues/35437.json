@@ -2,8 +2,8 @@
   "number": 35437,
   "kind": "issue",
   "title": "record page: the header highlights strip, the detail-view node and the record drawer still draw a field whose own visibleWhen is false",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T09:06:16Z",
-  "updated_at": "2026-11-19T12:12:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T15:42:05Z",
+  "closed_at": "2026-11-19T15:41:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35437",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35314 dev (os-dev-report 7004158578, PR #35421 Acceptance notes), read in code and not driven live. L1-a named it as owed (ACCEPT 7004621926). It is a follow-up of #35314 and is nested under it.\nReader: `domain:ui` (plugin-detail `record:highlights`, the detail-view node, the record drawer). Suggested grade: p2, the same reach and class as #35314 (UX, daily, objects with conditional fields).\nDedupe: `highlights visibleWhen`, `record drawer visibleWhen field`, `detail view visibleWhen false drawn`. Only #35314 matches, and it covers the details body.\n\n## 维护者速读\n\n- 用户能看到什么变化：记录页顶部的要点条、详情视图和侧边抽屉里，条件不满足的字段仍会显示，和表单、详情正文不一致。\n- 为什么做：详情正文已修好（前一张卡），这三处是同一问题的剩余位置。\n- 出错会怎样：只影响显示；条件算不出来时照常显示；撤回即可。\n- 要你做什么：无。\n\n## Ask\n\nApply #35421's rule to these three surfaces: drop a field whose own object-level `visibleWhen` is false for the record. Use the form's `resolveFieldRuleState` (fail-open, ADR-0137 D3) with the record bound as `record` and `previous`, plus the host predicate scope. Reuse #35421's `dropPredicateHidden` or its verdict, without a second implementation. Pins: a parity check against the form's verdict for each surface, with CONTROLs for a predicate that holds and for no predicate. Ablate red. `Clause-②: no` and `Metadata-protocol: none` expected.\n\n⛔ Not a claim."

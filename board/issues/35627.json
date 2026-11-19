@@ -1,0 +1,37 @@
+{
+  "number": 35627,
+  "kind": "pull_request",
+  "title": "fix(service-automation): name the braces rule in the invalid-expression header only over a brace refusal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T18:30:45Z",
+  "updated_at": "2026-11-19T19:21:22Z",
+  "closed_at": "2026-11-19T19:21:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T19:21:20Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35627",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRTHmmdYhGsPrpf8EzYYxUk)_\nFixes #35369\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 流程作者发布或启动流程被拒时,若被拒的表达式与花括号无关(例如对日期字段写了时间戳转换),提示首句不再讲花括号规则,改为中性的计数说明;含花括号错误时提示与之前一字不差。\n- 属于流程注册把关的报错质量改进,替被误导的流程作者解决\"先被告知一个自己没犯的错\"的问题。\n- 出错只会让提示首句措辞不准,哪些流程被拒、每条拒绝原因都不变;可直接撤回。\n- 无\n\n## What changes\n\nThe \"invalid expression\" refusal `registerFlow` throws (and the stored pass previews) opened with one fixed header for every failure kind: the ADR-0032 §1a braces sentence (\"Predicates ... must not wrap references in `{…}` template braces ...\"). Over a date-text verdict, an unknown function or a `{{ }}` hole over an unbound `$` name, that told the author about a mistake they did not make.\n\nPer the card's fix direction, verbatim: \"Name the braces rule only when a listed refusal is a brace refusal (`cel-template-brace` / `template-single-brace` / dialect mismatch); otherwise a neutral count header.\"\n\n- **Brace class** (header unchanged, byte for byte, citation kept): an expression-judge refusal whose `code` is `cel-template-brace`, `template-single-brace`, `cel-dialect-mismatch` or `template-dialect-mismatch`; every retired `{…}` token in a value-slot literal (`flowNodeValueTemplateRefusals`); a text-slot refusal whose single-brace half leads with the spec's published `TEXT_SLOT_TEMPLATE_REFUSAL`; a value envelope naming a dialect other than `cel` (its shape refusal carries no code).\n- **Everything else** (date-text family, unknown function, malformed shapes, blank sources, unbound `$` holes) is listed under the neutral header: `Flow 'X' has N invalid expression(s); each is refused for the reason given with it, and the flow does not register until every one is fixed:`. A mixed list keeps the braces header.\n- The kind is decided where each refusal is pushed (a `braces` argument on `refuse`), never read back out of the sentence. To carry it for value envelopes, the internal `valueEnvelopeRefusals` (dag-traversal) now passes through the judge's `code` beside `message`/`source`; that is two small edits outside the claim's file surface (`dag-traversal.ts`, `engine.ts` private signature), recorded as a deviation.\n- No verdict change: which flows are refused and every listed refusal line are unchanged (pinned: the mixed list's body contains each solo body byte for byte).\n\nFiles to read first, by risk:\n1. `packages/services/service-automation/src/flow-registration-checks.ts`: the value-envelope hunk (`refusal.code` vs `envelopeNamesNonCelDialect`) and the header hunk.\n2. `packages/services/service-automation/src/dag-traversal.ts`: `ValueEnvelopeRefusal` plus the `code` pass-through.\n3. `packages/services/service-automation/src/flow-registration-checks.test.ts`: the new top-level describe.\n\n## Tests\n\nNew top-level describe in `flow-registration-checks.test.ts` (9 cases): date-text alone, unknown function alone and unbound `$` hole alone give the neutral header with no braces sentence; braced predicate, retired `{…}` value literal, template-dialect value envelope, braced CEL value envelope and flow-text single-brace token give the braces header; the mix gives the braces header over both lines, each byte-identical to its solo listing. `registerFlow` throws a plain `Error` (no HTTP door is reached), so no `code`/`status` envelope exists to assert there.\n\nNo existing pin had to change: a repo-wide grep of the header's literal text found only the source and a comment in `packages/spec/src/automation/flow.test.ts` that quotes the braces header over a brace failure (still true). Every `/template braces/` pin in the package sits on a brace failure.\n\n<details><summary>Package suite and typecheck</summary>\n\n`pnpm --filter @objectstack/service-automation typecheck && pnpm --filter @objectstack/service-automation test` under the verify lock at 18e9316c (the final head): `VERDICT command-exit 0`, Test Files 289 passed (289), Tests 4195 passed (4195).\n\n</details>\n\n<details><summary>Ablations (each committed first, landed through ablation-replace, restored to the HEAD blob)</summary>\n\n- header forced to the braces form (`braceRuleRefused` to `true`): 3 failed, the three neutral cases.\n- value-envelope kind forced to non-brace: 1 failed, the template-dialect envelope case.\n- the code arm of the envelope kind forced to non-brace: 1 failed, the braced CEL envelope case.\n\nEach restore: `blob == HEAD (204687c3c91a)`, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- The brace class follows the card's list plus the two retired-token judges whose refusals are by construction `{…}` tokens; a `{{ }}` hole over an unbound `$` name is deliberately NOT brace class (its braces are the legal hole syntax).\n- The neutral header carries no ADR citation: ADR-0032 §1a is the build-time parse rule, and a date-text verdict is not a parse error.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands at 18e9316c, 72 families)</summary>\n\n71 exit 0 · 1 NOT MEASURED: `node scripts/check-plugin-teardown-shape.mjs --self-test` exit 3 (shallow checkout cannot reach its pinned positive control; CI runs it). `pnpm check:dual-build-cjs-loads` first exited 3 (no dist), re-run after the closure build: exit 0. `dispatch-gates --ran`: 72 derived, 71 run, 1 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\nTwo-minute check: `pnpm --filter @objectstack/service-automation exec vitest run src/flow-registration-checks.test.ts` and expect 32 passed, among them the describe \"the invalid-expression header names the braces rule only over a brace refusal\".\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUZrkMKgGrXXe8zPGq)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUZrkMKgGrXXe8zPGq\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgUZrkMKgGrXXe8zPGq -->\n"
+}

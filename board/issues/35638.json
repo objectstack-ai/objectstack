@@ -1,0 +1,32 @@
+{
+  "number": 35638,
+  "kind": "pull_request",
+  "title": "test(plugin-hono-server): wait for the response head instead of a fixed sleep in adapter-drain",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T20:09:03Z",
+  "updated_at": "2026-11-19T20:10:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35638",
+  "body": "Fixes #35621\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:只改了一个服务器关停流程的测试文件,产品行为前后不变。\n- 为什么做:合并队列里这条测试在机器繁忙时会误报失败,把无关的改动踢出队列;这次让它等到响应真的到了再检查。\n- 出错会怎样:最坏是这条测试在等待五秒后给出一句清楚的失败说明,不会影响任何用户;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`packages/plugins/plugin-hono-server/src/adapter-drain.test.ts` only (test-only).\n\n- New helper `waitForResponseHead(conn, timeoutMs = 5000)` next to `rawConnection` / `splitResponse`: resolves once the connection has received a response head (through the blank line after the headers); rejects with a message naming the bytes received if the deadline passes or the connection closes first.\n- \"an idle keep-alive connection is released at drain start\": the fixed `sleep(50)` before reading the response is replaced by `await waitForResponseHead(idle)`. The assertion is unchanged.\n- Two other cases whose sleep stood in for \"wait for the bytes we assert on\" use the same helper:\n  - \"a response that ended before close() but is still flushing to a slow reader arrives whole\": the `sleep(100)` stays (it also gives the big response time to call `end()` and fill the socket buffers, which the next two assertions read), and the wait for the idle connection's head is added after it.\n  - \"an event stream open when the drain begins ...\": `sleep(100)` replaced by the wait before asserting on the head.\n- Sleeps that deliberately hold a request in flight or a connection mid-headers are untouched.\n\nNo retry, no longer sleep. No changeset: the package builds from `src/index.ts`; after `pnpm --filter @objectstack/plugin-hono-server build`, `waitForResponseHead` has 0 hits in `dist/` while the control `inFlightResponses` has 4, so nothing published changes (`skip-changeset`).\n\n## Tests\n\nRead first: the helper `waitForResponseHead` (listener order: `rawConnection`'s collector is registered first, so `received()` already holds the chunk when the helper checks it), then the idle keep-alive case.\n\nTwo-minute check: `pnpm --filter @objectstack/plugin-hono-server exec vitest run --maxWorkers=2 src/adapter-drain.test.ts` should print `Tests 12 passed (12)`.\n\n<details><summary>File run and typecheck at 7db8fd85</summary>\n\n```\npnpm --filter @objectstack/plugin-hono-server exec vitest run --maxWorkers=2 src/adapter-drain.test.ts && pnpm --filter @objectstack/plugin-hono-server typecheck\n Test Files  1 passed (1)\n      Tests  12 passed (12)\ncheck:test-typecheck: OK — @objectstack/plugin-hono-server's test layer compiles under packages/plugins/plugin-hono-server/tsconfig.test.json\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Loop under CPU pressure: new 50/50 green; old version reproduced 1 in 20</summary>\n\nPressure: 12 parallel busy loops (`sh -c 'while :; do :; done'`, 3x the 4 CPUs of this container), started before the loop and killed by a trap at the end. Each run is a fresh `pnpm exec vitest run --maxWorkers=1 src/adapter-drain.test.ts` (whole file, 12 cases). The old version is the `origin/main` file copied in under another name for the run and removed afterwards.\n\n- New version (this PR): `RESULT new: 50 passed, 0 failed of 50` (12 busy loops only; load average about 14.6).\n- Old version: `RESULT old: 19 passed, 1 failed of 20`. The failure is the reported one: `FAIL ... an idle keep-alive connection is released at drain start` / `AssertionError: expected undefined to be 'keep-alive'`. Honest caveat: that loop ran under the same 12 busy loops PLUS this branch's derived gate scripts running at the same time for its first part, and the one failure (run 3) fell inside that window; the new-version loop did not have the gate scripts on top. One earlier old-version run under the 12 busy loops alone passed (a script bug invalidated the rest of that first old loop, so it is not counted).\n</details>\n\n## Acceptance notes\n\n- None.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands, 52 families) at 7db8fd85</summary>\n\n- 50 exit 0.\n- `pnpm check:dual-build-cjs-loads` exit 3, `pnpm check:lean-entry-closure` exit 3: NOT MEASURED locally (both need the whole workspace's `dist/`; neither reads this test file's behaviour). CI runs them.\n- `dispatch-gates --ran`: 52 derived, 50 run, 2 NOT-MEASURED (from a recorded exit 3), 0 UNRUN.\n- `node scripts/check-nul-bytes.mjs` exit 0.\n</details>\n\nAblation: not done; the diff changes test timing, not a behaviour a test pins. The old-version loop above is the before/after reading.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTyMahdAdhXSzgy2nt\n"
+}

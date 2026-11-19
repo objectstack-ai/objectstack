@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-17T15:46:47Z",
-  "updated_at": "2026-11-19T04:12:38Z",
+  "updated_at": "2026-11-19T17:05:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34908",
   "body": "## What (18.5.0, measured in a browser)\n\n1. **No per-position views.** A platform administrator can create list views in the console (title ▾ → 新建视图) and configure columns, sort and filters. Every published view is then visible to **everyone** who can read the object. A view cannot be targeted to a position, role or permission set (for example 「业务员看的客户视图」 and 「经理看的客户视图」). Business users can only 「另存为我的视图」 (personal views).\n   The app's requirement says the views different positions see are configured by the administrator, with no vendor involved. The platform has no way to do that today.\n2. **403 when customizing a console-created view in Studio.** In Studio, using 「定制」 on a view that was created through the console's 新建视图, and then adding a column, fails on save:\n   > 403 'view/crm_account.yanzheng_yong_guonei_kehu_shitu' declares an override of 'com.steedos.blackcat.crm', which ships no view named …\n\n   A view the deployment created itself cannot be edited in Studio.\n\n## Expected\n\n1. A view has an optional audience (positions, roles or permission sets), set by the administrator, and users see the views their audience includes.\n2. Studio edits a deployment-created view in place, or the console marks such a view as editable only in the console, instead of failing with an override error."

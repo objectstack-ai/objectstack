@@ -1,0 +1,34 @@
+{
+  "number": 35550,
+  "kind": "issue",
+  "title": "列表排序重做：与筛选共用字段清单，点一个字段即生效，排序以标签留在视图栏下",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T15:07:59Z",
+  "updated_at": "2026-11-19T17:05:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35550",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「涉及到很多细节了，我们之前做的都不好，包括 过滤 排序，选项的设置过程，视图创建和自定义的过程。」\n\n## 参照（Twenty）\n\n![参照 1：点排序出字段清单，顶部选升降序](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-sort-1-fields.jpg?raw=true)\n\n![参照 2：排序成为标签，排在筛选标签前](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-sort-2-chip.jpg?raw=true)\n\n## 我们现在\n\n![现状：一行两个下拉](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-sort.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。）\n\n- 点排序图标：面板「排序记录」，一行「排序依据」字段下拉加「最早 → 最新」方向下拉，下面「+ 添加排序」，右上「恢复视图默认排序」。\n- 字段下拉同样是不能搜索的纯文字列表。\n- 排序后界面上只有图标旁的数字「1」，看不出按什么排。\n- 点表头也能排序，两处状态要保持一致。\n\n## 要做的\n\n1. 点视图栏的「排序」，出与筛选相同的字段清单（搜索、显示字段在前、类型图标），清单顶部选升序或降序，默认升序；点一个字段立即生效。\n2. 排序显示成条件行里的标签（「↑ 金额 ×」），排在筛选标签之前；点标签切换升降序，点 × 删除。\n3. 支持多级排序：再点「排序」加第二个，标签顺序即优先级，可拖动调整。\n4. 方向的文字按字段类型：日期「最早 → 最新」，数字「小 → 大」，文本「A → Z」。\n5. 点表头排序与这里是同一个状态，标签同步出现。\n6. 「重置」回到视图保存的排序（与子卡 2 共用同一个按钮）。个人排序照旧自动记住、不影响别人。\n\n## 不做的\n\n- 不改排序的存储格式；不改服务端排序能力。\n\n## 验收\n\n- 从点「排序」到列表按金额降序，不超过 3 次点击。\n- 排序后视图栏下有标签写明字段和方向；点表头排序后标签同步变化。\n- 两级排序时，拖动标签改变优先级，列表随之变化。\n- 「重置」后回到视图保存的排序。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-list` 的排序面板、`ui/packages/plugin-grid/src/ObjectGrid.tsx` 的表头排序。与子卡 2 共用字段清单组件，建议同一车道连着做。\n\nDedupe: `排序 面板`（objectstack，open）→ 0。"
+}

@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T22:19:14Z",
-  "updated_at": "2026-11-19T06:02:47Z",
+  "updated_at": "2026-11-19T15:42:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34157",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate: seat ruling on PR #33652, contract finding S3, option B for the tenancy-class case (the federated case keeps the cap by ruling A). ⛔ Not a claim.\n\n## 维护者速读\n\n#33652 把单值关系条件编译为库内子查询（无 id 上限），但在有组织墙的租户姿态下，若外层对象与关联对象的租户类别不同（一个按组织隔离、另一个为平台全局），该跳仍回退到 id 读取并保留 1000 个 id 的上限。子查询本可以带上关联读取自身的驱动选项，从而在这种情况下也去掉上限。\n\n## What exists\n\n- `packages/objectql/src/relation-semi-join.ts` `relationSemiJoinServes` keeps the id read, before planning, when a posture that walls organizations is in force and the read's object and the related object are of different tenancy classes (`isDriverTenantScopedSchema`, `packages/objectql/src/engine-driver-options.ts`). The driver compiles a `ReadableIds` subquery with the OUTER read's driver options (ADR-0139 D3), so those options would scope the related table wrongly.\n- Such a hop is served as the id read: the related ids read as the caller, then `$in`, refused past 1,000 matches with `INVALID_FILTER` / 400. The card's item 1 (#33626) is therefore not reached for this class.\n\n## What this card asks\n\nLet the composed leaf carry the related read's own driver options (its tenant scope) so the SQL drivers compile the subquery under the related read's wall, and serve the hop as one statement with no id cap. Pin it on SQLite and PostgreSQL in both tenancy directions, with the two-step route's rows as the oracle.\n\nDedupe words: relation semi-join tenancy class, ReadableIds driver options, 1000 id cap tenant wall, cross tenancy subquery"

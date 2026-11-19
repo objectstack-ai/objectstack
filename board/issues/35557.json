@@ -1,0 +1,30 @@
+{
+  "number": 35557,
+  "kind": "issue",
+  "title": "[PM seat] repo:objectstack · seat 7 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · area:data",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T15:20:59Z",
+  "updated_at": "2026-11-19T15:50:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35557",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvvVzM5KhCWkT5f45c\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 7** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n- New seat: seats 1–6 are #34366 (os-sales), #34478 (os-steve), #34584 (os-support-ai), #34830 (seat 4), #35217 (os-bill), #35381 (hotlong); none is vacant and no seat-7 post existed, so this is seat 7.\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` · `session_01L9qibvvVzM5KhCWkT5f45c`, seated on the maintainer's summons in this account's fleet project (thread 「data 座位 · 车道调度」), verbatim: 「开一个 objectstack 车队座位，负责 data 分区」.\n- **Intake:** open cards labelled `area:data` in objectstack-ai/objectstack whose fix lands in this repository, `priority:p1` first, then p2, then p3.\n  - Excluded: cloud cards (`repo:cloud` seats), security advisories (`security` seats), other repositories, `pm:epic` children held by an epic seat, `needs-user-decision` / `pm:retriage` cards, and cards another seat holds (another seat's `Claim:`, `Area:` line, `lease:` label or assignee).\n  - Areas that meet another seat's lease roots (seat 2's `o2-E` objectql/drivers and `o2-F` data-layer performance in particular) are opened only after a mailbox note to that seat.\n- **Mailbox:** PR #35558 (subscribed). **Patrol:** `trig_01FDsUnvwm3kT41aKts25mTu` · `39 * * * *` (hourly while cards are in flight, back to a 5-hour fallback when idle, per the maintainer's token rules, 2026-11-12).\n- **Seated:** 2026-11-19T15:50Z.\n- **Posture ledger lives in the project:** the labels, the assignee, the `Claim:` comments carrying `Seat: repo:objectstack#7`, and the `head:claude/` PRs. Round reports live in the project thread.\n\n## Leases\n\nAreas carry the `d7-` prefix (lease labels `lease:d7-*`). Decided 2026-11-19T15:50Z on the maintainer's words in this session: the pick at 2026-11-19T15:32Z (seat 5 keeps its in-flight chains) as narrowed at 2026-11-19T15:33Z, verbatim 「5号只处理在手任务」: seat 5 finishes only the cards it already holds; every other `area:data` card, follow-ups of seat 5's work included, is seat 7's. W0 list: `/mnt/project-files/objectstack-seat7/w0-area-data-2026-11-19.md` (project share).\n\n| Area | Path roots | Thread session | Cards / PRs | L1 |\n|---|---|---|---|---|\n| `d7-A` | `plugin-sharing`, `plugin-security`, `plugin-auth` (SCIM, sign-in, invitations), `packages/client` share options, Change Owner server/console halves | `session_01L9qibyy9KSA69EGZtjDj9c` | p2 #35474 (claim 7014000854) #34861 #34971; p3 #33681 #33912 #32461 #34034 #33986 #33423 #32645 #32380 #34225 #35440; after seat 5's #35401: #35402 #35399 #35315 | L1-a |\n| `d7-B` | `packages/objectql` write path, `drivers/driver-sql`, analytics, `packages/runtime` action dispatch, `plugin-audit` seal | `session_01L9qibwJEh7hMPPvagWM1g7` | p2 #34746 #35434 #34292; p3 #34821 #34549 #34563 #33840 #33619 #34544 #33932 #34170 #34157 #35114 #35172 #34352; blocked #35500 #35433 | L1-a |\n| `d7-C` | filter grammar and nested relations (`packages/spec` filter docs, `ui/packages/core` adapters, dashboard drill), dashboard/dataset docs, small docs | `session_01L9qibvVRcFWKrfWeG5jzPb` | p2 #35493 #35494 #35481; p3 #35533 #35438 #35522 #35409 #35396 #34307 #34309 #34350 #34611 #33974 #35530 #33836 #35379 #35088 | L1-a |\n| `d7-D` | units of measure (ADR-0158) | `session_01L9qibvMi1U7R2kBd3JbTPu` | settled under the veto window: #35467 (7013996288) #35469 (7014013098) #35468 (7014035581), now pm:blocked; after seat 5's #35488 (which closes #35465 #35466): #35489 #35490 #35491 #35492 #35498 #35404; card thread for ADR-0155 step 1 #35571 (waits on triage) | L1-a |\n| `L1-a` | — | `session_01L9qibyQBB3KuDoNobNq9LH` | L1 for d7-A to d7-D | — |\n\nSeat 5 keeps only what it holds: #35401 #35355 #35488 #35394 #35329 #35149 #34886 #35047. Triage audited the eight waiting cards (7014110210) and they are now in the areas above. Large card #34365 (ruled A) waits for a free thread slot. #33787 is cut rolling into ADR-0155's six steps (table: comment 7014164429 on #33787); it is pm:blocked behind step 1 #35571 and stays the step-6 switch card. `d7-B` meets seat 2's `o2-E`/`o2-F` roots: claims there run `overlap-check.mjs` first.\n\n## Hot-file serial queue\n\n- Working calendars release pair (ADR-0157 D4: one release; seat 5's hand-off 7013775437): #35355 (seat 5, its PR names the service API) → #35356 (p1, ③ formula functions) and #35357 (p1, ④ approval escalation clock), seat 7, card threads planned against #35355's os-dev report; the three ship together.\n- Change Owner: #35401 (seat 5) → #35402 → #35399, #35315 (seat 7, `d7-A`).\n- Units of measure R1: #35488 (seat 5) → #35489 #35490 #35491 #35492 #35498 #35404 (seat 7, `d7-D`).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract (L2) reviews: TIER_DEFAULT records in-seat; CONTRACT_REVIEW_TIER by this seat's own isolated at-tier subagent (`references/contract-review.md`). Tier H and >3,000-line PRs still go to the human approver.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+}

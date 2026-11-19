@@ -1,0 +1,34 @@
+{
+  "number": 35554,
+  "kind": "issue",
+  "title": "列表取消「操作」列：选中后在页面栏换操作、右键菜单；默认滚动加载、记录数在视图名旁",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T15:10:34Z",
+  "updated_at": "2026-11-19T16:02:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35554",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「他列表页的action，是选中记录才显示吗？」；对「悬停时行尾出现 ⋮」的回答：「悬停时行尾出现的「⋮」，占了固定的位置，也很丑」；「我还发现，他没有第几页的概念，是滚动翻页，顶部显示记录数。」\n\n## 目标（图 36 下半）与参照\n\n![36 列表页，外壳不动](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/36-list-keep-shell.png?raw=true)\n\n![参照：Twenty 选中 1 条，页面栏右侧换成单记录操作](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-select-1.jpg?raw=true)\n\n![参照：Twenty 选中 2 条，换成批量操作](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-select-2.jpg?raw=true)\n\n![我们现在：固定的「操作」列](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-list.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。另在托管环境 1167 宽窗口实测）\n\n- 每行末尾有固定的「操作」列，放一个「⋮」。1167 宽时它压住最后一列（「预计成交日期」显示成「2027年1月4E」）和底部合计的前半截。\n- 勾选记录后，底部浮出批量操作栏，盖住最后一行。\n- 行菜单里「删除」紧贴「编辑」，无分隔、样式相同。\n- 分页：默认每页 50（`ui/packages/plugin-grid/src/ObjectGrid.tsx:2584-2600`），页脚有页码。\n- 已有的组件：`ui/packages/plugin-grid/src/components/RowActionMenu.tsx`、`BulkActionBar.tsx`、`RowContextMenu.tsx`、`ui/packages/plugin-grid/src/VirtualGrid.tsx`。\n\n## 要做的\n\n1. **取消「操作」列**。行上不放任何操作控件，包括悬停时出现的「⋮」。\n2. **选中后页面栏换内容**：勾选记录后，页面栏整条换成「对象名 → 已选 N 条」「取消」，右侧是针对所选记录的操作，露出一到两个，其余进「⋮」。\n   - 露出哪几个由对象元数据声明；没有声明时取现有行操作 / 批量操作的前两个。\n   - 选 1 条给单记录操作（如「提交审批」「生成报价单」），选多条给批量操作（如「批量更新」）。\n   - 取消选择后页面栏恢复「⋮」和「+ 新建」。\n3. **底部的批量操作栏退役**。\n4. **右键点行**弹出同一份操作菜单。菜单里「删除」放最后、加分隔线、用危险色。\n5. **勾选框的点击区域是整个单元格**；支持 Shift 连选。\n6. **默认滚动加载**：滚到底自动加载下一批，不显示页码；视图名旁的记录数是符合条件的总数。视图元数据声明了 `pagination` 的仍然分页。同时保证：\n   - 合计由服务端按全部符合条件的记录计算，不只算已加载的行。\n   - 勾表头全选时提示「已选当前加载的 N 条」，并可一键改为「选择全部 M 条」；批量操作的确认里写明实际条数。\n   - 点进记录再返回，回到原来的滚动位置。\n\n## 不做的\n\n- 不改各个操作本身的行为和权限。\n- 不改记录页上的操作区。\n- objectstack-ai/objectstack#35446 的其余部分（名称列冻结、其余列横向滚动）仍由该卡负责；该卡第 2 条「⋮ 改为悬停或选中时出现」由本卡取代为「取消」。\n\n## 验收（1280×800 与 1167×762 各一遍）\n\n- 页面上没有「操作」列，悬停任何一行都不出现行尾控件；最后一列和合计完整可读。\n- 勾选 2 条：页面栏显示「已选 2 条」和露出的操作；底部没有浮动栏；最后一行完整可见。取消后页面栏恢复。\n- 勾选 1 条与勾选 2 条露出的操作不同（HotCRM 商机上至少各有一个）。\n- 右键点一行弹出操作菜单，「删除」在最后且有分隔。\n- 一个超过 50 条的列表：不出现页码，滚到底继续加载；表头全选后出现「选择全部 M 条」；点进第 60 条再返回，仍停在第 60 条附近。\n- 加筛选后，合计等于服务端对全部符合条件记录的合计（准备一个加载不完一屏的数据量验证）。\n- 一个声明了 `pagination` 的视图仍然分页。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-grid`（`ObjectGrid.tsx`、`components/RowActionMenu.tsx`、`BulkActionBar.tsx`、`RowContextMenu.tsx`、`VirtualGrid.tsx`）、`ui/packages/app-shell/src/views/objectViewPageHeader.tsx`。页面栏的位置由子卡 1 提供；两卡可并行，后合入的一方负责对齐。\n\nDedupe: `操作列 取消 选中 批量`、`滚动加载 分页`、`批量操作栏 选中`（objectstack，open）→ 0；相关：objectstack-ai/objectstack#35446。"
+}

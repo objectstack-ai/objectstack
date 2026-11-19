@@ -1,0 +1,32 @@
+{
+  "number": 35595,
+  "kind": "issue",
+  "title": "记录页页签规则：第一个叫「概览」并含通栏的阶段条和关键字段；列出全部子表、带条数、只按宽度收进下拉；附件、审批、互动各一个页签",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T17:02:22Z",
+  "updated_at": "2026-11-19T17:55:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35595",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「阶段条是否建议放到明细（或者应该叫概览）」「概览中的关键信息是否建议把现在顶部区域的关键信息样式直接平移过去」「之前顶部的高亮字段和状态，迁移到概览中后，是不是还应该占全宽？」「选项卡标题没有数量不好，看不清」「要注意，顶部选项卡应该列出所有的子表，根据屏幕宽度显示下拉」「顶上一排审批相关的状态是否写太多，有的是否应该放到审批选项卡中」。\n\n## 目标（图 37）\n\n![图 37 记录页：概览、相关表页签、抽屉](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/37-record.png?raw=true)\n\n## 现状\n\n![现状：平台默认记录页（合同 CTR-0003）](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/ours-default-contract.jpg?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n- 默认页由 `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`（`synthTabs` :938-1022）和 `RecordPageColumns.tsx:355-403` 生成：页签是概览、有记录的子表各一个（带条数）、动态；**空的子表收进「+N」下拉**（objectstack-ai/objectstack#28469）。\n- 关键字段一排和阶段条在页签**上方**，每个页签下都在。\n- 审批记录和附件在默认页里是右栏的面板；手写页面没摆放它们时，由宿主兜底加在页面底部，每个页签下都在（`RecordDetailView.tsx:5610-5639`）。\n- 页签条数由 `ui/packages/components/src/renderers/layout/containers.tsx:547-644` 自动算（相关列表、附件）；审批只有传入时才有条数；动态条数来自 `RecordTimelineCountProbe`。\n\n## 要做的\n\n1. **第一个页签叫「概览」**。阶段条和关键字段从页签上方挪进概览，位于概览最上面，**占全宽**（横跨左右两栏）。关键字段沿用现在那一排的样式（标签在上、值在下），一排几个随宽度变。\n2. **页签列出这个对象的全部普通关联子表**，不管有没有记录，顺序由对象的 `relatedLists` 决定。已经放在概览里的主从子表不占页签（维护者：「如果主子表已经在 概览中，还需要出现在右侧和顶部tab中吗」）；被 `relatedList` 设置移出概览的主从子表才有页签。有记录的带条数；没有记录的不带数字、字色稍淡，点进去是空状态和添加入口。\n3. **只按宽度收**：放不下时靠后的进「更多 N ▾」，下拉里每一项仍带各自的条数。不再按有没有记录来收。\n4. **附件、审批、互动各一个页签**，排在子表之后：\n   - 附件：对象开了附件时始终有；有文件时带数字。\n   - 审批：对象配了审批流程时才有；有进行中的审批时带一个圆点。里面是审批进度、等待的审批人、催办、审批动态、原因说明、锁定说明。\n   - 互动：始终有，带条数。\n5. **页面底部不再有常驻的审批区和附件卡**；手写页面没摆放它们时，兜底放进对应的页签，而不是页面底部。\n6. 一张子表一个页签是默认。把多张表并进一个页签只能由页面定义显式配置，这时页签标题不带数字，平台不替它算总数。\n7. 页签条吸顶时不透出下面的内容（objectstack-ai/objectstack#35414 的行为保持）。\n\n## 不做的\n\n- 概览右栏的内容（子卡「概览右栏」）；主从子表进概览（子卡「主从子表」）；字段和互动、附件的排版（子卡「字段密排与互动、附件样式」）。\n- 手机端记录页。\n\n## 取代与承接\n\n- 取代 objectstack-ai/objectstack#28469（空的进下拉）：同笔改 `RecordTabRow.recordsFirst-28469` 等测试和验收条款。\n- 承接 objectstack-ai/objectstack#35483、#35484（审批带、锁定标记在回退到页签的合成页和有两个明细节点的手写页上重复出现）：验收里带上这两个场景。\n- 审批页签里的岗位名显示仍按 objectstack-ai/objectstack#35418。\n- 关键字段进概览后一排几个由宽度决定，objectstack-ai/objectstack#35252 的 lint 口径（只判前 4 个）届时要一并核对。\n\n## 验收（1280×800，zh-CN）\n\n- 托管环境那条合同（5 张子表全空）：页签依次是概览、5 张子表（灰色、不带数字）、附件、互动 2；没有「+5」下拉。窗口缩到 900 宽时靠后的进「更多」，下拉里各项带条数。\n- 切到任一子表页签：看不到阶段条和关键字段；切回概览：它们在最上面，横跨整个宽度。\n- 页面底部没有审批区和附件卡。待审批的记录有「审批」页签并带圆点；没有审批流程的对象没有这个页签。\n- objectstack-ai/objectstack#35483、#35484 描述的两种页面上，审批信息只出现一处。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`、`recordPageColumns.ts`、`RecordPageColumns.tsx`、`ui/packages/app-shell/src/views/RecordDetailView.tsx`、`ui/packages/components/src/renderers/layout/containers.tsx`。\n\nDedupe: `记录页 页签 子表 概览`、`record page tabs related list overview rail`（objectstack，open）→ 0；承接 objectstack-ai/objectstack#35483、#35484；取代 objectstack-ai/objectstack#28469。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 35541,
+  "kind": "pull_request",
+  "title": "fix(objectql): a committed or rolled-back trio handle reads as closed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T14:55:10Z",
+  "updated_at": "2026-11-19T15:54:39Z",
+  "closed_at": "2026-11-19T15:54:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T15:54:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35541",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\nFixes #35149\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:脚本里手动开启的事务提交或回滚之后,仍带着这个旧事务的迟到写入会像普通写入一样正常落库,不再被塞进一个已经结束的事务。\n- 为什么做:两种事务结束后的行为原本不一致,另一种早已按“已关闭即视为没有事务”处理,这次让两者一致。\n- 出错会怎样:最坏情况是某次迟到写入没有进入它本应加入的仍在进行的事务;改动只在事务已提交或已回滚之后生效,事务进行中的行为不变。\n- 要你做什么:无,席位落地。\n\n## 席位核对\n\n### What changes\n\n- `engine-execute-transactions.ts`: the trio's commit/rollback release is now `closeTrioTransactionScope`, which drops the owner record (as before) AND adds the handle to a module-level `closedTrioHandles` WeakSet, only for a handle the trio itself opened (one with an owner record). `isClosedTrioHandle` reads it. `recordTrioTransactionScope` clears the mark, so a driver that hands the same object out on a later `beginTransaction` gets it back open.\n- `engine-transactions-section.ts` `isClosedUnitHandle`: when `openedUnits` holds no entry for the handle, it answers `isClosedTrioHandle(handle)`. An `openedUnits` entry still decides first, so a `transaction()` unit handle reads exactly as before.\n- `engine-scoped-context.ts`: `commitTransaction` / `rollbackTransaction` call `closeTrioTransactionScope` in their existing `finally`. A joined (ambient) handle still returns early and is never marked.\n- `engine.ts` untouched: 6852 lines at `origin/main` 921211960d and at head (facade ceiling 6854).\n- Every reader of `isClosedUnitHandle` now treats a closed trio handle as absent, as #22855 does for a closed unit: `buildDriverOptions`, `enforceTransactionOrigin`, `opensAfterAbortUnit`, the secret-row release, the summary write transaction, and `openTransactionKind` (`'separate'` becomes `'none'` for a closed trio handle).\n- Clause-② measured on the diff: no caller that got an answer now gets a refusal. A late write carrying a closed trio handle was never refused (unattributed handle, the gate declined to judge), and is not refused now; it runs unenrolled instead of being handed the dead handle.\n\n### Tests\n\n`packages/objectql/src/engine-transaction-same-origin.test.ts`:\n\n- The PR #35102 pins \"forgets the owner once the trio commits / rolls back\" are re-worded to \"treats the handle as closed once the trio commits / rolls back — a late cross-datasource write runs unenrolled\". Intent kept (the record does not outlive the handle; the late write lands, not refused); the assertion now also requires `ledgerDb.writes[0].transaction` to be `undefined`.\n- New top-level describe `a trio handle closes as a transaction() unit handle does (#35149)`, in the same harness file: parity with a closed `transaction()` unit handle on a late cross-datasource write; a late same-datasource write after rollback runs unenrolled; CONTROL (open trio handle reads open, enrolls, and a cross-datasource business write under it is still refused with `ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`); `openTransactionKind` separate-then-none; a reused driver handle reads open on its next begin.\n\n### Acceptance notes\n\n- A0, reproduced at `origin/main` 921211960d source with the new tests only: a late `ledger` insert carrying a committed trio handle reached `ledger_db` with `transaction: { __trx: 'primary' }` (the dead foreign handle); the same after rollback. 7 failed / 27 passed.\n- The ADR-0119 note (2026-11-18) says the owner record is \"dropped when commitTransaction or rollbackTransaction closes it\": still true, and its \"a handle the engine never opened\" limit now matches the code. No ADR edit.\n\n### Verification\n\n<details><summary>Red at origin/main source, green at head, ablations</summary>\n\n- Red (tests only, source at 921211960d): `vitest run src/engine-transaction-same-origin.test.ts` → `Tests 7 failed | 27 passed (34)`; first failure `expected { __trx: 'primary' } to be undefined`.\n- Green at b548ddfb97: same file plus `engine-scoped-transaction-late-write.test.ts` and `open-transaction.test.ts` → `Test Files 3 passed (3)`, `Tests 69 passed (69)`.\n- Ablation 1 (`scripts/ablation-replace.mjs`, anchor x1 → x0, blob abff61612cfc → 235b522e2582): close drops the record without marking → `Tests 7 failed | 27 passed (34)`; restored, blob == HEAD, `git diff HEAD` empty.\n- Ablation 2 (anchor x1 → x0, blob abff61612cfc → 99010386c306): `recordTrioTransactionScope` no longer clears the mark → `Tests 1 failed | 33 passed (34)` (the reused-handle pin); restored, blob == HEAD, `git diff HEAD` empty.\n- The test imports `./engine.js` from `src`, so no `dist` leg applies.\n\n</details>\n\n<details><summary>Package and gates at b548ddfb97</summary>\n\n- `pnpm --filter @objectstack/objectql typecheck && pnpm --filter @objectstack/objectql test` under the verify lock → `VERDICT command-exit 0`; `Test Files 615 passed (615)`, `Tests 13900 passed (13900)`; `check:test-typecheck: OK`.\n- `dispatch-gates.mjs --commands` derived 65 families: 59 ran locally, exit 0 each. `check:type-check-debt` exit 3 (its closure build never got a turn on the shared verify lock): NOT MEASURED. `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:published-files` and `check:sourcemap-no-sources-content` read the built `dist`; the objectql build did not get a turn on the lock after more than 45 minutes in the queue, so these are NOT MEASURED locally, a declared narrowing, and left to CI.\n- `test:repo`, `--project integration` and the dogfood battery not run locally: not owed for this diff (no `!`, no narrowing arm), declared to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca1jJvsA1dHsPwMiQb)_\n"
+}

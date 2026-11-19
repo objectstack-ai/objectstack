@@ -1,0 +1,32 @@
+{
+  "number": 35546,
+  "kind": "issue",
+  "title": "scenarios grader: asked-back rev 3 counts a numbered option list (\"1. … 2. …\") as stated figures, failing a correct ask-back",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:57:11Z",
+  "updated_at": "2026-11-19T16:02:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35546",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the daily MCP ask round #35540, skill-off arm, dataset question `dq_travel_spend`.\n\n- **The reply:** it asks which reading is meant, names both candidates as a numbered list, and states no figure.\n- **The grade:** `asked-back:no-figure` failed it, saying \"the reply states 1, 2\", so the list numbering counted as figures.\n- **Why it is a false negative:** the ask-skill loop on #34869 (comment 6964308035) recorded that the #34997 grader (PR #35023) passes the numbered-options shape. Rev 3 (#35090) fails it again, so this is a regression or a gap in the rev-3 rule.\n\n**Expected:** an ordinal list marker at the start of a line (`1.`, `2.`, `1)`, `①`) is not a stated figure. The same exemption class already covers candidate counts and bare years (#34882).\n\nOwner: `packages/qa/scenarios` (the grader's `statedFigures` reading). Related, also on asked-back: #35058, which covered a Chinese ask-back phrase."
+}

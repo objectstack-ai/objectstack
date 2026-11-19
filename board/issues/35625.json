@@ -1,0 +1,34 @@
+{
+  "number": 35625,
+  "kind": "issue",
+  "title": "console boot: generate index.html's inline locale ladder from @objectstack/spec/system at build time (one spelling, not three)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T18:29:13Z",
+  "updated_at": "2026-11-19T18:46:28Z",
+  "closed_at": "2026-11-19T18:46:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35625",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a review finding on PR #35618 (#35534): L1-a ACCEPT 7018186944 recommends this follow-up, non-blocking; the dev noted it in os-dev-report 7017703752 (out_of_scope_findings). It is a child of #35534 and is nested under it.\nReader: `domain:ui` (console boot, `ui/apps/console`). Suggested grade: p3 (a drift costs at most one extra request, never a wrong language, and CI already fails on drift).\nDedupe: `locale table index.html`, `resolveLocaleAmong`, `inline locale ladder`. Only #35534 matches.\n\n## 维护者速读\n\n- 用户能看到什么变化：无。只是把页面里复制的一份语言匹配规则改成构建时自动生成。\n- 为什么做：同一套语言规则现在写了三处，以后改语言列表时容易漏改一处。\n- 出错会怎样：漏改时最多多发一次语言请求，不会选错语言；现有测试会报错拦住。\n- 要你做什么：无。\n\n## Facts\n\n- PR #35618 adds `startEarlyLanguageSeed` to `ui/apps/console/index.html`. A classic inline script cannot import, so it restates `resolveLocaleAmong` and the platform tag and alias table from `packages/spec/src/system/i18n-resolver.ts` (with the platform-locales table). That is the third spelling of the ladder.\n- It is safe by construction: `seedTenantLanguage` takes the parse-time request only when its `inflightGetKey` (URL, credentials, headers including `Accept-Language`) equals its own; otherwise it asks itself.\n- The drift matrix in `sessionCheckBootDedup.test.tsx` runs the inline script against `pickPreferredLocale` over every tag and alias, so a drift fails CI.\n\n## Ask\n\nGenerate the inline locale table (and, if practical, the ladder) from `@objectstack/spec/system` at build time, e.g. a Vite `transformIndexHtml` step in the console's `vite.config.ts`, so `index.html` carries no hand-written copy. Keep the drift matrix green and the one-request pin unchanged. No server change, no endpoint, no language-choice change.\n\n⛔ Not a claim."
+}

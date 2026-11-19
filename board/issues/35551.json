@@ -1,0 +1,34 @@
+{
+  "number": 35551,
+  "kind": "issue",
+  "title": "列表「选项」重做：菜单化（视图名、布局、字段、分组、行高），字段可搜索、拖动排序、点眼睛隐藏",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T15:08:57Z",
+  "updated_at": "2026-11-19T19:00:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35551",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「涉及到很多细节了，我们之前做的都不好，包括 过滤 排序，选项的设置过程，视图创建和自定义的过程。」\n\n## 参照（Twenty）\n\n![参照 1：选项是一张五行小菜单](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-options-1-menu.jpg?raw=true)\n\n![参照 2：字段二级清单，可搜索、拖动、隐藏](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-options-2-fields.jpg?raw=true)\n\n## 我们现在\n\n![现状：一个面板堆着所有设置](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-options.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。）\n\n- 点「显示」图标：一个面板自上而下是「布局」四个无文字图标、「打开记录」（抽屉 / 整页，下面一句「个人偏好，不进对象声明：记录的 ↗ 总能打开整页」）、「分组」、「隐藏字段」（折叠）、「密度」、「行号」开关、「行内编辑」开关，底部一个无名称的重置图标。\n- 增减列、调整列顺序不在这里，在表头上操作；「隐藏字段」折叠在中间。\n- 这些都是个人偏好，自动记住（`sys_user_preference` 的 `ui.list.<对象>`），不写回共享视图。\n\n## 要做的\n\n1. 点视图栏的「选项」，出一张菜单，每行左边名称、右边当前值、点进去是二级：\n   - 视图名（原地可改，仅对有权限改共享视图的人或「我的视图」的主人可编辑）\n   - 布局：表格、看板、日历…（带文字，不只是图标）\n   - 字段：「已显示 N 个」→ 二级清单\n   - 分组：当前分组字段 → 二级清单\n   - 行高：紧凑、标准、宽松\n   - 更多：打开记录方式、行号、行内编辑\n2. **字段二级清单**：顶部搜索；上半是已显示的字段，可拖动排序、点眼睛隐藏；下半「隐藏的字段」，点一下加回来。改动即时生效。\n3. 文字：去掉「个人偏好，不进对象声明…」这类开发者用语；所有图标按钮有文字名称；重置有文字「恢复默认」。\n4. 表头上原有的拖动列宽、拖动换位保留，与这里是同一个状态。\n5. 这些设置仍是个人偏好、自动记住、不影响别人（现有行为保留）。\n\n## 不做的\n\n- 不在这里放「可见范围」「删除视图」（属于视图管理，见子卡 5）。\n- 不改个人偏好的存储结构。\n\n## 验收\n\n- 从点「选项」到隐藏「成交概率」列，不超过 3 次点击；再加回来不超过 3 次点击。\n- 字段清单可搜索；拖动后列顺序立即变化，刷新后保持。\n- 面板里没有无文字的图标按钮，没有「对象声明」字样。\n- 用户 A 隐藏的列，用户 B 打开同一视图仍然看得到。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx`、`ui/packages/app-shell/src/context/ListPreferencesProvider.tsx`。依赖子卡 1。\n\nDedupe: `显示设置 隐藏字段 密度`（objectstack，open）→ 0。"
+}

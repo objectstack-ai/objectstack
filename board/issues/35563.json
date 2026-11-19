@@ -1,0 +1,34 @@
+{
+  "number": 35563,
+  "kind": "pull_request",
+  "title": "docs(runtime): a script action's in-process write into a disabled module is served, per the maintainer's ruling A",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T15:29:50Z",
+  "updated_at": "2026-11-19T18:07:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35563",
+  "body": "Refs #34900\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：没有行为变化。手册补了一段：模块停用后，同一应用里其他模块的按钮脚本仍能往它的表里写数据，模块重新启用后数据都在。\n- 为什么做：有人报告这算漏洞，但你 10 月 31 日已裁定应用自己的代码照常读写停用模块，这次把裁决写进手册和设计记录，并用测试钉住。\n- 出错会怎样：只改文档和测试，不改运行行为；最坏是文字说得不准，撤回即可。\n- 要你做什么：设计记录改了一句话，按规定要人工合并；席位审核通过后请你合并。\n\n## 席位核对\n\n### What changes\n\n- **Handbook** (`content/docs/deployment/marketplace-handbook.mdx`): one paragraph after the hooks paragraph. A script action of an enabled package writing into a disabled module's object through `ctx.api` (a script body has no `ctx.engine`) is served (200), and the row appears on re-enable; the module's own `beforeInsert` hooks running on it is stated as today's measured answer, not ruled. `OBJECT_PACKAGE_DISABLED` is an outward-door answer (REST data plane, by-name reads, `/actions` for the module's own objects, MCP data tools) that in-process code never meets.\n- **ADR-0070 D2 amendment** (`docs/adr/0070-package-first-authoring.md:66`): the stale \"Not decided here … the question is with the maintainer as decision letter `6538936519`\" sentence now records the ruling: letter A, ruling record `6545646924` on #28117. App-authored in-process access (hooks, script action bodies, services, cascades) stays served; no engine-side refusal keyed on caller origin.\n- **Pin** (`packages/runtime/src/domains/packages-disable-app-module.test.ts`): a new describe block drives the card's probe. A fifth module (`com.qa.suite.projects`, depending on the app and the orders module) carries a script action `prepare_billing` whose sandboxed body inserts into `qs_order`. With the orders module disabled: the data door answers POST and GET `/data/qs_order` with 404 `OBJECT_PACKAGE_DISABLED` and no hook runs (control); the action answers 200; the orders module's `beforeInsert` hook saw the row; after re-enable, the row is there and the refused one is not.\n- No changeset: no published package's files change (a test file, a docs page and an ADR).\n\n### Review round\n\nContract review 7016260113 at `b1a24da9`: S1 (a script body has `ctx.api` only; dropped `ctx.engine` from the handbook and the ADR), N1 (the pin docblock calls the `beforeInsert` run measured, not ruled; decision letter 6538936519 lists it as an open gap) and N2 (MCP data tools named among the outward doors) fixed in `211562ef`, prose and a comment only.\n\n### Ruling\n\nThis card asked for a refusal. That question was already ruled the other way: maintainer ruling `6545646924` on #28117 (letter A) keeps app-authored in-process access served; options B (refuse app-authored in-process access) and C (refuse every caller) were not taken, and #7557 (A) pins the served-resolver control. A script action's `ctx.api` is that same in-process path (system context). So this PR executes A in docs and a pin; the area closes #34900 citing the ruling.\n\n### Tests and gates\n\n- `pnpm --filter @objectstack/runtime exec vitest run src/domains/packages-disable-app-module.test.ts` on base `94fb8db2d1` plus this diff: Tests 28 passed (28), 27 before plus the new case.\n- No ablation: the pin holds the absence of a refusal, so there is no guard to remove.\n- Local, exit 0: `check-adr-links`, `check:nul-bytes`, `check:doc-authoring`, `check:issue-citations`, `check:pm-prior-rulings`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:adr-anchors`, `check:doc-anchors`, `check-affected-docs`, `check:closed-ceremony-text`, runtime typecheck (test layer included).\n- `overlap-check --branch=HEAD`: VERDICT clean against origin/main `b68f9ae347`, 0 PR heads.\n- Not measured locally: the rest of the derived gate families; CI runs them.\n\n### Routing\n\nTier H: `docs/adr/**` is human-merged. Seat L2, then the maintainer merges. Noted, not changed (outside the claim's surface): `content/docs/ui/actions.mdx` ~:865 names the action door's 404 but not the in-process answer.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbP6iSEGkWb5fn8yqd\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd -->\n"
+}

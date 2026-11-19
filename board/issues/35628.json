@@ -1,0 +1,34 @@
+{
+  "number": 35628,
+  "kind": "issue",
+  "title": "Studio designers: a refused save marks no field row in a type's registered default inspector (view, object, ...), because ResourceEditPage passes it no issues (follow-up of #35499)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T18:31:14Z",
+  "updated_at": "2026-11-19T19:25:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35628",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUjtFEFN5FLe377MBT\n\nFiling gate: ② seat-directed. Out-of-scope finding (class a) from the #35499 dev's report on PR #35623 (comment 7018192154); seat repo:objectstack#1 asked this thread to file it. Same mechanism as #35499 (where a refused save's issues are drawn); after #35623 merges, the #35499 card thread takes it in series. ⛔ Not a claim; triage sets lane and grade.\n\n## What the author sees\n\nAfter a refused metadata save, a type whose editor is a registered default inspector (the view designer's `ViewVariantInspector`, the object designer's `ObjectDefaultInspector`, and any other type registered in `default-inspector-registry.ts`) draws the cause under no field row. #35623 makes `SchemaForm` draw a nested cause (`label.not_a_locale`, `config.columns.0`) under the row its path names, but these inspectors render their own forms and are never handed the issues, so that fix does not reach them. Measured by the #35499 dev against a running console: a view save refused at `label.not_a_locale` (two entries, `invalid_key` and `invalid_format`) and at `config.columns.0` (`unrecognized_keys`) lights no row in the view designer. The cause is still in the Save button's reason and, for types with a live validator, in the banner. Not driven through a refused save in the view designer UI end to end: the serving shapes came from `PUT /api/v1/meta/view`, the mounted rows from the running console.\n\n## Where (read at `e35cf035`)\n\n- `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:3776-3796`: with no selection, the registered `DefaultInspectorComponent` gets `type`, `name`, `draft`, `onPatch`, `onSelectionChange`, `onBlockingIssuesChange`, `readOnly`, `locale`, `serverSchema`; no `issues` and no inline-register callback. The flat `SchemaForm` fallback right below it does get `issues={displayIssues}` (`:3792`, `:3822`).\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/ViewVariantInspector.tsx:527-534`: its `SchemaForm` gets no `issues` and no `onInlineIssueFieldsChange`.\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectDefaultInspector.tsx`: replaces the form for objects; takes no issues.\n- `default-inspector-registry.ts:86-98`: the registry, so the gap applies to every registered type, not only view and object.\n\n## Fix direction (to be designed on the card)\n\nHand the inspectors the same `displayIssues` and the inline register, so the #35623 placement rule applies inside them and the banner keeps leaving out what a row draws (objectstack#27865, one message per mistake). A view variant's paths are relative to the variant, so a prefix trim like `EmbeddedItemEditor`'s may be needed. Which inspectors draw rows from a `SchemaForm` and which from bespoke controls is to be measured.\n\nEvidence: os-dev report 7018192154 on PR #35623 (`summary`, zone-2 measurement (2), and `out_of_scope_findings`); screenshots in the project folder `build-seat1/35499/`.\n\nDedupe: issue search `view designer refused save no row highlighted` → 2 (QA run records #23166, #25817, closed, not this); `ViewVariantInspector SchemaForm issues` → 1 (#27895, closed, a different inspector feature); `default inspector refusal issues` → 133, first 30 read, none about issues reaching a default inspector."
+}

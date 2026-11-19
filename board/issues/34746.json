@@ -15,18 +15,21 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
+    "lease:d7-B",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T09:32:09Z",
-  "updated_at": "2026-11-19T05:00:57Z",
+  "updated_at": "2026-11-19T17:03:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34746",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: split from #34701 by its card thread's premise reading on `origin/main` `f6f5b50a` (half B; measured in the objectql engine with a capturing in-memory driver). Dedupe: `all fields dropped update no-op`; no open card.\n\nSuggested-grade: p1 (inherits #34701) · domain:server · Blocked-by #34672\n\n## 维护者速读\n\n- 现象：一次更新里调用方给的字段如果全部被丢弃(只读字段、readonlyWhen 锁住的字段),引擎仍然写这一行：盖上最后修改人和时间，并照跑 afterUpdate 钩子，「更新时」的流程和触发器会把它当成一次真的更新。\n- 为什么要修：什么都没改，记录头却显示「刚被某人修改」,自动化也被白白触发。\n- 需要你做的：无(分诊定级)。\n\n## Readings\n\n| Request | `driver.update` receives | dropped | afterUpdate |\n|---|---|---|---|\n| `{total_score: 100}` (readonly) | `{updated_at, updated_by}` | readonly | runs |\n| `{locked_note: 'x'}` (readonlyWhen-locked) | `{updated_at, updated_by}` | readonly_when | runs |\n\n`packages/objectql/src/engine-update.ts` has no short-circuit between the strip and `driver.update` (by-id and predicate branches alike). No audit row is written (the audit diff skips the stamp columns), so the card's \"history\" is the record header's last-modified fields.\n\n## Change (seat's reading, inside the maintainer's veto window)\n\nWhen the strip removes every caller-supplied key, the update is a no-op: no driver write, no stamps, **afterUpdate does not run**, and the answer is the current record plus `droppedFields` (the REST header as today). Both branches. A same-value write (nothing dropped) is out of scope and unchanged. Strict mode already refuses a dropped key and is unchanged. This narrows when \"on update\" automation fires ⇒ L1 + L2 + Tier H.\n\n## Done when\n\nPins for both branches show no driver write and no afterUpdate when every key is dropped, and an unchanged path when at least one key survives.\n"

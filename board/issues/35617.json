@@ -1,0 +1,36 @@
+{
+  "number": 35617,
+  "kind": "pull_request",
+  "title": "fix(studio): removing a field that holds data asks before the Data pillar saves it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T18:03:34Z",
+  "updated_at": "2026-11-19T18:56:40Z",
+  "closed_at": "2026-11-19T18:56:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T18:56:38Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35617",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuFHC3CpgeSgxYniLbe7jSsx)_\n\nFixes #34931\n\nClause-②: no\nMetadata-protocol: none\n\nSignature: repo:objectstack#1 · os-sales · session_01L6bhgUgZpbKcVYFC7iXgMu\n\n## 维护者速读\n\n- 用户能看到什么变化:平台管理员在 Studio 数据栏删除一个已发布且存有数据的字段时,不再只看到「更改未保存」,而是弹出确认框列出会丢失的数据,可选择强制保存或取消并找回该字段。\n- 为什么做:属于「控制台核心业务操作体验」专题中的应用与 Studio 往返一项,让管理员能在 Studio 里把删字段这件事做完。\n- 出错会怎样:最坏情况是确认框里强制保存把该字段的数据列变为不可访问(与其他编辑器的强制保存相同);改动只在界面层,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\nThe Data pillar's object draft save (`DataPillar` in `StudioDesignSurface.tsx`) now tells the door's `409 DESTRUCTIVE_CHANGE` apart from every other refusal, by status and code (`destructiveFindings` in `metadataError.ts`, which reads the client's parsed `issues`).\n\n- **The refusal opens a confirmation** instead of the generic strip. It lists the refusal's findings in the server's own words, under the existing `engine.edit.destructiveTitle` / `engine.edit.destructiveDesc` strings, with **Force save** (`engine.edit.forceSave`) and **Cancel** (`engine.cancel`). No locale key is added.\n- **Force save re-sends the refused save whole**: the same body, to the same object name and the same `packageId` the refused save wrote, with `force: true` (`?force=true` on the draft door). The address is held with the refusal, never re-derived, per the in-tree rule \"The pair a write names is the door's answer\". It goes through the same draft-version guard, so the `If-Match` pin still applies, and lands through the same success path as an ordinary autosave (dirty cleared only if the buffer did not move, verdict re-read, draft-saved toast).\n- **Cancel keeps the field**: each field a finding names goes back into the buffer as the server holds it (as loaded, or as last saved), at its old position. If the buffer is then what the server stores, it is clean and nothing is sent. If other edits are still pending, the autosave sends those edits, without the removal.\n- **While the confirmation is open the autosave is blocked** (`destructive !== null` in its `blocked` guard), so a refused removal is never re-sent behind another edit. The confirm cannot loop: the hook never re-sends a snapshot it already attempted, a forced save that is refused again goes to the strip, and a load of another object clears the held refusal.\n- The column-reorder save, which sends the same buffer, routes the same refusal to the same confirmation.\n\nEvery other refusal goes through `objectSaveRefusal` exactly as before.\n\n## Tests\n\nNew `DataPillar.destructiveChange-34931.test.tsx`, on a real `MetadataClient` over a fetch double, so the URL each PUT left with is the one the door reads. The field is removed through the field inspector's header menu and its confirm, the way an author removes it.\n\n- the 409 opens the confirm listing the finding's text, and no refusal strip; Force save sends a second PUT with the same path, `force=true`, `package=com.example.showcase`, `mode=draft` and a byte-equal body, and the field stays removed;\n- Cancel puts the field back on the Form canvas and sends nothing more (2.3 s past the debounce, still one PUT);\n- a 422 `INVALID_METADATA` refusal still shows the refusal strip and no confirm.\n\n<details><summary>Readings at 52a0afb1</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/DataPillar.destructiveChange-34931.test.tsx`: Test Files 1 passed (1), Tests 3 passed (3).\n- Ablation (the two source files restored to `e35cf035`, test kept, restored afterwards byte-identical by blob hash): Tests 2 failed, 1 passed (3). The Force save and Cancel cases go red; the other-refusal case stays green, as it pins unchanged behaviour.\n- Neighbouring suites (`DataPillar.*`, `metadataError.*`, `StudioDesignSurface.*` under `ui/`, at 887bbda0, before the test-only lint import): Test Files 177 passed (177), Tests 1307 passed (1307).\n- `pnpm --filter @object-ui/app-shell type-check` (both tsconfigs): exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 39 derived commands, all run locally, all exit 0; `--ran` reconciliation: 39 run, 0 NOT-MEASURED. `check:test-source-alias` first went red on the new test (it reaches a dynamic `@objectstack/lint` import), and is green after a module-top import in the test.\n- `ui` `check:new-line-citations`: 0 new citations. `overlap-check`: merges cleanly with `origin/main`, 0 open PR heads share a file.\n\n</details>\n\n## Acceptance notes\n\n- The finding list shows the server's English prose in every locale, as `ResourceEditPage` and `PermissionMatrixEditor` already do.\n- Not extracted: the destructive confirm now exists in four places (`ResourceEditPage`, `PermissionMatrixEditor`, `PackageOwdOverviewPanel`, here). A shared dialog was out of scope for this card.\n- Browser verification in a booted example app is recorded in the dev report comment on the card, not here: the pull request opens before that run.\n- Line budget: the diff is about 290 changed lines including the test, above the 200-line target. The extra lines are the dialog markup and the Cancel restore.\n\n## Verification\n\nRead first, by risk:\n\n1. `StudioDesignSurface.tsx`, `keepDestructive`: the Cancel restore and its dirty judgement.\n2. `StudioDesignSurface.tsx`, `doSave`: the `forced` argument, which must address exactly what the refused save did.\n3. `metadataError.ts`, `destructiveFindings`.\n\nTwo-minute check: run the new test file (command above). Expect 3 passed.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUgZpbKcVYFC7iXgMu)_\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgUgZpbKcVYFC7iXgMu -->\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 35632,
+  "kind": "pull_request",
+  "title": "chore(pm): ensure-pm-labels stops seeding the lease:* labels",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T18:51:14Z",
+  "updated_at": "2026-11-19T19:35:29Z",
+  "closed_at": "2026-11-19T19:35:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T19:35:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35632",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuR8F5nRQPQ47C5tRSxaHjFv)_\n\nPart of #35350\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；建标签的脚本不再建那批「区名」标签。\n- 为什么做：你同意不再用区名标签、改在认领评论里写区名；这一步保证标签删掉后不会被脚本重新建回来。\n- 出错会怎样：最坏是脚本少建一类已经不用的标签，派发照常；可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nCard item 2, script half only. The ruling on the card (Bill, 2026-11-19 05:57Z, 「同意，立卡更新skills」): no more `lease:*` labels; the area name goes into the claim comment, with the assignee and the seat's area table; the old labels are deleted. Item 1 (the skill text) landed in PR #35363.\n\n- `scripts/pm/ensure-pm-labels.sh`: removed the `lease:AREA` family block (the 18-line comment, the `for A in A1 A2 A3 A4 A5 E1 E2 E2b` loop and its `gh label create \"lease:$A\"` line; lines 433-453 at base a186b2b584). A default or `--reconcile` run of the script no longer recreates `lease:A1`-`A5`, `E1`, `E2`, `E2b` after the seat deletes them.\n- In its place, a six-line absence note in the same form as the file's existing `target:*` note: ownership is the `Area:` line in the `Claim:` comment (pm-dispatch `references/area-lease.md`), no reference reads a `lease:*` label, leftover objects are deleted by a deliberate PM action, and no row is to be re-added.\n- The script's header has no family index naming `lease:*` (the first `lease` match in the file is line 213, a `release` word), so nothing else in the file changed. File: 755 to 740 lines (+6 / -21).\n\nFiles to read first (by risk): 1. `scripts/pm/ensure-pm-labels.sh`, the hunk at line 433 (the only hunk).\n\n### Left to the seat: deleting the label objects\n\nDeleting a label object has no relay op, so this PR deletes nothing and the card stays open. Live `lease:*` set read during this run at head 76d9360e9f (`GET /repos/objectstack-ai/objectstack/labels`, paginated): **32 labels**.\n\n- On the card's list (24): `lease:A1`, `lease:A2`, `lease:A3`, `lease:A4`, `lease:A5`, `lease:E1`, `lease:E2`, `lease:E2b`, `lease:o1-A`, `lease:o1-B`, `lease:o1-D`; seat 5's nine: `lease:ux-1`, `lease:ux-2`, `lease:ux-3`, `lease:ai-1`, `lease:data-1`, `lease:data-2`, `lease:pkg-1`, `lease:pkg-2`, `lease:fleet-1`; other seats' areas (confirm first, per the card): `lease:o1-C`, `lease:o3-H`, `lease:o4-A`, `lease:o4-C`.\n- Added in the claim: `lease:b1-H` (created 2026-11-19 15:54Z, after the step had retired).\n- Live but on neither list (7): `lease:b1-A`, `lease:b1-B`, `lease:b1-F`, `lease:b1-G`, `lease:d7-B`, `lease:d7-C`, `lease:d7-D`. Their owning seats are not recorded on the card; the seat confirms each before deleting.\n\n## Tests\n\nNo package touched, so no package build or test is owed. The script's own test surface is `check:pm-label-desc-cap` (its `--self-test` runs the real script under a fake `gh`): exit 0, `50 label descriptions in scripts/pm/ensure-pm-labels.sh, all ≤100 characters` (floor 12). `bash -n scripts/pm/ensure-pm-labels.sh`: exit 0. No test file names the script (`git grep ensure-pm-labels` over test files: no match). No ablation: no tested behaviour changed.\n\n## Acceptance notes\n\n- `git grep -n 'lease:' -- scripts/pm .github/workflows` after the change: no line seeds, writes or reads a `lease:*` label. The matches left are `Release:`/`release:` prose and `scripts/pm/fleet-token.mjs:521` (\"Under the lease:\", the token write lease, not a label).\n- The remote branch had been deleted when PR #35587 merged, so the first push was a plain `git push -u` of a branch made from `origin/main` a186b2b584; no force push was needed.\n\n## Verification\n\nTwo-minute check: `grep -c 'gh label create \"lease' scripts/pm/ensure-pm-labels.sh` prints `0`, and `pnpm check:pm-label-desc-cap` prints the 50-descriptions line.\n\n<details><summary>Derived gate families at 76d9360e9f (27: 19 exit 0, 8 NOT MEASURED)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 27 commands for the one path. The worktree has no `node_modules` (S card, no install), so:\n\n- exit 0 (19): `check-self-test-wired` (+ `--self-test`), `check-whole-set-label-write` (+ `--self-test`), `ci/plan-test-core-shards --self-test`, `check:adr-anchors`, `check:agent-test-spelling`, `check:bash32-floor`, `check:cross-package-test-inputs`, `check:entry-guard`, `check:gitlink-declared`, `check:nul-bytes`, `check:parse-guard`, `check:pm-label-desc-cap`, `check:pnpm-filter-targets`, `check:pnpm-flag-spellings`, `check:refd-timer-probe`, `check:scripts-symbol-anchors`, `check:watch-hint-literal`.\n- NOT MEASURED, exit 3 PREREQUISITE NOT MET (`yaml` not installed) (6): `check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus`, `check:ci-filter-parity`, `check:cli-command-ids`, `check:driver-memory-census`.\n- NOT MEASURED, exit 1 from a missing dependency (2): `check-self-test-workflow-commands` (+ `--self-test`). The finding is `release-pending-publish --self-test` printing \"Cannot find package '@changesets/cli'\", and the self-test failure is `ci/lane-verdict --self-test`, which answers PREREQUISITE NOT MET (`yaml`) when run alone. Neither involves this file.\n- `--ran` reconciliation: exit 0, `27 derived famil(ies) accounted for — 19 run, 8 NOT-MEASURED (6 DERIVED from a recorded exit 3, 2 claimed)`.\n\nCI runs all of them with dependencies installed; the PR's check-runs are the verdict for the eight.\n\n</details>\n\n<details><summary>overlap-check</summary>\n\n`node scripts/pm/overlap-check.mjs --branch=HEAD` at 76d9360e9f: exit 0, `✓ origin/main: merges cleanly`, `VERDICT clean exit 0` (0 open PR heads share the file).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWh7NM35xq2HajeYCx)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWh7NM35xq2HajeYCx\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgWh7NM35xq2HajeYCx -->\n"
+}

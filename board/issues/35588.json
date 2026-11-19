@@ -1,0 +1,37 @@
+{
+  "number": 35588,
+  "kind": "issue",
+  "title": "4-hourly full run: red on main (Lint & Type Check)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T16:36:47Z",
+  "updated_at": "2026-11-19T19:02:09Z",
+  "closed_at": "2026-11-19T18:56:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35588",
+  "body": "os-4-hourly-full-run-lint-type-check — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.\n# 4-hourly full run: red on main (Lint & Type Check)\n_Swept 2026-11-19T16:36:43.187Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/44563404478) · commit `97f342037d0b9a6596f4aa8dbfb3541a69096ec9` · conclusion `failure`._\n`Lint & Type Check` runs the FULL battery on `main` every 4 hours (#16467, #25771). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the 4-hourly run green.\nFix what it names and let the next 4-hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green 4-hourly run\nRange: `5756ae0d75` (run 44522250492, the last green `Lint & Type Check` schedule run) .. `97f342037d` — [compare](https://github.com/objectstack-ai/objectstack/compare/5756ae0d75ee7d03a65ae72546fdd87010c8f3f2...97f342037d0b9a6596f4aa8dbfb3541a69096ec9)\n- `6ffa816e55` feat(security, create-objectstack): an AI-built app with its own capabilities and no connector plugins installs as an unmanaged copy (#35261)\n- `819c0679a8` fix(metadata-protocol)!: $expand and a relation condition stop serving a disabled package's object (#35444)\n- `e2f30946f5` fix(cli): a config that fails to load is no longer reported as \"Compile failed\" (#35463)\n- `89ea9bf84b` feat(platform-objects): Setup → Users can remove a pending person on a managed environment (#35487)\n- `895dd437f4` fix(driver-mongodb): refuse a non-UTC date-bucket timezone on a direct aggregate call (#35473)\n- `eb1f85d7f4` fix(plugin-detail): the compact related card labels its rows from the list columns when they leave the name out (#35497)\n- `578d3b1d66` fix(cli): stage os skills writes and swap them in by rename, recording last (#35495)\n- `921211960d` fix(components): a record page's stuck tab strip is a solid bar, flush with the page top (#35501)\n- `cc6f30c98e` fix(app-shell): record breadcrumb names the object while the record is read (#35504)\n- `af997d9416` feat(pm): card-pick reader, os-verify-lock --depth and check-prior-rulings --paths replace three retyped procedures (#35482)\n- `f727061b88` docs(adr): ADR-0157 working calendars are organization-editable runtime data, resolved by code or refused (#35364)\n- `0d9d982076` docs(skills): the api and i18n skills teach `RuntimeBuildIssue.userMessage` (#34970)\n- `fca72dfa32` docs(skills): teach the fault edge on a write after an approval decision and the RESUME_FAILED refusal members (#35002)\n- `2211bb103a` fix(cloud-connection): a managed install or upgrade fills the stored computed fields it makes live (#35514)\n- `94fb8db2d1` fix(plugin-chatbot): the AI approvals inbox stacks each action as a card on phones, and its drawer fits the screen (#35515)\n- `c0484c8fe7` fix(driver-sql): a boolean retyped from text stores 1 / 0 on SQLite, so a saved false no longer reads as true (#35511)\n- `d76d57ab46` fix(service-analytics): cube door answers a formula total with the virtual-field remedy (#35521)\n- `a354bb0edb` fix(app-shell): the inbox badge's receipt read no longer waits on the message read (#35519)\n- `c890070f29` feat(console): Studio landing cards open package management, and link to all packages (#35516)\n- `b68f9ae347` fix(metadata-protocol): the bare save, delete, publish, draft and history doors follow the row-held base the bare read serves (#35450)\n- `eed422ea24` fix(core): drill a relationship path as one nested-relation condition, pushed down by the server (#35423)\n- `41ee21810a` test(scenarios): split the three-shape no-skip refresh case into one case per shape (#35531)\n- `cf6bb70e2d` fix(verify): os verify writes nothing to an object on an external datasource, even one whose write gate is open (#35509)\n- `93fa4f9714` fix(i18n)!: refusal labels follow the declared sourceLocale, as /meta serves them (#35351)\n- `b65488a8a9` fix(plugin-detail): the highlights strip, the detail view and the record drawer hide a field whose own visibleWhen is false (#35545)\n- `3cfa5bc826` fix(core)!: a context placeholder on a date, datetime or time field is refused, as the id it resolves to already was (#35508)\n- `5cd2b540de` fix(objectql): a committed or rolled-back trio handle reads as closed (#35541)\n- `97f342037d` fix(metadata-protocol)!: drop an explained union head from a refused save's issues only when it is zod's bare \"Invalid input\" (#35520)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}

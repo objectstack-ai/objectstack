@@ -14,7 +14,6 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "lease:A2",
     "pm:queue",
     "priority:p3"
   ],
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-15T23:13:00Z",
-  "updated_at": "2026-11-19T06:02:44Z",
+  "updated_at": "2026-11-19T19:42:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

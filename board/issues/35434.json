@@ -14,18 +14,21 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:queue",
+    "lease:d7-B",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T09:01:45Z",
-  "updated_at": "2026-11-19T09:59:43Z",
+  "updated_at": "2026-11-19T15:44:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35434",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nArea: data-1 · follow-up of #35174 (PR #35383, contract review 7003367719 S2)\n\n## 维护者速读\n- **问题：** 动作处理器再去调用另一个动作时，被调用的那个动作拿到的接口不带「动作」标记；它若经「平台自用系统接口」写成员、岗位、权限集分配或邀请，不会像权限文档说的那样被拒。\n- **要做：** 让这条调用路径交出的接口也保留标记，或把那个函数改成只对平台钩子的接口去掉标记。\n- **不做会怎样：** 权限文档已注明这条路径「不覆盖」；宿主代码本来就持有引擎，所以不是新的越权，只是文档承诺的拒绝少了一条路。\n- **你要做的：** 无。\n\n## What\n\n`ObjectRepository.execute` (`packages/objectql/src/engine-object-repository.ts`, `ObjectRepositoryFacet.execute`) dispatches the named action with `api: new ScopedContext(executionContext, this.engine)`, over a context it marks `'action'`. That api is not app-authored, and runtime's `buildActionApi` does not build it, so it carries neither the engine's app-authored flag nor the action door's origin flag (the runtime provenance layer from PR #35383). In the dispatched handler, `platformSystemApi(ctx.api)` therefore returns a system api with neither the mark nor `flowRunId`, and its writes to `sys_member`, `sys_user_position`, `sys_user_permission_set` and `sys_invitation` pass as platform writes.\n\nReach: from an action door's handler, `ctx.api.object(o).execute(other)` dispatches another host handler with that api. Row 1b of `content/docs/permissions/system-context.mdx` and the `platform-system-api.ts` header name this api as not covered (PR #35383). There is no reach gain, since the handler already holds the engine.\n\nSeam: objectql `engine-object-repository.ts` `execute` builds the api. Consumers: `platformSystemApi` (objectql) and the identity-assignment refusal (plugin-security).\n\n## Routes to decide\n- **A.** `execute` hands the dispatched action a derivation of the calling api instead of a fresh `ScopedContext`. The repository holds only a context, so the api has to be threaded into `ObjectRepository`.\n- **B.** An engine-side origin flag on `ScopedContext`, copied by `derive` and set by `execute`. `engine.ts` is at 6852 lines against a facade ceiling of 6854 (`check:facade-delegation-only`, ruling 6897467376), so the field and its accessors would have to live in a facet module (e.g. a WeakSet keyed by instance). Otherwise the ceiling needs a maintainer ruling.\n- **C.** Narrow `platformSystemApi` itself so it sheds the mark only on an api the engine marks as the platform hook api (`buildHookApi`), inverting the flag's polarity. This also covers any future bare `createContext` api handed to app automation.\n\n## Done when\n`platformSystemApi(ctx.api)` inside an action dispatched by `execute` keeps the `'action'` mark, pinned by an integration test with an ablation. Row 1b and the header drop their \"not covered\" clause.\n\nDedupe words: platformSystemApi, ObjectRepository.execute, action mark, execute api, actionDoorOrigin\n\nGrade: `area:data · Bug · reach: host action handler chaining another action (no repo caller today) · evidence: read (L2 7003367719 S2)` → p2."

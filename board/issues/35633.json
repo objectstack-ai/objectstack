@@ -1,0 +1,32 @@
+{
+  "number": 35633,
+  "kind": "issue",
+  "title": "@objectstack/mcp: export the app-docs answer rule and its served-check (packageDocAnswerRule, packageDocToolsServed) from the package barrel, so a host with its own initialize text can carry it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T18:53:59Z",
+  "updated_at": "2026-11-19T18:56:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35633",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a premise gap that a `repo:cloud` pin round measured (objectstack-ai/cloud PR #4907, pin `53c9575b7eb4`). It blocks objectstack-ai/cloud#4905, the cloud half of item 2 of the maintainer-directed p1 #35442 (「AI 的回答是真实的查了系统中的元数据和相关文档，还是编的」, 「都是 p1」). Reader: the `domain:server` lane (packages/mcp). Dedupe: `packageDocAnswerRule export`, `packageDocToolsServed barrel`: none.\n\nGrade: p1 · Task · a blocker takes the top grade of what it blocks (cloud#4905 is p1).\n\n## 维护者速读\n- 要做的：把平台 MCP 里「先查应用手册、给出处」那段回答顺序，以及「两个手册工具是否都已提供」的判断，从包的入口导出。\n- 为什么：云端的 MCP 入口自己写开场说明，要引用同一段文字，不能抄第二份。现在这两样都导不出来，云端没法引用。\n- 需要你做的：无。\n\n## Measured (objectstack `53c9575b7eb4`, from the cloud worktree)\n\n- `packageDocAnswerRule` is module-local: `packages/mcp/src/mcp-server-runtime.ts:1898`, with no `export`.\n- `packageDocToolsServed` is exported from `packages/mcp/src/mcp-http-tools.ts:3308`, but `src/index.ts` does not re-export it. The package's `exports` field has only `'.'`.\n- A node import of `@objectstack/mcp` from cloud's `packages/objectos-runtime` resolves neither (both `false`).\n- PR #35564 appends the rule only to the open server's default `initialize` text. A host that injects its own `instructions` / `dataOnlyInstructions` gets nothing appended, by design. The cloud build door is such a host.\n\n## Done when\n\n`@objectstack/mcp`'s barrel exports:\n- `packageDocAnswerRule(definitionReader?)`, or the rule text plus a way to name the connection's definition reader;\n- `packageDocToolsServed(...)`, with the reader-name list (or `definitionReaderServed`) the rule needs.\n\nThe open server keeps using the same export, so only one copy of the text exists. A test pins the barrel export."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35544,
+  "kind": "issue",
+  "title": "MCP ask: \"claims\" matches two measures (Claim count, Claimed amount), so `claims_by_status` and `claimed_last_month` are asked back in both arms instead of answered",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:56:17Z",
+  "updated_at": "2026-11-19T16:02:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35544",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFiling trigger: the daily MCP ask round #35540 (fixture day 1, `travel_expense`, haiku/medium, published 18.6.0). The same two questions were lost in both arms on one day, which is the P filing rule of the confirmed plan (#34687 comment 6952197238, addition 3).\n\n## What happens, in both arms (skill off and skill on)\n- **`claims_by_status`**, as `dept_manager`: `list_datasets {\"terms\":[\"claims\",\"status\"]}` returned two measures for \"claims\" (Claim count, Claimed amount) and two dimensions for \"status\" (Claim status, Trip status). The agent asked which one was meant, and the card expects a figure.\n- **`claimed_last_month`**: `list_datasets {\"terms\":[\"claims\"]}` returned `claimed_amount` and `claim_count`. The agent asked back, and also asked which month.\n\n## The question this card answers\nWho owns the ambiguity:\n- **The card or its datasets (R):** the card's datasets declare \"claims\" as a term of both measures, while each question has one intended reading. \"Claims by status\" reads as a count; \"claimed last month\" reads as an amount.\n- **The door (P):** `list_datasets` returns every member a term touches, with no ranking. A word closer to one member's name (\"claimed\" against `claimed_amount`) still yields two equal matches, so an agent following the skill rightly asks back.\n\nThe fix is either a card or dataset change (`docs/qa/scenarios/travel_expense.json`, the card's dataset synonyms or the question wording), or matching that ranks or narrows a term that names one member more closely. Asking back is the correct behaviour on a true tie, so the card's expected answers need checking first.\n\nOne repetition only. The weekly five-repetition round will show whether the loss is stable."
+}

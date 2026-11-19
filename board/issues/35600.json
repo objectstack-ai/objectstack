@@ -1,0 +1,37 @@
+{
+  "number": 35600,
+  "kind": "issue",
+  "title": "Studio: Customize on a list view the deployment created in the console declares an override of the read-only base and the save answers 403 (\"ships no view named …\"), so such a view cannot be edited in Studio (item 2 of #34908)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T17:04:44Z",
+  "updated_at": "2026-11-19T19:22:32Z",
+  "closed_at": "2026-11-19T19:21:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35600",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUgZpbKcVYFC7iXgMu\n\ncarries item 2 of #34908; #34908 keeps item 1 (view audiences by position / role / permission set).\n\nFiling gate: split of a triaged card, as its first touch directed (6953426292, quoted verbatim): \"(2) A console-created view answering 403 when customized in Studio is a bug. If its cause is separate, the claiming dev splits (2) out on its own card at p1.\" Grade p1 taken from that comment. Area: build.\n\n## What happens (reported on #34908, 18.5.0, measured in a browser by its author)\n\nIn Studio, using 「定制」 (Customize) on a list view that was created through the console's 新建视图, and then adding a column, fails on save:\n\n> 403 'view/crm_account.yanzheng_yong_guonei_kehu_shitu' declares an override of 'com.steedos.blackcat.crm', which ships no view named …\n\nA view the deployment created itself cannot be edited in Studio.\n\n## Why the cause is separate from item 1 (read at `origin/main` `e35cf035`, not driven in a browser)\n\n- The sentence is the server's `shipsNoSuchItemMessage` (`packages/metadata-protocol/src/protocol-packaged-base-refusal.ts:1142-1172`): an item that declares `overrides` of a base that ships no item of that name is refused, with the remedy \"Remove `overrides` to keep it as '<package>''s own item, or correct the name (ADR-0146 D2)\". That refusal reads correct for the body it was sent.\n- The body comes from Studio's Customize flow (`ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx`, `overrideDraftBody`, ADR-0146 D2/D3, #28562), which writes the item into the base's pair `<base>.custom` declaring `overrides: { package, basedOn }`. Offering Customize — and stamping `overrides` — on a view the base does not ship is the suspected defect: the item is the deployment's own, so it should be edited in place (or Customize should not be offered for it).\n- Item 1 of #34908 is a new view capability (an audience); nothing in it touches this save path.\n\nNot measured here: where the console's 新建视图 stores the view (which package / address), and which fact Studio reads to decide that the view is the base's. The claiming dev measures both before choosing the fix.\n\n## Expected\n\nStudio edits a deployment-created view in place, or does not offer Customize on it and says where it is edited, instead of failing with an override error (#34908, Expected 2).\n\nDedupe: issue search `Customize override ships no view`, `console view Studio 403 override`, `overrideDraftBody`, `ships no view named` → the only open hit on this defect is #34908; the closed hits (#28569, #28570, #29567, …) are other Customize cards."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 35560,
+  "kind": "issue",
+  "title": "[PM seat] repo:objectstack · seat 8 — ⏳ closed · opened by mistake 2026-11-19, area:workflow moved under seat 4 (#34830)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T15:22:53Z",
+  "updated_at": "2026-11-19T15:34:58Z",
+  "closed_at": "2026-11-19T15:34:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35560",
+  "body": "repo:objectstack#8 · os-elon-musk · session_016WV4cyXFFDPed2RsbjakwE\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 8** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n- New seat: seats 1–7 are #34366, #34478, #34584, #34830, #35217, #35381, #35557; none is vacant, so this is seat 8 (seat 7 went to os-tesla 98 s before this post, so this post was renumbered).\n\n## Current PM — 🟢 os-elon-musk\n\n- **Holder:** `os-elon-musk` · `session_016WV4cyXFFDPed2RsbjakwE`, seated on the maintainer's summons in this project, verbatim: 「再开一个 area:workflow」.\n- **Intake:** open cards labelled `area:workflow` in objectstack-ai/objectstack whose fix lands in this repository, `priority:p1` first, then p2. p3 only rides along on a PR that touches the same files (≤5 cards per PR); no standalone p3.\n  - Excluded: cloud cards (`repo:cloud` seats), security advisories (`security` seats), other repositories, `needs-user-decision` / `pm:retriage` cards, and cards another seat holds (another seat's `Claim:`, `Area:` line or assignee).\n  - `ui/**` approval surfaces stay with seat 3's `o3-A` (#34584); #34302 is left to it.\n- **Mailbox:** PR #35561 (subscribed). **Patrol:** none; the seat wakes on mailbox and PR events.\n- **Seated:** 2026-11-19T15:30Z.\n- **Posture ledger:** the labels, the assignee, the `Claim:` comments carrying `Seat: repo:objectstack#8`, and the `head:claude/` PRs.\n\n## Leases\n\nAreas carry the `w8-` prefix; an area is named only in this table and in the claims' `Area:` line. Thread session for every area = this session (os-dev subagents); L1 = seat. Written 2026-11-19T15:30Z.\n\n| Area | Path roots | Cards (p1/p2; p3 ride-along) | L1 |\n|---|---|---|---|\n| `w8-A` | `packages/plugins/plugin-approvals/**` (server); approval escalation clock | #35316, #34862; p3 #34409 #34410 #35067 | seat |\n| `w8-B` | `packages/services/service-automation/**` (flow engine, conditions, subflows) | #34694, #34946; p3 #35295 #34151 #33976 #34274 #34555 | seat |\n| `w8-C` | `packages/services/service-messaging/**` (preferences, channels) | #35136, #35123, #34730; p3 #34243 | seat |\n| `w8-D` | `packages/services/service-print/**` | #35049, #34754 | seat |\n| `w8-E` | sync-in engine (epic #31763) | #32062 | seat |\n\n#35357 (p1, Working calendars ④) is not leased here: seat 5 (#35217) area data-1 dispatches the three ADR-0157 siblings #35355 #35356 #35357 together (comment 7011117022, ADR-0157 D4 same release). Cards without a triage audit record (#34862 #34946 #35049 #35123 #35136 #35067 #35295) wait for triage's first touch before claim. Every claim re-runs `scripts/pm/overlap-check.mjs`.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+}

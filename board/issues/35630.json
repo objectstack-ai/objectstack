@@ -1,0 +1,32 @@
+{
+  "number": 35630,
+  "kind": "issue",
+  "title": "lint: field-group-shadowed does not count the stage field the record page draws as record:path, so a group whose only member is it shows empty without a warning",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T18:44:28Z",
+  "updated_at": "2026-11-19T18:50:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35630",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUZrkMKgGrXXe8zPGq\n\nFiling gate: **(b) a defect read during a card's development**: an out-of-scope finding in the #35251 + #35252 os-dev report (PR #35629). **Read off the code, not reproduced on a running page.** ⛔ Not a claim. Grade is left to triage's first touch.\n\n## What happens (read, not measured)\n\nWhen the default record page draws a stage bar (`record:path`: `detectStatusField` plus the field's options, in `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`), `headerDrawnFields` also hides that field from the body. `field-group-shadowed` (`packages/lint/src/validate-semantic-roles.ts`) models only the highlight strip, which after PR #35629 reads `RECORD_HIGHLIGHTS_MAX`. It does not model the stage field. A field group whose only member is the stage field therefore draws nothing on the page, and lint does not warn about it.\n\n## Expected\n\nThe lint judges the same set of hoisted fields as `headerDrawnFields`, the stage field included, so its verdict matches the screen.\n\n## Done when\n\n- First step: measure. Boot an object whose status field is drawn as the stage bar and whose field group holds only that field. Confirm that the group renders empty, then confirm that `os lint --strict` passes it.\n- If it reproduces: the rule counts the stage field. Add a pin, a control showing that a group with one more visible member still passes, and an ablation.\n\nRe-check after PR #35629 merges: `git grep -n \"RECORD_HIGHLIGHTS_MAX\\|headerDrawnFields\" origin/main -- packages/lint/src ui/packages/plugin-detail/src/synth`.\n\nDedupe: issue search for `field-group-shadowed stage field record:path` and `headerDrawnFields pathField lint` found only #35252."
+}

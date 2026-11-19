@@ -13,17 +13,18 @@
   "labels": [
     "area:package",
     "domain:server",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-19T14:09:58Z",
-  "updated_at": "2026-11-19T14:09:58Z",
+  "updated_at": "2026-11-19T14:53:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35525",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: escalated by L1-a ACCEPT 7007008749 on PR #35444 (out of scope: \"measure service-analytics' isRegisteredObject gate; file a card under #35427 if it serves\"). Measured by area pkg-2 on origin/main 609b6751.\n\n## 维护者速读\n- 用户能看到什么变化：某个应用包停用后，报表分析仍能统计它的数据，按字段分组时还会显示字段内容。修好后，分析对停用包的数据也会拒绝，和直接打开时一致。\n- 为什么做：停用包的数据本该在所有读取入口都看不到。全局搜索和关联展开已经修了，分析是同一类问题的又一个入口。\n- 出错会怎样：最坏情况是分析时仍算进停用包的数据，和现在一样。没有停用任何包的环境不受影响。\n- 要你做什么：无。\n\n## Reach (measured)\nReal kernel (MetadataPlugin + ObjectQLPlugin + SqlDriver, in-memory SQLite, AnalyticsServicePlugin with one authored cube) via `HttpDispatcher`. Caller `isSystem`, with an allow-all `security` stub (without one, every field-reading query fails closed 503). Package B owns `beta_obj`; package A's `alpha_obj` has lookup `b_ref → beta_obj`. Results with B disabled:\n- `GET /api/v1/data/beta_obj` → **404** `OBJECT_PACKAGE_DISABLED` (as designed).\n- `POST /api/v1/analytics/query` with authored cube `beta_cube`, count + sum(amount) → **200** `cnt=1 total=42`, identical to the enabled state.\n- Same, with dimension `secret_note` → **200**, and the field value comes back as a group key.\n- Inferred cube `beta_obj`, `beta_obj.count` plus dimension `beta_obj.secret_note` → **200** with the value.\n- A hop from enabled `alpha_obj` (authored `b_ref.secret_note`, inferred `alpha_obj.b_ref.secret_note`) → **200** with the value. The hop joins the disabled object.\n- `GET /api/v1/analytics/meta` still lists `beta_cube` and its members.\n- CONTROL: re-enabling B leaves every analytics answer the same and restores the data route's 200.\n\n## Seam\n`packages/services/service-analytics/src/plugin.ts:1631` `isRegisteredObject` (= `engine.getObject?.(name) != null`) feeds `assertInferableCube` (`analytics-service.ts:4945-4962`) and the join existence check (`:3415`). `getObjectDeclaration` (`plugin.ts:1657`) feeds `api-exposure-door.ts:281/314` `apiExposureDenialReason`, which asks declared exposure only. Nothing in `service-analytics/src` asks `isObjectPackageDisabled`. The fix is to ask the registry's disabled-package predicate (the one the data route uses through `isObjectOfDisabledPackage`) for every object in a query's read set: base, declared joins and hops. A disabled object is refused with `OBJECT_PACKAGE_DISABLED`. A registry that cannot answer hides nothing, as on the data route. `/analytics/meta` listing is in scope to decide.\n\nPermissions: analytics resolves read scopes through the security service per object (`resolveReadScopes` / `assertReadAdmitted`), so this is a disable not being honoured, the same class as #35195 and #35427, not a permission breach. Caller-level permissions were not measured here.\n\nRelated: #35427 (parent: `$expand` / relation condition, PR #35444), #35195 (search door, merged), #34900 (in-process, ruled served by 6545646924).\nSuggested-grade: p2 (same class as #35195 / #35427)."

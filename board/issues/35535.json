@@ -1,0 +1,36 @@
+{
+  "number": 35535,
+  "kind": "issue",
+  "title": "console list and record pages: meta/view waits 440-845 ms after the app bundle for route chunks to load; start it from the route beside the chunks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T14:38:38Z",
+  "updated_at": "2026-11-19T16:52:03Z",
+  "closed_at": "2026-11-19T16:51:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35535",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a measured finding of the #35455 dev (os-dev-report 7012178512, item 3), measured on `origin/main` `92121196` with the built console, 12 loads. It is a child of #35455 (console first-screen round trips, p1) and is nested under it.\nReader: `domain:ui` (app-shell route and object view). Suggested grade: p1, the parent's grade.\nDedupe: `meta/view prefetch route`, `lazy chunk before view`, `ObjectView view read after chunk`. Only #35455 matches.\n\n## 维护者速读\n\n- 用户能看到什么变化：列表页和记录页的数据更早开始加载，首屏等待少约半秒到一秒。\n- 为什么做：托管环境打开页面要 9–10 秒，这是首屏串行里一段没有请求在跑的空等。\n- 出错会怎样：视图定义和数据不变，只提前发出；撤回即可。\n- 要你做什么：无。\n\n## Facts\n\n- From the app bundle answering to `meta/view?object=…` leaving: list page 693/845/763 ms cold and 774/786/842 ms warm; record page 523/499/439 ms cold. No request is in flight in that gap; the plugin-view, plugins-views, plugin-form and plugin-list chunks load in it.\n- The view read is issued from inside `ui/packages/app-shell/src/views/ObjectView.tsx`, a lazy route chunk in `console/AppContent.tsx`, only after the post-bundle render and those chunks.\n- The record page's own data read already leaves before `meta/view`; the list's first data page needs the view (select and sort), so it stays one hop behind it.\n\n## Ask\n\nStart `meta/view?object=OBJECT` from the route level as soon as the app's object scope has the bundle and the route's object, into the metadata cache `ObjectView` joins on mount, so it runs beside the chunk loads. Pin that the view read is issued while the chunk import is pending, and that `ObjectView` sends no second view read. Measure layers before and after (method of #34211 / #35455). About 150-300 lines in app-shell.\n\n⛔ Not a claim."
+}

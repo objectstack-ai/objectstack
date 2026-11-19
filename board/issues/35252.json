@@ -13,18 +13,20 @@
   "labels": [
     "area:build",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T19:19:47Z",
-  "updated_at": "2026-11-19T06:28:14Z",
+  "updated_at": "2026-11-19T17:03:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35252",
   "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a defect in a shipped check, reproduced once with the public CLI.\n\n**Business reason.** An app retiring its authored record pages puts the header strip into `highlightFields`. `os lint --strict` and the renderer disagree on how many fields the strip draws, so the app gets one of two bad results. Either it is refused for a list that renders fine, or it passes with a list whose hoisted fields leave a field group empty on the page. hotcrm had to drop `owner_id` from the lead strip and `expected_revenue` from the opportunity strip to pass lint (objectstack-ai/hotcrm#2382, PR objectstack-ai/hotcrm#2671).\n\n**Reach (measured once, hotcrm on `@objectstack/*` 18.6.0):**\n- `crm_lead.highlightFields = [status, rating, lead_source, email, phone, owner_id]` → `os lint --strict` exits **0**. On the record page, the default page hoists six highlights (`RECORD_HIGHLIGHTS_MAX = 6`, `headerDrawnFields` in `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`), so the `assignment` group, whose only member is `owner_id`, draws nothing.\n- The same list with `owner_id` fourth → `field-group-shadowed` fails. The lint reads `slice(0, 4)` and says \"Detail pages show the first 4 highlightFields\" (`packages/lint/src/validate-semantic-roles.ts`).\n- The mutation was made on hotcrm and restored, with the restore checked by blob hash.\n\nExpected: the lint judges exactly the fields the record page hoists (six on 18.6.0, from one shared constant), so its verdict matches the screen.\n\n**Seam.** `runtime:packages/lint/src/validate-semantic-roles.ts` (`slice(0, 4)`) → `renderer:plugin-detail` `buildDefaultPageSchema` (`RECORD_HIGHLIGHTS_MAX`, `headerDrawnFields`).\n\n**Reader.** objectstack triage grades it and routes it to the lint / record-page lane. Not a claim; it awaits triage.\n\n**Dedupe** (`repo:objectstack-ai/objectstack is:issue`, open and closed): `highlightFields first 4 field-group-shadowed` → 1 hit (#22161, closed, a different warning); `RECORD_HIGHLIGHTS_MAX highlightFields lint` → 0."

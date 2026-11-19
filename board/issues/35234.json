@@ -2,8 +2,8 @@
   "number": 35234,
   "kind": "issue",
   "title": "pm scripts: first-touch-sweep and check-half-states H13 read area and issue type instead of domain:*, then retire domain:* (step 4b)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,16 +16,20 @@
     "priority:p1"
   ],
   "assignees": [
-    "os-bill"
+    "os-sales"
   ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T17:28:14Z",
-  "updated_at": "2026-11-19T06:54:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T18:41:12Z",
+  "closed_at": "2026-11-19T18:41:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35234",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\n\n## What to do\n\nStep 4b, the SCRIPTS. `scripts/pm/first-touch-sweep.mjs` (its domain disjunction) and `scripts/pm/check-half-states.mjs` H13 read `area:*` and the issue type instead of `domain:*`. File ownership is derived from the paths a change touches, not from a label. Only after these land and pass on the live board are the `domain:*` labels retired, as a separate step the maintainer confirms.\n\n## Done when\n\nNo script under `scripts/pm/` needs a `domain:*` label to judge a card, the self-tests cover the area and type readings, and the label retirement is listed for the maintainer."

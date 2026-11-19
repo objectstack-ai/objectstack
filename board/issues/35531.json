@@ -2,9 +2,9 @@
   "number": 35531,
   "kind": "pull_request",
   "title": "test(scenarios): split the three-shape no-skip refresh case into one case per shape",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T14:18:10Z",
-  "updated_at": "2026-11-19T14:19:33Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-19T15:02:40Z",
+  "closed_at": "2026-11-19T15:02:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T15:02:38Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35531",
   "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化:用户无感,只改了一条测试的写法。\n2. 为什么做:这条测试把三次完整的画廊刷新塞进一个用例,在合并队列的繁忙机器上超过五秒上限而失败,挡住了别的改动入队。\n3. 出错会怎样:最坏只是这条测试本身失败,不影响任何发布内容,回滚即可。\n4. 要你做什么:无。\n\n## 席位核对\n\n### What changes\n\n`packages/qa/scenarios/test/export/refresh.test.ts`: the case \"does not skip when one listed app is on an older version, or when the index lists no app\" looped over three gallery shapes, each running a full `galleryRefresh` (git init, the fixture crm run, a commit) inside vitest's default 5000 ms per-test budget. It is now an `it.each` over the three shapes (one listed app older; an index listing no app; no index), each its own case with the same two assertions (`out.kind` is `committed`, exactly one run plan). No assertion skipped, removed or weakened; no timeout raised. Test-only, one file.\n\nWhy: the merge queue (run 44533961485, job 135595686454, Test Core 2/10) timed this case out at 5714 ms against the 5000 ms budget, while PR CI passed it at 3804 ms; a single refresh is about 1.4 to 1.5 s there, so three in one case sit on the budget edge on a loaded shard.\n\n### Tests\n\nLocal run of the file, `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 --reporter=verbose test/export/refresh.test.ts`, under the shared verify lock (shared-box timings):\n\n<details><summary>Before (origin/main f727061b88): 17/17 pass</summary>\n\n```\ndoes not skip when one listed app is on an older version, or when the index lists no app 910ms\nTest Files  1 passed (1)\n     Tests  17 passed (17)\n```\n</details>\n\n<details><summary>After (branch head 36587a38e3, same tree as the measured ce5cb4ba53): 19/19 pass</summary>\n\n```\ndoes not skip when one listed app is on an older version 560ms\ndoes not skip when the index lists no app 200ms\ndoes not skip when the gallery has no index 187ms\nTest Files  1 passed (1)\n     Tests  19 passed (19)\n```\n</details>\n\n`pnpm --filter @objectstack/scenarios typecheck`: exit 0 (the test file is in the tsc program, counted with `--listFiles`).\n\n### Acceptance notes\n\n- The first case of the three keeps most of the old wall time locally (it pays the first crm-fixture run); on the queue shard each case is expected near the 1.4 to 1.5 s single-refresh reading, well inside 5000 ms.\n- No changeset: the test file is not in the package's `files[]` (`dist`, `README.md`, `CHANGELOG.md`), so nothing publishes; labelled `skip-changeset`.\n\n### Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, 49 families)</summary>\n\n48 ran with exit 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: reads a full build's dist), so NOT MEASURED locally; CI's Lint and Repo Gates job measures it. `dispatch-gates --ran` reconciliation: 49 accounted, 48 run, 1 NOT-MEASURED, 0 UNRUN. `overlap-check --branch=HEAD`: VERDICT clean exit 0.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaysxGzF62ACvZ1x9x\n"

@@ -2,8 +2,8 @@
   "number": 35369,
   "kind": "issue",
   "title": "flow publish refusal: the \"invalid expression\" header always explains template braces, even when the refusal under it is a date-text or other verdict with no braces",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:build",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T06:41:05Z",
-  "updated_at": "2026-11-19T06:50:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T19:22:28Z",
+  "closed_at": "2026-11-19T19:21:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35369",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② out-of-scope finding from the #34660 os-dev report (PR #35358), routed by its L1 ACCEPT (7001828368, 范围外去向). Pre-existing, not caused by that PR. ⛔ Not a claim; triage sets lane and grade.\n\n## What the user sees\n\nRegistering (publishing or booting) a record-triggered flow whose `assignment` value is `timestamp(record.borrow_date)` on a date field throws:\n\n> Flow … has 1 invalid expression (ADR-0032 §1a). Predicates — conditions and declared bare-CEL slots … — must not wrap references in {…} template braces, and neither may a value slot …\n\nThe refusal listed under it is a date-text verdict; the expression has no braces. The author is first told about a mistake they did not make.\n\n## Where\n\n`packages/services/service-automation/src/flow-registration-checks.ts` (~:1047-1051 at the #35358 base): one fixed header for every failure kind. Reproduced on the built `@objectstack/service-automation` by the #34660 dev.\n\n## Fix direction\n\nName the braces rule only when a listed refusal is a brace refusal (`cel-template-brace` / `template-single-brace` / dialect mismatch); otherwise a neutral count header.\n\nDedupe: issue search `registerFlow refusal header template braces`, `invalid expression header misleading`, `flow-registration-checks preamble` → none."

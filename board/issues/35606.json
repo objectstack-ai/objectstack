@@ -1,0 +1,32 @@
+{
+  "number": 35606,
+  "kind": "issue",
+  "title": "With rate limiting armed or on the REST door, a signed-in request still reads the session twice: give the request one shared session read (follow-up to #35457)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T17:08:09Z",
+  "updated_at": "2026-11-19T17:56:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35606",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① a measured defect, the half of #35457 its PR cannot reach inside its file surface. PR #35598 (\"Part of #35457\") makes the dispatcher's auth gate and the declared-endpoint fallback reuse the identity step's session read. Two more reads per request remain. Suggested grade: p1, because it is the rest of #35457, which objectstack-ai/cloud#4563 (p1, hosted page load 9–10 s) names as its blocker. ⛔ Not a claim; triage sets lane and grade.\n\n## Measured (real kernel, sqlite-wasm, real AuthPlugin, Bearer session, warm; origin/main `97f342037d`; the os-dev report on #35457, comment 7016195995)\n\n- **Inbound rate limiter.** With `server.security.rateLimit` armed, every request (dispatcher and REST) calls `getSession` once more. The caller is `packages/runtime/src/security/resolve-session-principal.ts:64`, reached from `dispatcher-plugin.ts:911` (the card's \"near 217\" is `readGatedSessionUser`, a different caller). The limiter runs in the transport's middleware seam. The Hono adapter runs the whole IHttp middleware chain to completion, and only then calls the route, with a separate request object and no shared async scope. So `packages/runtime` cannot hand the limiter's read to the route without a cross-request cache, which is ruled out.\n- **REST door with an ADR-0069 gate active.** `GET /api/v1/data/<object>` issues 2 `getSession` calls: the identity read, plus core `decideAuthGate` under `authGate: 'reread-when-active'` (`packages/core/src/security/request-execution-context.ts:226`, used by `packages/rest/src/rest-server.ts:3484`). That is 2 `sys_session` token lookups per REST request.\n- On remote Turso every read is a round trip, so each extra read adds one per request on hosted.\n\n## Done when\n\nOne request reads the session and its user once on every door (dispatcher, REST, declared endpoints), with the rate limiter armed and with a session gate active. A real-kernel test pins the count for each door and posture. Nothing is cached across requests, and revocation, expiry, held-session (403) and anonymous (401) behave as today.\n\n## Direction (the dev's recommendation, to be designed on this card)\n\nA core-owned per-request session-read memo, in the shape of the existing request-grants memo: the transport opens it per request, and core `readSession`, `decideAuthGate` and the runtime limiter consult it. One carrier fixes all three doors. The narrower alternative, one async scope across the Hono middleware seam and the route, fixes only the limiter-to-dispatcher pair and leaves REST at 2. Surface: `packages/core/src/security/**`, the Hono server plugin's middleware seam, `packages/runtime/src/security/resolve-session-principal.ts`, `packages/rest/src/rest-server.ts` (consumer only).\n\nDedupe: issue search `rate limit getSession`, `reread-when-active`, `session read once request scope`, `limiter session read` → only #35457."
+}

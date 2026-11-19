@@ -15,18 +15,20 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T04:54:32Z",
-  "updated_at": "2026-11-19T05:07:19Z",
+  "updated_at": "2026-11-19T15:31:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34648",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: the `Skills-docs: follow-up` card owed by PR #34647 (Part of #33187; the action answer `table` format, whose contract landed in #34500), passed on by area `o2-B`. Dedupe: `resultDialog skill actions.md`; no open card.\n\nSuggested-grade: p2 · domain:skills · Blocked-by #33187 (teach the shape only after the renderer lands)\n\n## 维护者速读\n\n- 现象:#34647 让动作的结果弹窗能把服务端返回的数组画成表格(`format: table` 加 `columns`)。教 AI 写 UI 动作的技能还没讲 `resultDialog`,更没讲表格这一格。\n- 为什么要修：技能不教,AI 写「返回一批结果」的动作时只会用 `json` 或 `text` 格式，用户看到的是一坨原始数据。\n- 需要你做的：无(落地时按受管面照常审批)。\n\n## Change\n\nAfter PR #34647 merges, add one bullet to `skills/objectstack-ui/rules/actions.md`, beside the `preflight` bullet. The PR body proposes this sentence; check it against the merged spec describe before using it:\n\n> `resultDialog` — a one-shot dialog that shows the server answer: `fields: [{ path, label?, format? }]`, `format` one of `qrcode`, `code-list`, `secret`, `text`, `json`, or `table` with `columns: [{ path, label?, format? }]` (one row per element of the array at `path`, one cell per column; required with `table` and refused beside any other format).\n\nAdd one eval that writes an action returning a list of rows and checks it uses `format: table` with `columns`.\n\n## Done when\n\nThe rule teaches it and the eval passes.\n\nBlocked-by: #33187\n"
