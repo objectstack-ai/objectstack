@@ -31,6 +31,13 @@
  *  3. CONTROL: a strand that met no refusal (a fault — a throw that declares
  *     no HTTP answer) carries NEITHER member: absent, not empty, never
  *     synthesised from the prose.
+ *  4. The pair is READ the way the thrown `RESUME_FAILED` reads it
+ *     (`strandedDecisionDetails`): the engine relays whatever a node executor
+ *     returns, and node types are open to plugins, so a plugin node's blank
+ *     `userMessage`, or an `innerRefusal` whose `code` is unregistered or
+ *     whose `message` is no string, reaches the recall answer WITHOUT that
+ *     member — on the recall's own strand and on a subflow parent's — while a
+ *     well-formed pair still rides (CONTROL).
  *
  * The locale half: which sentence a declared refusal catalogue answers is the
  * runtime's choice (`resolveHookRefusal`, held by its own tests). This file
@@ -170,15 +177,40 @@ const PARENT = {
   ],
 };
 
+/**
+ * A plugin's node type: it fails with whatever pair it is configured to return
+ * — the shape a node executor hands the engine, which relays it unchecked.
+ */
+const PLUGIN_STEP = 'plugin_step';
+const pluginStep = (id: string) => ({ id, type: PLUGIN_STEP, label: id });
+
+/** As {@link DIRECT}, with the plugin step on the reject (recall) branch. */
+const DIRECT_PLUGIN = {
+  ...DIRECT,
+  name: 'plan_direct_plugin',
+  nodes: DIRECT.nodes.map(n => (n.id === 'release_plan' ? pluginStep('release_plan') : n)),
+};
+
+/** As {@link PARENT}, with the plugin step after the subflow. */
+const PARENT_PLUGIN = {
+  ...PARENT,
+  name: 'plan_parent_plugin',
+  nodes: PARENT.nodes.map(n => (n.id === 'adopt_plan' ? pluginStep('adopt_plan') : n)),
+};
+
 /** One live process: real engine, real builtin + approval nodes, real approvals service. */
-function boot(refusal: () => unknown) {
+function boot(refusal: () => unknown, pluginCarried: Record<string, unknown> = {}) {
   const data = makeFakeEngine(refusal);
   data.tables.set('alloc_plan', [{ id: 'p1', status: 'submitted' }]);
   const service = new ApprovalService({ engine: data as any, logger: noopLogger });
   const automation = new AutomationEngine(noopLogger, new InMemorySuspendedRunStore());
   installBuiltinNodes(automation, { logger: noopLogger, getService: (n: string) => (n === 'data' ? data : undefined) } as any);
   registerApprovalNode(automation, service, noopLogger);
-  for (const flow of [DIRECT, CHILD, PARENT]) automation.registerFlow(flow.name, flow as never);
+  automation.registerNodeExecutor({
+    type: PLUGIN_STEP,
+    async execute() { return { success: false, error: 'plugin step refused', ...pluginCarried }; },
+  } as never);
+  for (const flow of [DIRECT, CHILD, PARENT, DIRECT_PLUGIN, PARENT_PLUGIN]) automation.registerFlow(flow.name, flow as never);
   service.attachAutomation(automation);
   return { data, service, automation };
 }
@@ -287,6 +319,56 @@ describe('#34638 — resumeFailure tells the hook refusal that stranded the run'
       const answer = await env.service.recall(req.id, { actorId: 'rep' }, SYSTEM_CTX);
       expect(answer.resumeFailure).toMatchObject({ code: 'RESUME_FAILED', runId: parentRunId, status: 'stranded', repairable: true });
       neitherMember(answer);
+    });
+  });
+  describe('the pair is read the way the thrown RESUME_FAILED reads it — a plugin node\'s malformed member is dropped', () => {
+    const WELL_FORMED = { code: 'VALIDATION_FAILED', message: 'over capacity' };
+    const MARKED = 'Capacity is already taken.';
+    const CASES = [
+      {
+        name: 'a blank userMessage is no marking: dropped, the well-formed innerRefusal rides',
+        carried: { innerRefusal: WELL_FORMED, userMessage: '   ' },
+        told: { innerRefusal: WELL_FORMED },
+      },
+      {
+        name: 'an innerRefusal whose code is unregistered is dropped, the marked userMessage rides',
+        carried: { innerRefusal: { code: 'PLUGIN_OVER_CAPACITY', message: 'over capacity' }, userMessage: MARKED },
+        told: { userMessage: MARKED },
+      },
+      {
+        name: 'an innerRefusal whose message is no string, and a non-string userMessage, are both dropped',
+        carried: { innerRefusal: { code: 'VALIDATION_FAILED', message: 42 }, userMessage: 7 },
+        told: {},
+      },
+      {
+        name: 'CONTROL: a well-formed pair rides whole',
+        carried: { innerRefusal: WELL_FORMED, userMessage: MARKED },
+        told: { innerRefusal: WELL_FORMED, userMessage: MARKED },
+      },
+    ];
+
+    describe.each(CASES)('$name', ({ carried, told }) => {
+      it('on the recall\'s own strand', async () => {
+        const env = boot(fault, carried);
+        const { req } = await park(env, 'plan_direct_plugin');
+        const answer = await env.service.recall(req.id, { actorId: 'rep' }, SYSTEM_CTX);
+        expect(answer.resumed, "this door's own resume stranded").toBe(false);
+        expect(answer.resumeError, 'the strand is the plugin step').toContain('plugin step refused');
+        expect(answer.resumeFailure).toEqual({
+          code: 'RESUME_FAILED', runId: req.flow_run_id, status: 'stranded', repairable: true, ...told,
+        });
+      });
+
+      it('on a subflow parent\'s strand, through the recall door', async () => {
+        const env = boot(fault, carried);
+        const { req, startedRunId: parentRunId } = await park(env, 'plan_parent_plugin');
+        const answer = await env.service.recall(req.id, { actorId: 'rep' }, SYSTEM_CTX);
+        expect(answer.resumed, 'the child really did resume').toBe(true);
+        expect(answer.resumeError, 'the strand is the plugin step').toContain('plugin step refused');
+        expect(answer.resumeFailure).toEqual({
+          code: 'RESUME_FAILED', runId: parentRunId, status: 'stranded', repairable: true, ...told,
+        });
+      });
     });
   });
 });

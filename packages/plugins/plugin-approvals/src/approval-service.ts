@@ -25,7 +25,7 @@ import {
   type ObjectSchemaReadDelegate,
   type RecordOrganizationResolver,
 } from '@objectstack/metadata-core';
-import { isObjectAbsentError, keysetWalk, strandedDecisionFailure, type StrandedDecisionDetails } from '@objectstack/types';
+import { declaredUserMessage, isObjectAbsentError, keysetWalk, strandedDecisionFailure, type StrandedDecisionDetails } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
 // `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
@@ -61,6 +61,7 @@ import type {
 // what forced this file to cast its way out of its own contract to read
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { FlowInnerRefusalSchema } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { IOwnershipQueueService } from '@objectstack/spec/contracts';
 import {
@@ -5953,14 +5954,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // (`AutomationResult.innerRefusal` / `.userMessage`, ruling B′ on
       // #24914) — kept beside the code and status instead of being dropped
       // here, one line before the envelope is built, which is where #13807
-      // found `status` too. Copied as reported; the recogniser in
-      // `@objectstack/types` validates it before anything reaches the wire.
-      if (reported.innerRefusal !== undefined || reported.userMessage !== undefined) {
-        err.resumeRefusal = {
-          ...(reported.innerRefusal !== undefined ? { innerRefusal: reported.innerRefusal } : {}),
-          ...(reported.userMessage !== undefined ? { userMessage: reported.userMessage } : {}),
-        };
-      }
+      // found `status` too. [#34638] Read here, once, through
+      // {@link recognisedRefusal}: two channels read this value — the thrown
+      // envelope (whose recogniser in `@objectstack/types` reads it again)
+      // and the success channel's own strand reports (`recall`,
+      // `resumeBatchOfRecalledItem`), which have no recogniser after this line.
+      const refusal = ApprovalService.recognisedRefusal(reported);
+      if (refusal.innerRefusal !== undefined || refusal.userMessage !== undefined) err.resumeRefusal = refusal;
       throw err;
     }
     return this.automation?.takeSubflowParentStrand?.(runId);
@@ -6002,13 +6002,42 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   }
 
   /**
+   * [#34638] The refusal pair an engine result or a subflow-parent strand
+   * carries, read the way the thrown `RESUME_FAILED` reads it
+   * (`strandedDecisionDetails`, `@objectstack/types`), so the two approvals
+   * channels answer one engine result the same way. The engine relays what
+   * a node executor returned unchecked, and node types are open to plugins:
+   *
+   *  - `innerRefusal` is kept only in its declared shape, read by the spec's
+   *    own `FlowInnerRefusalSchema` — a `code` in the closed ADR-0112 set and
+   *    a string `message`; anything else is dropped, never relayed;
+   *  - `userMessage` is kept only as `declaredUserMessage` reads a marking —
+   *    a blank or non-string value is no marking.
+   *
+   * A member that fails its read is dropped and the strand is still told.
+   * Applied where the pair is built for the success channel:
+   * {@link serviceResume} (a rejected resume) and {@link parentStrandReport}.
+   */
+  private static recognisedRefusal(source: { innerRefusal?: unknown; userMessage?: unknown }): ResumeRefusal {
+    const innerRefusal = source.innerRefusal === undefined
+      ? undefined
+      : FlowInnerRefusalSchema.safeParse(source.innerRefusal);
+    const userMessage = declaredUserMessage(source);
+    return {
+      ...(innerRefusal?.success ? { innerRefusal: innerRefusal.data } : {}),
+      ...(userMessage !== undefined ? { userMessage } : {}),
+    };
+  }
+
+  /**
    * [#34638] The {@link ResumeFailureReport} for a subflow PARENT that
    * stranded behind a resume this door issued — built in ONE place for the
    * three doors that read such a strand (`resumeRecordedOutcome`, `recall`,
    * `resumeBatchOfRecalledItem`), so they cannot drift on what the report
    * carries: the parent's `runId` and `repairable`, and the refusal the
    * parent's downstream step met when it met one (`{}` otherwise, so a
-   * fault-stranded parent reports neither member).
+   * fault-stranded parent reports neither member), read through
+   * {@link recognisedRefusal}.
    */
   private static parentStrandReport(strand: SubflowParentStrandReport): ResumeFailureReport {
     return {
@@ -6016,8 +6045,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       runId: strand.runId,
       status: 'stranded',
       repairable: strand.repairable,
-      ...(strand.innerRefusal !== undefined ? { innerRefusal: strand.innerRefusal } : {}),
-      ...(strand.userMessage !== undefined ? { userMessage: strand.userMessage } : {}),
+      ...ApprovalService.recognisedRefusal(strand),
     };
   }
 
