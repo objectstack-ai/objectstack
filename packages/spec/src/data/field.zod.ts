@@ -2112,7 +2112,8 @@ export const FieldSchema = lazySchema(() => {
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
    *   - `true` / absent  → shown as an auxiliary panel on the parent's record
-   *                       page. There is no count-based auto-split.
+   *                       page (absent on a `master_detail` field: see below).
+   *                       There is no count-based auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
    *                       a full-width table in the record's detail body, not
    *                       as an auxiliary panel. A field group's `relatedList`
@@ -2125,10 +2126,12 @@ export const FieldSchema = lazySchema(() => {
    * How the record page lays these out is ADR-0085's to define; this key states
    * the relationship's role, not the page's chrome.
    *
-   * Absent on a `master_detail` field that sets `inlineEdit`, the list is
-   * `'primary'` by default: line items edited inside the parent's form are part
-   * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
+   * Absent on a `master_detail` field, the list is `'primary'` by default
+   * (#35597, amending #27069 which also required `inlineEdit`): rows the parent
+   * owns are part of its main content (a quote's lines belong under the quote,
+   * not beside it), whether or not the parent's form edits them inline. Write
+   * `relatedList: true` to keep such a list an auxiliary panel, or `false` to
+   * hide it. Absent on a `lookup` field, the list stays an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -2141,7 +2144,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field, the list is \'primary\' by default; write true to keep it an auxiliary panel (absent on a lookup field it is an auxiliary panel). \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
