@@ -27,14 +27,14 @@
 ## 区内规则
 
 - 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
-- 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或活 `Claim:` 带他区 `Area:` 行 ⇒ 不碰。
+- 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `Area:` 行 ⇒ 不碰。
 - 认领前三查必过,各写认领评论一行;任一不过或遇大卡 ⇒ 不认领、不派 dev,当即交席位:
   - `Pre-claim lane:` 修复所改路径属哪条车道,点名依据路径(碰他道路径照下文留道行)。
   - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」逐个已合;热文件照下文重叠检查。
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
     测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
 - 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
-- 认领照 `execution-duties.md` 派发原子对,`Claim:` 评论带 `Area: <区>` 行,⛔ 不建不挂区标签;`Branch:` 照 AGENTS.md 命名。
+- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读(SKILL.md 标签写四步)只查 `pm:dispatched` 与 assignee,缺即重挂;首推即开 draft PR。
 - 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
