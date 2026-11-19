@@ -328,7 +328,7 @@ it. The arm is part of the driver's record (`env.driver.door`), and `summary` ne
   | `names-build-door-tools` | the rules whose own text names a tool the hosted build door registers (`apply_blueprint`, `verify_build`, …), most of which the open draft door does not serve |
 
   The arm gives every active rule up front, so `--door-rules-omit ondemand` is the closest it comes to the hosted
-  delivery; the whole corpus is about 113,000 characters of `CLAUDE.md`.
+  delivery. The whole corpus is about 115,000 characters of `CLAUDE.md`; the `inline` set alone, about 21,000.
 - `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, in place
   of the built-in corpus. The file lives outside this repository; one inside the checkout is refused. A file named
   `builtin` is given with a path (`./builtin`).
