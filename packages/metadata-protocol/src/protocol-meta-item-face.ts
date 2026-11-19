@@ -671,11 +671,11 @@ export async function declaredMemberOverrideAddressOf(
  * row holders ({@link storedRowHoldersRefusal}) and the layered door's
  * (`packagelessLayeredReadRefusal`) ask this first, so the plain read,
  * `/layers` and the execution face serve the base's row where they refused
- * naming both; beside a package-less row they still refuse (#33210). The
- * writes naming no package do not ask it: the save, delete, publish, draft
- * and history doors still refuse these rows naming base and dependent
- * (`packagelessAddress`), so the read serves the base's stack where the
- * write it would send is refused (#34441 contract review S1).
+ * naming both; beside a package-less row they still refuse (#33210).
+ * [#34681] The writes naming no package ask it too, where their rows' address
+ * names two or more packages (`packagelessRowHeldBaseAddress`): the save,
+ * delete, draft discard, publish, history, diff and rollback doors act on the
+ * base's row, as the read serves it.
  * `preread` is the item's active rows when the caller read them already.
  */
 export async function rowHeldBaseAddressOf(
