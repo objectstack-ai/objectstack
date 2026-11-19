@@ -150,6 +150,26 @@
         "must_contain": ["240", "partial"],
         "must_not_contain": ["unknown"]
       }
+    },
+    {
+      "id": 16,
+      "prompt": "用户说:「按行业看销售额」 You called `list_datasets({ terms: ['销售额', '按行业'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析), with `matches: [{ term: '销售额', member: 'measures.sales_amount', matchedOn: 'label' }]`; its dimensions include `industry`, labelled 行业. 「按行业」 matched nothing, and the answer carries `candidates: [{ term: '按行业', dataset: 'sales_analysis', member: 'dimensions.industry' }]`. What do you do next, and how do you write the answer?",
+      "expected_output": "销售额 matches exactly one measure, so the governed metric answers. 「按行业」 matched nothing and its one candidate is a dimension, so its candidates are all dimensions: it is at most a possible grouping. The user is not asked about it, and it does not stop the matched measure. The question asks for the figure by industry, so the next step is one `query_dataset` call with `datasetName: 'sales_analysis'` and a `selection` whose `measures` is `['sales_amount']` and whose `dimensions` is `['industry']`. The reply carries no question back: it is the answer, written in Chinese, with the figures shown by 行业 label and the source cited from the tool's answer (as in 「指标：销售额（数据集：销售分析）」). The candidate is not treated as a match for any measure, and nothing is computed from the object tools.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "销售额", "行业"],
+        "must_not_contain": ["aggregate_records", "非指标口径", "?", "？"]
+      }
+    },
+    {
+      "id": 17,
+      "prompt": "The user asks: \"What are our sales?\" `list_datasets({ terms: ['sales'] })` answers one dataset, `sales_analysis` (label Sales Analysis), with `matches: []`. Its one measure is `sales_amount`, labelled Sales Amount and described as \"Amount of opportunities closed as won\"; its dimensions are `industry`, labelled Industry, and `close_quarter`, labelled Close Quarter. The answer also carries `candidates: [{ term: 'sales', dataset: 'sales_analysis', member: 'measures.sales_amount' }]`. What is your reply?",
+      "expected_output": "The word matches nothing and a measure is among its candidates, so it is asked about: a near word is still not a match, and only a word whose candidates are all dimensions is spared the question. The reply is a question and nothing else, asking whether that candidate is the one meant, such as \"Do you mean Sales Amount (in Sales Analysis: amount of opportunities closed as won)?\", naming the candidate's label, its dataset's label and its description, not its machine name. It does not pick the candidate, gives no figure, makes no tool call until the user answers, and does not fall back to the object tools either: the fallback is for a word with no candidates.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Sales Amount", "Sales Analysis", "?"],
+        "must_not_contain": ["query_dataset", "aggregate_records", "sales_amount"]
+      }
     }
   ]
 }
