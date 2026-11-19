@@ -701,18 +701,20 @@ export interface ApprovalRecallInput {
  * spelling on every channel.
  *
  * ⛔ Which is exactly why `ResumeFailureDetailsSchema` is NOT the reader for
- * this member. That schema declares the three shared members and not
- * {@link code}, and it is a plain non-strict `z.object`: parsing a report
- * with it SILENTLY STRIPS the code — the parse SUCCEEDS, raises no
- * `unrecognized_keys` issue, logs nothing, and hands back an object whose
- * failure class is simply gone. The one member the paragraph above calls
- * indispensable is the one the act of validating removes, and nothing in the
- * result says so. On the resume door that schema is the right reader,
- * because there the registered code rides on the `error` envelope it parses
- * beside; here there is no envelope, so read {@link code} off the report
- * itself — it is typed `ErrorCode`, required, and needs no parse at all. Use
- * that schema on this member to read the three shared facts if you like,
- * ⛔ never as a way to obtain the report. Both halves are measured in
+ * this member. That schema declares the three shared members and none of
+ * {@link code}, {@link innerRefusal} or {@link userMessage}, and it is a plain
+ * non-strict `z.object`: parsing a report with it SILENTLY STRIPS all three —
+ * the parse SUCCEEDS, raises no `unrecognized_keys` issue, logs nothing, and
+ * hands back an object whose failure class and refusal are simply gone. The
+ * one member the paragraph above calls indispensable, the code, is among
+ * those the act of validating removes, and nothing in the result says so. On
+ * the resume door that schema is the right reader, because there the
+ * registered code rides on the `error` envelope it parses beside, and the
+ * refusal pair on that envelope too; here there is no envelope, so read
+ * {@link code}, {@link innerRefusal} and {@link userMessage} off the report
+ * itself — the code is typed `ErrorCode`, required, and needs no parse at
+ * all. Use that schema on this member to read the three shared facts if you
+ * like, ⛔ never as a way to obtain the report. Both halves are measured in
  * `contracts/resume-failure-report.pin.test.ts`.
  *
  * ⛔ No new error code is minted under the ruling. `code` is typed as
@@ -761,7 +763,10 @@ export interface ResumeFailureReport extends ResumeFailureDetails {
    * doors' thrown `RESUME_FAILED` carries since #34579 (`innerRefusal` on
    * `StrandedDecisionDetails`), told on the success channel for the strands
    * that channel reports: a recall whose own resume stranded, and a subflow
-   * PARENT that stranded behind a resume that succeeded.
+   * PARENT that stranded behind a resume that succeeded. Read the way the
+   * thrown envelope reads it: a value outside the declared shape (a `code`
+   * outside the closed ADR-0112 set, a `message` that is not a string) is
+   * dropped, never relayed.
    *
    * Optional, and absent when the run stranded on a fault that met no refusal
    * (a crash, an unreachable store) — ⛔ never synthesised from the prose, and
@@ -772,12 +777,23 @@ export interface ResumeFailureReport extends ResumeFailureDetails {
   /**
    * [#34638] The producer-marked end-user text of that refusal — the engine's
    * `AutomationResult.userMessage`, verbatim. For a record hook that declares
-   * a `refusals` catalogue this is the declared sentence in the caller's
-   * locale, while {@link innerRefusal}'s `message` keeps the diagnostic text.
+   * a `refusals` catalogue this is the declared sentence in the RUN's locale
+   * (`AutomationContext.locale`, `contracts/automation-service.ts`), while
+   * {@link innerRefusal}'s `message` keeps the diagnostic text. Every strand
+   * this report tells is a resumed leg, and a resumed leg renders in the
+   * language of whoever STARTED the run — usually the submitter, not this
+   * report's caller: a resume carries no locale of its own, and the decider's
+   * segment takes the decider's identity and grants and keeps the starter's
+   * locale. A run no person started (a record-change, schedule or webhook
+   * trigger) carries no locale, so there the sentence is the catalogue's
+   * authored message.
+   *
    * Same semantics as on every other channel that carries it (the record
    * save's error body, every flow door's `FLOW_FAILED`, the decision doors'
-   * `RESUME_FAILED`): presence IS the marking. Absent when the run met no
-   * marked refusal.
+   * `RESUME_FAILED`): presence IS the marking, and a blank or non-string
+   * value is no marking, so it is dropped. Absent when the run met no marked
+   * refusal; it can ride without {@link innerRefusal} (a marked failure that
+   * was no refusal).
    */
   userMessage?: string;
 }
