@@ -4990,6 +4990,12 @@ const es = {
       shown: 'En esta vista',
       hidden: 'Campos ocultos',
       empty: 'Ningún campo coincide',
+      addable: 'Aún no en la vista',
+      add: 'Añadir {{label}}',
+      show: 'Mostrar {{label}}',
+      hide: 'Ocultar {{label}}',
+      move: 'Mover {{label}}',
+      moveHint: 'Arrastra, o usa las flechas arriba y abajo, para cambiar el orden',
     },
     filter: {
       advanced: 'Filtro avanzado',

@@ -4906,6 +4906,12 @@ const zhHant = {
       shown: '檢視中顯示',
       hidden: '隱藏的欄位',
       empty: '沒有匹配的欄位',
+      addable: '尚未加入檢視',
+      add: '新增{{label}}',
+      show: '顯示{{label}}',
+      hide: '隱藏{{label}}',
+      move: '移動{{label}}',
+      moveHint: '拖動，或按上下方向鍵，調整順序',
     },
     filter: {
       advanced: '高階篩選',
