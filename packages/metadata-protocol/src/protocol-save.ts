@@ -1784,10 +1784,14 @@ export class ProtocolSaveFacet {
         // before the authoring gate and every write: every load of it would
         // insert each record again. A draft seed whose object is itself still a
         // draft is judged at its publish. A `migrate-stored` re-save rewrites an
-        // existing row and is not judged. See {@link seedExternalIdSaveRefusal}.
+        // existing row and is not judged. [#34864] This door alone (`'save'`)
+        // also refuses a seed whose object nothing resolves: no draft (on a
+        // draft save), no registered, stored or code-defined object. See
+        // {@link seedExternalIdSaveRefusal}.
         if (writeSource !== 'migrate-stored') {
             const seedKeyRefusal = await host.seedExternalIdSaveRefusal(
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+                'save',
             );
             if (seedKeyRefusal) throw seedKeyRefusal;
         }

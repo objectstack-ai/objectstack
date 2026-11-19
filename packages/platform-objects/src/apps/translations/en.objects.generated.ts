@@ -72,6 +72,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Must Change Password",
         help: "When on, the user must change their password before they can continue. Turned on when an administrator creates or imports the account, or resets its password; system-managed."
       },
+      dev_seed_credential: {
+        label: "Development Seed Credential",
+        help: "Set on an account the development seed created. While its password is still the seed password, a production server refuses its sign-in and every new session; os user set-password sets a new password and clears it. System-managed; never returned on reads."
+      },
       mfa_required_at: {
         label: "MFA Required At",
         help: "When enforced MFA first applied to this user (grace-period clock). Backs mfa_required; system-managed."

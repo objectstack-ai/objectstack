@@ -405,14 +405,20 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   // the rows left over are exactly the ones that succeeded. A failure the
   // server answered with a count only leaves the successes unknown, and the
   // result keeps to its count rather than name a record that may have failed.
+  // Rows an aggregate handler did not confirm are neither landed nor failed.
+  const unconfirmedIds = new Set(result?.aggregateUnconfirmed ?? []);
   const succeededRows = (() => {
     if (!result || result.succeeded === 0) return [];
     const failedIds = new Set(result.errors.map(e => e.id));
-    const landed = rows.filter(r => r.id != null && !failedIds.has(String(r.id)));
+    const landed = rows.filter(r => r.id != null
+      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)));
     return landed.length === result.succeeded ? landed : [];
   })();
   const succeededPreview = succeededRows.slice(0, 5);
   const succeededRest = succeededRows.length - succeededPreview.length;
+  const unconfirmedCount = unconfirmedIds.size;
+  const unconfirmedPreview = [...unconfirmedIds].slice(0, 5);
+  const unconfirmedRest = unconfirmedCount - unconfirmedPreview.length;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(result); }}>
@@ -587,10 +593,28 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </div>
         )}
 
-        {step === 'result' && result && !result.aggregateRejection && (
+        {step === 'result' && result?.aggregateUnreadable && (
+          /* An aggregate run that resolved with a `succeeded` / `failed` member
+             that does not parse as a BulkActionResult is ONE outcome for the
+             selection, like a rejection: the answer cannot say which rows the
+             handler wrote, so the panel prints no per-row count and never
+             reports full success. */
+          <div className="space-y-3 text-sm" data-testid="bulk-aggregate-unreadable">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+              <span>
+                {t('grid.bulk.aggregateUnreadable', {
+                  defaultValue: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
+                })}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {step === 'result' && result && !result.aggregateRejection && !result.aggregateUnreadable && (
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2">
-              {result.failed === 0 ? (
+              {result.failed === 0 && unconfirmedCount === 0 ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               ) : (
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -603,6 +627,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   defaultValue: `Succeeded ${result.succeeded} / ${result.total}`,
                 })}
                 {result.failed > 0 && t('grid.bulk.resultFailed', { count: result.failed, defaultValue: ` · Failed ${result.failed}` })}
+                {unconfirmedCount > 0 && t('grid.bulk.resultNotConfirmed', { count: unconfirmedCount, defaultValue: ` · Not confirmed ${unconfirmedCount}` })}
               </span>
             </div>
             {succeededPreview.length > 0 && (
@@ -624,6 +649,32 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   )}
                 </ul>
               </ScrollArea>
+            )}
+            {unconfirmedCount > 0 && (
+              /* Selected rows an aggregate handler's BulkActionResult named in
+                 neither list: not counted as succeeded, because nothing said
+                 they were written. */
+              <div className="space-y-1" data-testid="bulk-unconfirmed-records">
+                <p className="text-xs text-muted-foreground">
+                  {t('grid.bulk.notConfirmedRecords', {
+                    defaultValue: 'The action did not report on these records. Check their current values:',
+                  })}
+                </p>
+                <ScrollArea className="max-h-32 rounded border bg-muted/30 p-2">
+                  <ul className="text-xs space-y-1">
+                    {unconfirmedPreview.map(id => (
+                      <li key={id} className="break-words" data-testid={`bulk-unconfirmed-record-${id}`}>
+                        • {refusedRecordName(id)}
+                      </li>
+                    ))}
+                    {unconfirmedRest > 0 && (
+                      <li className="text-muted-foreground">
+                        {t('grid.bulk.andMore', { count: unconfirmedRest, defaultValue: `… and ${unconfirmedRest} more` })}
+                      </li>
+                    )}
+                  </ul>
+                </ScrollArea>
+              </div>
             )}
             {result.errors.length > 0 && (
               <>

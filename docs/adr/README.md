@@ -13,11 +13,11 @@
 
 ## Summary
 
-158 records under `docs/adr/` (153 numbers), 11 under `ui/docs/adr/` (listed separately below).
+159 records under `docs/adr/` (154 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 137 |
+| Accepted | 138 |
 | Proposed | 7 |
 | Superseded | 4 |
 | Draft | 3 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **158** |
+| **Total** | **159** |
 
 ## Shared numbers
 
@@ -225,6 +225,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
 | [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Accepted — 2026-11-19 — maintainer ruling on #35340, comment `7000950747`,… | 2026-11-19 | — | — |
+| [ADR-0158](./0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md) | Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that… | Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record `70011930… | 2026-11-19 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
