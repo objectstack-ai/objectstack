@@ -800,7 +800,8 @@ const REMOVE_KEYS = new Set(['userId']);
  * removal (`503`, nothing removed), as it refuses a deactivation: the door
  * calls the host once and keeps no record to ask again from, so removing the
  * person would leave an invitation nothing can cancel. With no host wired
- * nothing is called.
+ * nothing is called. A removal that commits writes one admin audit row
+ * (`writeAdminAudit`, `user.admin_removed_pending`); a refused one writes none.
  */
 export async function runRemoveSsoUser(
   deps: PendingSsoUserDeps,
@@ -868,6 +869,14 @@ export async function runRemoveSsoUser(
     return removalNotDone(deps, engine, error, { userId, host, event });
   }
 
+  // The admin audit row the add doors write, for the removal that committed:
+  // never on a refusal (nothing was removed), never failing the answer.
+  await writeAdminAudit(deps, {
+    action: 'delete',
+    actor,
+    recordId: userId,
+    metadata: { event: 'user.admin_removed_pending', hostNotified: host.notified },
+  });
   return { status: 200, body: { success: true, data: { userId, email, removed: true, host } } };
 }
 
