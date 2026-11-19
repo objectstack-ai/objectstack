@@ -285,8 +285,8 @@ function keepsTimeOfDay(value: unknown): boolean {
  * finite number, a valid `Date` or an instant string whose UTC year has no
  * four-digit spelling ([#20480]). Everything else — any other number
  * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
- * string, a `{token}` — answers `false`, each for a reason recorded in the
- * module note or below.
+ * string, a `{token}` other than a period key — answers `false`, each for a
+ * reason recorded in the module note or below.
  *
  * A `{placeholder}` is stepped around rather than judged because it is another
  * layer's vocabulary and that layer already refuses the unknown ones loudly
@@ -294,6 +294,17 @@ function keepsTimeOfDay(value: unknown): boolean {
  * that call this run BEFORE token resolution, so judging a placeholder here
  * would refuse `{30_days_ago}` — the platform's own correct spelling, and the
  * positive control this fix is pinned against.
+ *
+ * [#34938] Save a period key (`{current_iso_week}`, the spec's
+ * `PERIOD_KEY_TOKENS`), which is judged AS WRITTEN. It resolves to an ISO week
+ * key such as `2026-W47`: text, which no temporal storage rule reads — not a
+ * calendar day, not an instant, not a wall clock. Stepped around, the key
+ * reached the driver and compared as text against stored days (`$lt` answered
+ * every row, `$eq` none) where the literal `"2026-W47"` is refused. Judged as
+ * written, the placeholder is read by none of the three rules either, so it
+ * takes the literal's refusal on every kind. The context tokens
+ * (`{current_user_id}`, …) are still stepped around here; whether they should
+ * be is #35394's question, not this rule's.
  */
 export function isUninterpretableTemporalComparand(
   kind: TemporalComparandKind,
@@ -311,8 +322,11 @@ export function isUninterpretableTemporalComparand(
   const s = value.trim();
   // The empty-string cell is its own card — see the module note.
   if (s === '') return false;
-  // Another layer's vocabulary, and it has its own loud refusal.
-  if (classifyFilterToken(value) !== null) return false;
+  // Another layer's vocabulary, and it has its own loud refusal — save a
+  // period key, which names no temporal value and falls through to the kind's
+  // rule as written (see the note above).
+  const placeholder = classifyFilterToken(value);
+  if (placeholder !== null && placeholder.kind !== 'period-key') return false;
   if (kind === 'datetime') return !readsAsInstant(s) || isOutsideTemporalYearRange(s, kind);
   if (kind === 'date') return !readsAsCalendarDay(s) || isOutsideTemporalYearRange(s, kind);
   return !(readsAsWallClock(s) || (readsAsInstant(s) && keepsTimeOfDay(s)));

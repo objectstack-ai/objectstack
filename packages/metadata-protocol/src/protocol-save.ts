@@ -1418,7 +1418,10 @@ export class ProtocolSaveFacet {
             // through the console's plain `?mode=draft` save. An ambiguous
             // address has no row to land in, and is refused with the refusal
             // the repository answers it with.
-            if (singularType === 'permission') {
+            // [#35157] …and a `capability` the same way: one name, one
+            // holder, and never a platform capability's name — the same
+            // predicate, judged against the same landing binding.
+            if (singularType === 'permission' || singularType === 'capability') {
                 let landsIn: string | null = null;
                 if (typeof request.packageId === 'string' && request.packageId !== '') {
                     landsIn = request.packageId;

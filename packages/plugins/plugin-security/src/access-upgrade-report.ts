@@ -39,8 +39,7 @@
  *    object or a criteria field the registry lacks. A capability counts as
  *    known when it is registered or a package-shipped set still carries it
  *    (ADR-0066 ⑨'s rule: a set's `systemPermissions` declares it). This is the
- *    capability type's whole part: capabilities are code-only and never
- *    switched.
+ *    capability type's whole part: a capability takes no switch.
  * 5. **Field denies a customer set lacks** — a package-shipped set that denies
  *    a field (`readable: false`, or not `editable` on an object it grants
  *    edit on) and an environment-authored set granting the same object with no
