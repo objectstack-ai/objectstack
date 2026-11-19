@@ -985,14 +985,15 @@ describe('cascadeDeleteRelations — [#23221] every cascade-issued child delete 
         const afterMarkers: boolean[] = [];
         engine.on('afterDelete', object, (ctx: any) => { afterMarkers.push('referentialCascadeDelete' in ctx); });
         (engine as any).realtimeService = {};
-        const spies = [
-            vi.spyOn(engine as any, 'releaseSecretHandles'),
-            vi.spyOn(engine as any, 'recomputeSummaries'),
-            vi.spyOn(engine as any, 'publishDataEvent').mockResolvedValue(undefined),
+        // Each spy with the argument position that names the object.
+        const spies: Array<[ReturnType<typeof vi.spyOn>, number]> = [
+            [vi.spyOn(engine as any, 'releaseSecretHandles'), 0],
+            [vi.spyOn(engine as any, 'recomputeSummaries'), 0],
+            [vi.spyOn(engine as any, 'publishDataEvent').mockResolvedValue(undefined), 1],
         ];
         return {
             afterMarkers,
-            calls: () => spies.map((spy) => spy.mock.calls.filter((args) => args[0] === object).length),
+            calls: () => spies.map(([spy, at]) => spy.mock.calls.filter((args) => args[at] === object).length),
         };
     };
 
