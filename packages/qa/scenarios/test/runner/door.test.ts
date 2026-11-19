@@ -5,18 +5,21 @@
  * a maintainer supplies, read and judged before any card runs; the skills less
  * the omitted ones; and a door turn that holds the app's MCP draft door, the
  * arm's skills and rules, and no project file. Every rule text here is
- * invented for the test.
+ * invented for the test, except the built-in corpus's (`door-rules-corpus.ts`).
  */
 
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { PLATFORM_TOOLS_BY_PACKAGE } from '@objectstack/spec/system';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readAskSkills } from '../../src/runner/ask-skills.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
-import { doorArmText, DoorRulesRefusedError, omitSkills, readDoorRules, renderDoorRules } from '../../src/runner/door.js';
+import { BUILTIN_DOOR_RULES, doorArmText, DoorRulesRefusedError, omitSkills, readDoorRules, renderDoorRules } from '../../src/runner/door.js';
+import { DOOR_RULES_CORPUS } from '../../src/runner/door-rules-corpus.js';
 import { ClaudeCodeDriver, DOOR_DENIED_TOOLS, RecordedDriver, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { renderSummaryTable, summaryTables, type SummaryRecord } from '../../src/runner/summary.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -304,5 +307,83 @@ describe('a replay and a summary state the door arm', () => {
     expect(renderSummaryTable(none!)).not.toContain('door arm');
     const [one] = summaryTables([record('a.json', arm), record('b.json', arm)]);
     expect(renderSummaryTable(one!)).toContain(`door arm: skills: none · rules: rules.json (sha256 ${'c'.repeat(12)}) 1 active, 1 omitted (rule-b)`);
+  });
+});
+
+describe('the built-in rules corpus (`--door-rules builtin`) — the hosted build door’s rules, ported as data', () => {
+  const ids = DOOR_RULES_CORPUS.rules.map((r) => r.id);
+  const sets = DOOR_RULES_CORPUS.sets ?? {};
+
+  it('is a rules file in the arm’s format: the file reader judges its JSON exactly as it judges the built-in value', () => {
+    const json = JSON.stringify(DOOR_RULES_CORPUS);
+    const builtin = readDoorRules(BUILTIN_DOOR_RULES);
+    expect(builtin.info).toEqual({ file: 'builtin', sha256: createHash('sha256').update(json).digest('hex'), active: ids, omitted: [] });
+    const asFile = readDoorRules(rulesFile(json, 'corpus.json'));
+    expect(asFile.rules).toEqual(builtin.rules);
+    expect(asFile.info.sha256).toBe(builtin.info.sha256);
+    expect(JSON.stringify(builtin.info)).not.toContain(DOOR_RULES_CORPUS.rules[0]!.text.slice(0, 40));
+  });
+
+  it('holds 54 rules and the two preambles, ids unique; the dropped rule and the ones the tier does not offer are absent', () => {
+    expect(ids).toHaveLength(56);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.filter((id) => id.endsWith('-preamble'))).toEqual(['metadata-authoring-preamble', 'solution-design-preamble']);
+    for (const absent of ['14b-tier', 'flow-node-types', '13', '14b', '14c', 'process-approval-flow']) expect(ids).not.toContain(absent);
+  });
+
+  it('its named sets partition it twice (by corpus, by delivery), and each omits as a selector', () => {
+    expect(Object.keys(sets)).toEqual(['metadata-authoring', 'solution-design', 'inline', 'ondemand', 'names-build-door-tools']);
+    const union = (a: string, b: string) => [...sets[a]!, ...sets[b]!].sort();
+    expect(union('metadata-authoring', 'solution-design')).toEqual([...ids].sort());
+    expect(union('inline', 'ondemand')).toEqual([...ids].sort());
+    for (const name of Object.keys(sets)) {
+      const { info, rules } = readDoorRules(BUILTIN_DOOR_RULES, { omit: name });
+      expect(info.omitted).toEqual(ids.filter((id) => sets[name]!.includes(id)));
+      expect(rules.map((r) => r.id)).toEqual(ids.filter((id) => !sets[name]!.includes(id)));
+      expect(info.omit).toBe(name);
+    }
+    expect(readDoorRules(BUILTIN_DOOR_RULES, { omit: 'ondemand' }).info.active).toEqual(sets.inline);
+  });
+
+  it('`names-build-door-tools` is exactly the rules whose own text (before any published section) names a hosted build-door tool', () => {
+    const tools = PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']!;
+    expect(tools).toContain('apply_blueprint');
+    const own = (text: string) => text.split('[published · ')[0]!;
+    const names = (text: string) => tools.some((t) => new RegExp(`(?<![A-Za-z0-9_])${t}(?![A-Za-z0-9_])`).test(own(text)));
+    expect(sets['names-build-door-tools']).toEqual(DOOR_RULES_CORPUS.rules.filter((r) => names(r.text)).map((r) => r.id));
+  });
+
+  /** What the content scan refuses: an address other than an example.com one, an IP, a key-shaped string. */
+  const UNSAFE: ReadonlyArray<readonly [string, RegExp]> = [
+    ['url', /\b[a-z][a-z0-9+.-]*:\/\/(?!…)(?!(?:[a-z0-9-]+\.)*example\.com(?![a-z0-9.-]))[^\s`'")\]]+/gi],
+    ['hostname', /\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|net|org|io|ai|dev|app|cloud|co|cn|sh|me|so|run|site|tech|xyz|info|biz|us|uk|de|jp)\b/gi],
+    ['localhost', /\blocalhost\b/gi],
+    ['ip address', /\b\d{1,3}(?:\.\d{1,3}){3}\b/g],
+    ['key', /\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*KEY-----|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
+    ['long hex or base64 run', /\b[A-Fa-f0-9]{32,}\b|[A-Za-z0-9+/]{40,}={0,2}/g],
+  ];
+  const unsafeIn = (text: string): string[] =>
+    UNSAFE.flatMap(([kind, re]) =>
+      [...text.matchAll(re)].map((m) => m[0]).filter((hit) => !(kind === 'hostname' && /(?:^|\.)example\.com$/i.test(hit))).map((hit) => `${kind}: ${hit}`),
+    );
+
+  it('⛔ carries no address but example.com ones, no IP and no key-shaped string (the scan flags each kind it is shown)', () => {
+    for (const planted of ['https://api.internal.test/v1', 'call build.objectos.ai first', 'http://localhost:3000', '10.0.0.12', 'sk-ant-abcdefghijklmnopqrstu', 'AKIAABCDEFGHIJKLMNOP', 'ghp_abcdefghijklmnopqrstuvwxyz', '-----BEGIN PRIVATE KEY-----', 'deadbeef'.repeat(5)]) {
+      expect(unsafeIn(planted), planted).not.toEqual([]);
+    }
+    expect(unsafeIn('see https://example.com/a, someone@example.com, url:\'https://…\'')).toEqual([]);
+    for (const r of DOOR_RULES_CORPUS.rules) expect(unsafeIn(r.text), r.id).toEqual([]);
+  });
+
+  it('the arm reads it by `--door-rules builtin`, the variable or the flag, and states it as `builtin`', () => {
+    expect(parseArgs(['--modes', 'door', '--door-rules', 'builtin', '--door-rules-omit', 'ondemand'])).toMatchObject({ doorRules: 'builtin', doorRulesOmit: 'ondemand' });
+    // `makeDriver` reads the rules before it builds the live driver (whose version probe needs a `claude` on PATH):
+    // a selector the corpus does not hold is refused there, so the flag reaches the built-in reader with no CLI installed.
+    expect(() => makeDriver('claude', { doorRules: 'builtin', doorRulesOmit: 'rule-z' }, { repoRoot: root })).toThrow(DoorRulesRefusedError);
+    const { info } = readDoorRules(BUILTIN_DOOR_RULES, { omit: 'ondemand' });
+    expect(doorArmText({ rules: info })).toBe(`skills: none · rules: builtin (sha256 ${info.sha256.slice(0, 12)}) ${sets.inline!.length} active, ${sets.ondemand!.length} omitted (ondemand)`);
+    expect(() => readDoorRules(BUILTIN_DOOR_RULES, { omit: 'rule-z' })).toThrow(
+      /^the built-in door rules corpus \(`--door-rules builtin`\) is refused: the selector names `rule-z`, which is neither a rule id nor a set of the file$/,
+    );
   });
 });
