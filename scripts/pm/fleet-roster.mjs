@@ -747,14 +747,20 @@ export function renderHealth(h, { now }) {
   const split = (list) => list.map((x) => `${shortRepo(x.repo)} ${x.n}`).join(' · ');
   const ageOf = (hrs) => (hrs === null ? 'no card' : relAge(hrs));
   const ref = (key) => key.replace(/^[^/]+\//, '');
-  const lines = [
-    `fleet-roster --health — read ${now} · repos ${h.repos.join(', ')} · read-only, nothing written`,
-    `walk: ${h.walks.map((w) => (w.unreadable ? `${w.repo} UNREAD` : `${w.repo} ${w.enumerated} open issue(s) over ${w.pages} page(s) · the platform counts ${w.totalCount}`)).join(' · ')}`,
+  // An INCOMPLETE run marks every indicator line, so a line copied out of it never reads clean; a run no repository
+  // answered prints no indicator at all (no `0 ()`, no "every board read is empty").
+  const mark = h.complete ? '' : ' ⛔ INCOMPLETE run — not a clean reading (gaps below)';
+  const indicators = [
     `1 可派发库存 — open ${QUEUE_LABEL}, no assignee: ${h.inventory.total} (${split(h.inventory.perRepo)}) · trend unread (named below)`,
     `2 决策箱 — 决策卡 ${h.inbox.decisionCards} · 待您审合 PR ${h.inbox.awaitingMergePulls} (two inboxes, never summed) · decision cards an open card names on a Blocked-by: line (reverse read, now): ${h.inbox.downstream.length} of ${h.inbox.decisionCards}${h.inbox.downstream.length ? ` — ${h.inbox.downstream.map((d) => `${ref(d.card)} ← ${d.dependents.map(ref).join(', ')}`).join('; ')}` : ''}`,
     `3 finding — ${h.findings.total} open (the bare label is the ungraded count; a held card has changed label), median age ${ageOf(h.findings.medianAgeHours)} (${split(h.findings.perRepo)})`,
     `4 裸卡 — ${h.bare.total} bare (${split(h.bare.perRepo)}; first-touch-sweep ①, off the sweep's own walk), median age ${ageOf(h.bare.medianAgeHours)} = first-touch debt · ungraded (④) ${h.bare.ungraded}`,
     `5 发版阻塞 — open ${P0_LABEL} issues summed over the repos read: ${h.releaseBlockers.total} (${split(h.releaseBlockers.perRepo)}); zero means every board read is empty · the total open count is deliberately not an indicator`,
+  ];
+  const lines = [
+    `fleet-roster --health — read ${now} · repos ${h.repos.join(', ')} · read-only, nothing written`,
+    `walk: ${h.walks.map((w) => (w.unreadable ? `${w.repo} UNREAD` : `${w.repo} ${w.enumerated} open issue(s) over ${w.pages} page(s) · the platform counts ${w.totalCount}`)).join(' · ')}`,
+    ...(h.unanswered ? ['no indicator printed: no repository answered'] : indicators.map((l) => l + mark)),
     'Not read by this reader — the seat reads these itself:',
     ...HEALTH_UNREAD_LEGS.map((l) => `  · ${l}`),
     h.unanswered
@@ -809,7 +815,8 @@ export async function readHealthRepo(repo, { get, nowMs, sweepFn = null }) {
   if (!m.ok || !Array.isArray(m.value?.items)) gaps.push(`awaiting-merge pulls did not answer (${m.ok ? 'no items' : m.error})`);
   else {
     pulls = m.value.items;
-    if (pulls.length !== m.value.total_count) gaps.push(`awaiting-merge pulls: listed ${pulls.length} and the platform counts ${m.value.total_count}`);
+    if (m.value.incomplete_results === true) gaps.push('awaiting-merge pulls: the platform listing answered incomplete_results');
+    else if (pulls.length !== m.value.total_count) gaps.push(`awaiting-merge pulls: listed ${pulls.length} and the platform counts ${m.value.total_count}`);
   }
   const comments = new Map();
   for (const i of rows.filter((x) => hasLabel(x, BLOCKED_LABEL))) {
@@ -1067,7 +1074,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
   'the health rule text: every phrase --health is built from is in the file that writes it': 4,
-  '--health: five indicators off one walk, every count checked, every gap named': 23,
+  '--health: five indicators off one walk, every count checked, every gap named': 25,
 });
 const SELF_TEST_BATTERY_FLOOR = 12;
 
@@ -1353,10 +1360,15 @@ async function selfTest() {
     t('⭐ an unreadable pm:blocked thread is a gap, and its comment-borne line is not read', [healthExit(threadGap), threadGap.gaps.some((g) => g.includes("#106's thread could not be read")), threadGap.inbox.downstream.map((d) => d.card)], [EXIT_INCOMPLETE, true, [`${OS}#104`]]);
     const mergeGap = await run(withRepo(OS, { totals: { merge: 2 } }), [OS, CRM]);
     t('an awaiting-merge listing shorter than the platform count is a gap', mergeGap.gaps, [`${OS}: awaiting-merge pulls: listed 1 and the platform counts 2`]);
+    const partial = (p) => { const r = healthFixtureGet(H)(p); return p.includes(encodeURIComponent('label:pm:awaiting-merge')) && r.ok ? { ok: true, value: { ...r.value, incomplete_results: true } } : r; };
+    const mergePartial = await readHealth([OS], { get: partial, nowMs });
+    t('⭐ an awaiting-merge listing answered incomplete_results is a gap, as the four label counts are', mergePartial.gaps, [`${OS}: awaiting-merge pulls: the platform listing answered incomplete_results`]);
     const blind = await readHealth([OS], { get: healthFixtureGet(H), nowMs, sweepFn: async () => ({ enumerated: 5, pages: 1, totalCount: 5, complete: true, why: [], found: { 1: [], 4: [] } }) });
     t('⭐ a sweep walk this reader did not keep is a gap: no indicator is read off rows it never saw', [healthExit(blind), blind.gaps.some((g) => g.includes('the sweep enumerated 5 open issue(s) and this reader kept 0'))], [EXIT_INCOMPLETE, true]);
     const none = await run({ ...H, repos: { 'objectstack-ai/objectui': null } });
     t('no repository answering is CAN\'T READ, exit 3, no indicator read', [healthExit(none), renderHealth(none, { now: H.now }).includes("CAN'T READ")], [EXIT_PREREQUISITE, true]);
+    const noneText = renderHealth(none, { now: H.now });
+    t('⭐ a CAN\'T READ run prints no indicator line — no `0 ()`, no "every board read is empty" — and an INCOMPLETE run marks each of the five', [noneText.includes('0 ()'), noneText.includes('every board read is empty'), /^[1-5] /m.test(noneText), renderHealth(h, { now: H.now }).split('\n').filter((l) => /^[1-5] /.test(l) && l.endsWith('(gaps below)')).length, renderHealth(two, { now: H.now }).includes('INCOMPLETE run')], [false, false, false, 5, false]);
     const text = renderHealth(h, { now: H.now });
     t('⭐ every run names the legs it cannot read, and the trend reads "unread", never a number', [HEALTH_UNREAD_LEGS.every((l) => text.includes(l)), /可派发库存 — [^\n]*trend unread/.test(text)], [true, true]);
     t('the five indicator lines print in the rule\'s order, the two inboxes apart', ['1 可派发库存', '2 决策箱 — 决策卡 3 · 待您审合 PR 1', '3 finding — 2 open', '4 裸卡 — 3 bare', '5 发版阻塞 — open priority:p0 issues summed over the repos read: 2'].map((s) => text.includes(s)), [true, true, true, true, true]);
