@@ -581,11 +581,16 @@ export function AiPendingActionsInbox({
         */}
         <SheetContent className="w-full sm:max-w-[560px] overflow-y-auto">
           <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <Bot className="h-4 w-4" />
+            {/*
+              `[overflow-wrap:anywhere]`: an action or tool name is one
+              snake_case word, and a long one would push the full-width
+              drawer sideways on a phone; this lets it break anywhere.
+            */}
+            <SheetTitle className="flex items-center gap-2 [overflow-wrap:anywhere]">
+              <Bot className="h-4 w-4 shrink-0" />
               {selected ? selected.action_name : t('aiApprovals.drawerFallbackTitle')}
             </SheetTitle>
-            <SheetDescription>
+            <SheetDescription className="[overflow-wrap:anywhere]">
               {/*
                 One key with `{{tool}}` and `{{object}}` holes rather than an
                 English sentence assembled around two `<code>` elements — the

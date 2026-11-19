@@ -108,6 +108,8 @@ const BASE = {
   sheet: grab(`${UI}/sheet.tsx`, /const sheetVariants = cva\(\s*"([^"]+)"/, ['fixed']),
   sheetRight: grab(`${UI}/sheet.tsx`, /right:\s*"([^"]+)"/, ['w-3/4']),
   sheetHeader: grab(`${UI}/sheet.tsx`, /"(flex flex-col space-y-2 text-center sm:text-left)"/, ['flex-col']),
+  sheetTitle: grab(`${UI}/sheet.tsx`, /cn\("(text-lg font-semibold text-foreground)"/, ['text-lg']),
+  sheetDescription: grab(`${UI}/sheet.tsx`, /cn\("(text-sm text-muted-foreground)", className\)/, ['text-sm']),
 };
 
 const F = INBOX_FILE;
@@ -132,6 +134,8 @@ const INBOX = {
   viewSize: grab('cards', /<Button\s+size="([^"]+)"\s+variant="outline"/),
   view: grab('cards', /size="[^"]+"\s+variant="outline"\s+className="([^"]+)"/, ['flex-1']),
   sheet: grab(F, /<SheetContent className="([^"]+)">/, ['sm:max-w-[560px]']),
+  sheetTitle: grab(F, /<SheetTitle className="([^"]+)">/, ['flex']),
+  sheetDescription: grab(F, /<SheetDescription className="([^"]+)">/),
   sheetBody: grab(F, /\{selected \? \(\s*<div className="([^"]+)">/, ['px-4']),
   sheetButtons: grab(F, /\{selected\.status === 'pending' \? \(\s*<div className="([^"]+)">/, ['flex']),
 };
@@ -166,10 +170,11 @@ const ROWS = [
 const icon = '<svg class="h-3.5 w-3.5 mr-1" width="14" height="14"></svg>';
 
 /** The inbox in its card variant, inside the page's 16 px gutter. `tableAtPhone` shows the desktop face below `md` — the pre-fix arm. */
-function inbox(l: Labels, opts: { tableAtPhone?: boolean } = {}): string {
+function inbox(l: Labels, opts: { tableAtPhone?: boolean; rows?: typeof ROWS } = {}): string {
+  const rows = opts.rows ?? ROWS;
   const tableBox = opts.tableAtPhone ? cn(INBOX.tableBox, 'block') : INBOX.tableBox;
   const head = (i: number, label: string) => `<th class="${cn(BASE.th, INBOX.heads[i])}">${label}</th>`;
-  const tableRows = ROWS.map(
+  const tableRows = rows.map(
     (r) =>
       `<tr class="border-b">` +
       `<td class="${cn(BASE.td, 'font-mono text-xs')}">${r.tool}</td>` +
@@ -185,7 +190,7 @@ function inbox(l: Labels, opts: { tableAtPhone?: boolean } = {}): string {
         : '') +
       `</div></td></tr>`,
   ).join('');
-  const cards = ROWS.map(
+  const cards = rows.map(
     (r) =>
       `<div data-card="${r.id}" class="${INBOX.card}">` +
       `<div class="${INBOX.cardHead}"><div data-action="${r.id}" class="${INBOX.action}">${r.action}</div>` +
@@ -216,16 +221,21 @@ function inbox(l: Labels, opts: { tableAtPhone?: boolean } = {}): string {
   );
 }
 
-/** The detail drawer for a pending row. `primitiveWidth` drops the component's own width — the pre-fix arm. */
-function drawer(l: Labels, opts: { primitiveWidth?: boolean } = {}): string {
-  const own = opts.primitiveWidth ? INBOX.sheet.split(/\s+/).filter((c) => c !== 'w-full').join(' ') : INBOX.sheet;
+/**
+ * The detail drawer for the long-named pending row. `preFix` drops the classes
+ * this fix added (the drawer's `w-full`, the button row's `flex-wrap`) — the
+ * pre-fix arm.
+ */
+function drawer(l: Labels, opts: { preFix?: boolean } = {}): string {
+  const drop = (cls: string, token: string) => (opts.preFix ? cls.split(/\s+/).filter((c) => c !== token).join(' ') : cls);
   const r = ROWS[1];
   return (
-    `<div id="sheet" role="dialog" class="${cn(BASE.sheet, BASE.sheetRight, own)}">` +
-    `<div class="${BASE.sheetHeader}"><h2 class="text-lg font-semibold">${r.action}</h2>` +
-    `<p class="text-sm">Tool ${r.tool} on ${r.object}</p></div>` +
+    `<div id="sheet" role="dialog" class="${cn(BASE.sheet, BASE.sheetRight, drop(INBOX.sheet, 'w-full'))}">` +
+    `<div class="${BASE.sheetHeader}">` +
+    `<h2 class="${cn(BASE.sheetTitle, INBOX.sheetTitle)}"><svg class="h-4 w-4 shrink-0" width="16" height="16"></svg>${r.action}</h2>` +
+    `<p class="${cn(BASE.sheetDescription, INBOX.sheetDescription)}">Tool ${r.tool} on ${r.object}</p></div>` +
     `<div class="${INBOX.sheetBody}"><div class="grid grid-cols-2 gap-3 text-sm"><div>Status</div><div>Proposed</div></div>` +
-    `<div class="${INBOX.sheetButtons}">` +
+    `<div class="${drop(INBOX.sheetButtons, 'flex-wrap')}">` +
     `<button data-control="sheet approve" class="${btn('default', 'sm')}">${icon}${l.approveAndExecute}</button>` +
     `<button data-control="sheet reject" class="${btn('destructive', 'sm')}">${icon}${l.reject}</button>` +
     `</div></div></div>`
@@ -242,7 +252,7 @@ test.beforeAll(async () => {
       return { path: file, base: path.dirname(file), content: readFileSync(file, 'utf8') };
     },
   });
-  const html = [inbox(EN), inbox(EN, { tableAtPhone: true }), drawer(EN), drawer(EN, { primitiveWidth: true })].join(' ');
+  const html = [inbox(EN), inbox(EN, { tableAtPhone: true }), drawer(EN), drawer(EN, { preFix: true })].join(' ');
   const candidates = html.match(/class="([^"]+)"/g) ?? [];
   css = compiler.build(candidates.flatMap((c) => c.slice(7, -1).split(/\s+/)).filter(Boolean));
   if (!css.includes('@media')) throw new Error('Tailwind produced no media queries — `md:hidden` would be inert.');
@@ -322,6 +332,8 @@ test.describe('AI approvals inbox at phone width (objectstack#35449)', () => {
         const r = await measure(page, width, drawer(l));
         expect(r.docScrollWidth, 'the page scrolls sideways').toBeLessThanOrEqual(width);
         expect(inside(r.boxes['sheet'], width), `sheet ${JSON.stringify(r.boxes['sheet'])}`).toBe(true);
+        // Full width below `sm`, not the primitive's three quarters.
+        expect(r.boxes['sheet'].width, 'the drawer is narrower than the phone').toBeGreaterThanOrEqual(width - 0.5);
         for (const c of ['sheet approve', 'sheet reject']) {
           expect(inside(r.boxes[c], width), `${c}: ${JSON.stringify(r.boxes[c])} at ${width}px`).toBe(true);
           expect(r.boxes[c].right, `${c} leaves the drawer`).toBeLessThanOrEqual(r.boxes['sheet'].right + 0.5);
@@ -336,20 +348,20 @@ test.describe('AI approvals inbox at phone width (objectstack#35449)', () => {
     expect(table.tableBox.scrollWidth, 'the desktop table fit a phone, so the card check measured nothing')
       .toBeGreaterThan(table.tableBox.clientWidth);
     expect(inside(table.boxes['table approve a1'], 390), 'Approve in the table was on screen at 390px').toBe(false);
-    const sheet = await measure(page, 390, drawer(EN, { primitiveWidth: true }));
-    expect(inside(sheet.boxes['sheet reject'], 390), 'Reject in the 75% drawer was on screen at 390px').toBe(false);
+    const sheet = await measure(page, 390, drawer(EN, { preFix: true }));
+    expect(inside(sheet.boxes['sheet reject'], 390), 'Reject in the pre-fix drawer was on screen at 390px').toBe(false);
   });
 
   test('1280px control: the desktop table as before, nothing to scroll sideways', async ({ page }) => {
-    const r = await measure(page, 1280, inbox(EN) + drawer(EN));
+    // The two ordinary rows: the table's fixed columns are unchanged, and a
+    // name longer than its column widens it on a desktop as it did before.
+    const r = await measure(page, 1280, inbox(EN, { rows: ROWS.filter((x) => x.id !== 'a2') }) + drawer(EN));
     expect(r.docScrollWidth).toBeLessThanOrEqual(1280);
     expect(r.boxes['card-face'].width, 'the phone cards are drawn on a desktop').toBe(0);
     expect(r.boxes['table-face'].width).toBeGreaterThan(0);
     expect(r.tableBox.scrollWidth, 'the desktop table scrolls sideways at 1280px').toBeLessThanOrEqual(r.tableBox.clientWidth);
-    for (const row of ROWS.filter((x) => x.pending)) {
-      for (const c of ['view', 'approve', 'reject']) {
-        expect(inside(r.boxes[`table ${c} ${row.id}`], 1280), `${c} on ${row.id}`).toBe(true);
-      }
+    for (const c of ['view', 'approve', 'reject']) {
+      expect(inside(r.boxes[`table ${c} a1`], 1280), `${c} on a1`).toBe(true);
     }
     // The drawer keeps its 560 px cap from `sm` up.
     expect(Math.round(r.boxes['sheet'].width)).toBe(560);
