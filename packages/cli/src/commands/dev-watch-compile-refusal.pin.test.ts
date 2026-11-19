@@ -274,3 +274,25 @@ describe('os dev watcher: a refused recompile shows the refusal (#23820)', () =>
     expect(landed).toEqual([]);
   });
 });
+
+/**
+ * The failure line is NEUTRAL (ruling record 6998194814, letter D): the watcher
+ * sees only the child's exit status, and a refusal raised while the config loads
+ * shares that status with a judged compile failure. So the line says the config
+ * did not load or compile and asserts neither a code error nor a refusal. Both
+ * exit statuses the measured shapes produce are driven: 2 (a throw at load, or a
+ * syntax error) and 1 (a refusal that prints and exits, or a judged failure).
+ */
+describe('os dev watcher: the failure line says the config did not load or compile, never which', () => {
+  for (const [mode, status] of [['refuse-stdout', 2], ['refuse-both', 1]] as const) {
+    it(`exit ${status}: neutral head line, no "compile error", no "refused", no "compile failed"`, async () => {
+      const { printed } = await recompileOnce(mode);
+      const told = printed.join('\n---\n');
+      expect(printed, told).toHaveLength(2);
+      // The head line only: the relayed compile output below it is the child's text, not the watcher's.
+      const head = printed[1].split('\n')[0];
+      expect(head, told).toContain('objectstack.config did not load or compile');
+      expect(head, told).not.toMatch(/compile error|refused|compile failed/i);
+    });
+  }
+});
