@@ -29,4 +29,9 @@ The plain read, `/layers` and the execution read now ask every layer for the can
 
 A bundle that ships or stores its canonical member is served exactly as before. So is any named member, and so is every type with no members. A non-canonical member is still read with its own selector, for example `?member=fr-FR`, which the Studio list already links to for each member.
 
+**Reverses two statements of the 18.6.0 note** for the arrangement where base A ships `email_template` `welcome` in `fr-FR` only and dependent D, which declares A, stores `en-US`:
+
+- 18.6.0 said "`GET /meta/email_template/welcome/layers` (no member) moves FROM `404` after a restart TO A's `fr-FR` (200)". Now `/layers` naming no member answers `404 RESOURCE_NOT_FOUND` on both sides of a restart, as `/layers?member=en-US` does.
+- 18.6.0 said "**Not moved.** The plain read, `?member=CANONICAL` and the execution read of the first shape (A's `fr-FR` naming no member, 404 at `en-US`)." Now only `?member=CANONICAL` is unmoved. The plain read naming no member answers 404 and the execution read naming no member answers `null`, where both served A's `fr-FR`.
+
 Migration: a caller that read a bundle with no canonical member without naming a member must name the member it wants (`?member=fr-FR`). The email template loader reads the list (`getMetaItemsForExecution`) and does not use this read, so it is not affected.
