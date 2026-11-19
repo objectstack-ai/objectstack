@@ -350,6 +350,8 @@ describe('the tools the door registers are the ones a skill offered over MCP may
         { name: 'list_datasets', description: 'List the datasets.' },
         { name: 'query_dataset', description: 'Query one metric of a dataset.' },
       ],
+      searchPackageDocs: unused,
+      readPackageDoc: unused,
     });
   }
   const everyScope = [

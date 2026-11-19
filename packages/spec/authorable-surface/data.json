@@ -491,6 +491,7 @@
     "data/HookContext:result",
     "data/HookContext:session",
     "data/HookContext:submitted",
+    "data/HookContext:text",
     "data/HookContext:transaction",
     "data/HookContext:user",
     "data/HookRefusal:message",

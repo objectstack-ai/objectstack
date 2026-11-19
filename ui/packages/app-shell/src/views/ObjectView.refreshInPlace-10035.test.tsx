@@ -61,6 +61,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, act, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
@@ -377,17 +380,21 @@ describe('a list drawing a self-fetching visualization keeps its tree and the vi
  * leading node any more), and the title switcher carries none; a chart face,
  * which has no toolbar row, carries it on the switcher
  * (`ObjectView.chartViewTabs-13114.test.tsx`).
+ *
+ * Since objectstack#35548 the switcher leads the list's view bar on every
+ * face (the host's leading node again), so the list draws no info control and
+ * the description is the switcher's tooltip on a list face too.
  */
 describe('the view description is shown once, never as a row (objectui#12528)', () => {
   const switcher = () => screen.queryByTestId('list-view-switcher');
 
-  it('a list face draws it as the toolbar row\'s info control; the switcher carries none', async () => {
+  it('a list face draws it as the switcher\'s tooltip; the list draws no info control', async () => {
     await mountPage({ type: 'grid' });
 
     expect(screen.queryByTestId('view-description')).toBeNull();
-    expect(screen.getByTestId('view-description-info')).toHaveAttribute('title', 'Every task');
+    expect(screen.queryByTestId('view-description-info')).toBeNull();
     expect(switcher()).not.toBeNull();
-    expect(switcher()?.hasAttribute('title')).toBe(false);
+    expect(switcher()).toHaveAttribute('title', 'Every task');
   });
 
   it('appearance.showDescription: false shows it nowhere', async () => {

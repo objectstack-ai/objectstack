@@ -45,6 +45,8 @@ import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironme
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#34766] The open MCP draft door: its registry, behind `metadata:write` and the user's own `manage_metadata`.
 import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
+// [#35442] The app-docs members (`search_package_docs` / `read_package_doc`), over the `/meta/doc` docs-audience gate.
+import { createPackageDocMembers, packageDocsReadGate, type PackageDocsProtocol } from './mcp-package-docs.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
@@ -248,7 +250,10 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // carries `list_datasets` / `query_dataset` exactly where the analytics
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
+    // [#35442] The docs seam: the bridge carries `search_package_docs` /
+    // `read_package_doc` exactly where the protocol serves the `/meta` list read.
+    const packageDocs = await resolveMcpPackageDocsProtocol(deps, context);
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
     // read for every call. `undefined` for a grant without `metadata:write`
@@ -948,7 +953,7 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService; packageDocs?: PackageDocsProtocol } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1597,6 +1602,21 @@ export function buildMcpBridge(
         // [ADR-0149 D2] The dataset seam (`list_datasets` / `query_dataset`),
         // carried only where the analytics service serves its executor.
         ...(seams.datasetTools ? datasetToolMembers(seams.datasetTools, getProtocol, ec, deps, context) : {}),
+        // [#35442] The docs seam (`search_package_docs` / `read_package_doc`),
+        // carried only where the protocol serves the `/meta` list read. Every
+        // page is read through the `/meta/doc` docs-audience gate AS this
+        // request's caller (`mcp-package-docs.ts`), in this request's locale.
+        ...(seams.packageDocs
+            ? createPackageDocMembers(async () => ({
+                protocol: seams.packageDocs!,
+                readGate: packageDocsReadGate(
+                    seams.packageDocs!,
+                    ec as Record<string, unknown> | undefined,
+                    (name) => deps.resolveService(context, name),
+                ),
+                locale: metaRequestLocale({ headers: context.request?.headers }),
+            }))
+            : {}),
     };
 }
 
@@ -1638,6 +1658,25 @@ export async function resolveMcpDatasetToolsService(
         return undefined;
     }
     return service && typeof service.datasetTools === 'function' ? (service as McpDatasetToolsService) : undefined;
+}
+
+/**
+ * [#35442] The protocol whose `/meta` list read the app-docs members read
+ * `doc` and `book` items through, or `undefined` when this request has none
+ * (no protocol, one without `getMetaItems`, or a lookup that throws): the doc
+ * tools are then not listed, as for {@link resolveMcpDatasetToolsService}.
+ */
+export async function resolveMcpPackageDocsProtocol(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<PackageDocsProtocol | undefined> {
+    let protocol: Partial<PackageDocsProtocol> | undefined;
+    try {
+        protocol = (await deps.resolveService(context, 'protocol', context.environmentId)) as Partial<PackageDocsProtocol> | undefined;
+    } catch {
+        return undefined;
+    }
+    return protocol && typeof protocol.getMetaItems === 'function' ? (protocol as PackageDocsProtocol) : undefined;
 }
 
 /**

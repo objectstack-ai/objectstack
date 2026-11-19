@@ -989,6 +989,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "參數",
         helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
       },
+      texts: {
+        label: "文字",
+        helpText: "掛鉤寫入記錄的句子，以其程式碼透過 ctx.text 請求的 snake_case 鍵為鍵（例如 follow_up_subject）。掛鉤取得依組織語言翻譯的宣告句子，無翻譯時退回宣告的句子。適用於 JavaScript（L2）內文或處理器；運算式內文宣告會被拒絕"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "程式碼請求此鍵時掛鉤寫入的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "texts.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 lead）：程式碼請求 ctx.text(key, { lead })，{{ lead }} 預留位置即顯示該值。不填：句子為純文字"
+      },
       handler: {
         label: "處理器",
         helpText: "處理器函式名（已廢棄——建議使用 body）"
