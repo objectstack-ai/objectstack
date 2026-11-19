@@ -699,7 +699,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 91 today, an ADDITION of ONE: #29462 offered the field form's
     // `referenceNameVisible` row, gated on `data.type in ['lookup','user']`. It
     // is an in-list, so it does not reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(91);
+    // It is 93 today, an ADDITION of TWO: #35096 and #34823 offered the action
+    // form's `texts` and `refusals` rows, each gated like `body` on
+    // `data.type == 'script'`. They reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(93);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -827,7 +830,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 65 today: #35047's `field :: percentDisplay` gate also opens for a
     // percent formula, `data.type == 'formula' && data.returnType == 'percent'`,
     // two more single-quoted literal comparisons.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
+    // It is 67 today: #35096's `action :: texts` and #34823's
+    // `action :: refusals` rows are each gated on `data.type == 'script'`, two
+    // single-quoted literal comparisons.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(67);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
