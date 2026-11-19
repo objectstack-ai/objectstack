@@ -825,7 +825,22 @@ export const CEILINGS = new Map([
   // -> 6145 tokens: the 5 tokens of headroom are absorbed and the ceiling moves
   // 6011 -> 6145 (+134), the measured remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24577 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6145],
+  // 6145 -> 6163 (card #35285): the "Declaring is a demand" rule is scoped to
+  // what `os serve` does — a declared token of the provider table or
+  // `ai`/`ai-studio` with its package absent fails the boot, a declared
+  // enterprise / cloud token with no provider only warns, and
+  // `hierarchy-security`'s scopes then fall back to owner-only. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST — two restatements cut, each keeping its other
+  // home in the same sentence: ", not at boot" after "rejected by `defineStack`
+  // at authoring time", and "— so new routes added to HttpDispatcher work
+  // automatically" after "delegates everything else to it". Arithmetic in
+  // priced bytes (stamp line excluded): on `origin/main` the text was 24577
+  // bytes (6145 tokens, headroom 0); the cuts remove 78 and the rule adds 150,
+  // so the LANDED priced text is 24649 bytes -> 6163 tokens: the ceiling moves
+  // 6145 -> 6163 (+18), the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24649 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6163],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
