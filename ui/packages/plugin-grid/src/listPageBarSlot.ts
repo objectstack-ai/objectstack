@@ -19,8 +19,7 @@
  *   page column that holds the page bar and the list).
  * - A grid whose root sits inside a host's scope is that page's list. It
  *   portals its selection content (「已选 N 条」, Cancel, the actions) into the
- *   slot, tells the host when a selection is open, and reports its match total
- *   for the count beside the view name.
+ *   slot and tells the host when a selection is open.
  * - A grid inside no host's scope — a related list, a page block, a grid in
  *   the record drawer (which is not inside the page column) — finds no host
  *   and keeps its own row-end actions and its own bulk bar, as before.
@@ -35,8 +34,6 @@ import React from 'react';
 export interface ListPageBarState {
   /** A selection is open: the page bar shows the slot in place of its own content. */
   selecting: boolean;
-  /** The list's match total (every row the query matches), when the list knows it. */
-  total?: number;
 }
 
 interface Host {
@@ -113,11 +110,11 @@ export function useListPageBarSlot(root: HTMLElement | null): HTMLElement | null
 
 /** Write the list's side of the host state (a no-op when `slot` is `null`). */
 export function useListPageBarState(slot: HTMLElement | null, state: ListPageBarState): void {
-  const { selecting, total } = state;
+  const { selecting } = state;
   React.useLayoutEffect(() => {
     const host = hostOf(slot);
     if (!host) return undefined;
-    host.state = { selecting, total };
+    host.state = { selecting };
     emit();
     return () => {
       // Only clear what is still ours: a re-render may have written newer state.
@@ -126,5 +123,5 @@ export function useListPageBarState(slot: HTMLElement | null, state: ListPageBar
         emit();
       }
     };
-  }, [slot, selecting, total]);
+  }, [slot, selecting]);
 }

@@ -81,7 +81,6 @@ const PageBar: React.FC = () => {
   const state = useListPageBarHost(slot, scope);
   return (
     <div ref={(el) => setScope(el?.parentElement ?? null)} data-testid="page-bar" data-selecting={state.selecting ? 'yes' : 'no'}>
-      <span data-testid="page-bar-total">{state.total ?? ''}</span>
       <div ref={setSlot} data-testid="page-bar-slot" />
     </div>
   );

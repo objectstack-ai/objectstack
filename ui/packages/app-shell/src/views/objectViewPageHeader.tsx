@@ -19,7 +19,6 @@ import {
   DropdownMenuTrigger,
 } from '@object-ui/components';
 import { Upload, MoreHorizontal } from 'lucide-react';
-import { useDisplayLocale } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -134,23 +133,12 @@ export function ObjectViewPageHeader({
     // `@object-ui/plugin-grid`). The list in this page column fills it while
     // rows are selected — 「已选 N 条」, Cancel and the actions for what is
     // selected — and this bar shows it in place of its title and actions.
-    // The list also reports its match total, drawn beside the view name.
     const [selectionSlot, setSelectionSlot] = useState<HTMLDivElement | null>(null);
     const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
     const headerRootRef = useCallback((el: HTMLDivElement | null) => {
         setPageColumn(el?.parentElement ?? null);
     }, []);
     const pageBar = useListPageBarHost(selectionSlot, pageColumn);
-    const displayLocale = useDisplayLocale();
-    const totalCount = typeof pageBar.total === 'number' ? (
-        <span
-            className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground"
-            title={t('list.recordCount', { count: pageBar.total, defaultValue: '{{count}} records' })}
-            data-testid="list-total-count"
-        >
-            {pageBar.total.toLocaleString(displayLocale)}
-        </span>
-    ) : null;
     // A view with no label is already called by the plural (objectui#12774):
     // the switcher names the object, and a crumb would say it twice.
     const title = titleSwitcher == null
@@ -192,7 +180,7 @@ export function ObjectViewPageHeader({
                  // (objectui#12606).
                  // objectstack#28950 — and, before it, the 「Personalized」
                  // marker while the reader's list differs from the view.
-                 badge={<>{totalCount}{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
+                 badge={<>{personalizedMarker}<ManagedByBadge managedBy={(objectDef as any)?.managedBy} /></>}
                  subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
                  // `createElement`, not a JSX tag: the looked-up icon is a value,
                  // which react-hooks/static-components refuses in tag position

@@ -1463,7 +1463,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // objectstack#35554 — tell the page bar whether a selection is open and how
   // many rows the list's query matches (the count beside the view name).
-  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0, total: resolvedTotalMatching });
+  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 });
 
   // objectstack#35554 — a host that loads its rows window by window
   // (`onLoadMore`) is asked for the next window as the table's scroll box
