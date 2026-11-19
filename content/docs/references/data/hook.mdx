@@ -122,6 +122,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
 | **api** | `any` | optional | Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`) |
 | **notice** | `any` | optional | Tell the person who made THIS insert/update what the save set in motion: `ctx.notice(message)` hands one non-empty string to the write's own `onNotice` listener, answered as the create/update `notice`. Bound by the engine on every insert/update dispatch (a no-op when nothing listens); absent on find/delete |
+| **text** | `any` | optional | Answer one of the hook's declared texts: `await ctx.text(KEY, params?)` returns the sentence in the organization's language (translated through hooks.`<hook>`.texts.`<key>`.message, the declared message as the fallback, holes filled from params). Bound by the runtime on every path a hook runs on; a key the hook does not declare rejects the call |
 | **user** | `{ id?: string; name?: string; email?: string; organizationId?: string }` | optional | Current user info shortcut |
 
 ### Nested Shape: `HookContext.dispatch`

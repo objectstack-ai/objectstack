@@ -96,11 +96,13 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // for one defect class is what that module exists to prevent.
 import {
   BUILTIN_OPERATION_MESSAGES,
-  objectFieldLabelKey,
-  objectLabelKey,
   operationMessageTranslationKey,
   renderOperationMessage,
   resolveBundleLocale,
+  translateObject,
+  type ObjectLike,
+  type ResolveOptions,
+  type TranslationBundle,
 } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
@@ -332,6 +334,49 @@ function denialTranslator(
 }
 
 /**
+ * [#34030] An object document with the labels a refusal's `userMessage` names,
+ * in `locale`, put there by `translateObject` (`@objectstack/spec/system`) —
+ * the translator the metadata route serves the object with, over the same
+ * bundle (every locale the i18n service holds) and the same `ResolveOptions`
+ * (`metaTranslateOptions` in rest): the request's locale, the DECLARED
+ * fallback chain (`getFallbackLocale()`), and the authored language — the
+ * declared `sourceLocale` (`getSourceLocale()`), else `defaultLocale`
+ * (`getDefaultLocale()`). So a request in the authored language reads the
+ * label as written, never the `defaultLocale` row `t()` falls to. ⛔ No key is
+ * spelled here.
+ *
+ * The declared document comes back with no i18n service, one that cannot hand
+ * its translations over (no `getLocales` / `getTranslations`), and one that
+ * throws: a misbehaving i18n service must not turn a 403 into a 500.
+ */
+function denialLabels<T extends ObjectLike>(ctx: PluginContext, doc: T, locale: string): T {
+  try {
+    const i18n = ctx.getService<II18nService>('i18n');
+    if (!i18n || typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') return doc;
+    const bundle: Record<string, unknown> = {};
+    for (const code of i18n.getLocales()) {
+      const data = i18n.getTranslations(code);
+      if (data && typeof data === 'object') bundle[code] = data;
+    }
+    const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+    const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+    const authored = typeof source === 'string' && source.length > 0
+      ? source
+      : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    const options: ResolveOptions = {
+      locale,
+      ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
+      ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
+    };
+    return translateObject(doc, Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options);
+  } catch {
+    // i18n is optional (ADR-0029 D8 registers it from another plugin, possibly
+    // later than this one), and a misbehaving one must not turn a 403 into a 500.
+    return doc;
+  }
+}
+
+/**
  * The end user's half of a refusal whose `message` stays the developer
  * sentence: the owner-anchor, queue and field-write 403s.
  *
@@ -359,7 +404,8 @@ function withUserMessage(refusal: PermissionDeniedError, userMessage: string): P
  * learn it. A field is nameable when BOTH hold:
  *
  *  - it has a LABEL: the deployment's translation of the field label in the
- *    caller's locale, else the declared label. The API name is never the last
+ *    caller's locale, else the declared label, read by the metadata route's
+ *    rule ({@link denialLabels}, #34030). The API name is never the last
  *    rung (#7414), and a declared label equal to the API name counts as none.
  *  - the caller READS it: the caller's read guard leaves it readable
  *    (`computeQueryGuardFieldPerms` with the computed fields withheld for
@@ -381,23 +427,21 @@ function fieldEditDenialMessage(
   // Labels are translated in the language the sentence itself resolves to.
   const loc = denialLocaleOf('field_edit_denied', locales, translate) ?? 'en';
   const locale = [loc];
+  if (forbidden.some((field) => readable[field]?.readable === false)) {
+    return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
+  }
+  const declaredFields: Record<string, { label?: string }> = {};
+  for (const field of forbidden) {
+    const declared = schema?.fields?.[field]?.label;
+    declaredFields[field] = typeof declared === 'string' && declared.trim().length > 0 ? { label: declared.trim() } : {};
+  }
+  const served = denialLabels(ctx, { name: objectName, fields: declaredFields }, loc).fields as
+    | Record<string, { label?: unknown }>
+    | undefined;
   const labels: string[] = [];
   for (const field of forbidden) {
-    if (readable[field]?.readable === false) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
-    let label: string | undefined;
-    if (translate) {
-      const key = objectFieldLabelKey(objectName, field);
-      try {
-        const translated = translate(key, loc);
-        if (typeof translated === 'string' && translated.trim().length > 0 && translated !== key) label = translated.trim();
-      } catch {
-        // A misbehaving i18n service must not turn a 403 into a 500.
-      }
-    }
-    if (label === undefined) {
-      const declared = schema?.fields?.[field]?.label;
-      if (typeof declared === 'string' && declared.trim().length > 0) label = declared.trim();
-    }
+    const raw = served?.[field]?.label;
+    const label = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
     if (label === undefined || label === field) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
     labels.push(label);
   }
@@ -409,7 +453,8 @@ function fieldEditDenialMessage(
  * `controlled_by_parent` record lacks edit (or read) access on its MASTER
  * record, so the sentence names the master object's LABEL — the deployment's
  * translation in the language the sentence resolves to, else the declared
- * label — and sends the user to that record's owner
+ * label, read by the metadata route's rule ({@link denialLabels}, #34030) —
+ * and sends the user to that record's owner
  * (`master_record_edit_denied` / `master_record_read_denied`).
  *
  * The `_opaque` form names nothing, for two callers: one the gate names no
@@ -429,25 +474,15 @@ function masterGateDenialMessage(
   if (master === undefined) return userFacingDenialMessage(ctx, opaque, locales);
   const translate = denialTranslator(ctx);
   const loc = denialLocaleOf(named, locales, translate) ?? 'en';
-  let label: string | undefined;
-  if (translate) {
-    const key = objectLabelKey(master);
-    try {
-      const translated = translate(key, loc);
-      if (typeof translated === 'string' && translated.trim().length > 0 && translated !== key) label = translated.trim();
-    } catch {
-      // A misbehaving i18n service must not turn a 403 into a 500.
-    }
+  let declared: unknown;
+  try {
+    declared = typeof ql?.getSchema === 'function' ? (ql.getSchema(master) as { label?: unknown } | undefined)?.label : undefined;
+  } catch {
+    declared = undefined;
   }
-  if (label === undefined) {
-    let declared: unknown;
-    try {
-      declared = typeof ql?.getSchema === 'function' ? (ql.getSchema(master) as { label?: unknown } | undefined)?.label : undefined;
-    } catch {
-      declared = undefined;
-    }
-    if (typeof declared === 'string' && declared.trim().length > 0) label = declared.trim();
-  }
+  const authored = typeof declared === 'string' && declared.trim().length > 0 ? declared.trim() : undefined;
+  const raw = denialLabels(ctx, { name: master, ...(authored !== undefined ? { label: authored } : {}) }, loc).label;
+  const label = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
   if (label === undefined || label === master) return userFacingDenialMessage(ctx, opaque, [loc]);
   return userFacingDenialMessage(ctx, named, [loc], { master: label });
 }

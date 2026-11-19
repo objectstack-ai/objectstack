@@ -651,3 +651,87 @@ describe('[#34938] a period key on a temporal column is refused as written, and 
     expect(reads[reads.length - 1].ast.where.due_on.$gte).toBe('2026-11-16');
   });
 });
+
+/**
+ * [#35394] A context token is judged as written at this door too, never
+ * stepped around: `{current_user_id}` / `{current_org_id}` resolve to the
+ * caller's user or organization id, which is text, so on a `date`, `datetime`
+ * or `time` column it takes the refusal the literal id takes —
+ * `INVALID_FILTER` / 400, before any driver read.
+ *
+ * Measured before the door judged it, through `engine.find` on SqlDriver
+ * (SQLite) and InMemoryDriver alike: `$lt` answered every row and `$eq` /
+ * `$gte` answered 200 `[]` on all three kinds, while the literal id was
+ * refused here. The refusal sits in front of every driver, so this file's
+ * recording driver pins it for both (`reads` stays empty).
+ *
+ * The positive controls share the test, by this file's ruling: the token still
+ * resolves on a text column, `{current_week_start}` still resolves on a `date`
+ * column, and an unknown or record-context token keeps the resolver's own
+ * refusal by name rather than this door's.
+ */
+describe('[#35394] a context token on a temporal column is refused as written, and still resolves on text', () => {
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+  const CTX = { userId: 'usr_1', tenantId: 'org_9', timezone: 'UTC' } as never;
+  const refusalOf = async (p: Promise<unknown>) =>
+    p.then(() => null, (e: any) => e as Error & { code?: string; status?: number });
+
+  beforeEach(async () => {
+    // Date only: the engine's async paths keep real timers. A Thursday, ISO week 47.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(support_case, 'test');
+    await engine.insert('support_case', { id: 'mine', subject: 'usr_1', due_on: '2026-11-19', created_date: '2026-11-19T10:00:00.000Z', opens_at: '10:00:00' });
+    await engine.insert('support_case', { id: 'theirs', subject: 'usr_2', due_on: '2026-11-12', created_date: '2026-11-12T10:00:00.000Z', opens_at: '09:00:00' });
+    reads.length = 0;
+  });
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('refuses {current_user_id} and {current_org_id} on a date, a datetime and a time column with INVALID_FILTER / 400 before any read — the token still resolves on text, and {current_week_start} on a date', async () => {
+    for (const field of ['due_on', 'created_date', 'opens_at'] as const) {
+      for (const token of ['{current_user_id}', '${current_user_id}', '{current_org_id}']) {
+        for (const op of ['$eq', '$lt', '$gte', '$gt'] as const) {
+          const err = await refusalOf(engine.find('support_case', { where: { [field]: { [op]: token } }, context: CTX }));
+          expect(err, `${field} ${op} ${token}`).not.toBeNull();
+          expect(err!.code, `${field} ${op} ${token}`).toBe('INVALID_FILTER');
+          expect(err!.status, `${field} ${op} ${token}`).toBe(400);
+          expect(err!.message).toContain(`'${field}'`);
+        }
+        // The implicit-equality and list-member positions, and the write verbs' filter.
+        for (const where of [{ [field]: token }, { [field]: { $in: [token] } }]) {
+          await expect(engine.find('support_case', { where: where as never, context: CTX }), `${field} ${JSON.stringify(where)}`)
+            .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+        }
+        await expect(engine.count('support_case', { where: { [field]: { $lt: token } }, context: CTX } as never), `${field} count ${token}`)
+          .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+        await expect(engine.delete('support_case', { where: { [field]: { $lt: token } }, multi: true, context: CTX } as never), `${field} delete ${token}`)
+          .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      }
+      // The literal id takes the same refusal — the class the token now joins.
+      await expect(engine.find('support_case', { where: { [field]: { $eq: 'usr_1' } }, context: CTX }))
+        .rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+      // An unknown and a record-context token keep the resolver's refusal by name.
+      await expect(engine.find('support_case', { where: { [field]: { $lt: '{current_user}' } }, context: CTX }))
+        .rejects.toMatchObject({ code: 'FILTER_TOKEN_UNKNOWN', status: 400 });
+      await expect(engine.find('support_case', { where: { [field]: { $lt: '{record_id}' } }, context: CTX }))
+        .rejects.toMatchObject({ code: 'FILTER_TOKEN_UNRESOLVED', status: 400 });
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+
+    // ── the POSITIVE CONTROLS, in this same test ────────────────────────────
+    const ids = async (where: Record<string, unknown>) =>
+      (await engine.find('support_case', { where, context: CTX })).map((r: any) => r.id).sort();
+    expect(await ids({ subject: { $eq: '{current_user_id}' } }), 'text $eq').toEqual(['mine']);
+    expect(await ids({ subject: '${current_user_id}' }), 'text, implicit equality').toEqual(['mine']);
+    expect(reads[reads.length - 1].ast.where.subject, 'text reached the driver resolved').toBe('usr_1');
+    expect(await ids({ due_on: { $gte: '{current_week_start}' } }), 'a date macro on a date column').toEqual(['mine']);
+    expect(reads[reads.length - 1].ast.where.due_on.$gte).toBe('2026-11-16');
+  });
+});

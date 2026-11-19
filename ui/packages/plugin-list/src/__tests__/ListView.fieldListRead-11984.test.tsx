@@ -220,7 +220,7 @@ const FIELD_LIST_TRIGGERS: Record<'wide' | 'compact', string[]> = {
   // The compact toolbar folds Group, Row color and Hide fields into Display
   // (objectui#12423; "View settings" before it), which reads `allFields` for
   // all three.
-  compact: ['Display', 'Filter', 'Sort'],
+  compact: ['Filter', 'Options', 'Sort'], // Display reads Options since objectstack#35548
 };
 
 interface Sweep {
