@@ -9064,10 +9064,9 @@ export class ObjectStackProtocolImplementation implements
      * same package batch (`pending` as the batch's object declarations), else
      * the engine's registered definition, whose fields include extension
      * fields; the columns the registry injects (`id`, the audit and tenant
-     * columns) count. Not refused when the object cannot be resolved: on a
-     * draft save, an object that is itself still a draft (`pending` as
-     * `'drafts'`) is judged at the seed's publish; an object resolved by
-     * neither is reported by the load.
+     * columns) count; on a draft save, an object itself still a draft (`pending`
+     * as `'drafts'`) is judged at the seed's publish. [#34864] One nothing resolves is
+     * refused by the save door alone (`door`): `unknownSeedObjectRefusal`'s docblock.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -9088,13 +9087,15 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         pending?: 'drafts' | ReadonlyArray<unknown>,
         writeFace?: MetadataWriteFace,
+        door?: 'save',
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
             get engine() { return readEngine(); },
             listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
     }
 
     /**

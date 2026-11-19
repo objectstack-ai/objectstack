@@ -132,7 +132,7 @@
  * assertion is correct for a dashboard tile and wrong for the corpus.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, cleanup, act } from '@testing-library/react';
 import '@object-ui/components';
 // Mirrors the docs-site gallery host's registration list, in its order. The host
 // (`registerCatalogBlocks.ts`) was deleted with the site by objectstack#27145;
@@ -150,6 +150,9 @@ import '@object-ui/plugin-timeline';
 import '@object-ui/plugin-view';
 import '@object-ui/plugin-form';
 import '@object-ui/plugin-grid';
+// ui/AGENTS.md lazy-boundary rule: the modules kanban's and markdown's React.lazy import() loads, so a tile never asserts on its Suspense fallback (objectstack#35407).
+import '../../../packages/plugin-kanban/src/KanbanImpl';
+import '../../../packages/plugin-markdown/src/MarkdownImpl';
 import { SidebarProvider } from '@object-ui/components';
 import { registerLayout } from '@object-ui/layout';
 import { ComponentRegistry } from '@object-ui/core';
@@ -462,6 +465,11 @@ async function renderEntry(schema: unknown): Promise<Rendered> {
       </SidebarProvider>
     </SchemaRendererContext.Provider>,
   );
+  // A `React.lazy` tile paints its Suspense fallback first even when its module
+  // is already loaded (the module-scope imports above): `import()` settles a tick
+  // later. Let that tick reach the screen before the settles below, which the
+  // fallback alone would satisfy (objectstack#35407).
+  await act(async () => {});
   // Two settles, for two different asynchronous shapes:
   //  - a dataset widget starts in `loading` and resolves on a promise;
   //  - `code-editor`, `kanban` and `markdown` are `React.lazy` behind

@@ -276,6 +276,20 @@ async function hasRows(
     return Array.isArray(rows) && rows.length > 0;
 }
 
+/**
+ * [#34864] The engine registers no object of this name: it answers its
+ * registered objects (`getSchema`) and answers none for this one. An engine
+ * without the read, or whose read throws, cannot say so, and answers `false`.
+ */
+function objectIsMissing(engine: ProbeEngine, objectName: string): boolean {
+    if (typeof engine.getSchema !== 'function') return false;
+    try {
+        return !engine.getSchema(objectName);
+    } catch {
+        return false;
+    }
+}
+
 /** Rows sampled from an object by the data probes, and distinct values probed per column. */
 const PROBE_SAMPLE_ROWS = 50;
 
@@ -545,6 +559,25 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 });
             }
         } catch (e) {
+            // [#34864] An object that does not exist is not a read that
+            // failed: publishing again cannot help, so the finding names the
+            // missing object and the fix instead. Missing only when the
+            // engine can answer for its registered objects and answers none,
+            // and no published object of the name is held either; anything
+            // else stays `unreadable`.
+            if (objectIsMissing(engine, objectName) && (await readItem('object', objectName)) === undefined) {
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'error',
+                    artifact: { type: 'seed', name: p.name },
+                    ref: { type: 'object', name: objectName },
+                    code: 'seed_not_applied',
+                    message: `Seed "${p.name}" was published but loads into object "${objectName}", which does not exist — no record was loaded.`,
+                    fix: `Correct the seed's \`object\` to the object's full name, or create and publish object "${objectName}", then republish the seed.`,
+                    userMessage: say('seed_not_applied', { object: objectName, cause: 'missing' }),
+                });
+                continue;
+            }
             issues.push({
                 layer: 'runtime',
                 severity: 'error',
