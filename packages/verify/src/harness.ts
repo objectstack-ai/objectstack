@@ -26,12 +26,14 @@
 // connects them (ADR-0062 D1/D2, the datasource-connection service below), so
 // a read of an object bound to one reaches that datasource, and so does a
 // write the APP makes there: its seed, or a hook or flow of its own that
-// writes such an object when one of verify's writes fires it. What verify
-// itself writes stays here: every derived write family leaves an object on an
-// external datasource out and reports it "not exercised", whatever its write
-// gate says (`deriveCrudCases`, `derive.ts`), and the local flow run refuses a
+// writes such an object when one of verify's writes fires it. Verify's own
+// writes never reach an object on an EXTERNAL datasource: every derived write
+// family leaves it out and reports it "not exercised", whatever its write gate
+// says (`deriveCrudCases`, `derive.ts`). An object bound to a declared MANAGED
+// datasource (or one that declares no `schemaMode`) is written through that
+// datasource, as under `objectstack dev`; only the local flow run refuses a
 // write to any object routed away from this database (`flow-run.ts`).
-// `verify.external-datasource-no-writes.test.ts` pins the first half.
+// `verify.external-datasource-no-writes.test.ts` pins the external half.
 
 import { randomBytes } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
