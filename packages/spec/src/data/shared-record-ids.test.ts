@@ -223,6 +223,9 @@ describe('the fixed-read brand dispatch (ADR-0155 D4)', () => {
     expect(isFixedReadLeaf(leaf)).toBe(true);
     expect(isFixedReadLeaf(leaf, [SHARED_RECORD_IDS_BRAND])).toBe(true);
     expect(isFixedReadLeaf(leaf, []), 'an empty list names no brand').toBe(false);
+    for (const notAList of [true, 'objectstack.filter.sharedRecordIds', SHARED_RECORD_IDS_BRAND] as unknown[]) {
+      expect(isFixedReadLeaf(leaf, notAList as never), `brands ${String(notAList)}`).toBe(false);
+    }
     for (const value of [ReadableIds.of('account'), ReadableIds.compose(ReadableIds.of('account'), undefined), { ...leaf }, null, ['d1']]) {
       expect(fixedReadLeafBrandOf(value), String(value)).toBeUndefined();
       expect(isFixedReadLeaf(value), String(value)).toBe(false);
@@ -248,7 +251,7 @@ describe('the comparand-shape door admits the leaf only for a caller that names 
   });
 
   it('refuses the same branded leaf for every caller that names no brand — the refusal that existed before the leaf', () => {
-    for (const options of [undefined, {}, { admitFixedReadLeaves: [] }, { admitReadableIds: true }] as const) {
+    for (const options of [undefined, {}, { admitFixedReadLeaves: [] }, { admitReadableIds: true }, { admitFixedReadLeaves: true as never }] as const) {
       const err = refusalOf(() => assertListComparandShapes({ id: { $in: read } }, undefined, 'where', options));
       expect(envelopeOf(err), JSON.stringify(options)).toEqual(ENVELOPE);
       expect(err.message).toMatch(/^Operator "\$in" on field "id" requires an ARRAY of values\. Received object/);

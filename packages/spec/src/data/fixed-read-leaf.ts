@@ -35,9 +35,9 @@
  *
  * ## What every evaluator owes the description
  *
- * `column IN (SELECT column FROM table WHERE <each equals> AND <each memberOf>
- * AND column IS NOT NULL AND column <> '')`, or the in-process equivalent, in
- * the position the leaf holds:
+ * `field IN (SELECT column FROM table WHERE <each equals> AND <each memberOf>
+ * AND column IS NOT NULL AND column <> '')`, where `field` is the one whose
+ * `$in` the leaf is, or the in-process equivalent:
  *
  *  - **The blank-id guard is the mechanism's, on every leaf**, so it is not a
  *    field: a NULL in the subquery would make a negation (`id NOT IN (…)`)
@@ -122,6 +122,9 @@ export function fixedReadLeafBrandOf(value: unknown): FixedReadLeafBrand | undef
  * names.
  */
 export function isFixedReadLeaf(value: unknown, brands?: readonly FixedReadLeafBrand[]): value is FixedReadLeaf {
+  // A `brands` that is not a list (an untyped caller's `true`, a string) names
+  // no brand, so it admits nothing.
+  if (brands !== undefined && !Array.isArray(brands)) return false;
   const brand = fixedReadLeafBrandOf(value);
   return brand !== undefined && (brands === undefined || brands.includes(brand));
 }

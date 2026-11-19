@@ -99,8 +99,9 @@
  * No operator joins `FieldOperatorsSchema` or `VALID_AST_OPERATORS`
  * (`./filter.zod.ts`), and there is no CEL function and no lint vocabulary. One
  * producer writes it: plugin-sharing's read-scope builder, and its write-scope
- * builder. Until that producer's switch lands (ADR-0155 plan step 6) nothing
- * writes it, and no caller of the comparand-shape door admits it.
+ * builder. No caller of the comparand-shape door admits it until the engine's
+ * card (ADR-0155 plan step 2), and nothing writes it until that producer's
+ * switch (plan step 6).
  *
  * Like `./readable-ids.ts`, the module is tolerant of bare, un-parsed input:
  * {@link isSharedRecordIds} accepts `unknown` and answers `false` for every
