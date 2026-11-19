@@ -38,6 +38,7 @@
 
 import * as React from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { ManifestSchema, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { useAuth } from '@object-ui/auth';
 import { NAMESPACE_RE, isSpecPackageId } from '../studio-design/packages-io.js';
@@ -610,6 +611,15 @@ export function PackageFormDialog({
         });
         const id = String((created?.manifest?.id as string) ?? manifestBody.id);
         result = { id, mode, package: created };
+        // `ux-conventions.write-feedback`: the create answers with a toast
+        // naming the new package by its display name — the dialog closes
+        // and the caller may navigate away, so nothing else on screen says
+        // the write landed. A refusal stays in the dialog's banner below.
+        toast.success(
+          tFormat('engine.packages.create.created', locale, {
+            name: String((created?.manifest?.name as string) ?? manifestBody.name),
+          }),
+        );
       } else {
         const id = String((manifest?.id as string) ?? draft.id ?? '');
         // The REST PATCH persists name / description / version / dependencies

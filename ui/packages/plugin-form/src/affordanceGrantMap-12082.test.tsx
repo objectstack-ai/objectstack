@@ -467,6 +467,8 @@ const RESOLVER_DIR = 'packages/permissions/src/';
 const OUT_OF_FAMILY: Record<string, string> = {
   'packages/app-shell/src/utils/managedByEmptyState.ts':
     "chooses an empty list's COPY from the object's bucket ('entries appear automatically'), principal-independent by design; it shows or hides no affordance — the page's New button is the listNew row",
+  'packages/app-shell/src/console/notification-settings/NotificationSettingsPage.tsx':
+    "gates the caller's OWN sys_notification_preference writes (a switch, the digest, quiet hours) on perms.can(sys_notification_preference, create | update) — the outOfFamily write sites myPreferences.ts :: sendPreferenceWrite below, the sys_personal_view pattern ObjectView reads; no record the caller browses is offered for writing",
 };
 
 const READS: RegExp[] = [
@@ -760,9 +762,9 @@ const WRITE_SITES: Record<string, WriteSite> = {
     outOfFamily("the caller's OWN sys_api_key row (Revoke on Connect an Agent's key list, whose read is filtered on user_id = the caller and offers Revoke only on an active key); the write sets revoked: true and the server's CRUD step asks the grant; no record the caller browses is written"),
   // The account app's Notification Settings page (objectstack-ai/objectstack#34728): the caller's own preference rows.
   'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: create':
-    outOfFamily("the caller's OWN sys_notification_preference row (a switch, the digest or quiet hours on Notification Settings), created with user_id = the caller; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
+    outOfFamily("the caller's OWN sys_notification_preference row (a switch, the digest or quiet hours on Notification Settings), created with user_id = the caller, offered behind perms.can(sys_notification_preference, create | update) in NotificationSettingsPage; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
   'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: update':
-    outOfFamily("the caller's OWN sys_notification_preference row, by the id the caller-scoped door GET /api/v1/messaging/me/preferences names as theirs; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
+    outOfFamily("the caller's OWN sys_notification_preference row, by the id the caller-scoped door GET /api/v1/messaging/me/preferences names as theirs, offered behind the same read in NotificationSettingsPage; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),
