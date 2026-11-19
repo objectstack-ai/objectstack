@@ -224,49 +224,51 @@ deletes the seeded copies (ADR-0131 D10).
 Withdraw a capability by withdrawing the **grant**.
 </Callout>
 
-## `capability` is code-only
+## Declaring a capability in the environment
 
 `capability` is a registered metadata kind, and its registry entry declares
-`allowRuntimeCreate: false` **and** `allowEnvironmentOverlay: false`. Together those
-are the code-only declaration, so:
+`allowRuntimeCreate: true` with `allowEnvironmentOverlay: false`. So an
+environment may declare a capability of its own through the metadata door
+(`PUT /api/v1/meta/capability/:name`), but never re-declare one a package
+ships. An `unmanaged` install is the write that needs this: it copies an app
+into the environment, and an app that gates its actions on its own
+capabilities copies them too (below).
 
-```
-PUT /api/v1/meta/capability/:name
-  → 403  NOT_CREATABLE
-    "Metadata type 'capability' is code-only: the metadata-type registry
-     declares allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it
-     cannot be created through the runtime metadata API … on any kernel.
-     Declare it in source (**/*.capability.ts) and redeploy."
-```
+Every such write is judged before anything is stored:
 
-The refusal fires **before** the body is validated, on every kernel, in draft
-mode as well as active. This is deliberate and follows straight from the
-three-way separation: an administrator minting a brand-new capability at runtime
-has no counterpart in it — nothing in code would ever *require* the name, so the
-result is an unreferenced grant target sitting in the live authorization
-namespace. `job` and `agent` carry the same pair for the same reason.
+- **The body** by `CapabilityDeclarationSchema`; a malformed one is
+  `422 INVALID_METADATA`.
+- **A platform capability's name** (`manage_users`, `manage_metadata`, …) is
+  refused `422 NAMESPACE_CONFLICT`. A declaration under it would re-declare a
+  platform power's `scope`, and the scope decides whether an organization
+  administrator may hand out the sets that grant it.
+- **A name another holder declares** — a package, the environment, or another
+  copy — is refused `422 NAMESPACE_CONFLICT`, naming the holder. A grant and a
+  requirement match a capability by name across the whole deployment, so one
+  name has one holder.
 
 Under a `group` or `isolated` tenancy posture, a caller below the platform
-operator reads a different refusal, with the same `403` status: the walled
-refusal every environment-metadata write takes there (ADR-0131 D3, D12 items
-7–8), whose message names the posture, with the code `FORBIDDEN` on the REST
-door and `PERMISSION_DENIED` on the runtime dispatcher.
-It runs before the code-only refusal, so the block above is the answer the
-platform operator reads, and every caller under `single`.
+operator reads the walled refusal every environment-metadata write takes there
+(ADR-0131 D3, D12 items 7–8) before any of these.
 
-Two things this does **not** close:
+The package-declaration channel is untouched: `AppPlugin` registers stack
+`capabilities[]` through the in-memory registry and the filesystem loader globs
+`filePatterns`; neither goes through the runtime write door.
+`supportsOverlay: false` still holds — a capability is a name, a label and a
+scope, with no merge semantic.
 
-- **The package-declaration channel is untouched.** `AppPlugin` registers stack
-  `capabilities[]` through the in-memory registry and the filesystem loader
-  globs `filePatterns`; neither goes through the runtime write door.
-- **`supportsOverlay: false`** — a capability is a name, a label and a scope;
-  there is no merge semantic, and a per-organization overlay of a
-  package-shipped declaration could re-scope `org` → `platform`.
+### In an unmanaged copy
 
-`OS_METADATA_WRITABLE=capability` remains the one documented operator escape
-hatch (ADR-0005). Behind it the write is judged by `CapabilityDeclarationSchema`
-and a malformed body is rejected with `422 invalid_metadata` — it is not a way
-to store arbitrary JSON on the authorization surface.
+A package that permits `installModes: ['unmanaged']` may declare capabilities.
+The copy writes each one into the environment, owned by the copy. Installed
+under a `targetNamespace`, a capability the package names with its namespace
+(`demoasset.manage_assets`, or `demoasset_manage_assets`) takes the target's
+(`trial1.manage_assets`), and every `systemPermissions` grant and
+`requiredPermissions` requirement of it in the copy follows. So two copies of
+one app never share a gate. A name the package does not declare — a platform
+capability it grants or requires — is copied as written. A capability the
+package declares without its namespace prefix keeps its name, and a second copy
+of it is refused rather than shared, so prefix your capability names.
 
 ## Checklist
 

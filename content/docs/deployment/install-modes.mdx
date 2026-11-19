@@ -58,8 +58,13 @@ while it carries something that door cannot write as environment metadata. The
 refusal is `STACK_UNMANAGED_INSTALL_UNCOPYABLE`, with one finding per key:
 
 - items of a metadata type the metadata-type registry declares
-  runtime-uncreatable (`allowRuntimeCreate: false`);
-- code: `functions`, `plugins` and the other keys that carry or describe code;
+  runtime-uncreatable (`allowRuntimeCreate: false`). A package's own
+  capabilities are not among them: they are copied, with the permission sets
+  that grant them and the actions, flows and objects that require them;
+- code: `functions`, `plugins` and the other keys that carry or describe code.
+  A project scaffolded by `npm create objectstack` lists no `plugins`; add a
+  connector's plugin only when the app declares that connector, and it then
+  installs managed only;
 - extensions of another package's items: `objectExtensions`,
   `picklistExtensions`, `navigationContributions`, `contributes`;
 - `packages`, which describes an artifact of several packages, while one
@@ -244,6 +249,12 @@ The copy is renamed by the same rules as duplicating a package:
   is a whole prefixed object name (`crm_lead`, never `x_crm_lead`).
 - **Translations are named `acme_<locale>`**, with the object keys inside them
   renamed.
+- **A capability the package names with its prefix takes the new one.**
+  `crm.approve_deal` copies as `acme.approve_deal` (and `crm_approve_deal` as
+  `acme_approve_deal`), and every permission set's `systemPermissions` grant and
+  every `requiredPermissions` requirement of it in the copy follows, so the copy
+  never shares a gate with the package or another copy. A capability the package
+  does not declare, a platform one among them, keeps its name.
 - **An object of another package keeps its name**, and so do its view items.
 
 `targetNamespace` follows the rule for a manifest `namespace`, and the
@@ -256,6 +267,7 @@ refusal is answered before the base exists, so nothing is installed:
 | An object whose copy name another object's copy takes (`ticket` beside `crm_ticket`) | `400 INVALID_REQUEST`, naming the object and the rename that clears it |
 | A copy name that is not a legal item name, longer than an object's table name may be (63 characters), or longer than an item name may be (255) | `400 INVALID_REQUEST`, naming each item |
 | A renamed key that meets a key the item already holds (a permission set granting both `crm_lead` and `acme_lead`) | `400 INVALID_REQUEST`, naming the item and both keys |
+| A capability whose copy name another capability of the package declares (`crm.approve` beside `acme.approve`) | `400 INVALID_REQUEST`, naming the capability |
 | A renamed name the environment or a managed package already holds | `409 RESOURCE_CONFLICT`, naming each |
 | A `targetNamespace` another package owns | `409 RESOURCE_CONFLICT`, naming it |
 
