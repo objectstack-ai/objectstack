@@ -1,6 +1,6 @@
 # ADR-0158: Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that names its unit, and a base quantity stored at write
 
-**Status**: Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record [`7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034), maintainer 「先不考虑 hotsrm，先处理平台任务，你的意见我同意」). `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The R1 cards follow it, as the ruling's "Next" says.
+**Status**: Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record [`7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034), maintainer 「先不考虑 hotsrm，先处理平台任务，你的意见我同意」); its items L1 and L2 picked by the maintainer the same day (ruling record [`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733), option A 「可改，只影响以后」). `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The R1 cards follow it, as the ruling's "Next" says.
 
 - **Date**: 2026-11-19
 - **Decided by**: the maintainer, 2026-11-19T06:01:58Z, in the design discussion for #35339, verbatim and untranslated:
@@ -8,7 +8,9 @@
   [`7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034) reads 「你的意见」
   as the recommendation it carries: "It was reviewed adversarially before it went to the maintainer, and he accepted
   it as recommended on each of its three questions". The record's own text is the authority this ADR executes; where
-  the two differ, the record wins and this ADR is corrected.
+  the two differ, the record wins and this ADR is corrected. The two product items this record was left, L1 and L2,
+  were picked by the maintainer on a decision card at 2026-11-19T08:11Z, option A 「可改，只影响以后」, recorded in
+  [`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733).
 - **Ordered by**: the maintainer's regrades on the card, 「升 p2，交 data 区写 ADR」
   ([`7001211414`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001211414)) and then
   「升级 p1」 ([`7001212970`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001212970)).
@@ -43,9 +45,9 @@ Four kinds of text feed this record. Each section says which kind it carries.
    > 3. R2 converts both by dimension ratio and by a suite-supplied factor.
 
 2. **Left to this record.** The ruling hands this record three items ("Left to the ADR"), and U6 hands it one more
-   sentence. Each is a section of [Left to this record](#left-to-this-record) that states the question as ruled. L3
-   and L4 carry the owning seat's settlement, marked as such; L1 and L2 carry no settlement yet. The consequences
-   noted under U3 are the same seat's, and are not new rules.
+   sentence. Each is a section of [Left to this record](#left-to-this-record) that states the question as ruled. L1
+   and L2 carry the maintainer's pick, quoted verbatim from the ruling record `7003532733`; L3 and L4 carry the owning
+   seat's settlement, marked as such. The consequences noted under U3 are the same seat's, and are not new rules.
 3. **The card.** The business reason and the review questions in #35339's body. They are the analysis the ruling
    answered; a detail that appears only there is not ruled.
 4. **Readings.** Current behaviour, read at `3819afec` and cited by file or symbol. The commands are under
@@ -129,7 +131,7 @@ Decision wins.
 | D5: the home amount at write, stored with its rate; a missing rate refuses, no 1:1 or null fallback | U7 R2: the base quantity at write, stored with its factor; no ratio and no factor refuses, no 1:1 or null fallback |
 | D7 parameter 4: `rate` at scale 12 | U7 R2: "Ratios are decimal, scale 12, never float." |
 | No CEL `convertCurrency()` (D1, Non-goals) | U8: no formula conversion function |
-| D4: the home currency locks once used | The ruling compares L1's question with it ([L1](#l1--the-ratio-lock)) |
+| D4: the home currency locks once used | Not mirrored: an org unit's ratio stays editable, and an edit affects later writes only ([L1](#l1--the-ratio-lock)) |
 
 ## Decision
 
@@ -224,23 +226,47 @@ and is the ceiling, and a unit's decimal places are only its display default.
 The ruling leaves three items to this record under "Left to the ADR", and U6's last sentence leaves a fourth. Each
 section below states its question as ruled.
 
-**PENDING: L1 and L2.** Their settlement comes from the seat, with the maintainer's pick where an item is a product
-choice; until then each states its question and nothing else. L3 and L4 are settled.
+All four are settled. L1 and L2 were product choices and carry the maintainer's pick; L3 and L4 were technical and
+carry the owning seat's settlement.
 
 ### L1 — The ratio lock
-
-<!-- PENDING: settlement from the seat -->
 
 > Whether an org unit's ratio locks once used, and how. "Used" means scanning every quantity table, which is costlier
 > than the home-currency lock.
 
-The home-currency lock it compares with is ADR-0144 D4.
+The home-currency lock it compares with is ADR-0144 D4. The decision card put the question as
+「自定义单位的换算比例，用过以后还能不能改」, and with it what deleting a used org unit does.
+
+**Picked by the maintainer**: maintainer decision card, 2026-11-19T08:11Z, option A 「可改，只影响以后」, recorded in
+[`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733). Verbatim:
+
+> - **1A.** An org unit's ratio may be edited at any time and affects later writes only. Stored rows keep their
+>   quantity and the factor they were converted with; they change only through an explicit recompute that previews
+>   first and writes on confirmation. Only an organization admin edits a ratio; the edit is audited (field history, as
+>   for exchange-rate rows), and the UI states that an edit affects only records saved afterwards ("a changed
+>   specification is a new unit, not an edited ratio").
+> - **Delete under 1A's terms:** deleting an org unit is allowed. Old rows keep their code and stored conversion and
+>   show the code without a label; a new save with that code is refused (the row's quantity must move to an existing
+>   unit first).
+> - **Under every option (technical, settled by the ADR):** a unit's code and dimension are immutable after create.
+
+So no ratio lock exists, and no quantity table is scanned for "used". One edge the pick leaves to R2's card is
+[Open item](#open-items) 5.
 
 ### L2 — Organization-unit label translation
 
-<!-- PENDING: settlement from the seat -->
-
 > How org-unit labels are translated. No row-data translation mechanism was found.
+
+The decision card put the question as 「自定义单位的名称要不要多语言」.
+
+**Picked by the maintainer**, on the same card and in the same record
+([`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733)). Verbatim:
+
+> - **2A.** One label per org unit, written by the org in its own language; translation of org-unit labels is
+>   deferred to its own card (filed as a sub-issue of this card, p3). Standard U1 codes get a platform-shipped
+>   per-locale label table.
+
+The deferred card is [#35404](https://github.com/objectstack-ai/objectstack/issues/35404).
 
 ### L3 — U4's key spellings, and following a parent
 
@@ -265,7 +291,7 @@ unitConfig: {
 }
 ```
 
-The values are illustrations: which codes U1 holds, and the dimension vocabulary, are [Open item](#open-items) 2.
+The values are illustrations: which codes U1 holds, and the dimension vocabulary, are [Open item](#open-items) 1.
 
 - **The mirror.** `unitConfig`, `unitMode` and `unitField` mirror `currencyConfig`, `currencyMode` and
   `currencyField` (`packages/spec/src/data/field.zod.ts#CurrencyConfigSchema`). `unitMode`'s two values reuse `fixed`
@@ -331,7 +357,8 @@ settlement, not ruling text:
 > places. In R2, the projected base quantity rounds to the base field's `scale`.
 
 The `scale` it names is the existing key, enforced on writes of a `number` field
-([Context](#2-what-the-platform-has-today-read-at-3819afec) §2).
+([Context](#2-what-the-platform-has-today-read-at-3819afec) §2). A field that declares no `scale` is
+[Open item](#open-items) 6.
 
 ## Releases
 
@@ -347,7 +374,7 @@ U7 is the ruled plan; this table restates it and adds nothing.
 
 - U7 lists the readers of each release, not the declarations they read: U1's constant, U3's `sys_unit` and U4's unit
   declaration. U8 binds each key to its reader: "No unit key ships ahead of the engine that reads it" ([Open
-  items](#open-items) 6).
+  items](#open-items) 7).
 - The ruling's "Next": "An ADR records U1–U8. The R1 cards follow it."
 - Suite adoption is no release's member ([Non-goals](#non-goals)).
 
@@ -369,6 +396,12 @@ U7 is the ruled plan; this table restates it and adds nothing.
   places only set how its values display. R2's base quantity rounds to the base field's `scale`.
 - **R2 refuses rather than guesses** (U7 R2): with no ratio and no factor, the write is refused; affine units take no
   ratio conversion.
+- **An org unit's ratio never locks** (L1). An edit affects later writes only; stored rows keep their quantity and
+  factor until an explicit recompute that previews first. A unit's code and dimension cannot change after create.
+- **A deleted org unit leaves its rows readable** (L1): they keep their code and stored conversion and show the code
+  without a label, and a new save with that code is refused.
+- **An org unit has one label** (L2), in the organization's own language; standard codes get per-locale labels
+  shipped by the platform.
 
 ## Non-goals
 
@@ -383,32 +416,39 @@ Also outside this record:
 
 - A formula conversion function (U8).
 - Ratio conversion of affine units such as temperature (U7 R2).
+- Translation of organization-unit labels, deferred to
+  [#35404](https://github.com/objectstack-ai/objectstack/issues/35404) (L2).
 - From the card's body, not restated by the ruling and not contradicted by it: "Inventory, costing and valuation stay
   with the suites and the ERP" and "No suite-side migration is in scope; each suite adopts the result in its own
   repo."
 
 ## Open items
 
-The ruling does not decide the items below, and this record does not settle them. Items 2–6 belong to the card that
+The rulings do not decide the items below, and this record does not settle them. Each belongs to the card that
 builds the piece, settled under that card's review; this record is amended with each answer, the way ADR-0144's open
 items were.
 
-1. **[L1](#l1--the-ratio-lock) and [L2](#l2--organization-unit-label-translation)**, pending in this draft.
-2. **U1's membership.** Which Rec 20 common codes the curated subset holds, each one's dimension and ratio, and which
+1. **U1's membership.** Which Rec 20 common codes the curated subset holds, each one's dimension and ratio, and which
    package codes it lists. U2 fixes one code (`H87`) and refuses two (`C62`, `EA`).
-3. **`sys_unit`'s owning package, and its fields** beyond what U3, U6 and U7 R2 name, against
+2. **`sys_unit`'s owning package, and its fields** beyond what U3, U6, U7 R2, L1 and L2 name, against
    [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D1, D3 and D6. ADR-0144 D3 left
    `sys_exchange_rate`'s owner to its card the same way.
-4. **The codes of the new refusals**: U5's membership refusal, U7 R1's aggregate refusal and U7 R2's refusal of a
-   write with no ratio and no factor. [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) sets their codes and
-   envelope.
-5. **R2's key spellings.** U7 R2 names `factorField`, the pointer to a suite-supplied factor: an input, written by
+3. **The codes of the new refusals**: U5's membership refusal, U7 R1's aggregate refusal, U7 R2's refusal of a write
+   with no ratio and no factor, and L1's refusal of a new save with a deleted org unit's code.
+   [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) sets their codes and envelope.
+4. **R2's key spellings.** U7 R2 names `factorField`, the pointer to a suite-supplied factor: an input, written by
    the suite. The field where the engine stores "the factor used" is an output, engine-written and `readonly`, the
    counterpart of `homeAmount.rateField` (`packages/spec/src/data/field.zod.ts#HomeAmountSchema`). The input pointer
    and the output field get two different names (the owning seat's settlement, 2026-11-19). The rest of the R2
    block's spelling, the base-quantity field's declaration included, is the R2 card's, the way ADR-0144 left
    `rateDate` and `rateField` to its card.
-6. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
+5. **An edited old row under R2.** When an old row's quantity is edited and its unit is unchanged, does R2 reuse the
+   row's stored factor? L1 keeps stored rows on the factor they were converted with until an explicit recompute; this
+   edge is not settled here and is R2's card's.
+6. **A number field with no `scale`.** A number field that declares `unitConfig` (or R2's base field) may declare no
+   `scale`; whether a scale is then required is for the R1/R2 cards. L4 names the field's `scale` as the ceiling and
+   R2's rounding target.
+7. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
    ([Releases](#releases)).
 
 ## Verification notes
@@ -428,6 +468,9 @@ git grep -n "name: 'sys_exchange_rate'" -- packages/platform-objects/src        
 ## References
 
 - Ruling record: [#35339 `7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034).
+- Ruling record of L1 and L2:
+  [#35339 `7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733); the
+  deferred label translation, [#35404](https://github.com/objectstack-ai/objectstack/issues/35404).
 - Regrades ordering this record:
   [#35339 `7001211414`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001211414),
   [#35339 `7001212970`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001212970).
