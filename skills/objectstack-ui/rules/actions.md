@@ -137,9 +137,18 @@ Bodies execute **trusted** (`ctx.api` /
 with a `js` body (an inline `target` function is lowered to one; any other action is refused the
 key) declares `refusals` and throws the code, as `crm_add_invoice_line` below does: the catalogue,
 throws and checks are a hook's (objectstack-data → Lifecycle Hooks → Declared refusals). The
-sentence is answered as `userMessage`, translated at
-`objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
-failure toast shows it unless the action authors `errorMessage`.
+sentence is answered as `userMessage`, translated under the action's `refusals` keys
+(objectstack-i18n); the console's failure toast shows it unless the action authors `errorMessage`.
+
+### Writing in the organization's language (`texts`)
+
+A sentence the body writes into a record (an activity's subject) is read by the whole
+organization: the same actions declare it under `texts` and ask for it by key —
+`texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then
+`await ctx.text('email_subject', { subject: input.subject })`. It answers in the organization's
+language, never the caller's (keys: objectstack-i18n); with no translation the declared sentence
+is written, filled; an unreadable Localization setting rejects. An undeclared key is refused: at
+save when named literally, else at run.
 
 ## Opening in a New Tab
 

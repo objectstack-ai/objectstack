@@ -200,6 +200,16 @@
         "must_contain": ["refusals", "NOT_DRAFT", "409", "_actions"],
         "must_not_contain": ["hooks.submit_signoff"]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "The `send_email` script action on `crm_contact` logs a `crm_activity` whose subject its `js` body builds as `'Email: ' + input.subject`. Our organization works in zh-CN, but every logged subject reads English. Make the subject follow the organization's language.",
+      "expected_output": "The action declares `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }` and the body writes `const subject = await ctx.text('email_subject', { subject: input.subject });` instead of concatenating. The sentence is answered in the organization's language (the Localization setting if somebody set it, else `i18n.defaultLocale`), never the language of the person who pressed the button, and translated at `objects.crm_contact._actions.send_email.texts.email_subject.message`, the translation keeping its `{{ subject }}` hole. With no translation the declared sentence is written. A key `texts` does not declare is refused. Not a locale branch in the body, and not a `messages` lookup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["texts", "email_subject", "ctx.text", "_actions"],
+        "must_not_contain": ["'Email: ' +", "hooks.send_email"]
+      }
     }
   ]
 }
