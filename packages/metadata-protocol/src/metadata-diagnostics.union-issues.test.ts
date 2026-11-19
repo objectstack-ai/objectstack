@@ -46,23 +46,16 @@ describe('#5598 computeMetadataDiagnostics — a stored view names the offending
         const diag = computeMetadataDiagnostics('view', brokenView);
 
         expect(diag?.valid).toBe(false);
-        // The defect, stated as a number: this was exactly 1 before the fix.
-        expect(diag?.errors?.length).toBeGreaterThan(1);
+        // The defect, stated as an entry: before the fix this was the ONLY one.
+        // [#35400] Since the bare head is dropped once a branch explains it, it
+        // is now not served at all — the save path's 422 answers the same.
+        expect(diag?.errors?.some((e) => e.path === '' && e.code === 'invalid_union')).toBe(false);
 
-        // Additive, not replacing: the union's own entry is still first, so a
-        // consumer reading `errors[0]` reads the same entry it always did.
-        expect(diag?.errors?.[0]).toEqual({
-            path: '',
-            message: 'Invalid input',
-            code: 'invalid_union',
-        });
-
-        // ...and the branch behind it is the one that names keys. The #4001
-        // curated prose itself is spec-owned and deliberately not pinned here —
-        // what this file guards is that a KEY reaches the consumer at all.
-        const explained = diag?.errors?.slice(1) ?? [];
-        expect(explained.some((e) => e.code === 'unrecognized_keys')).toBe(true);
-        expect(explained.some((e) => e.message.includes('`columns`'))).toBe(true);
+        // ...and the branch that names keys is first. The #4001 curated prose
+        // itself is spec-owned and deliberately not pinned here — what this file
+        // guards is that a KEY reaches the consumer at all.
+        expect(diag?.errors?.[0]?.code).toBe('unrecognized_keys');
+        expect(diag?.errors?.[0]?.message).toContain('`columns`');
     });
 
     it('serves the same verdict the save path serves — one ranking, not two', () => {
@@ -84,7 +77,7 @@ describe('#5598 computeMetadataDiagnostics — a stored view names the offending
             _diagnostics?: { valid: boolean; errors?: Array<{ code?: string }> };
         };
         expect(decorated._diagnostics?.valid).toBe(false);
-        expect(decorated._diagnostics?.errors?.length).toBeGreaterThan(1);
+        expect(decorated._diagnostics?.errors?.[0]?.code).toBe('unrecognized_keys');
     });
 
     it('re-decorating an already-decorated item is stable — the strip still runs', () => {

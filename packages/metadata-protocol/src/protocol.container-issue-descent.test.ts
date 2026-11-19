@@ -275,9 +275,10 @@ describe('#8783 controls — a second descent, not a widened walk', () => {
         ]);
     });
 
-    it('an `invalid_union` still expands by the ranking, unchanged', () => {
+    it('an `invalid_union` still expands by the ranking', () => {
         // Verbatim the #5364 pin: fewest issues wins, `unrecognized_keys`
-        // breaks the tie. Container descent must not have perturbed it.
+        // breaks the tie. Container descent must not have perturbed it. [#35400]
+        // The union's bare head is dropped because the branch explains it.
         const out = zodIssuesToMetadataIssues([union([
             [{ code: 'invalid_value', message: 'wrong discriminator', path: ['kind'] }],
             [{ code: 'unrecognized_keys', message: 'Unrecognized key(s): `nmae`', path: [] }],
@@ -288,7 +289,6 @@ describe('#8783 controls — a second descent, not a widened walk', () => {
         ])]);
 
         expect(out).toEqual([
-            { path: '', message: 'Invalid input', code: 'invalid_union' },
             { path: '', message: 'Unrecognized key(s): `nmae`', code: 'unrecognized_keys' },
         ]);
     });
@@ -326,6 +326,9 @@ describe('#8783 controls — a second descent, not a widened walk', () => {
     it('a union BELOW a container is expanded by the ranking, not emitted whole', () => {
         // The two descents compose, and each level applies its own rule: the
         // container emits every issue it has, the union below it selects.
+        // [#35400] And each keeps its own head rule: the container's head stays
+        // (its code says the KEY was refused); the union's bare head, explained
+        // by the branch it selected, goes.
         const out = zodIssuesToMetadataIssues([{
             code: 'invalid_key',
             message: 'Invalid key in record',
@@ -338,7 +341,6 @@ describe('#8783 controls — a second descent, not a widened walk', () => {
 
         expect(out.map((e) => [e.path, e.code])).toEqual([
             ['m.ab', 'invalid_key'],
-            ['m.ab', 'invalid_union'],
             ['m.ab', 'unrecognized_keys'],
         ]);
     });
