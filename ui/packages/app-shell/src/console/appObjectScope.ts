@@ -180,6 +180,51 @@ function matchObjectScopeRoute(
   };
 }
 
+/** The route paths whose element is `ObjectView`, the list page of an object. */
+const OBJECT_VIEW_ROUTES: readonly string[] = [':objectName', ':objectName/view/:viewId'];
+
+/**
+ * objectstack#35535 — the object whose list `ObjectView` draws on the route at
+ * `subPath` (below `/apps/:appName`), or `undefined` on every other route.
+ * Matched against the same table as the scope's routes, so a static or host
+ * route that shadows `:objectName` (`search`, `reports`) is not one.
+ */
+export function objectViewRouteObject(subPath: string, hostPaths: readonly string[] = []): string | undefined {
+  const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
+  const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
+  const match = matches?.[matches.length - 1];
+  if (!match || !OBJECT_VIEW_ROUTES.includes(match.route.path)) return undefined;
+  return match.params.objectName || undefined;
+}
+
+/** An adapter that reads an object's saved views (`ObjectStackAdapter`). */
+type ObjectViewRowsHost = {
+  listViews?: unknown;
+  listViewOverrides?: (objectName: string) => Promise<unknown>;
+};
+
+/**
+ * objectstack#35535 — start the read of `objectName`'s published views that
+ * `ObjectView` sends when its list mounts, so it runs while the list's lazy
+ * modules still load instead of after them.
+ *
+ * It is the reader's own call, never a second read: `ObjectView` asks
+ * `listViewOverrides(objectName)` and `listViews(objectName)`, and outside a
+ * draft preview the adapter answers both from one stored, shared one-object
+ * read (`GET /meta/view?object=OBJECT`, or the stored `/meta/view` list it
+ * narrows). A reader asking while this is on the wire joins it; one asking
+ * after it landed reads what it stored. A failure is not stored, so the
+ * reader that asks next asks again and sees it, as it did before.
+ *
+ * An adapter without both readers is left alone.
+ */
+export function prefetchObjectViewRows(dataSource: unknown, objectName: string): void {
+  const host = dataSource as ObjectViewRowsHost | null | undefined;
+  if (!host || typeof host.listViews !== 'function' || typeof host.listViewOverrides !== 'function') return;
+  // Nobody waits on it: a failure is the reader's to see when it asks.
+  host.listViewOverrides.call(host, objectName).catch(() => undefined);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }

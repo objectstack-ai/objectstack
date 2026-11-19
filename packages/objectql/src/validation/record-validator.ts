@@ -133,7 +133,10 @@ import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretable
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
-  objectFieldLabelKey,
+  translateObject,
+  type ObjectLike,
+  type ResolveOptions,
+  type TranslationBundle,
   type ValidationMessageTranslator,
 } from '@objectstack/spec/system';
 
@@ -430,11 +433,27 @@ export interface ValidationMessageContext {
   /** BCP-47 locale of the principal performing the write. */
   locale?: string;
   /**
-   * `II18nService.t`-compatible lookup, used for two things: a deployment's
-   * `validation.field.*` message override, and the field's TRANSLATED label
-   * (the declared `label` is only the source language).
+   * `II18nService.t`-compatible lookup for MESSAGES: a deployment's
+   * `validation.field.*` message override and an authored rule message's
+   * catalog entry. A metadata LABEL is not asked through it — see
+   * {@link labelTranslation}.
    */
   translate?: ValidationMessageTranslator;
+  /**
+   * [#34030] How a metadata LABEL a refusal names — a field's, an option's, an
+   * object's — is put in the caller's language: the deployment's translations
+   * and the `ResolveOptions` the metadata route serves the same labels with
+   * (the request's locale, the declared fallback chain, and the authored
+   * language: `i18n.sourceLocale`, else `defaultLocale`). So a request in the
+   * authored language reads the label as written, never the `defaultLocale`
+   * row `t()` would fall to, and a refusal names a field with the word the
+   * form showed. A thunk, asked only when a refusal names something: building
+   * the bundle reads every locale the service holds.
+   *
+   * Absent, or answering `undefined` (no i18n service, no locale): the
+   * declared labels.
+   */
+  labelTranslation?: () => ValidationLabelTranslation | undefined;
   /** Object name — needed to address the field's label in the bundle. */
   objectName?: string;
   /**
@@ -455,30 +474,60 @@ export interface ValidationMessageContext {
 }
 
 /**
+ * [#34030] The deployment's translations, keyed by locale (`undefined` when it
+ * holds none), and the `ResolveOptions` a metadata label is resolved with —
+ * {@link ValidationMessageContext.labelTranslation}'s answer.
+ */
+export interface ValidationLabelTranslation {
+  bundle: TranslationBundle | undefined;
+  options: ResolveOptions;
+}
+
+/**
+ * [#34030] An object document with the labels a refusal names, put in the
+ * caller's language by `translateObject` (`@objectstack/spec/system`) — the
+ * translator `GET /meta/object/:name` serves the object with, so the rule that
+ * decides which language the inline label is lives in one place. ⛔ No key is
+ * spelled here.
+ *
+ * The declared document comes back when there is nothing to translate with,
+ * and when the translator throws: a misbehaving i18n service must not turn a
+ * refusal into a 500.
+ */
+export function translatedLabels<T extends ObjectLike>(
+  doc: T,
+  ctx: Pick<ValidationMessageContext, 'labelTranslation'> | undefined,
+): T {
+  if (typeof ctx?.labelTranslation !== 'function') return doc;
+  try {
+    const translation = ctx.labelTranslation();
+    if (!translation) return doc;
+    return translateObject(doc, translation.bundle, translation.options);
+  } catch {
+    return doc;
+  }
+}
+
+/**
  * The field's display name in the caller's locale: translation bundle →
  * declared `label` → API name. The API name is the last resort precisely
  * because surfacing it is the bug (#3957); it stays available to clients as
- * `FieldValidationError.field`.
+ * `FieldValidationError.field`. The bundle is read by the metadata route's
+ * rule ({@link translatedLabels}, #34030).
  */
 export function resolveFieldLabel(
   name: string,
   def: { label?: string } | undefined,
   ctx: ValidationMessageContext | undefined,
 ): string {
-  if (ctx?.translate && ctx.objectName && ctx.locale) {
-    const key = objectFieldLabelKey(ctx.objectName, name);
-    try {
-      const translated = ctx.translate(key, ctx.locale);
-      // II18nService echoes the key back on a miss.
-      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-        return translated;
-      }
-    } catch {
-      // A misbehaving i18n service must not turn a 400 into a 500.
-    }
-  }
   const declared = def?.label?.trim();
-  return declared && declared.length > 0 ? declared : name;
+  let label: string | undefined = declared;
+  if (ctx?.objectName && ctx.locale) {
+    const doc = translatedLabels({ name: ctx.objectName, fields: { [name]: { label: declared } } }, ctx);
+    const fields = doc.fields as Record<string, { label?: string }> | undefined;
+    label = fields?.[name]?.label;
+  }
+  return typeof label === 'string' && label.length > 0 ? label : name;
 }
 
 /**

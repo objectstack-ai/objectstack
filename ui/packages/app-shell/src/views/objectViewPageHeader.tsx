@@ -33,6 +33,15 @@ import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 /**
+ * objectstack#35446 — the list header's width under which it takes
+ * `PageHeader`'s compact form: no description, and the folded actions (New
+ * labelled, Import and the rest in the 「⋯」 menu). The `md` breakpoint, read
+ * against the header's own width, so a main area narrowed by the AI panel, a
+ * small window or the record drawer gets it, and a full-width list does not.
+ */
+const LIST_HEADER_COMPACT_WIDTH = 768;
+
+/**
  * The list title 「OBJECT / VIEW ▾」 (objectstack#27950): the page
  * header is the one place a page is named (objectui#12461), and with the view
  * switcher as the title (objectstack#27594) it names the object too, with the
@@ -230,6 +239,7 @@ export function ObjectViewPageHeader({
                    </>
                  }
                  foldedActions={foldedHeaderActions}
+                 compactBelow={LIST_HEADER_COMPACT_WIDTH}
              />
              </div>
     );

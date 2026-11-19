@@ -30,7 +30,8 @@
  *
  * ## The five disjunctions — the rule text's, nothing narrower
  *
- * Excluded from every disjunction first: `tracking`, `status:parked`, every `pm:seat` post, `qa-run` records.
+ * Excluded from every disjunction first: `tracking`, `status:parked`, every `pm:seat` post, `qa-run` and `eval-run`
+ * records (`RUN_RECORD_LABELS`, the one list of run-record kinds in `check-half-states.mjs`).
  *
  *   ① bare — no `pm:*` label, no `needs-user-decision`, no `area:*` (other labels, `finding` among them, do not
  *      make a card "touched": ① is NOT "no labels");
@@ -57,8 +58,9 @@
  * Every public card carries exactly one `area:*` and an issue type, set at filing or at triage's first touch. The
  * backstop is the daily read that catches the card neither reached (`AREA_BACKSTOP_PHRASE`, pinned like the
  * disjunctions): every open card of the same walk that carries no `area:*`, and every one whose issue type (the REST
- * row's `type`) is empty, with the sweep's own exclusions — plus `security` on the area row only: a security card
- * owes no area, and nothing excuses a type. It rides the walk already paid for, so it costs no request.
+ * row's `type`) is empty, with the sweep's own exclusions — plus `security` on the area row only (a security card owes
+ * no area) and `pm:epic` on the type row only (an epic takes no type, `TYPE_EXEMPT_PHRASE`, yet still owes an area, so
+ * `pm:epic` is ⛔ never an exclusion). It rides the walk already paid for, so it costs no request.
  * ⛔ It is a DAILY duty, not a first-touch debt: it is printed after the five rows and never enters the `owed` set,
  * the verdict or the exit code. A listed card that IS owed a first touch — bare (①), or queued with no `area:*` (②) —
  * is owed through that disjunction already; the two rows add no debt of their own, so old cards still missing a type
@@ -84,7 +86,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { DECISION_INBOX_LABEL, EXIT_PREREQUISITE_NOT_MET, PM_EXCLUSIVE_STATE_LABELS, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
+import { DECISION_INBOX_LABEL, EXIT_PREREQUISITE_NOT_MET, PM_EXCLUSIVE_STATE_LABELS, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo, RUN_RECORD_LABELS } from './check-half-states.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = new URL('../../', import.meta.url);
@@ -104,7 +106,7 @@ export const TRIAGE_RULE_PHRASES = Object.freeze([
   '③ `area:*` 无 pm-state',
   '④ `pm:queue`+`area:*` 无 `priority:*`',
   '②③④ 只取 `updated_at` 早于 ~2min',
-  '排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录',
+  '排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 与 `eval-run` 记录',
   '析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟',
   '不等 ⇒ 报 `sweep INCOMPLETE`',
 ]);
@@ -113,12 +115,16 @@ export const TRIAGE_RULE_PHRASES = Object.freeze([
 export const AREA_BACKSTOP_PHRASE = '日对账扫缺 `area:*` 或 type 的公开卡';
 export const AREA_BACKSTOP_LIST_CAP = 30;
 
+/** The rule line that excuses an epic or a tracking card from a type (the self-test pins it), and the epic label. */
+export const TYPE_EXEMPT_PHRASE = '`pm:epic`/`tracking` 卡不带';
+export const EPIC_LABEL = 'pm:epic';
+
 /** The multi-lane boards (`cross-repo-coordination.md`: 「多车道仓 `objectstack`」); ② runs on these alone. */
 export const MULTI_LANE_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 export const MULTI_LANE_RULE_PATH = '.claude/skills/pm-dispatch/references/cross-repo-coordination.md';
 export const MULTI_LANE_RULE = '多车道仓 `objectstack`';
 
-export const EXCLUDED_LABELS = Object.freeze(['tracking', 'status:parked', 'pm:seat', 'qa-run']);
+export const EXCLUDED_LABELS = Object.freeze(['tracking', 'status:parked', 'pm:seat', ...RUN_RECORD_LABELS]);
 export const SETTLE_MS = 2 * 60 * 1000;
 export const PAGE_SIZE = 100;
 export const PAGE_CEILING = 60;
@@ -178,12 +184,13 @@ export function issueTypeOf(issue) {
 }
 
 /**
- * The type backstop: an open card with no issue type. The sweep's exclusions apply; no label excuses a type (the rule
- * line scans every public card with none). Pure.
+ * The type backstop: an open card with no issue type. The sweep's exclusions apply, and an epic card takes none
+ * (`TYPE_EXEMPT_PHRASE`; `tracking` is already an exclusion) — on this row only: the area row still lists an epic
+ * with no `area:*`. Pure.
  */
 export function lacksType(issue) {
   const labels = labelsOf(issue);
-  if (labels.some((l) => EXCLUDED_LABELS.includes(l))) return false;
+  if (labels.some((l) => EXCLUDED_LABELS.includes(l) || l === EPIC_LABEL)) return false;
   return issueTypeOf(issue) === null;
 }
 
@@ -431,11 +438,11 @@ function rearmThroughProxy(args) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
-  'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 18,
+  'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 20,
   'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set': 8,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
-  'the area and type backstop: an open card with no area:* or no issue type is listed daily, and never moves the first-touch verdict': 14,
+  'the area and type backstop: an open card with no area:* or no issue type is listed daily, and never moves the first-touch verdict': 17,
 });
 const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -487,7 +494,8 @@ export async function selfTest() {
   t('a routed, graded, queued card is owed nothing', c(['area:data', 'pm:queue', 'priority:p3']), []);
   t('②③④ wait ~2 min after the last update: a card mid-write is not owed', [c(['area:fleet'], { updated_at: FRESH }), c(['pm:queue'], { updated_at: FRESH })], [[], []]);
   t('…while ① is asked at once', c([], { updated_at: FRESH }), [1]);
-  t('exclusions come first: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => c([x]).length), [0, 0, 0, 0]);
+  t('exclusions come first: tracking, status:parked, pm:seat, qa-run, eval-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run'].map((x) => c([x]).length), [0, 0, 0, 0, 0]);
+  t('⭐ an `eval-run` record as scenario-eval files it — that label alone — owes no first touch, no area and no type', [c(['eval-run']), lacksArea(card(1, ['eval-run'])), lacksType(card(1, ['eval-run']))], [[], false, false]);
   t('labels compare case-insensitively', c(['Area:Fleet', 'PM:Queue']), [4]);
   t('the issue type routes nothing: a typed card with no area is still bare', c(['finding'], { type: { name: 'Bug' } }), [1]);
 
@@ -551,11 +559,14 @@ export async function selfTest() {
     t('⛔ a domain:* is no area', lacksArea(card(1, ['domain:spec', 'pm:queue', 'priority:p2'])));
     t('the label compares case-insensitively', lacksArea(card(1, ['Area:UX'])), false);
     t('⛔ a security card owes no area', lacksArea(card(1, ['security', 'pm:queue'])), false);
-    t('the sweep\'s exclusions apply here too: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => lacksArea(card(1, [x]))), [false, false, false, false]);
+    t('the sweep\'s exclusions apply here too: tracking, status:parked, pm:seat, qa-run, eval-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run'].map((x) => lacksArea(card(1, [x]))), [false, false, false, false, false]);
     t('the type is read from the REST row\'s `type.name`', [issueTypeOf(card(1, [], BUG)), issueTypeOf(card(1, [], { type: 'Task' })), issueTypeOf(card(1, [])), issueTypeOf(card(1, [], { type: { name: ' ' } }))], ['Bug', 'Task', null, null]);
     t('⭐ an area-routed card with no issue type is listed for its type', [lacksArea(card(1, ['area:data', 'pm:queue'])), lacksType(card(1, ['area:data', 'pm:queue']))], [false, true]);
     t('…and the same card carrying one is not', lacksType(card(1, ['area:data', 'pm:queue'], BUG)), false);
-    t('the exclusions apply to the type row too', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => lacksType(card(1, [x]))), [false, false, false, false]);
+    t('the exclusions apply to the type row too', ['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run'].map((x) => lacksType(card(1, [x]))), [false, false, false, false, false]);
+    t('the epic\'s type exemption is the rule\'s own sentence (a reworded rule reds here)', readFileSync(new URL(TRIAGE_RULE_PATH, REPO_ROOT), 'utf8').includes(TYPE_EXEMPT_PHRASE));
+    t('⭐ an epic card draws no type row, while a `pm:epic` card missing an area still draws the area row', [lacksType(card(1, ['pm:epic', 'area:ai'])), lacksType(card(1, ['PM:Epic'])), lacksArea(card(1, ['pm:epic'])), lacksArea(card(1, ['pm:epic', 'area:ai']))], [false, false, true, false]);
+    t('⛔ …so `pm:epic` is no exclusion: only the type row excuses it, and a claimed epic with no area is still listed', [EXCLUDED_LABELS.includes(EPIC_LABEL), lacksArea(card(1, ['pm:epic', 'pm:dispatched']))], [false, true]);
     const rows = [card(41, ['pm:queue', 'priority:p2', 'area:build'], BUG), card(42, ['domain:spec', 'pm:queue', 'priority:p2'], BUG), card(43, ['security', 'pm:dispatched', 'priority:p1']), card(44, ['pm:queue', 'priority:p2', 'area:data'])];
     const get = async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 4, incomplete_results: false } } : { status: 200, json: p.endsWith('page=1') ? rows : [] });
     const r = await sweep({ repo: REPO, nowMs: NOW, sinceMs: Date.parse('2026-11-14T20:00:00Z'), get });

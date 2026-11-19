@@ -21,11 +21,12 @@ import indexHtml from '../../index.html?raw';
 import mainSource from '../main.tsx?raw';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
-import { AuthProvider, useAuth } from '@object-ui/auth';
+import { AuthGuard, AuthProvider, useAuth } from '@object-ui/auth';
 import { preflightAuth } from '../lib/auth-preflight';
 import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
+import { SessionUserScope } from '../../../../packages/auth/src/ActiveOrganizationStorage';
 
 const TOKEN = 'tok_valid';
 const EARLY_SLOT = Symbol.for('objectui.earlySessionCheck');
@@ -231,19 +232,15 @@ describe('one page load, one get-session, started at parse time', () => {
 });
 
 describe('every safety of the preflight is kept', () => {
-  it('no token: no parse-time request, and the preflight sends none either', async () => {
-    runEarlySessionCheck();
-    expect(fetchStub).not.toHaveBeenCalled();
-    expect((globalThis as unknown as Record<symbol, unknown>)[EARLY_SLOT]).toBeUndefined();
-
-    await preflightAuth(authUrlFor());
-    expect(sessionCalls()).toHaveLength(0);
-  });
-
   it('blocked storage: no parse-time request, and the script does not throw', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    // Blocked storage throws on access. Spied on the window's accessor: this
+    // test environment's `localStorage` does not reach `Storage.prototype`,
+    // and a read answering `null` is the no-token case, which now asks the
+    // cookie session's question (objectstack#35455).
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError');
     });
+    expect(() => window.localStorage.getItem('auth-session-token')).toThrow();
     expect(() => runEarlySessionCheck()).not.toThrow();
     expect(fetchStub).not.toHaveBeenCalled();
   });
@@ -309,6 +306,218 @@ describe('every safety of the preflight is kept', () => {
     await preflightAuth(authUrlFor());
 
     expect(sessionCalls()).toHaveLength(2);
+  });
+});
+
+/**
+ * objectstack#35455 — with no stored Bearer (a cookie session, the hosted
+ * posture's first visit) `get-session` was asked by `AuthProvider` after the
+ * mount, so it waited on the language seed's race. The parse-time script now
+ * asks the cookie session's question and the preflight hands the answer on.
+ */
+describe('no stored token: the cookie session is asked at parse time and handed on', () => {
+  /** AuthProvider, read through a probe, behind the same gate a protected route uses. */
+  function renderApp() {
+    const probe: { current: ReturnType<typeof useAuth> | null } = { current: null };
+    function Probe() {
+      const value = useAuth();
+      useLayoutEffect(() => {
+        probe.current = value;
+      });
+      return <span>{value.isLoading ? 'loading' : value.user?.name ?? 'nobody'}</span>;
+    }
+    render(
+      <React.StrictMode>
+        <AuthProvider authUrl={authUrlFor()}>
+          <Probe />
+          <AuthGuard fallback={<span>sign-in</span>} loadingFallback={<span>guard-waits</span>}>
+            <span>protected</span>
+          </AuthGuard>
+        </AuthProvider>
+      </React.StrictMode>,
+    );
+    return probe;
+  }
+
+  it('sends the cookie question in the same parse pass, with no Authorization header', () => {
+    runScript('applyEarlyBranding');
+    runEarlySessionCheck();
+
+    const urls = fetchStub.mock.calls.map(([input]) => urlOf(input));
+    expect(urls).toEqual(['/api/v1/runtime/config', '/api/v1/auth/get-session']);
+    const [, init] = sessionCalls()[0]!;
+    expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+  });
+
+  it('asks exactly what the preflight would ask without a token', async () => {
+    runEarlySessionCheck();
+    const [earlyUrl, earlyInit] = sessionCalls()[0]!;
+
+    // CONTROL leg: the preflight alone, on a page without the script.
+    clearSlots();
+    fetchStub.mockClear();
+    await preflightAuth(authUrlFor());
+    const [ownUrl, ownInit] = sessionCalls()[0]!;
+
+    expect(earlyUrl).toBe(ownUrl);
+    expect(earlyInit?.credentials).toBe(ownInit?.credentials);
+    expect([...new Headers(earlyInit?.headers).entries()]).toEqual([...new Headers(ownInit?.headers).entries()]);
+  });
+
+  it('end to end: one get-session, signed in, and the protected route renders with the session', async () => {
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('Ada')).toBeTruthy();
+    expect(screen.getByText('protected')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isAuthenticated).toBe(true);
+    // The answer's token is synced exactly as `getSession()` syncs it.
+    expect(localStorage.getItem('auth-session-token')).toBe(TOKEN);
+  });
+
+  it('a signed-out answer is handed on too: still one get-session, and the sign-in fallback', async () => {
+    // better-auth answers "no session" 200 with a null body.
+    sessionAnswer = () => json(null);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isLoading).toBe(false);
+    expect(probe.current?.user).toBeNull();
+  });
+
+  it('the server\'s 401 UNAUTHENTICATED is a signed-out answer too: one get-session, and the sign-in fallback', async () => {
+    // The platform answers an anonymous get-session 401 in the ADR-0112 envelope.
+    sessionAnswer = () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    const probe = renderApp();
+
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.isLoading).toBe(false);
+    expect(probe.current?.user).toBeNull();
+  });
+
+  // A handed-on signed-out answer never reaches `loadSession`, so the purge its
+  // conclusive-signed-out branch runs is run by AuthProvider's boot path: a
+  // browser that held a user drops that user's client state before the
+  // sign-in page shows (an expired cookie session on a shared browser).
+  const SIGNED_OUT_ANSWERS: Array<[string, () => Response]> = [
+    ['200 with no user', () => json(null)],
+    ['401 UNAUTHENTICATED', () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401)],
+  ];
+  const PRIOR_USER_KEY = 'list-state:u_alice:account';
+  const PRIOR_METADATA_KEY = 'objectui:metadata:app:org_a:abc';
+
+  async function bootSignedOut(answer: () => Response, priorUser: string | null) {
+    SessionUserScope._resetForTests();
+    if (priorUser !== null) SessionUserScope.adopt(priorUser);
+    localStorage.setItem(PRIOR_USER_KEY, JSON.stringify({ perView: { all: { sort: [] } } }));
+    sessionStorage.setItem(PRIOR_METADATA_KEY, '{}');
+    localStorage.setItem('vite-ui-theme', 'dark');
+    sessionAnswer = answer;
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeDefined();
+    // Nothing has purged before AuthProvider mounts: the preflight's
+    // no-token path hands on and clears nothing.
+    expect(localStorage.getItem(PRIOR_USER_KEY)).not.toBeNull();
+    const probe = renderApp();
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.user).toBeNull();
+  }
+
+  it.each(SIGNED_OUT_ANSWERS)(
+    'a handed-on signed-out answer (%s) on a browser that held a user purges that user\'s client state',
+    async (_label, answer) => {
+      try {
+        await bootSignedOut(answer, 'u_alice');
+        expect(localStorage.getItem(PRIOR_USER_KEY)).toBeNull();
+        expect(sessionStorage.getItem(PRIOR_METADATA_KEY)).toBeNull();
+        // The sweep keeps the device's keys, as every sign-out purge does.
+        expect(localStorage.getItem('vite-ui-theme')).toBe('dark');
+      } finally {
+        sessionStorage.clear();
+        SessionUserScope._resetForTests();
+      }
+    },
+  );
+
+  it.each(SIGNED_OUT_ANSWERS)(
+    'CONTROL: a handed-on signed-out answer (%s) on a browser that never held a user purges nothing',
+    async (_label, answer) => {
+      try {
+        await bootSignedOut(answer, null);
+        expect(SessionUserScope.current()).toBeNull();
+        expect(localStorage.getItem(PRIOR_USER_KEY)).not.toBeNull();
+        expect(sessionStorage.getItem(PRIOR_METADATA_KEY)).toBe('{}');
+      } finally {
+        sessionStorage.clear();
+        SessionUserScope._resetForTests();
+      }
+    },
+  );
+
+  it('CONTROL: with a stored Bearer a 401 is still a stale token, purged, and nothing handed on', async () => {
+    localStorage.setItem('auth-session-token', 'tok_stale');
+    sessionAnswer = () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+
+    expect(localStorage.getItem('auth-session-token')).toBeNull();
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeUndefined();
+  });
+
+  it('CONTROL: a non-OK answer hands nothing on, and the protected route waits for AuthProvider\'s own read', async () => {
+    sessionAnswer = () => json(null, 503);
+    runEarlySessionCheck();
+    await settle();
+    // The preflight asks once itself and gets the 503 too.
+    await preflightAuth(authUrlFor());
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeUndefined();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    sessionAnswer = () => gate.then(() => json(SESSION_BODY));
+    renderApp();
+    expect(screen.getByText('guard-waits')).toBeTruthy();
+    expect(screen.queryByText('protected')).toBeNull();
+
+    await act(async () => { release(); await settle(); });
+    expect(await screen.findByText('protected')).toBeTruthy();
+    // Parse time and the preflight answered 503; AuthProvider asked itself.
+    expect(sessionCalls().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('CONTROL: a token stored since the cookie question was asked is not answered by it', async () => {
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    localStorage.setItem('auth-session-token', TOKEN);
+
+    renderApp();
+    expect(await screen.findByText('Ada')).toBeTruthy();
+    await act(async () => { await settle(); });
+
+    // The handed-on answer belonged to the cookie question; AuthProvider asked
+    // itself, with the token now stored.
+    const calls = sessionCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(new Headers(calls[0]![1]?.headers).has('authorization')).toBe(false);
+    expect(new Headers(calls[calls.length - 1]![1]?.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
   });
 });
 

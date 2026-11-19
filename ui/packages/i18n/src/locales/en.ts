@@ -3012,6 +3012,8 @@ const en = {
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        close: 'Close',
+        more: 'More actions',
       },
       group: {
         today: 'Today',
@@ -5011,12 +5013,20 @@ const en = {
       queued: 'Sends when the current reply finishes',
       queuedCancel: 'Cancel',
       fileTooLarge: 'Too large to attach (limit {{limit}}): {{files}}',
+      addAttachment: 'Add attachment',
     },
     answer: {
       showFull: 'Show full answer',
       collapse: 'Collapse',
       expandTable: 'Expand',
       exitExpandedTable: 'Close',
+      copyTable: 'Copy table',
+      copyTableAsMarkdown: 'Copy table as Markdown',
+      copyTableAsCsv: 'Copy table as CSV',
+      copyTableAsTsv: 'Copy table as TSV',
+      downloadTable: 'Download table',
+      downloadTableAsCsv: 'Download table as CSV',
+      downloadTableAsMarkdown: 'Download table as Markdown',
     },
     answerSource: {
       title: 'How this was computed',
