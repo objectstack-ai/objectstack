@@ -49,6 +49,9 @@ import { ApiErrorSchema, BaseResponseSchema } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach
+// (`domains/packages.ts` → `standalone-stack.ts`) loads it lazily.
+import '@objectstack/metadata';
 
 const ORIGIN = 'http://tenant.example';
 /** Not allow-listed, and the domain hands the request to a recording member. */

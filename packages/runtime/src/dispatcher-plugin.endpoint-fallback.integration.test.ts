@@ -40,6 +40,9 @@ import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IHttpServer } from '@objectstack/spec/contracts';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach
+// (`domains/packages.ts` → `standalone-stack.ts`) loads it lazily.
+import '@objectstack/metadata';
 
 /** Two declared endpoints in the ADR-0121 D1 shape (`<prefix>/apps/<ns>/…`). */
 const DECLARED: ApiEndpoint[] = [
