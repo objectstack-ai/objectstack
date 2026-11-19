@@ -22,7 +22,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { ComponentRegistry, ExpressionEvaluator, declaredNameField, isElementDataSourceConfig, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
-import { actionRendersAt, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
+import { actionRendersAt, detectStatusField, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
 import { useRecordContext, useAction, useCapabilityGate, usePredicateScope, usePageVariables, useInlineEdit, useActionTextLocalizer, useMetadataItem, reportUnresolvableVisibilityPredicate, resolveInlineAriaProps, buildNodeEvaluationScope } from '@object-ui/react';
 import { renderChildren, renderNodeSlot, cn } from '../../lib/utils';
@@ -63,6 +63,7 @@ import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { PageHeaderPhoneContext } from './page-header-phone-context';
+import { RecordHeaderBarContext, RecordHeaderStateContext } from './record-header-bar-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
@@ -1927,6 +1928,13 @@ export interface PageHeaderActionsProps {
    * `mobileMaxVisible` still sets the budget when it declares one.
    */
   face?: 'row' | 'bar';
+  /**
+   * The desktop inline budget when the page declares no `maxVisible`
+   * (objectstack#35593): the record's one-row header passes 1, so a record
+   * draws Edit, ONE primary action and the `⋯`. An authored `maxVisible`
+   * still wins. Absent: 3, as before.
+   */
+  defaultMaxVisible?: number;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -1959,8 +1967,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   refresh,
   trailing,
   face = 'row',
+  defaultMaxVisible,
 }) => {
   const ctx = useRecordContext();
+  // The record's state (objectstack#35593): when the host hands a `group`,
+  // the row is what that group draws — the record's row unchanged, or the
+  // state's own levers with the record's actions in their `⋯`.
+  const stateGroup = React.useContext(RecordHeaderStateContext)?.group;
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
   // inline draft is active, header actions flagged `disableDuringInlineEdit`
   // (the host's Edit CTA) grey out so the classic form-edit surface can't be
@@ -2490,7 +2503,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
 
   const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
   const renderHeaderActions = () => {
-    if (headerActions.length === 0 && !refresh && !hasTrailing) return null;
+    if (headerActions.length === 0 && !refresh && !hasTrailing && !stateGroup) return null;
     // The label is already resolved — the `headerActions` memo above ran every
     // action through the shared localizer (`{ns}.objects.{objectName}
     // ._actions.{name}.label`, authored literal as fallback), together with the
@@ -2546,7 +2559,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       ? (readMax(rawMobileMaxVisible) ?? PHONE_ACTION_BAR_BUTTONS)
       : isMobile
         ? (readMax(rawMobileMaxVisible) ?? 1)
-        : (readMax(rawMaxVisible) ?? 3);
+        : (readMax(rawMaxVisible) ?? defaultMaxVisible ?? 3);
     const isMoreOnly = (a: any): boolean =>
       Array.isArray(a?.locations) &&
       a.locations.length > 0 &&
@@ -2798,7 +2811,66 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
         </TooltipProvider>
       );
     };
-    const toolbarItems = (
+    // One `⋯` entry, drawn the same in the header's own `⋯` and in a state
+    // group's (objectstack#35593); `idBase` keeps the two sets of ids apart.
+    const renderMenuItem = (action: any, idx: number, idBase: string, separateAt: number) => {
+      const label = resolveLabel(action);
+      const itemKey = action.name || action.id || `overflow-action-${idx}`;
+      const pending = pendingActionKeys.has(itemKey);
+      const disabled = isActionDisabled(action) || pending;
+      const icon = typeof action.icon === 'string' ? action.icon : null;
+      const isDestructive = isDestructiveAction(action);
+      // objectui#11811 — the same reason as the inline button, but
+      // drawn as a visible second line, not a tooltip. Inside the
+      // menu a tooltip trigger is unreachable from the keyboard: a
+      // disabled item is skipped by arrow-key focus (`focusable:
+      // !disabled` in the menu's roving group), and the menu traps
+      // Tab. The menu is already an explicit, opened surface, so the
+      // reason simply shows there, and is the item's description
+      // while its name stays the label alone.
+      const disabledReason = disabledReasonFor(action);
+      const labelId = `${disabledReasonIdBase}-${idBase}-label-${idx}`;
+      const reasonId = `${disabledReasonIdBase}-${idBase}-reason-${idx}`;
+      return (
+        <React.Fragment key={itemKey}>
+        {idx === separateAt && idx > 0 && <DropdownMenuSeparator />}
+        <DropdownMenuItem
+          disabled={disabled}
+          aria-busy={pending || undefined}
+          aria-labelledby={disabledReason ? labelId : undefined}
+          aria-describedby={disabledReason ? reasonId : undefined}
+          onSelect={(e) => {
+            e.preventDefault();
+            runHeaderAction(action, itemKey);
+          }}
+          className={cn(
+            'gap-2',
+            isDestructive && 'text-destructive focus:text-destructive focus:bg-destructive/10'
+          )}
+        >
+          {pending
+            ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
+            : icon && <LazyIcon name={icon} className="h-4 w-4" />}
+          {disabledReason ? (
+            <span className="flex min-w-0 flex-col">
+              <span id={labelId}>{label}</span>
+              <span id={reasonId} className="text-xs text-muted-foreground">{disabledReason}</span>
+            </span>
+          ) : (
+            <span>{label}</span>
+          )}
+        </DropdownMenuItem>
+        </React.Fragment>
+      );
+    };
+    const refreshItem = refresh ? (
+      /* Not `preventDefault`: a refresh closes the menu. */
+      <DropdownMenuItem onSelect={() => refresh.onSelect()} className="gap-2" data-page-refresh="">
+        <RefreshCw className="h-4 w-4" />
+        <span>{refresh.label}</span>
+      </DropdownMenuItem>
+    ) : null;
+    const recordRowItems = (
       <>
         {inlineActions.map(renderButton)}
         {useOverflow && (
@@ -2814,69 +2886,47 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              {refresh && (
+              {refreshItem && (
                 <>
-                  {/* Not `preventDefault`: a refresh closes the menu. */}
-                  <DropdownMenuItem onSelect={() => refresh.onSelect()} className="gap-2" data-page-refresh="">
-                    <RefreshCw className="h-4 w-4" />
-                    <span>{refresh.label}</span>
-                  </DropdownMenuItem>
+                  {refreshItem}
                   {overflowActions.length > 0 && <DropdownMenuSeparator />}
                 </>
               )}
-              {overflowActions.map((action, idx) => {
-                const label = resolveLabel(action);
-                const itemKey = action.name || action.id || `overflow-action-${idx}`;
-                const pending = pendingActionKeys.has(itemKey);
-                const disabled = isActionDisabled(action) || pending;
-                const icon = typeof action.icon === 'string' ? action.icon : null;
-                const isDestructive = isDestructiveAction(action);
-                // objectui#11811 — the same reason as the inline button, but
-                // drawn as a visible second line, not a tooltip. Inside the
-                // menu a tooltip trigger is unreachable from the keyboard: a
-                // disabled item is skipped by arrow-key focus (`focusable:
-                // !disabled` in the menu's roving group), and the menu traps
-                // Tab. The menu is already an explicit, opened surface, so the
-                // reason simply shows there, and is the item's description
-                // while its name stays the label alone.
-                const disabledReason = disabledReasonFor(action);
-                const labelId = `${disabledReasonIdBase}-more-label-${idx}`;
-                const reasonId = `${disabledReasonIdBase}-more-reason-${idx}`;
-                return (
-                  <React.Fragment key={itemKey}>
-                  {idx === firstDestructiveIdx && idx > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuItem
-                    disabled={disabled}
-                    aria-busy={pending || undefined}
-                    aria-labelledby={disabledReason ? labelId : undefined}
-                    aria-describedby={disabledReason ? reasonId : undefined}
-                    onSelect={(e) => {
-                      e.preventDefault();
-                      runHeaderAction(action, itemKey);
-                    }}
-                    className={cn(
-                      'gap-2',
-                      isDestructive && 'text-destructive focus:text-destructive focus:bg-destructive/10'
-                    )}
-                  >
-                    {pending
-                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" data-header-action-pending="" />
-                      : icon && <LazyIcon name={icon} className="h-4 w-4" />}
-                    {disabledReason ? (
-                      <span className="flex min-w-0 flex-col">
-                        <span id={labelId}>{label}</span>
-                        <span id={reasonId} className="text-xs text-muted-foreground">{disabledReason}</span>
-                      </span>
-                    ) : (
-                      <span>{label}</span>
-                    )}
-                  </DropdownMenuItem>
-                  </React.Fragment>
-                );
-              })}
+              {overflowActions.map((action, idx) => renderMenuItem(action, idx, 'more', firstDestructiveIdx))}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+      </>
+    );
+    // A state group (objectstack#35593) takes the record's actions as `⋯`
+    // items: every one of them, in the overflow's three bands (the page's
+    // own, the host's chrome, the destructive last), the host's refresh first.
+    const stateMenuActions = stateGroup
+      ? (() => {
+          const pool = [...ranked, ...menuOnly, ...moreOnlyActions];
+          return [
+            ...pool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
+            ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a)),
+            ...pool.filter(isDestructiveAction),
+          ];
+        })()
+      : [];
+    const stateFirstDestructiveIdx = stateMenuActions.findIndex(isDestructiveAction);
+    const toolbarItems = (
+      <>
+        {stateGroup
+          ? stateGroup({
+              recordRow: recordRowItems,
+              recordMenuItems: stateMenuActions.length > 0 || refreshItem ? (
+                <>
+                  {refreshItem}
+                  {refreshItem && stateMenuActions.length > 0 && <DropdownMenuSeparator />}
+                  {stateMenuActions.map((action, idx) => renderMenuItem(action, idx, 'state', stateFirstDestructiveIdx))}
+                </>
+              ) : null,
+              face,
+            })
+          : recordRowItems}
         {trailingSegment}
       </>
     );
@@ -2911,6 +2961,35 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
 
   return <>{renderHeaderActions() ?? emptySlot}</>;
 };
+
+/** `recordChrome: false`, in either spelling: the bare-h1 header, no record chip. */
+function disableRecordChromeOf(schema: any): boolean {
+  return schema?.recordChrome === false || schema?.properties?.recordChrome === false;
+}
+
+/**
+ * The record's current stage as a short tag (objectstack#35593): the option
+ * label of the object's stage field (`detectStatusField`, the field
+ * `record:path` steps through) on this record. A field with no options, or no
+ * value on the record, draws nothing.
+ */
+function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
+  const stageField = detectStatusField(objSchema);
+  if (!stageField) return null;
+  const options = (declaredFieldDef(objSchema, stageField) as any)?.options;
+  if (!Array.isArray(options) || options.length === 0) return null;
+  const raw = labelledData?.[stageField];
+  const text = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
+  if (!text) return null;
+  return (
+    <span
+      className="inline-flex h-5 shrink-0 items-center rounded-md border bg-muted px-1.5 text-xs font-medium text-foreground"
+      data-record-stage-tag={stageField}
+    >
+      {text}
+    </span>
+  );
+}
 
 const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const { designer } = splitDesignerProps(props);
@@ -2954,6 +3033,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // A phone host's face (objectstack#27058): the actions go to its bottom bar,
   // and its subtitle stands in for an undeclared one.
   const phoneFace = React.useContext(PageHeaderPhoneContext);
+  // The host's one-row bar (objectstack#35593) and the record state's tags.
+  const headerBar = React.useContext(RecordHeaderBarContext);
+  const headerStateTags = React.useContext(RecordHeaderStateContext)?.tags;
   const headerObjectSchema: any = (ctx as any)?.objectSchema;
   const headerObjectName: string | undefined = ctx?.objectName || headerObjectSchema?.name;
   const explicitTitle = interpolate(
@@ -2980,8 +3062,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
 
   // Schema-level opt-outs let authors keep the historic "bare h1" header
   // when they don't want a record chip (e.g. a non-record landing page).
-  const disableRecordChrome =
-    schema?.recordChrome === false || schema?.properties?.recordChrome === false;
+  const disableRecordChrome = disableRecordChromeOf(schema);
   // The favorite star is a control that stores something, so it draws only
   // where the host wires a toggle: the `RecordContext` carries
   // `onToggleFavorite` (objectui#12427), and that is the one switch. Metadata
@@ -3012,22 +3093,40 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // row, in its bar face, is drawn into the host's bottom bar instead — a
   // portal, so it stays inside this record's contexts — and nothing is drawn
   // until that element exists.
-  const renderHeaderTail = (emptySlot: React.ReactNode): React.ReactNode => {
+  const renderHeaderTail = (emptySlot: React.ReactNode, inBar = false): React.ReactNode => {
     const row = (
       <PageHeaderActions
         actions={rawHeaderActions}
         placedActions={rawPlacedActions}
         maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
         mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
-        emptySlot={phoneFace ? null : emptySlot}
+        emptySlot={phoneFace || inBar ? null : emptySlot}
         refresh={hostRefresh ? { label: tt('common.refresh', 'Refresh'), onSelect: handleManualRefresh } : undefined}
-        trailing={phoneFace ? undefined : headerTrailing}
+        // In the host's bar the bar draws its own panel switches.
+        trailing={phoneFace || inBar ? undefined : headerTrailing}
         face={phoneFace ? 'bar' : 'row'}
+        defaultMaxVisible={inBar ? 1 : undefined}
       />
     );
     if (!phoneFace) return row;
     return phoneFace.actionBar ? createPortal(row, phoneFace.actionBar) : null;
   };
+
+  // objectstack#35593 — the record's one-row header. Where the host draws a
+  // bar for the record (the page's top bar, the pane's) and this header draws
+  // a record, the header draws INTO that bar: its name and tags in the bar's
+  // title slot, its button group in the bar's action slot, and no row of its
+  // own under it. A phone keeps its own face (the bottom bar). The claim tells
+  // the host to stop drawing its own record crumb while this header holds the
+  // bar; it is given back when the header goes.
+  const hasRecord = !!(ctx?.data && (ctx as any)?.objectSchema);
+  const drawsInBar = !!headerBar && !phoneFace && hasRecord && !disableRecordChromeOf(schema);
+  const claimBar = headerBar?.claim;
+  React.useLayoutEffect(() => {
+    if (!drawsInBar || !claimBar) return undefined;
+    claimBar(true);
+    return () => claimBar(false);
+  }, [drawsInBar, claimBar]);
 
   // Decide whether to render the record chip. Conditions:
   //   1. There's a live RecordContext with data + an object schema.
@@ -3067,7 +3166,6 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // from `resolveTitleField`. This package's own CHANGELOG already described
   // the probe as "not a spec property — always undefined" while this line kept
   // honouring it. Pinned in `__tests__/page-header-title.test.tsx`.
-  const hasRecord = !!(ctx?.data && (ctx as any)?.objectSchema);
   if (hasRecord && !disableRecordChrome) {
     const data: any = ctx!.data;
     const objSchema: any = (ctx as any).objectSchema;
@@ -3314,6 +3412,47 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // size lets the h1's `truncate` fire. `sm:w-auto` hands the row back to
     // the arbitration above unchanged. Geometry pinned in Chromium by
     // `e2e/record-header-title-width.spec.ts`.
+    // objectstack#35593 — in the host's bar: the record's name, its stage and
+    // the state's tags in the title slot, the button group in the action
+    // slot. The object's label is the bar's own crumb, so the chip does not
+    // repeat it. Nothing is drawn until the host's slots exist.
+    if (drawsInBar && headerBar) {
+      const title = headerBar.titleSlot ? createPortal(
+        <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
+          <RecordTitleChip
+            title={resolvedTitle}
+            titleNode={declaredFace}
+            icon={recordPicture}
+            // The bar's crumb names the object; a host note on it (how a
+            // Setup record's object is managed) keeps its label beside the
+            // name, where the note has something to sit on.
+            objectLabel={ctx?.objectLabelNote ? objectLabel : undefined}
+            objectLabelNote={ctx?.objectLabelNote}
+            resourceId={data?.id ? String(data.id) : undefined}
+            showCopyId={showCopyId}
+            isFavorite={ctx?.isFavorite}
+            onToggleFavorite={
+              ctx?.onToggleFavorite
+                ? () => ctx.onToggleFavorite?.()
+                : undefined
+            }
+            className="text-foreground [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:sm:text-sm [&>div]:flex-nowrap [&>div]:items-center"
+          />
+          {recordStageTag(objSchema, labelledData)}
+          {headerStateTags}
+        </span>,
+        headerBar.titleSlot,
+      ) : null;
+      const actions = headerBar.actionSlot
+        ? createPortal(renderHeaderTail(null, true), headerBar.actionSlot)
+        : null;
+      return (
+        <>
+          {title}
+          {actions}
+        </>
+      );
+    }
     return (
       <header
         className={cn(

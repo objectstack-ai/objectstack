@@ -37,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Separator,
   cn,
@@ -46,6 +47,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@object-ui/components';
+import type { RecordHeaderGroupParts } from '@object-ui/components';
 import {
   ActionProvider,
   MetadataCtx,
@@ -175,6 +177,32 @@ export interface DeclaredActionsBarProps {
    * `viewer` block fails every gate closed). Pass a stable function.
    */
   onDrawnActionsChange?: (names: string[]) => void;
+  /**
+   * Draw the request's levers as the record header's ONE button group
+   * (objectstack#35593) instead of as a band of their own. The header hands
+   * its own pieces (`RecordHeaderGroupParts`), and the group is, by the
+   * server's `viewer` block:
+   *
+   * - an approver (`can_act`): the decisions (`isLeadDecision`) as the only
+   *   buttons, the approve one the page's one filled button, then one `⋯`
+   *   holding the other levers, a separator, and the record's own actions;
+   * - the submitter (`is_submitter`, no slot): the submitter's levers —
+   *   resubmit, recall, remind, read off their routes — as buttons, then the
+   *   same `⋯`;
+   * - an override-only administrator: the record's row, with the override
+   *   levers behind their one marked menu ahead of it;
+   * - anyone else, or before the request's definition has loaded: the
+   *   record's row unchanged.
+   *
+   * Placement only: every lever keeps its own gates and dialog.
+   */
+  headerParts?: RecordHeaderGroupParts;
+  /**
+   * The reject decision asks for its reason before it is sent
+   * (objectstack#35593): the record page's reject dialog requires its
+   * `comment`. The request the decision sends is unchanged.
+   */
+  requireRejectReason?: boolean;
 }
 
 /**
@@ -185,11 +213,12 @@ export interface DeclaredActionsBarProps {
  * The route is the server's own name for what the action does, so it answers
  * the bar's two questions about a lever without an action-name list: which
  * decision a click records (the decision-output params), and what an override
- * notice may say the click does (objectui#13164, objectui#13225). Any other
- * route reads `undefined`.
+ * notice may say the click does (objectui#13164, objectui#13225), and which
+ * of the submitter's levers lead the record header's group (`remind`,
+ * `resubmit`, objectstack#35593). Any other route reads `undefined`.
  */
-type ApprovalRouteVerb = 'approve' | 'reject' | 'reassign' | 'recall';
-const APPROVAL_ROUTE_VERB = /\/(approve|reject|reassign|recall)$/;
+type ApprovalRouteVerb = 'approve' | 'reject' | 'reassign' | 'recall' | 'remind' | 'resubmit';
+const APPROVAL_ROUTE_VERB = /\/(approve|reject|reassign|recall|remind|resubmit)$/;
 function approvalRouteVerb(action: ActionDef): ApprovalRouteVerb | undefined {
   const match = APPROVAL_ROUTE_VERB.exec(String(action.target ?? ''));
   return match ? (match[1] as ApprovalRouteVerb) : undefined;
@@ -300,7 +329,17 @@ const DeclaredActionButton: React.FC<{
    * decisions sit side by side at equal width on a phone.
    */
   fill?: boolean;
-}> = ({ action, objectName, record, asMenuItem = false, onDrawn, fill = false }) => {
+  /**
+   * The record header's group (objectstack#35593): `primary` keeps a declared
+   * `primary` variant as the page's one filled button, and every other lever
+   * is drawn as an outline button, a `danger` one in the destructive text
+   * colour, so one header never shows two filled buttons. Sized for the
+   * header row.
+   */
+  headerTone?: 'primary' | 'secondary';
+  /** The reject dialog requires its `comment` (`requireRejectReason`). */
+  requireReason?: boolean;
+}> = ({ action, objectName, record, asMenuItem = false, onDrawn, fill = false, headerTone, requireReason = false }) => {
   const { execute } = useAction();
   const [loading, setLoading] = useState(false);
   // Localize the SERVER-DECLARED strings through the `_actions.<name>.*`
@@ -584,7 +623,12 @@ const DeclaredActionButton: React.FC<{
         dispatch.overrideNotice = overrideNotice;
         dispatch.label = overrideLabel;
       }
-      const staticParams = Array.isArray(rawParams) ? rawParams : [];
+      // objectstack#35593 — on the record page a rejection names its reason:
+      // the dialog requires the declared `comment` before Confirm.
+      const declaredParams = Array.isArray(rawParams) ? rawParams : [];
+      const staticParams = requireReason && routeVerb === 'reject'
+        ? declaredParams.map((param: any) => (param?.name === 'comment' ? { ...param, required: true } : param))
+        : declaredParams;
       if (staticParams.length > 0 || outputParams.length > 0) {
         dispatch.actionParams = [...staticParams, ...outputParams];
       }
@@ -592,7 +636,7 @@ const DeclaredActionButton: React.FC<{
     } finally {
       setLoading(false);
     }
-  }, [action, execute, loading, objectName, record, localizeActionTexts, t, overrideNotice, overrideLabel]);
+  }, [action, execute, loading, objectName, record, localizeActionTexts, t, overrideNotice, overrideLabel, requireReason]);
 
   // The declared `visible` gate (`useDeclaredActionShown` above).
   if (!shown) return null;
@@ -614,11 +658,13 @@ const DeclaredActionButton: React.FC<{
   // "the decision you were assigned".
   const variant = isOverride
     ? 'outline'
-    : declaredVariant === 'primary'
-      ? 'default'
-      : declaredVariant === 'danger'
-        ? 'destructive'
-        : (declaredVariant || 'outline');
+    : headerTone === 'secondary'
+      ? 'outline'
+      : declaredVariant === 'primary'
+        ? 'default'
+        : declaredVariant === 'danger'
+          ? 'destructive'
+          : (declaredVariant || 'outline');
   // Same resolver as the dispatch above, so the button text and the confirm
   // dialog body can never come from different bundle reads (objectui#4265).
   const label = isOverride ? overrideLabel : declaredLabel;
@@ -711,8 +757,10 @@ const DeclaredActionButton: React.FC<{
       // the record header's spelling (`PageHeaderActions`).
       // Below `sm` a 44 px touch target (objectstack#29071).
       className={cn(
-        'h-11 sm:h-9',
+        headerTone ? 'h-11 sm:h-8' : 'h-11 sm:h-9',
         fill && (disabledReason ? 'w-full sm:w-auto' : 'flex-1 sm:flex-none'),
+        headerTone === 'secondary' && declaredVariant === 'danger' && !isOverride
+          && 'text-destructive hover:text-destructive',
         isOverride
           && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
         pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
@@ -770,6 +818,25 @@ const DeclaredActionButton: React.FC<{
     </TooltipProvider>
   );
 };
+
+/**
+ * The submitter's levers that lead the record header's group
+ * (objectstack#35593), in their order: on a returned request resubmit and
+ * recall, on a pending one recall and remind (each lever's own `visible` gate
+ * decides which of them a request shows).
+ */
+const SUBMITTER_LEAD_VERBS: readonly ApprovalRouteVerb[] = ['resubmit', 'recall', 'remind'];
+
+/**
+ * Is this viewer the request's submitter, holding no approver slot on it? The
+ * server's `viewer.is_submitter`, strictly, like `isActingApprover`.
+ */
+function isSubmitterViewer(record: unknown): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const viewer = (record as { viewer?: unknown }).viewer;
+  if (!viewer || typeof viewer !== 'object') return false;
+  return (viewer as { is_submitter?: unknown }).is_submitter === true;
+}
 
 /**
  * The status line that replaces the override levers for a viewer who holds no
@@ -945,11 +1012,12 @@ const DeclaredActionsToolbar: React.FC<
   Pick<
     DeclaredActionsBarProps,
     'objectName' | 'record' | 'className' | 'label' | 'foldOverrides' | 'foldDecisions' | 'onDrawnActionsChange'
+    | 'headerParts' | 'requireRejectReason'
   > & {
     /** The located set, pre-filtered by `location` / `exclude`, ungated. */
     actions: ActionDef[];
   }
-> = ({ actions, objectName, record, className, label, foldOverrides, foldDecisions, onDrawnActionsChange }) => {
+> = ({ actions, objectName, record, className, label, foldOverrides, foldDecisions, onDrawnActionsChange, headerParts, requireRejectReason }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
   const permitted = useMemo(
@@ -1006,6 +1074,114 @@ const DeclaredActionsToolbar: React.FC<
   const everyLeverReported = permitted.every((action) => !action.name || hasOwnKey(drawnByName, action.name));
   const foldDecisionOthers = decisionOthers.length > 0 && (!everyLeverReported || drawnNames.length > 2);
   const decisionOthersDrawn = decisionOthers.some((action) => !!action.name && drawnByName[action.name] === true);
+
+  // objectstack#35593 — the record header's ONE group. Which levers lead it
+  // is read off the server's `viewer` block (see `headerParts`); the rest of
+  // the request's levers go into the group's `⋯` ahead of the record's own.
+  const headerLeads = headerParts && folded.length === 0
+    ? isActingApprover(record)
+      ? permitted.filter((action) => isLeadDecision(action))
+      : isSubmitterViewer(record)
+        ? permitted
+            .filter((action) => SUBMITTER_LEAD_VERBS.includes(approvalRouteVerb(action) as ApprovalRouteVerb))
+            .sort((a, b) => SUBMITTER_LEAD_VERBS.indexOf(approvalRouteVerb(a)!) - SUBMITTER_LEAD_VERBS.indexOf(approvalRouteVerb(b)!))
+        : []
+    : [];
+  const headerOthers = headerLeads.length > 0 ? permitted.filter((action) => !headerLeads.includes(action)) : [];
+  const headerOthersDrawn = headerOthers.some((action) => !!action.name && drawnByName[action.name] === true);
+
+  if (headerParts) {
+    const barFace = headerParts.face === 'bar';
+    if (headerLeads.length === 0 && folded.length === 0) {
+      // Nothing of the request's leads this viewer: the record's row.
+      return <>{headerParts.recordRow}</>;
+    }
+    if (headerLeads.length === 0) {
+      // The override-only administrator: the record's row, and the override
+      // levers behind their one marked menu ahead of it.
+      const overrideMenuLabel = String(t('approvalsInbox.viaOverrideChip', { defaultValue: 'Admin override' }));
+      return (
+        <>
+          {folded.map((action) => (
+            <DeclaredActionVisibilityProbe key={action.name} action={action} record={record} onDrawn={reportDrawn} />
+          ))}
+          {foldedDrawn && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    'gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
+                    barFace ? 'h-11 shrink-0' : 'h-8',
+                  )}
+                  aria-label={overrideMenuLabel}
+                  title={overrideMenuLabel}
+                  data-testid="declared-actions-override-menu"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {folded.map((action) => (
+                  <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem />
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {headerParts.recordRow}
+        </>
+      );
+    }
+    const moreLabel = String(t('detail.moreActions', { defaultValue: 'More actions' }));
+    const hasRecordItems = headerParts.recordMenuItems !== null && headerParts.recordMenuItems !== undefined;
+    return (
+      <>
+        {headerLeads.map((action) => (
+          <DeclaredActionButton
+            key={action.name}
+            action={action}
+            objectName={objectName}
+            record={record}
+            onDrawn={reportDrawn}
+            headerTone={action.variant === 'primary' ? 'primary' : 'secondary'}
+            requireReason={requireRejectReason}
+            fill={barFace}
+          />
+        ))}
+        {headerOthers.map((action) => (
+          <DeclaredActionVisibilityProbe key={action.name} action={action} record={record} onDrawn={reportDrawn} />
+        ))}
+        {(headerOthersDrawn || hasRecordItems) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'h-8 gap-1 px-2'}
+                aria-label={moreLabel}
+                data-testid="declared-actions-header-menu"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-48" data-testid="declared-actions-header-menu-content">
+              {headerOthers.map((action) => (
+                <DeclaredActionButton key={action.name} action={action} objectName={objectName} record={record} asMenuItem />
+              ))}
+              {headerOthersDrawn && hasRecordItems && (
+                <DropdownMenuSeparator data-testid="declared-actions-header-menu-separator" />
+              )}
+              {headerParts.recordMenuItems}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </>
+    );
+  }
 
   // Nothing this viewer may invoke renders nothing — no toolbar chrome, no
   // orphan divider, same degrade as "nothing declared at this location".
@@ -1210,6 +1386,8 @@ export function DeclaredActionsBar({
   foldOverrides,
   foldDecisions,
   onDrawnActionsChange,
+  headerParts,
+  requireRejectReason,
 }: DeclaredActionsBarProps) {
   const dataSource = useAdapter();
   // Fetch the object def (and its declared actions) unless the host passed
@@ -1252,7 +1430,9 @@ export function DeclaredActionsBar({
   // above it, so it cannot also decide whether to mount it. A set that is
   // located but wholly denied therefore mounts an inert provider and its
   // (closed) dialogs, and draws no chrome — see `DeclaredActionsToolbar`.
-  if (located.length === 0) return null;
+  // A header group with nothing declared (or not loaded yet) is the record's
+  // row: the group never takes the header's buttons away.
+  if (located.length === 0) return headerParts ? <>{headerParts.recordRow}</> : null;
 
   return (
     <ActionProvider {...runtime.actionProviderProps}>
@@ -1267,6 +1447,8 @@ export function DeclaredActionsBar({
         foldOverrides={foldOverrides}
         foldDecisions={foldDecisions}
         onDrawnActionsChange={onDrawnActionsChange}
+        headerParts={headerParts}
+        requireRejectReason={requireRejectReason}
       />
       {runtime.dialogs}
     </ActionProvider>
