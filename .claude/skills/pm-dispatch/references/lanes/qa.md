@@ -11,8 +11,8 @@
 
 - 先 `retest-owed.mjs`,再照 §6 四张:`owed:weekly`、`touched:` 上轮 subject、`priority:P0`、`surface:api`。
 - 发版后 `smoke:npm-<版本>` 照 §6;上轮冒烟抽出的修复卡在此重判。
-- 场景半边跑 `docs/qa/scenarios` 的 `starter` 卡:`--modes scratch --packages workspace`(开发波未发布)。
-- 一卡一命令 `--only ID`(后台限 2 小时),每容器至多两条并行;照 `packages/qa/scenarios/README.md`。
+- 场景半边跑 `docs/qa/scenarios` 的 `starter` 卡:`--modes scratch --packages workspace`(测未发布代码)。
+- 一卡一命令 `--only ID`,后台时限与每容器并行数住座位贴;照 `packages/qa/scenarios/README.md`。
 - 其〈Running the cards in a Claude Code cloud session〉:订阅 `oauth_token` 登录、无 API 变量、非 Auto。
 - 计分卡进轮次记录(非 `qa-run`);失败半边判为产品缺陷 ⇒ 照 `fail` 抽卡,`QA-source:` 指本轮。
 - 执行照 checklist-test 与 RUNNER;本席即派 runner 的会话,runner 的安全复现私报本席。
