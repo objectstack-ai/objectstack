@@ -100,7 +100,7 @@
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
-import { sharedGetJson } from '@object-ui/types';
+import { inflightGetKey, sharedGetJson } from '@object-ui/types';
 import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { readConsoleDiscovery } from './lib/early-discovery';
 
@@ -119,6 +119,41 @@ interface MeLocalizationResponse {
 
 /** This page-load's read of the language a choice-less read states, once started. */
 let preferredLocale: Promise<string | undefined> | null = null;
+
+/**
+ * The seed's settled answer, held for `LocalizationFetchProvider`'s boot read
+ * (objectstack#35455): the request it answered, as `inflightGetKey` spells it,
+ * and the session owner it was asked for. See {@link takeSettledSeedAnswer}.
+ */
+let settledSeed: { key: string; owner: number; body: unknown } | null = null;
+/** Whether the boot read has already been offered the seed's answer. */
+let settledSeedSpent = false;
+
+/**
+ * Hand the seed's settled answer to the boot read that asks the SAME request,
+ * once per page load (objectstack#35455), or `null`.
+ *
+ * On a true first visit the seed's request usually settles inside its race,
+ * before React mounts; the provider mounts later and, since the in-flight
+ * registry holds only pending requests, used to ask the endpoint a second
+ * time. This is the request it would make, answered moments ago in this page
+ * load, so it takes that answer instead.
+ *
+ * Only an answer about the caller who still owns the browser is handed over:
+ * an unauthenticated one is never held, and a change of owner since the seed
+ * asked (objectui#10193) answers `null`. The first call spends the hand-off
+ * whatever it finds, so a later read — a remount, or the re-read after a write
+ * to the user's own row — asks the server, and an answer that settles after
+ * the boot read started (which joined it in flight instead) is never held.
+ */
+export function takeSettledSeedAnswer(url: string, init: RequestInit): unknown | null {
+  const held = settledSeed;
+  settledSeed = null;
+  settledSeedSpent = true;
+  if (!held || held.key !== inflightGetKey(url, init)) return null;
+  if (held.owner !== getSessionOwnerChangeCount()) return null;
+  return structuredClone(held.body);
+}
 
 /**
  * The language a read with no explicit choice states (objectstack#33985,
@@ -187,9 +222,14 @@ export function startedPreferredLocale(): Promise<string | undefined> | null {
   return preferredLocale;
 }
 
-/** Test seam: forget this page-load's read of the stated language. Not public. */
+/**
+ * Test seam: forget this page-load's read of the stated language, and the
+ * seed's held answer. Not public.
+ */
 export function __resetPreferredLocaleForTests(): void {
   preferredLocale = null;
+  settledSeed = null;
+  settledSeedSpent = false;
 }
 
 /**
@@ -219,23 +259,25 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     // overlap by construction: this one keeps running past the 500 ms race, and
     // the provider mounts as soon as the race resolves. Sharing is in-flight
     // only, so on the boots where they do NOT overlap each still fetches.
-    const json = await sharedGetJson<MeLocalizationResponse>(
-      `${serverBase}/api/v1/auth/me/localization`,
-      {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          // A supported browser language decides the rung below the user's
-          // own locale (objectstack#33985); otherwise the browser's own header
-          // goes, and the server's deployment default decides
-          // (objectstack#34392).
-          ...(preferred ? { 'Accept-Language': preferred } : {}),
-        },
+    const url = `${serverBase}/api/v1/auth/me/localization`;
+    const init: RequestInit = {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        // A supported browser language decides the rung below the user's
+        // own locale (objectstack#33985); otherwise the browser's own header
+        // goes, and the server's deployment default decides
+        // (objectstack#34392).
+        ...(preferred ? { 'Accept-Language': preferred } : {}),
       },
-    );
+    };
+    const json = await sharedGetJson<MeLocalizationResponse>(url, init);
     if (json?.authenticated === false) return;
     if (getSessionOwnerChangeCount() !== ownerAtRequest) return;
     cacheLanguageSeed(json?.locale);
+    // Held for the provider's boot read (objectstack#35455), unless that read
+    // has already started: it then joined this request in flight.
+    if (!settledSeedSpent) settledSeed = { key: inflightGetKey(url, init), owner: ownerAtRequest, body: json };
   } catch {
     // Offline, blocked, malformed — the boot simply goes unseeded.
   }

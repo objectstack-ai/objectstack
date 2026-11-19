@@ -67,6 +67,19 @@
  * sent. The preflight takes it once, when both match what it would send
  * itself, and reads that answer instead of asking again. A failed or non-OK
  * early request is not reused: the preflight then fetches as it always did.
+ *
+ * # With no stored token, the cookie session's answer (objectstack#35455)
+ *
+ * Without a Bearer there is nothing stale to purge, but there is still the
+ * session `AuthProvider` asks for on mount — and React mounts only after
+ * `main.tsx`'s pre-render gate, which on a device's first visit includes the
+ * language seed's bounded race. Asked from the provider, `get-session` waited
+ * on that race though it needs nothing from it. So the same parse-time script
+ * asks the cookie session's question (no `Authorization` header), and this
+ * preflight hands the OK answer on with a null token: the session when it
+ * names a user, and a signed-out answer when it names none, so a signed-out
+ * visitor still costs one request. `AuthProvider` takes it only while no token
+ * is stored.
  */
 
 const TOKEN_KEY = 'auth-session-token';
@@ -92,7 +105,8 @@ const EARLY_SESSION_KEY = Symbol.for('objectui.earlySessionCheck');
  */
 interface EarlySessionSlot {
   authUrl: string;
-  token: string;
+  /** The Bearer it sent, or `null` for the cookie session's question. */
+  token: string | null;
   body: Promise<unknown>;
   taken?: boolean;
 }
@@ -108,7 +122,7 @@ type SessionAnswer = { ok: true; body: unknown } | { ok: false };
  */
 async function takeEarlySessionAnswer(
   authBaseUrl: string,
-  token: string,
+  token: string | null,
 ): Promise<SessionAnswer | null> {
   const holder = globalThis as unknown as Record<symbol, EarlySessionSlot | undefined>;
   const slot = holder[EARLY_SESSION_KEY];
@@ -123,17 +137,16 @@ async function takeEarlySessionAnswer(
 }
 
 /** Ask the server — the request `index.html` sends early, byte for byte. */
-async function askSession(authBaseUrl: string, token: string): Promise<SessionAnswer> {
+async function askSession(authBaseUrl: string, token: string | null): Promise<SessionAnswer> {
   const res = await fetch(`${authBaseUrl}/get-session`, {
     method: 'GET',
     // The cookie rides along so a renewed `Set-Cookie` is stored; the
     // server reads the Bearer over it, so a stale token still answers null
     // (header, objectui#12892).
     credentials: 'include',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
+    headers: token
+      ? { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+      : { Accept: 'application/json' },
   });
   if (!res.ok) return { ok: false };
   return { ok: true, body: await res.json().catch(() => null) };
@@ -175,7 +188,10 @@ export async function preflightAuth(authBaseUrl: string): Promise<void> {
     // validate, and nothing we could purge either.
     return;
   }
-  if (!token) return;
+  if (!token) {
+    await handOnCookieSession(authBaseUrl);
+    return;
+  }
 
   try {
     const answer =
@@ -202,5 +218,27 @@ export async function preflightAuth(authBaseUrl: string): Promise<void> {
   } catch {
     // Network error: assume token might still be good; don't punish the
     // user by clearing it. Worst case AuthProvider will detect it next.
+  }
+}
+
+/**
+ * No stored token: hand the cookie session's answer on to `AuthProvider`
+ * (header, objectstack#35455). An OK answer is handed on whether it names a
+ * user or not — a signed-out answer is the server saying so, and asking again
+ * after mount would only spend a second request. A failed or non-OK answer
+ * hands nothing on, and `AuthProvider` asks as it always did.
+ */
+async function handOnCookieSession(authBaseUrl: string): Promise<void> {
+  try {
+    const answer =
+      (await takeEarlySessionAnswer(authBaseUrl, null)) ?? (await askSession(authBaseUrl, null));
+    if (!answer.ok) return;
+    (globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SESSION_KEY] = {
+      authUrl: authBaseUrl,
+      token: null,
+      body: JSON.stringify(answer.body),
+    };
+  } catch {
+    // Network error: nothing handed on; `AuthProvider` asks itself.
   }
 }
