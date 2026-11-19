@@ -105,7 +105,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { isVirtualSearchField, referenceTargetOf } from '@objectstack/spec/data';
+import { isVirtualSearchField, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 import { declaredFieldClasses } from './having-filter.js';
 
 type ShapeRefusal = Error & {
@@ -159,19 +159,6 @@ function virtualGroupMessage(object: string, path: string, field: string, type: 
     + 'by that. A formula field is virtual: with no column behind it the group key reached the driver as a '
     + 'column that does not exist, and an engine that aggregates in memory put every row into one null group '
     + 'while the answer looked served.';
-}
-
-/**
- * The object a declared field references, or `undefined` — read only to word a
- * refusal, so a reference carrier the spec cannot read words it as a
- * non-relation instead of replacing the refusal with the reader's own throw.
- */
-function relationTargetOf(declared: unknown): string | undefined {
-  try {
-    return referenceTargetOf(declared);
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -230,7 +217,8 @@ export function assertGroupByTargetsAreStored(
       const headField = Object.prototype.hasOwnProperty.call(fields, head)
         ? (fields as Record<string, unknown>)[head]
         : undefined;
-      const headIsRelation = headField !== undefined && relationTargetOf(headField) !== undefined;
+      const headType = (headField as { type?: unknown } | undefined)?.type;
+      const headIsRelation = typeof headType === 'string' && REFERENCE_VALUE_TYPES.has(headType);
       throw refusal(
         'INVALID_FIELD',
         relationPathGroupMessage(object, position, field, head, headIsRelation),
