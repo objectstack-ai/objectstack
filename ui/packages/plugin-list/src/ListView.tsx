@@ -2043,18 +2043,6 @@ function ListOptionPicker({
 }
 
 /**
- * Imperative handle exposed by ListView via React.forwardRef.
- * Allows parent components to trigger a data refresh programmatically.
- *
- * @example
- * ```tsx
- * const listRef = React.useRef<ListViewHandle>(null);
- * <ListView ref={listRef} schema={schema} />
- * // After a mutation:
- * listRef.current?.refresh();
- * ```
- */
-/**
  * What a function `toolbarLeading` is called with (objectstack#35548).
  * `recordCount` is the count the record-count bar says — the server's total
  * under paging, the rows otherwise, a paged board's view total — or `null`
@@ -2066,6 +2054,18 @@ export interface ListToolbarLeadingState {
   layout: string;
 }
 
+/**
+ * Imperative handle exposed by ListView via React.forwardRef.
+ * Allows parent components to trigger a data refresh programmatically.
+ *
+ * @example
+ * ```tsx
+ * const listRef = React.useRef<ListViewHandle>(null);
+ * <ListView ref={listRef} schema={schema} />
+ * // After a mutation:
+ * listRef.current?.refresh();
+ * ```
+ */
 export interface ListViewHandle {
   /** Force the ListView to re-fetch data from the DataSource */
   refresh(): void;
