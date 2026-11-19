@@ -20,6 +20,7 @@ export const ko: TranslationData = {
         nav_account_profile: { label: '프로필' },
         nav_account_mobile_app: { label: '모바일 앱' },
         nav_account_notifications: { label: '알림' },
+        nav_account_notification_settings: { label: '알림 설정' },
         nav_account_approvals: { label: '내 승인 대기' },
         nav_account_memberships: { label: '내 조직' },
         nav_account_linked: { label: '연결된 계정' },
@@ -38,7 +39,6 @@ export const ko: TranslationData = {
       navigation: {
         group_overview: { label: '개요' },
         group_apps: { label: '앱' },
-        nav_packaged_actions: { label: '패키지 액션' },
         nav_marketplace_browse: { label: '마켓플레이스 둘러보기' },
         nav_marketplace_installed: { label: '설치된 앱' },
         nav_cloud_connection: { label: '클라우드 연결' },
@@ -189,13 +189,55 @@ export const ko: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: '사용자' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '조직' } } },
-    sys_session_metrics: { measures: { session_count: { label: '세션' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: '설치' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: '사용자',
+          description: '등록된 사용자 계정 수(활성 여부와 관계없음).',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '조직',
+          description: '등록된 조직 수. 각 조직은 고유한 구성원, 데이터, 설정을 가집니다.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: '세션',
+          description: '기록된 로그인 세션 수. 브라우저나 기기에서 로그인할 때마다 하나씩 생깁니다.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: '설치',
+          description: '기록된 패키지 설치 수. 설치된 패키지마다 1건입니다.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: '작업' }, user_id: { label: '사용자' } },
-      measures: { event_count: { label: '이벤트' } },
+      dimensions: {
+        action: {
+          label: '작업',
+          description: '감사 로그 항목이 기록하는 작업 유형(예: 생성, 업데이트, 삭제, 로그인, 구성 변경).',
+        },
+        user_id: {
+          label: '사용자',
+          description: '감사 대상 작업을 수행한 사용자. 플랫폼이 직접 기록한 항목은 "시스템"으로 묶입니다.',
+        },
+      },
+      measures: {
+        event_count: {
+          label: '이벤트',
+          description: '감사 로그 항목 수. 각 항목은 사용자나 플랫폼 자체가 시스템에서 수행한 작업 하나를 기록합니다.',
+        },
+      },
     },
   },
 

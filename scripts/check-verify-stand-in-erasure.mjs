@@ -236,6 +236,9 @@ const NOT_A_STAND_IN = {
   runDashboardWindowProofs: 'same `VerifyStack` handle as runCrudVerification.',
   formatDashboardWindowReport:
     'formats a `DashboardWindowReport` this package produced; presentation, not conformance.',
+  runFlowProof: 'same `VerifyStack` handle as runCrudVerification.',
+  formatFlowRunReport:
+    'formats a `FlowRunReport` this package produced; presentation, not conformance.',
   formatSeedReport:
     'formats a `SeedReport` this package produced (`judgeSeedOutcome` / `readSeedOutcome`, #32141); ' +
     'presentation, not conformance.',

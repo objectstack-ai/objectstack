@@ -144,10 +144,15 @@
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
  *   hooks.<hook>.texts.<key>.message                           (#34374)
+ *   objects.<object>._actions.<action>.refusals.<CODE>.message  (#34273; and
+ *   globalActions.<action>.refusals.<CODE>.message, with `.reasons.<REASON>.message` under each)
+ *   objects.<object>._actions.<action>.texts.<key>.message     (#34374 PR2; and
+ *   globalActions.<action>.texts.<key>.message)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
  *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
+ *   mappings.<mapping>.label                (a named import mapping's label)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -258,6 +263,7 @@ export interface ExpectedEntry {
     | 'position'
     | 'permission'
     | 'book'
+    | 'mapping'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -797,6 +803,63 @@ function pushActionOutcomeMessages(
   if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
   for (const [outcome, message] of Object.entries<unknown>(messages)) {
     pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], actionCopy(message), kind, { objectName });
+  }
+}
+
+/**
+ * [#34273] Emit `<action root>.refusals.<CODE>.message` for every entry an
+ * action's refusal catalogue declares (`ActionSchema.refusals`), and
+ * `….reasons.<REASON>.message` for each reason under it — seeded with the
+ * declared sentence, as {@link walkHookRefusals} seeds a hook's. The action
+ * body runner reads exactly that key (`actionRefusalMessageKey`) in the
+ * caller's locale, so each entry is one demand, under the action's own root:
+ * `objects.<object>._actions.<action>` or `globalActions.<action>`.
+ */
+function pushActionRefusals(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const refusals = action?.refusals;
+  if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) return;
+  for (const [code, entry] of Object.entries<any>(refusals)) {
+    pushOptional(out, [...actionRoot, 'refusals', code, 'message'], inlineText(entry?.message), kind, { objectName });
+    const reasons = entry?.reasons;
+    if (!reasons || typeof reasons !== 'object' || Array.isArray(reasons)) continue;
+    for (const [reason, sentence] of Object.entries<any>(reasons)) {
+      pushOptional(
+        out,
+        [...actionRoot, 'refusals', code, 'reasons', reason, 'message'],
+        inlineText(sentence?.message),
+        kind,
+        { objectName },
+      );
+    }
+  }
+}
+
+/**
+ * [#34374 PR2] Emit `<action root>.texts.<key>.message` for every text an
+ * action declares (`ActionSchema.texts`), seeded with the declared message, as
+ * {@link walkHookTexts} seeds a hook's. The action body runner reads exactly
+ * that key (`actionTextMessageKey`) in the organization's language when the
+ * body asks for the text (`ctx.text`), so each declared text is one demand,
+ * under the action's own root: `objects.<object>._actions.<action>` or
+ * `globalActions.<action>`.
+ */
+function pushActionTexts(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const texts = action?.texts;
+  if (!texts || typeof texts !== 'object' || Array.isArray(texts)) return;
+  for (const [key, entry] of Object.entries<any>(texts)) {
+    pushOptional(out, [...actionRoot, 'texts', key, 'message'], inlineText(entry?.message), kind, { objectName });
   }
 }
 
@@ -1555,6 +1618,8 @@ export function collectExpectedEntries(
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionRefusals(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionTexts(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
 
@@ -1655,6 +1720,8 @@ export function collectExpectedEntries(
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
     pushActionPreflight(out, root, action, kind, objectName);
+    pushActionRefusals(out, root, action, kind, objectName);
+    pushActionTexts(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────
@@ -1740,6 +1807,9 @@ export function collectExpectedEntries(
 
   // ── Doc books (`books.<name>.…`) ──────────────────────────────────
   walkBooks(config, out);
+
+  // ── Import mappings (`mappings.<name>.label`) ─────────────────────
+  walkMappings(config, out);
 
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
@@ -2090,6 +2160,25 @@ function walkBooks(config: any, out: ExpectedEntry[]): void {
       if (typeof key !== 'string' || key.length === 0) continue;
       pushEntry(out, ['books', name, 'groups', key, 'label'], group.label, 'book');
     }
+  }
+}
+
+// ─── Import mappings (`mappings.<name>.label`) ──────────────────────────
+
+/**
+ * Emit a named import mapping's label: `mappings.<mapping>.label`, the key
+ * `translateMapping` reads. The import wizard offers a mapping by this label.
+ * The label is optional on the schema, so it is recorded with
+ * {@link pushOptional}; a mapping's `fieldMapping` is column and field names,
+ * not copy, and has no key.
+ */
+function walkMappings(config: any, out: ExpectedEntry[]): void {
+  const mappings: any[] = Array.isArray(config?.mappings) ? config.mappings : [];
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object') continue;
+    const name = mapping.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
   }
 }
 

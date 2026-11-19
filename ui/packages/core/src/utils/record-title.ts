@@ -560,6 +560,50 @@ export function getRecordDisplayName(
   record: any,
   options?: RecordDisplayNameOptions,
 ): string {
+  const named = recordTitleAboveFloor(objectDef, record, options);
+  if (named !== undefined) return named;
+
+  // 5. Record-#id floor; only a truly id-less record hits the bare fallback.
+  const id = record?.id ?? record?._id;
+  if (id !== null && id !== undefined && String(id).trim() !== '') {
+    return `Record #${id}`;
+  }
+  return options?.fallback ?? 'Untitled';
+}
+
+/**
+ * The title of a record that a LOOKUP points at — a group header keyed by a
+ * lookup, a filter value option, any surface that names the referenced record
+ * from the record it read: the lookup field's own `displayField` (the
+ * caller's declared pointer, {@link RecordDisplayNameOptions.titleField}),
+ * then the target object's ladder from {@link getRecordDisplayName}, with its
+ * declared `nameField` above every heuristic. That is the default the spec
+ * states for a lookup with no `displayField` ("the referenced object's
+ * name/title").
+ *
+ * Stops short of the `Record #<id>` / `Untitled` floor and answers
+ * `undefined` instead, so each caller keeps its own face for a record nothing
+ * names (a raw key, an id chip). `targetDef` may be absent while the target's
+ * schema is unknown; the ladder then reads the record alone.
+ */
+export function referencedRecordTitle(
+  targetDef: any,
+  record: any,
+  displayField?: string,
+): string | undefined {
+  if (!record || typeof record !== 'object') return undefined;
+  return recordTitleAboveFloor(targetDef, record, { titleField: displayField });
+}
+
+/**
+ * Every rung of {@link getRecordDisplayName} above its floor: the title, or
+ * `undefined` when no rung names the record.
+ */
+function recordTitleAboveFloor(
+  objectDef: any,
+  record: any,
+  options?: RecordDisplayNameOptions,
+): string | undefined {
   // 0. Explicit title field — the caller's option, if it actually resolves on
   //    the record. This is a DECLARED key: every view config that offers a
   //    title pointer (`ui/CalendarConfig`, `ui/GalleryConfig`, `ui/GanttConfig`,
@@ -632,10 +676,5 @@ export function getRecordDisplayName(
     }
   }
 
-  // 5. Record-#id floor; only a truly id-less record hits the bare fallback.
-  const id = record?.id ?? record?._id;
-  if (id !== null && id !== undefined && String(id).trim() !== '') {
-    return `Record #${id}`;
-  }
-  return options?.fallback ?? 'Untitled';
+  return undefined;
 }

@@ -267,6 +267,7 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-sql/src/sql-driver-filter-helpers.ts',
   'packages/drivers/driver-sql/src/sql-driver-internal-helpers.ts',
   'packages/drivers/driver-sql/src/sql-driver-introspection.ts',
+  'packages/drivers/driver-sql/src/sql-driver-latest-per.ts',
   'packages/drivers/driver-sql/src/sql-driver-lifecycle.ts',
   'packages/drivers/driver-sql/src/sql-driver-managed-drift.ts',
   'packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts',

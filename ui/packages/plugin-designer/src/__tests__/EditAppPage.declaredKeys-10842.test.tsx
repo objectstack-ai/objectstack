@@ -43,7 +43,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    useAdapter: () => ({ getClient: () => ({ meta: { saveItem } }) }),
+    useAdapter: () => ({
+      getClient: () => ({ meta: { saveItem } }),
+      // objectstack#35054 — the page edits the app as stored (the layers read):
+      // the served app minus its read decorations, which no layer carries.
+      getAuthoredItem: async (_type: string, name: string) => {
+        const served = apps.find((a) => a.name === name);
+        return served ? Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_'))) : null;
+      },
+    }),
     useMetadata: () => ({ apps, objects: [], refresh: () => Promise.resolve() }),
   };
 });
@@ -95,6 +103,7 @@ async function saveOf(served: Record<string, unknown>) {
   apps.length = 0;
   apps.push(served);
   render(<EditAppPage />);
+  await screen.findByTestId('edit-app-page');
   fireEvent.click(screen.getByRole('button', { name: 'finish' }));
   await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
   const [type, name, body] = saveItem.mock.calls[0];

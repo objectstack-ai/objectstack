@@ -16,9 +16,11 @@
  *  (b) a record route whose record page is declared (a full page) reads the
  *      objects that page binds, by name, and never the whole registry.
  *
- * CONTROLs, counted request by request: Setup's open (the root of an app whose
- * package holds no objects of its own) asks the same as before, the package
- * list and then the whole registry; an app whose package holds its objects
+ * Setup's open (the root of an app whose package holds no objects of its own)
+ * reads the same way: the package list, then its entries' required objects,
+ * never the whole registry (objectstack#34211).
+ *
+ * CONTROLs, counted request by request: an app whose package holds its objects
  * asks the same as before; a record route with no declared record page, or a
  * slotted one, reads the whole registry, as before.
  *
@@ -299,15 +301,20 @@ describe('a record route reads the objects its declared record page binds (objec
   });
 });
 
-describe('CONTROLs: the shapes this card does not change ask what they asked before (objectui#13046)', () => {
-  it("Setup's open (the root of an app whose package holds no objects of its own): the package list, then the whole registry", async () => {
+describe('the root of an app whose package holds none of its objects reads by name too (objectstack#34211)', () => {
+  it("Setup's open (the root of an app whose package holds no objects of its own): the package list, then its entries' required objects in one presence read, never the whole registry (objectstack#34211)", async () => {
     boot('/apps/setup');
-    await waitFor(() => expect(objectCalls()).toContain('object'));
+    await waitFor(() => expect(objectCalls()).toContain('object?names=sys_member'));
     await settle();
 
-    expect(objectCalls()).toEqual([`object?package=${SETUP}`, 'object']);
+    // Then it lands on its first entry, an object's route, which reads its own
+    // names by name; the whole registry is read at no point.
+    expect(objectCalls().slice(0, 2)).toEqual([`object?package=${SETUP}`, 'object?names=sys_member']);
+    expect(objectCalls()).not.toContain('object');
   });
+});
 
+describe('CONTROLs: the shapes this card does not change ask what they asked before (objectui#13046)', () => {
   it('an app whose package holds its objects: the package list and the lookup target outside it', async () => {
     boot('/apps/crm/crm_account');
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));

@@ -286,6 +286,51 @@ const flowBody = (name: string) => ({
  * These run against the REAL `getMetaItems`, so they fail if the read path ever
  * grows a decoration that consumers don't know to remove.
  */
+/**
+ * [#34901] `_withheldFields`, the served object's note of the fields a
+ * disabled package withholds from it, is a read decoration like `_diagnostics`:
+ * stamped on the served face only, and never stored by the Studio round-trip.
+ * The stub registry answers the withheld-field reader the way `SchemaRegistry`
+ * does while the extending package is off.
+ */
+describe('[#34901] the served object carries `_withheldFields`; a GET → edit → PUT never stores it', () => {
+    const WITHHELD = { crm_project: { packageId: 'com.example.projects' } };
+    const withWithheldReader = (engine: any) => {
+        engine.registry.getWithheldExtensionFields = (name: string) => (name === 'crm_invoice' ? WITHHELD : {});
+        return engine;
+    };
+
+    it('stripReadDecorations removes it', () => {
+        expect(stripReadDecorations({ name: 'x', _withheldFields: WITHHELD })).toEqual({ name: 'x' });
+    });
+
+    it('the served read stamps it, the layered (editor) read does not, and the PUT stores none of it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(withWithheldReader(engine));
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: objectBody('crm_invoice') });
+        const firstStored = storedBody(rows, 'crm_invoice');
+
+        const served: any = (await protocol.getMetaItem({ type: 'object', name: 'crm_invoice' })).item;
+        expect(served._withheldFields, 'precondition: the served read carries the marker').toEqual(WITHHELD);
+
+        const layered: any = await (protocol as any).getMetaItemLayered({ type: 'object', name: 'crm_invoice' });
+        expect(JSON.stringify(layered ?? null)).not.toContain('_withheldFields');
+
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: { ...served, label: 'Invoice (edited)' } });
+        const stored = storedBody(rows, 'crm_invoice');
+        expect('_withheldFields' in stored).toBe(false);
+        expect({ ...stored, label: firstStored.label }).toEqual(firstStored);
+    });
+
+    it('control: nothing withheld ⇒ no marker on the served read', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(withWithheldReader(engine));
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_other', item: objectBody('crm_other') });
+        const served: any = (await protocol.getMetaItem({ type: 'object', name: 'crm_other' })).item;
+        expect('_withheldFields' in served).toBe(false);
+    });
+});
+
 describe('a served document survives its own (closed) schema — cloud#971', () => {
     /** Serve `flowBody(name)` back through the real read path. */
     async function serveFlow(name: string): Promise<Record<string, unknown>> {

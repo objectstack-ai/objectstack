@@ -16,8 +16,17 @@
  *   its access         POST /api/v1/data/sys_user_permission_set { user_id,
  *                      permission_set, organization_id } — a user with no app permission
  *                      set reads `PERMISSION_DENIED` on every app object
- *   a seed row         POST /api/v1/data/:object with the card's own `id` (accepted
- *                      verbatim, so a lookup value in the seed names the real row)
+ *   the seed rows      the managed install door below, with a data-only package whose
+ *                      `data[]` holds them (`loadSeedRows` in `orchestrate.ts`): the
+ *                      platform's seed loader writes them under its seed posture, which
+ *                      skips the `state_machine` rule a user write meets. Measured on a
+ *                      blank 18.5.0 host with the travel_expense build installed: every
+ *                      row keeps the card's own `id`, a lookup value names the row
+ *                      seeded under it, a user id in `owner_id` or a `user` field lands
+ *                      as sent, and the answer's `data.seeded.errorList` names each row
+ *                      refused (`sourceObject`, `recordIndex`, `message`; no code). A
+ *                      second package claiming a namespace another holds is refused
+ *                      (`PLUGIN_REGISTER_FAILED`), so each load takes its own
  *   a waiting lookup   PATCH /api/v1/data/:object/:id with the bare field patch (the
  *                      seed's second pass, `seedApp` in `orchestrate.ts`; read from the
  *                      route's source, `packages/rest/src/crud-routes.ts`, not yet
@@ -43,10 +52,24 @@
  *                      answer is its text content; a refusal is that text carrying
  *                      `{ error: { code, status } }` with `isError` set.
  *
+ * Door mode's doors (`doorMode` in `orchestrate.ts`), read from their sources and
+ * the in-process dogfood that drives the same OAuth flow, not yet measured
+ * against `os dev`:
+ *
+ *   a writable package POST /api/v1/packages { manifest } — Studio's new-package
+ *                      door; a scope-less package is a writable base (ADR-0070)
+ *   the door's token   {@link mintAuthoringToken}: OAuth 2.1 + PKCE as the admin
+ *   pending drafts     GET  /api/v1/meta/_drafts?package=…
+ *   the person's publish POST /api/v1/packages/:id/publish-drafts — Studio's
+ *                      Changes > Publish; a refusal answers `outcome: refused`
+ *                      with `failed[]` on a 200
+ *
  * The data API's refusal is the flat `{ error, code }` envelope; the auth and
  * install doors answer `{ success: false, error: { code, message } }`. Both
  * are read by {@link codeOf}.
  */
+
+import { createHash, randomBytes } from 'node:crypto';
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/meta-spelling';
 
@@ -149,14 +172,41 @@ export interface AppHarness {
    * The same build installed managed (`installMode: 'managed'`): what ask mode
    * falls back to when the unmanaged door refuses the build
    * `UNMANAGED_INSTALL_UNCOPYABLE` (`withInstalledBuild` in `orchestrate.ts`).
+   * It is also the door the seed loads through: a data-only package whose
+   * `data[]` holds the rows (`loadSeedRows` in `orchestrate.ts`).
    * Optional, so a harness written before the fallback keeps compiling; without
-   * it that refusal stays the mode's finding.
+   * it that refusal stays the mode's finding, and every seed row is refused.
    */
   installManaged?(manifest: Record<string, unknown>): Promise<HttpAnswer>;
+  /**
+   * The sample-data reseed of a package the managed door installed
+   * (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`):
+   * its `data[]` loaded again under the deliberate re-seed posture, which
+   * inserts every missing row whatever the organization's record of landed
+   * seed rows says. It is how a restore puts back a seeded row a turn removed,
+   * which an install withholds (`loadSeedRows` in `orchestrate.ts`). Optional,
+   * so a harness written before it keeps compiling; without it such a row is
+   * refused, named, and the operation is not measured.
+   */
+  reseedManaged?(manifestId: string): Promise<HttpAnswer>;
   /** The environment's metadata of every collection the template carries, as an artifact. */
   metadataAsArtifact(collections: readonly string[]): Promise<Record<string, unknown[]>>;
   /** One MCP tool call as the owner of `apiKey`, through the door the agent uses (`mcpUrl`). */
   callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer>;
+  // ── Door mode (`doorMode` in `orchestrate.ts`): each optional, so a harness
+  // written before it keeps compiling; without them door mode is skipped, saying so.
+  /** Studio's new-package door as the signed-in admin: `POST /api/v1/packages { manifest }`. */
+  createPackage?(manifest: Record<string, unknown>): Promise<HttpAnswer>;
+  /**
+   * An OAuth access token for the MCP door, consented by the signed-in admin
+   * and scoped `scope` (`mintAuthoringToken`, below): what a person's MCP
+   * client holds after they connect it. Never written to a record.
+   */
+  mintAuthoringToken?(scope: string): Promise<HttpAnswer & { token?: string }>;
+  /** The package's pending drafts, as Studio's Changes review lists them: `GET /api/v1/meta/_drafts?package=`. */
+  listDrafts?(packageId: string): Promise<HttpAnswer & { drafts: Array<{ type: string; name: string }> }>;
+  /** Studio's publish of a package's drafts, as the signed-in admin: `POST /api/v1/packages/:id/publish-drafts`. */
+  publishDrafts?(packageId: string): Promise<HttpAnswer>;
 }
 
 export interface HttpAppOptions {
@@ -326,6 +376,10 @@ export class HttpApp implements AppHarness {
     return this.call('POST', '/api/v1/marketplace/install-local', { packageId, manifest, installMode: 'managed' }, { session: this.admin });
   }
 
+  reseedManaged(manifestId: string): Promise<HttpAnswer> {
+    return this.call('POST', `/api/v1/marketplace/install-local/${encodeURIComponent(manifestId)}/reseed-sample-data`, {}, { session: this.admin });
+  }
+
   async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
     const res = await fetch(this.mcpUrl, {
       method: 'POST',
@@ -339,6 +393,26 @@ export class HttpApp implements AppHarness {
     return toolAnswerOf(rpc.result);
   }
 
+  createPackage(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.call('POST', '/api/v1/packages', { manifest }, { session: this.admin });
+  }
+
+  async mintAuthoringToken(scope: string): Promise<HttpAnswer & { token?: string }> {
+    return mintAuthoringToken(this.baseUrl, this.admin.header(), scope);
+  }
+
+  async listDrafts(packageId: string): Promise<HttpAnswer & { drafts: Array<{ type: string; name: string }> }> {
+    const r = await this.call('GET', `/api/v1/meta/_drafts?package=${encodeURIComponent(packageId)}`, undefined, { session: this.admin });
+    const body = r.body as { drafts?: unknown; data?: { drafts?: unknown } } | null;
+    const raw = body?.drafts ?? body?.data?.drafts;
+    const drafts = (Array.isArray(raw) ? raw : []).filter(isBag).map((d) => ({ type: String(d.type ?? ''), name: String(d.name ?? '') }));
+    return { ...r, drafts };
+  }
+
+  publishDrafts(packageId: string): Promise<HttpAnswer> {
+    return this.call('POST', `/api/v1/packages/${encodeURIComponent(packageId)}/publish-drafts`, {}, { session: this.admin });
+  }
+
   async metadataAsArtifact(collections: readonly string[]): Promise<Record<string, unknown[]>> {
     const out: Record<string, unknown[]> = {};
     for (const plural of collections) {
@@ -350,4 +424,84 @@ export class HttpApp implements AppHarness {
     }
     return out;
   }
+}
+
+/** The redirect URI the runner registers for its token: never served, the code is read off the redirect itself. */
+const DOOR_REDIRECT_URI = 'http://127.0.0.1:33419/callback';
+
+/**
+ * An OAuth access token for the MCP door, the way a person's MCP client gets
+ * one (OAuth 2.1 with PKCE, the flow `packages/qa/dogfood` drives in process):
+ * read the protected resource the app advertises
+ * (`GET /.well-known/oauth-protected-resource`), register a public client
+ * (`POST /api/v1/auth/oauth2/register`), authorize it as the signed-in person
+ * (`cookie`), consenting when asked (`POST /api/v1/auth/oauth2/consent`), and
+ * trade the code for the token (`POST /api/v1/auth/oauth2/token`). Each step
+ * that answers otherwise is the answer, naming the step: absence is loud, and
+ * the mode records it instead of running a client that holds no door.
+ */
+export async function mintAuthoringToken(baseUrl: string, cookie: string, scope: string): Promise<HttpAnswer & { token?: string }> {
+  const read = async (res: Response): Promise<unknown> => {
+    const text = await res.text();
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return text;
+    }
+  };
+  const refused = (step: string, res: Response, body: unknown): HttpAnswer => {
+    const c = codeOf(body);
+    const oauth = isBag(body) && typeof body.error === 'string' ? { code: body.error, message: String(body.error_description ?? '') } : {};
+    return { ok: false, status: res.status, body: null, ...c, ...oauth, message: `${step}: ${c.message ?? (oauth as { message?: string }).message ?? res.statusText}`.slice(0, 500) };
+  };
+  const prm = await fetch(`${baseUrl}/.well-known/oauth-protected-resource`, { headers: { accept: 'application/json' } });
+  const prmBody = await read(prm);
+  const resource = isBag(prmBody) && typeof prmBody.resource === 'string' ? prmBody.resource : undefined;
+  if (!prm.ok || resource === undefined) return refused('the app advertises no OAuth protected resource for its MCP door', prm, prmBody);
+
+  const reg = await fetch(`${baseUrl}/api/v1/auth/oauth2/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      client_name: 'scenario runner (door mode)',
+      redirect_uris: [DOOR_REDIRECT_URI],
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+      application_type: 'native',
+      scope,
+    }),
+  });
+  const regBody = await read(reg);
+  const clientId = isBag(regBody) && typeof regBody.client_id === 'string' ? regBody.client_id : undefined;
+  if (!reg.ok || clientId === undefined) return refused('client registration', reg, regBody);
+
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const qs = new URLSearchParams({ client_id: clientId, redirect_uri: DOOR_REDIRECT_URI, response_type: 'code', scope, state: 'scenario', code_challenge: challenge, code_challenge_method: 'S256', resource });
+  const az = await fetch(`${baseUrl}/api/v1/auth/oauth2/authorize?${qs}`, { headers: { cookie }, redirect: 'manual' });
+  const loc = az.headers.get('location') ?? '';
+  let code = loc ? new URL(loc, baseUrl).searchParams.get('code') : null;
+  if (!code) {
+    if (!loc) return refused('authorization', az, await read(az));
+    // The consent screen: the person accepts, as they would in the browser.
+    const consent = await fetch(`${baseUrl}/api/v1/auth/oauth2/consent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json', cookie, origin: baseUrl },
+      body: JSON.stringify({ accept: true, oauth_query: loc.slice(loc.indexOf('?') + 1) }),
+    });
+    const cb = await read(consent);
+    const to = isBag(cb) ? (typeof cb.redirect_uri === 'string' ? cb.redirect_uri : typeof cb.url === 'string' ? cb.url : undefined) : undefined;
+    code = to ? new URL(to, baseUrl).searchParams.get('code') : null;
+    if (!consent.ok || !code) return refused('consent', consent, cb);
+  }
+  const tok = await fetch(`${baseUrl}/api/v1/auth/oauth2/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: DOOR_REDIRECT_URI, client_id: clientId, code_verifier: verifier, resource }).toString(),
+  });
+  const tj = await read(tok);
+  const token = isBag(tj) && typeof tj.access_token === 'string' ? tj.access_token : undefined;
+  if (!tok.ok || token === undefined) return refused('token exchange', tok, tj);
+  return { ok: true, status: tok.status, body: { scope: isBag(tj) && typeof tj.scope === 'string' ? tj.scope : scope }, token };
 }

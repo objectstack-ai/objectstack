@@ -441,8 +441,68 @@ export interface DeclaredToday {
   agentSet?: Readonly<Record<string, readonly string[]>>;
 }
 
-function matches(row: Row, where: Readonly<Record<string, Scalar>>, object: string, today: DeclaredToday): boolean {
+/** The card's declared lookups (`expect.lookups`), which a post-state's relation path hops through. */
+export type DeclaredLookups = ScenarioCard['expect']['lookups'];
+
+/** The lookup target of `object.field`, or `undefined` when the card declares no such lookup. */
+const lookupTarget = (lookups: DeclaredLookups, object: string, field: string): string | undefined =>
+  (lookups ?? []).find((l) => l.object === object && l.field === field)?.to;
+
+/**
+ * The objects a post-state's `where` relation paths hop to (`claim.trip` on
+ * `claim_line` reaches `expense_claim`): the runner reads their rows after the
+ * turn beside the post-states' own objects, so a path resolves.
+ */
+export function relationObjects(op: CardOperation, lookups: DeclaredLookups): string[] {
+  if (op.outcome.kind !== 'applied') return [];
+  const out = new Set<string>();
+  for (const s of op.outcome.state) {
+    for (const key of Object.keys(s.where ?? {})) {
+      let cur: string | undefined = s.object;
+      for (const seg of key.split('.').slice(0, -1)) {
+        cur = cur === undefined ? undefined : lookupTarget(lookups, cur, seg);
+        if (cur !== undefined) out.add(cur);
+      }
+    }
+  }
+  return [...out];
+}
+
+/**
+ * A relation path read off `row` of `object`: each hop but the last follows
+ * the lookup's id to the target object's row as read after the turn. A hop the
+ * card declares no lookup for, an id that is no string, or an id naming no row
+ * read back reads `undefined`, which matches nothing but a declared `null`.
+ */
+function readPath(row: Row, object: string, path: string, rowsByObject: Readonly<Record<string, readonly Row[]>>, lookups: DeclaredLookups): unknown {
+  const segs = path.split('.');
+  let cur = object;
+  let r: Row | undefined = row;
+  for (const seg of segs.slice(0, -1)) {
+    const to = lookupTarget(lookups, cur, seg);
+    const id: unknown = r[seg];
+    r = to !== undefined && typeof id === 'string' ? (rowsByObject[to] ?? []).find((x) => String(x.id) === id) : undefined;
+    if (r === undefined) return undefined;
+    cur = to as string;
+  }
+  return r[segs[segs.length - 1]!];
+}
+
+function matches(
+  row: Row,
+  where: Readonly<Record<string, Scalar>>,
+  object: string,
+  today: DeclaredToday,
+  rowsByObject: Readonly<Record<string, readonly Row[]>> = {},
+  lookups: DeclaredLookups = [],
+): boolean {
   return Object.entries(where).every(([k, v]) => {
+    // A relation path matches strictly: the card's-today reading below is
+    // about a field the platform stamped on this row, not on a parent.
+    if (k.includes('.')) {
+      const read = readPath(row, object, k, rowsByObject, lookups);
+      return v === null ? read === null || read === undefined : read === v;
+    }
     if (v === null) return row[k] === null || row[k] === undefined;
     if (row[k] === v) return true;
     if (today.agentSet === undefined || (today.agentSet[object] ?? []).includes(k)) return false;
@@ -450,12 +510,21 @@ function matches(row: Row, where: Readonly<Record<string, Scalar>>, object: stri
   });
 }
 
-/** Per declared post-state, the rows the data API returned for its `id` / `where`. */
-export function postStateRows(op: CardOperation, rowsByObject: Readonly<Record<string, readonly Row[]>>, today: DeclaredToday = {}): Row[][] | undefined {
+/**
+ * Per declared post-state, the rows the data API returned for its `id` /
+ * `where`; a relation path in a `where` reads through `lookups` and the rows
+ * of `rowsByObject` ({@link relationObjects} names the objects it needs).
+ */
+export function postStateRows(
+  op: CardOperation,
+  rowsByObject: Readonly<Record<string, readonly Row[]>>,
+  today: DeclaredToday = {},
+  lookups: DeclaredLookups = [],
+): Row[][] | undefined {
   if (op.outcome.kind !== 'applied') return undefined;
   return op.outcome.state.map((s) => {
     const rows = rowsByObject[s.object] ?? [];
-    return s.id !== undefined ? rows.filter((r) => String(r.id) === s.id) : rows.filter((r) => matches(r, s.where ?? {}, s.object, today));
+    return s.id !== undefined ? rows.filter((r) => String(r.id) === s.id) : rows.filter((r) => matches(r, s.where ?? {}, s.object, today, rowsByObject, lookups));
   });
 }
 
@@ -475,8 +544,10 @@ export interface ObserveInput {
   /** The operation object's rows before and after the turn. */
   before: readonly Row[];
   after: readonly Row[];
-  /** Every object a declared post-state names, read after the turn. */
+  /** Every object a declared post-state names, and every object its relation paths reach ({@link relationObjects}), read after the turn. */
   rowsByObject: Readonly<Record<string, readonly Row[]>>;
+  /** The card's declared lookups, for a post-state's relation path; absent ⇒ none resolves. */
+  lookups?: DeclaredLookups;
   /** The persona the audit trail named for the touched row; `null` = named none; absent = not read. */
   auditActor?: string | null;
   /** A probed operation's probe ({@link observeProbe}); absent = not run. */
@@ -503,7 +574,7 @@ export function observeOperation(input: ObserveInput): OperationObservation {
     withheld: withheldWrite(input.turn, input.op.object, writes),
   };
   const agentSet = input.today?.agentSet ?? agentSetOf(input.op, input.turn);
-  const state = postStateRows(input.op, input.rowsByObject, { ...input.today, agentSet });
+  const state = postStateRows(input.op, input.rowsByObject, { ...input.today, agentSet }, input.lookups);
   if (state) obs.state = state;
   if (input.today?.runDates !== undefined) obs.runDates = input.today.runDates;
   obs.agentSet = agentSet;
@@ -551,9 +622,14 @@ export function observeProbe(call: ProbeCall, answer: ToolAnswer, before: readon
 }
 
 /** The id of the row an applied operation touched: its target, or the first `where` match. */
-export function touchedRowId(op: CardOperation, rowsByObject: Readonly<Record<string, readonly Row[]>>, today: DeclaredToday = {}): string | undefined {
+export function touchedRowId(
+  op: CardOperation,
+  rowsByObject: Readonly<Record<string, readonly Row[]>>,
+  today: DeclaredToday = {},
+  lookups: DeclaredLookups = [],
+): string | undefined {
   if (op.target !== undefined) return op.target;
-  const rows = postStateRows(op, rowsByObject, today);
+  const rows = postStateRows(op, rowsByObject, today, lookups);
   const first = rows?.[0]?.[0];
   return first ? String(first.id) : undefined;
 }

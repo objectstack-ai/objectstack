@@ -48,6 +48,8 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.bulk.all': '全选',
   'perm.bulk.none': '清空',
   'perm.bulk.allTip': '授予除导出外的所有列;导出只能单独勾选',
+  'perm.more.col': '更多权限',
+  'perm.more.count': '已开 {count} 项',
   // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
   'perm.scope.unset': '未设置',
   'perm.scope.value.own': '本人',
@@ -497,6 +499,12 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.requiredWhen': '必填条件',
   'designer.field.conditionalRulesHint':
     '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
+  'designer.field.requiredVisibleWhenReference':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。条件经由引用字段 {fields} 读取关联记录，服务器在这里无法读取，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。请改为读取本对象自己的字段。',
+  'designer.field.requiredVisibleWhenFormula':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填，其中的 {fields} 按要保存的记录计算。表单在你编辑时也会同样计算该公式；但向导最后提交时的检查，以及数据源不提供对象定义的表单，用的是上次读取的公式值（新建记录时没有值），可能与服务器的判断不一致。',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    '{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录都仍要求填写。表单同样无法计算它：会显示该字段并保持必填。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',
@@ -586,6 +594,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow node inspector
   'engine.inspector.flowNode.kind': '节点',
   'engine.inspector.flowNode.close': '关闭节点',
+  'engine.inspector.flowNode.sourceLabel': '原文标签：“{label}”',
   'engine.inspector.flowNode.id': 'ID',
   'engine.inspector.flowNode.idRequired': '未重命名：节点必须有 ID。',
   'engine.inspector.flowNode.idTaken': '未重命名：此流程中已有另一个节点的 ID 是“{id}”。',
@@ -619,14 +628,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.value': '值',
   'engine.inspector.flowNode.kv.remove': '删除条目',
   'engine.inspector.flowNode.kv.empty': '暂无条目。',
-  'engine.inspector.flowNode.kv.asExpression': '写成 CEL 表达式',
-  'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL 表达式，例如 joinNonEmpty(…)',
-  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
+  'engine.inspector.flowNode.kv.asExpression': '写成公式',
+  'engine.inspector.flowNode.kv.expressionPlaceholder': '公式，例如 joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个公式。请填写公式，或把这个值切回文本。',
   'engine.inspector.flowNode.kv.undeclaredKey': '该动作没有声明这个输入，运行时会拒绝它。请删除它，或选择声明了它的动作。',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': '更新触发记录',
-  'engine.inspector.flowNode.triggeringRecord.hint': '目标为启动此流程的那条 {object} 记录。',
-  'engine.inspector.flowNode.triggeringRecord.active': '更新启动此流程的那条 {object} 记录。',
+  'engine.inspector.flowNode.triggeringRecord.hint': '目标为启动此流程的那条「{object}」记录。',
+  'engine.inspector.flowNode.triggeringRecord.active': '更新启动此流程的那条「{object}」记录。',
   'engine.inspector.flowNode.list.add': '添加项',
   'engine.inspector.flowNode.list.item': '值',
   'engine.inspector.flowNode.list.remove': '删除项',
@@ -638,6 +647,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.help.learnMore': '了解更多',
   'engine.inspector.flowNode.help.showLess': '收起',
   'engine.inspector.flowNode.remove': '删除节点',
+  // objectstack#34796 — the node panel's header menu and its collapsed section for the node id.
+  'engine.inspector.flowNode.moreActions': '更多操作',
+  'engine.inspector.flowNode.developerInfo': '开发者信息',
   // App nav inspector
   'engine.inspector.appNav.kind': '导航项',
   'engine.inspector.appNav.close': '关闭导航项',
@@ -1338,6 +1350,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.view.type.map': '地图',
   'engine.inspector.view.type.chart': '图表',
   'engine.inspector.view.type.tree': '树形',
+  'engine.inspector.view.type.timesheet': '工时表',
   // Report default ("home") inspector
   'engine.inspector.report.kind': '报表',
   'engine.inspector.report.close': '关闭报表',
@@ -1422,7 +1435,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.reference.managerPlaceholder': '自动解析',
   'engine.inspector.reference.managerHint': '运行时根据提交人的上级自动解析 —— 无需填写。',
   'engine.inspector.reference.queueHint': '队列的机器名。步骤开启时队列的成员即为审批人；空队列不会添加任何人。',
-  'engine.inspector.reference.fieldsOf': '{object} 的字段。',
+  'engine.inspector.reference.fieldsOf': '「{object}」的字段。',
   'engine.inspector.reference.setTriggerObject': '请先在开始节点上设置流程的触发对象，才能列出字段。',
   'engine.inspector.reference.actionsOf': '{connector} 的动作。',
   'engine.inspector.reference.chooseConnector': '请先在上方选择连接器，才能列出其动作。',
@@ -1439,7 +1452,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.recipients.placeholder.user': '选择用户',
   'engine.inspector.recipients.placeholder.team': '选择团队',
   'engine.inspector.recipients.placeholder.email': 'name@example.com',
-  'engine.inspector.recipients.placeholder.expression': 'CEL 表达式，例如 ownerId',
+  'engine.inspector.recipients.placeholder.expression': '公式，例如 ownerId',
   'engine.inspector.recipients.placeholder.custom': '按原样保存，例如 role:admin',
   'engine.inspector.recipients.add': '添加收件人',
   'engine.inspector.recipients.remove': '移除收件人',
@@ -1724,6 +1737,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.create.submit': '创建软件包',
   'engine.packages.create.failed': '创建软件包失败',
   'engine.packages.create.exists': '已存在相同 ID 的软件包。',
+  'engine.packages.create.created': '已创建软件包「{name}」。',
   // objectstack#8270 — 这条正是在 zh 控制台里显示为英文原文的服务端拒绝信息。
   'engine.packages.noCapability': '你没有在本系统管理软件包的权限 — 该操作需要「管理元数据」权限。',
   'engine.packages.form.basics': '基本信息',
@@ -1991,7 +2005,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.tab.advanced': '高级',
   'engine.studio.data.nameLabel': '对象名称',
   'engine.studio.data.idLabel': '标识',
-  'engine.studio.auto.nameLabel': '流程名称',
+  'engine.studio.auto.nameLabel': '自动化名称',
   'engine.studio.auto.idLabel': '标识',
   'engine.studio.access.nameLabel': '名称',
   'engine.studio.access.idLabel': '标识',
@@ -2250,6 +2264,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.definitionTitle': '{label} · 定义',
   // The shared rail (objectstack#26733): the action under a search that matched nothing.
   'engine.studio.rail.clearSearch': '清除搜索',
+  // objectstack#35061: the narrow rail's top button, which floats the whole list over the content and back.
+  'engine.studio.rail.expand': '展开完整列表',
+  'engine.studio.rail.collapse': '收回窄栏',
   // Data pillar
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',
@@ -2404,14 +2421,19 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.title': '权限矩阵',
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
-    '此矩阵仅列出本包声明的对象,「Save」只合并本包切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效(与数据、界面一致)。',
-  'engine.studio.access.banner': '仅本包对象 · 保存为草稿',
+    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后随应用一起生效（与数据、界面一致）。',
+  'engine.studio.access.banner': '本应用对象 · 发布后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': '本包及 {package} 的对象 · 保存为草稿',
+  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 发布后生效',
+  // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
+  'engine.studio.access.origin.app': '随应用提供',
+  // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
+  'engine.studio.copilot.subject.access': '权限',
+  'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
-    '此权限集位于 {package} 的定制包中，因此矩阵除本包声明的对象外，也列出 {package} 的对象；「Save」只合并这一切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效。',
+    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后生效。',
   'engine.studio.access.bannerTitleReadOnly':
-    '此矩阵仅列出本包声明的对象。本软件包为只读:其权限集可在此查看,但不能修改。',
+    '这里只列出本应用的对象。这个应用是只读的：可以查看它的权限集，但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
   'engine.studio.access.suggestPromptEveryone': '建议让所有成员默认拥有「{set}」，新加入的人也会自动拥有。',
   'engine.studio.access.suggestPromptGuest': '建议让未登录的访客默认拥有「{set}」。',
@@ -2482,6 +2504,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.operation': '操作',
   'engine.studio.access.explain.run': '解释',
   'engine.studio.access.explain.running': '解释中…',
+  'engine.studio.access.explain.needObject': '请先选择对象',
   'engine.studio.access.explain.allowedLine': '该主体对「{object}」执行 {operation} 将被【允许】。',
   'engine.studio.access.explain.deniedLine': '该主体对「{object}」执行 {operation} 将被【拒绝】。',
   'engine.studio.access.explain.principal': '主体',
@@ -2883,6 +2906,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.createDraft': '存为草稿',
   'engine.studio.saveDraft': '保存草稿',
   'engine.studio.autoSaving': '保存中…',
+  // objectstack#34818 — 流程标题行的「已保存」、读屏时念出的完整说法，以及唯一保留的提示（保存失败）。
+  'engine.studio.autoSaved': '已保存',
+  'engine.studio.flowSavedNamed': '流程「{item}」已保存',
+  'engine.studio.flowSaveFailed': '「{item}」的草稿没有保存成功',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': '应用名称',
   'engine.studio.app.idLabel': '标识',
@@ -3055,6 +3082,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.customizations.failed': '无法读取定制',
   'engine.studio.landing.customizations.pairTitle': '在 Studio 中打开定制包 {pair}',
   'engine.studio.landing.customizations.switchedOffTitle': '打开该软件包的自动化，在那里启用或停用其中的项',
+  'engine.studio.landing.customizations.switchedOffActionsLead': '动作：',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '另 {count} 项',
+  'engine.studio.landing.customizations.switchedOffActionsTitle': '打开已停用的动作：在动作上即可重新启用',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': '不属于软件包',
   'engine.studio.org.name': '组织流程',
@@ -3299,6 +3329,11 @@ const STUDIO_ZH: Record<string, string> = {
   // Actions view
   'engine.studio.actions.none': '该对象没有操作。',
   'engine.studio.actions.newButton': '新建操作',
+  // objectstack#34724 — 只读应用的厂商动作：启停开关。
+  'engine.studio.actions.ledger.hint': '该动作来自只读软件包。此开关只在本部署中启用或停用它，不改动软件包本身。',
+  'engine.studio.actions.ledger.walled': '在此部署中，只有平台运营方可以启用或停用打包动作。',
+  'engine.studio.actions.ledger.offMark': '已停用',
+  'engine.studio.actions.ledger.loadFailed': '无法读取该动作在本部署中是否启用：{message}',
   'engine.studio.actions.editorMissing': '本次会话没有注册操作编辑器,因此无法在这里编辑该操作的属性。',
   'engine.studio.actions.newLabel': '新操作',
   'engine.studio.actions.delete': '删除',
@@ -3670,7 +3705,34 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowPreview.showVars': '显示变量面板',
   'engine.flowPreview.hideVars': '隐藏变量面板',
   'engine.flowPreview.variables': '变量',
-  'engine.flowPreview.noVars': '未声明变量。',
+  'engine.flowPreview.noVars': '还没有变量。变量保存一个值，步骤里用 {{ 名称 }} 读取。标为「输入」可由启动流程的一方传入，标为「输出」会在流程结束时返回。',
+  'engine.flowPreview.addVariable': '添加变量',
+  'engine.flowPreview.vars.name': '变量名',
+  'engine.flowPreview.vars.type': '类型',
+  'engine.flowPreview.vars.default': '默认值',
+  'engine.flowPreview.vars.defaultPlaceholder': '默认值（可选）',
+  'engine.flowPreview.vars.input': '输入',
+  'engine.flowPreview.vars.output': '输出',
+  'engine.flowPreview.vars.remove': '删除变量 {name}',
+  'engine.flowPreview.vars.type.text': '文本',
+  'engine.flowPreview.vars.type.number': '数字',
+  'engine.flowPreview.vars.type.boolean': '是 / 否',
+  'engine.flowPreview.vars.type.object': '对象',
+  'engine.flowPreview.vars.type.list': '列表',
+  'engine.flowPreview.vars.nameBlank': '变量需要一个名称。',
+  'engine.flowPreview.vars.nameDollar': '名称不能以 $ 开头，这类名称归流程引擎所有。',
+  'engine.flowPreview.vars.nameTaken': '已有另一个变量叫 {name}。',
+  'engine.flowPreview.vars.renameRead': '{name} 仍被这些地方读取：{steps}。请先修改这些步骤，再重命名。',
+  'engine.flowPreview.vars.removeRead': '{name} 仍被这些地方读取：{steps}。请先修改这些步骤，再删除。',
+  'engine.flowPreview.vars.listSep': '、',
+  'engine.flowPreview.vars.readerConnection': '某条连线的条件',
+  'engine.flowPreview.vars.readerMessages': '流程的结束提示',
+  'engine.flowPreview.vars.defaultNumber': '数字变量的默认值必须是数字。',
+  'engine.flowPreview.vars.defaultBoolean': '是 / 否变量的默认值必须是 true 或 false。',
+  'engine.flowPreview.vars.defaultObject': '对象变量的默认值必须是 JSON 对象，例如 {"key": "value"}。',
+  'engine.flowPreview.vars.defaultList': '列表变量的默认值必须是 JSON 列表，例如 ["a", "b"]。',
+  'engine.flowPreview.vars.typeHeld': '默认值不符合「{type}」。请先清空或改写默认值，再修改类型。',
+  'engine.flowPreview.vars.inputRecord': '这个输入是 {object} 的记录，因此必须保持为输入。',
   'engine.flowPreview.runsTitle': '来自自动化引擎的运行历史',
   'engine.flowPreview.runs': '运行',
   'engine.flowPreview.problemsTitle': '校验问题',
@@ -3684,6 +3746,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowRuns.refresh': '刷新运行历史',
   'engine.flowRuns.unavailable': '运行历史不可用 —— 自动化引擎已离线,或此流程尚未发布。',
   'engine.flowRuns.empty': '暂无运行记录。',
+  // objectstack#34818 — 上面那句里的两种原因，宿主知道是哪一种时各说各的。
+  'engine.flowRuns.unpublished': '发布并启用后，这里显示每次运行的记录。',
+  'engine.flowRuns.engineOffline': '运行历史暂时不可用 —— 自动化引擎没有响应，请稍后再试。',
   'engine.flowRuns.noSteps': '未记录步骤日志。',
   'engine.flowRuns.iteration': '迭代',
   'engine.flowRuns.iterationN': '第 {n} 次迭代',
@@ -4021,7 +4086,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.inspector.listView.kind': '列表视图',
   'engine.studio.inspector.listView.intro': '画布上的就是这个列表。它的列、筛选与排序保存到本包的草稿,并立即显示在画布上。',
   'engine.studio.inspector.listView.defaultView': '默认视图',
-  'engine.studio.inspector.listView.notCreated': '还没有列表视图「{view}」。在这里做的第一次修改会在本包的草稿中创建它。',
+  'engine.studio.inspector.listView.notCreated': '改动先存为草稿。',
   'engine.studio.inspector.listView.readOnly': '本包只读:这里展示列表视图,不能编辑。',
   'engine.studio.inspector.listView.notList': '「{view}」不是列表视图,因此不在这里编辑。',
   'engine.studio.inspector.listView.filter': '筛选',
@@ -4115,6 +4180,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.category.positions': '岗位',
   'engine.translationPreview.category.permissions': '权限集',
   'engine.translationPreview.category.books': '文档书',
+  'engine.translationPreview.category.mappings': '导入映射',
   'engine.translationPreview.category.metadataForms': '元数据表单',
   'engine.translationPreview.category.settingsCommon': '设置界面',
   'engine.translationPreview.coverage': '分类覆盖率：',

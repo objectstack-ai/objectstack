@@ -33,8 +33,10 @@ import '@objectstack/metadata';
 
 import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 
+import { ACTION_CONFIRMATION_REFUSAL_REASONS } from '@objectstack/spec/contracts';
+
 import { HttpDispatcher } from './http-dispatcher.js';
-import { confirmationGatedStarterOf, flowStartRefusal } from './flow-start-admission.js';
+import { confirmationGatedStartRefusal, confirmationGatedStarterOf, flowStartRefusal } from './flow-start-admission.js';
 
 const OBJECT = 'fcg_invoice';
 const FLOW = 'fcg_void_invoice';
@@ -319,6 +321,51 @@ describe('CONTROLS — what the confirmation-gated start rule leaves exactly as 
             expect(answer.details).toMatchObject({ actionName: GATED_ACTION, confirmationMember: 'confirm' });
             expect(execute).not.toHaveBeenCalled();
         }
+    });
+});
+
+describe('the refusal names its reason, service_account, exactly as the action door does', () => {
+    // The reason an AI service account is refused rides `details.reason`, a
+    // member of the contract's closed set, at every door that answers rule 2b's
+    // 428 — so a client that branches on the reason treats a flow start the way
+    // it treats an action.
+    const SERVICE_ACCOUNT = 'service_account';
+
+    it('the reason is a member of the contract\'s closed refusal-reason set', () => {
+        expect(ACTION_CONFIRMATION_REFUSAL_REASONS).toContain(SERVICE_ACCOUNT);
+    });
+
+    for (const route of ROUTE_NAMES) {
+        it(`${route}: the account's refusal is 428 ACTION_CONFIRMATION_REQUIRED with details.reason service_account`, async () => {
+            const { trigger, execute } = makeDoors();
+
+            const answer = await trigger(route, ACCOUNT_EC, { confirm: true });
+
+            expect(answer.status).toBe(428);
+            expect(answer.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+            expect(answer.details?.reason).toBe(SERVICE_ACCOUNT);
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        it(`${route}: parity — the action door and the trigger route refuse the same account with the same details`, async () => {
+            const doors = makeDoors();
+
+            const action = await doors.actionDoor(ACCOUNT_EC);
+            const start = await doors.trigger(route, ACCOUNT_EC);
+
+            expect(start.details?.reason).toBe(action.details?.reason);
+            expect(action.details?.reason).toBe(SERVICE_ACCOUNT);
+            expect({ status: start.status, code: start.code, details: start.details })
+                .toEqual({ status: action.status, code: action.code, details: action.details });
+            expect(doors.execute).not.toHaveBeenCalled();
+        });
+    }
+
+    it('an object-less gated action\'s refusal carries the reason too', () => {
+        const refusal = confirmationGatedStartRefusal({ action: { name: GATED_ACTION } });
+
+        expect(refusal).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        expect(refusal.details).toEqual({ actionName: GATED_ACTION, confirmationMember: 'confirm', reason: SERVICE_ACCOUNT });
     });
 });
 

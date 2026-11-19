@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario, type Truth } from '../src/index.js';
+import { observeOperation, relationObjects, type Row } from '../src/runner/observe.js';
+import { namespacedScenario } from '../src/runner/namespace.js';
+import type { ParsedTurn } from '../src/runner/transcript.js';
+import { gradeCardOperation } from '../src/score/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD = resolve(HERE, '../../../../docs/qa/scenarios/travel_expense.json');
@@ -203,5 +207,132 @@ describe('scenario card travel_expense (docs/qa/scenarios/travel_expense.json)',
     });
     expect(() => assertPinned(copy)).toThrow();
     expect(copy.truths.top_claimants).not.toEqual(EXPECTED_TRUTHS.top_claimants);
+  });
+});
+
+/**
+ * `file_and_submit_from_text` grades the per-type amounts, not the line
+ * shape: "two hotel nights at 430 each and three days of meals at 115" is one
+ * hotel line of quantity 2 and one meals line of quantity 3, or two hotel
+ * lines and three meals lines of quantity 1, and both are the same claim. The
+ * observation is built as the runner builds it (the namespaced card, the rows
+ * the data API reads after the turn, the card's lookups), over the full seed,
+ * whose other claims carry hotel and meals lines of their own.
+ */
+describe('travel_expense file_and_submit_from_text: the per-type amounts, in either line shape', () => {
+  const scenario = namespacedScenario(load(CARD));
+  const ns = (o: string) => `demotravel_${o}`;
+  const op = scenario.card.run.operations.find((o) => o.id === 'file_and_submit_from_text')!;
+  const seed = scenario.card.run.seed;
+  // The claim and lines the area's iteration-2 workspace run read back
+  // (recorded turn `travel_expense/ask/run/file_and_submit_from_text/employee`):
+  // quantity 2 and 3, filed, and left in draft because the build's own
+  // submit failed.
+  const claim: Row = { id: 'cLCnt_a9Ig1NRmjn', name: 'EC-0007-08157', claimant: 'e02', department: 'dep_sales', trip: 't121', claim_date: '2026-11-17', total_amount: 1205, status: 'draft', paid_on: null };
+  const line = (id: string, expense_type: string, expense_date: string, quantity: number, unit_amount: number, cap_amount: number): Row => ({
+    id, claim: claim.id, expense_type, expense_date, quantity, unit_amount, amount: quantity * unit_amount, cap_amount, over_standard: unit_amount > cap_amount, over_reason: null,
+  });
+  const QUANTITY_LINES = [line('hr0PpRfaFH0U49fV', 'hotel', '2026-11-12', 2, 430, 500), line('GbQxASaiLpHHIPxm', 'meals', '2026-11-12', 3, 115, 150)];
+  // The per-night and per-day lines the five-rep round's agent sent on 18.5.0
+  // (same turn key; its filing action failed there, so these are the lines it
+  // asked for, read back as the build would store them).
+  const PER_UNIT_LINES = [
+    line('pu_h1', 'hotel', '2026-11-12', 1, 430, 500),
+    line('pu_h2', 'hotel', '2026-11-13', 1, 430, 500),
+    line('pu_m1', 'meals', '2026-11-12', 1, 115, 150),
+    line('pu_m2', 'meals', '2026-11-13', 1, 115, 150),
+    line('pu_m3', 'meals', '2026-11-14', 1, 115, 150),
+  ];
+  // Another new claim on another trip, with a hotel line at 430 of its own:
+  // the relation path keeps it out of t121's sums.
+  const decoyClaim: Row = { id: 'decoy', claimant: 'e02', trip: 't124', total_amount: 430, status: 'draft' };
+  const decoyLine: Row = { id: 'decoy_h', claim: 'decoy', expense_type: 'hotel', quantity: 1, unit_amount: 430, amount: 430, over_standard: true };
+  const turn: ParsedTurn = {
+    replyText: 'Filed and submitted.',
+    toolCalls: [{ name: 'run_action', rawName: 'mcp__app__run_action', input: { objectName: ns('expense_claim'), params: { trip: 't121' } }, output: '{"id":"cLCnt_a9Ig1NRmjn"}' }],
+    meta: {},
+  };
+  const grade = (claimRow: Row, lines: readonly Row[], extra: { claims?: Row[]; lines?: Row[] } = {}) => {
+    const claims = [...seed[ns('expense_claim')]!, claimRow, ...(extra.claims ?? [])];
+    const allLines = [...seed[ns('claim_line')]!, ...lines, ...(extra.lines ?? [])];
+    const observation = observeOperation({
+      op,
+      turn,
+      before: seed[ns('expense_claim')]!,
+      after: claims,
+      rowsByObject: { [ns('expense_claim')]: claims, [ns('claim_line')]: allLines },
+      lookups: scenario.card.expect.lookups,
+      auditActor: 'employee',
+    });
+    return gradeCardOperation(scenario, op.id, observation);
+  };
+  const failing = (g: ReturnType<typeof grade>) => g.checks.filter((c) => !c.pass).map((c) => c.check);
+  const submitted = { ...claim, status: 'submitted' };
+
+  it('declares the per-type sums and the no-line-over-standard check, scoped to the claim for t121, and keeps the claim-level checks', () => {
+    expect(op.outcome).toEqual({
+      kind: 'applied',
+      state: [
+        { object: ns('expense_claim'), where: { trip: 't121' }, values: { claimant: 'e02', status: 'submitted', total_amount: 1205 } },
+        { object: ns('claim_line'), where: { 'claim.trip': 't121', expense_type: 'hotel' }, sum: { amount: 860 } },
+        { object: ns('claim_line'), where: { 'claim.trip': 't121', expense_type: 'meals' }, sum: { amount: 345 } },
+        { object: ns('claim_line'), where: { 'claim.trip': 't121' }, each: { over_standard: false } },
+      ],
+      auditActor: 'employee',
+    });
+    // The path hops claim_line.claim to expense_claim, which the runner reads after the turn.
+    expect(relationObjects(op, scenario.card.expect.lookups)).toEqual([ns('expense_claim')]);
+  });
+
+  it('passes the quantity-2/3 lines and the per-night/per-day lines alike, the seed\'s other lines and another new claim left out', () => {
+    const qty = grade(submitted, QUANTITY_LINES, { claims: [decoyClaim], lines: [decoyLine] });
+    expect(failing(qty)).toEqual([]);
+    expect(qty.pass).toBe(true);
+    expect(qty.checks.map((c) => c.detail)).toContain('read 860 = 860 over 1 row(s), declared 860');
+    const perUnit = grade(submitted, PER_UNIT_LINES, { claims: [decoyClaim], lines: [decoyLine] });
+    expect(failing(perUnit)).toEqual([]);
+    expect(perUnit.checks.map((c) => c.detail)).toEqual(expect.arrayContaining([
+      'read 430 + 430 = 860 over 2 row(s), declared 860',
+      'read 115 + 115 + 115 = 345 over 3 row(s), declared 345',
+      '5 of 5 row(s) read false',
+    ]));
+  });
+
+  it('the recorded run still fails on status alone: its claim stayed in draft', () => {
+    expect(failing(grade(claim, QUANTITY_LINES))).toEqual([`state:${ns('expense_claim')}[trip="t121"].status`]);
+  });
+
+  it('fails a wrong filing: one hotel night short, a line over the standard, or no lines on the claim', () => {
+    const hotelSum = `state:${ns('claim_line')}[claim.trip="t121",expense_type="hotel"].sum(amount)`;
+    const each = `state:${ns('claim_line')}[claim.trip="t121"].each(over_standard)`;
+    // One night filed: hotel 430, not 860 (the claim total is wrong too).
+    expect(failing(grade({ ...submitted, total_amount: 775 }, PER_UNIT_LINES.filter((l) => l.id !== 'pu_h2')))).toEqual([
+      `state:${ns('expense_claim')}[trip="t121"].total_amount`,
+      hotelSum,
+    ]);
+    // A third line on the claim, over the standard, though the per-type sums stand.
+    const taxi = { ...line('pu_t1', 'taxi', '2026-11-12', 1, 90, 80) };
+    expect(taxi.over_standard).toBe(true);
+    expect(failing(grade(submitted, [...PER_UNIT_LINES, taxi]))).toEqual([each]);
+    // The claim landed with no lines: every aggregate reads no row.
+    expect(failing(grade(submitted, []))).toEqual([
+      `state:${ns('claim_line')}[claim.trip="t121",expense_type="hotel"]->rows`,
+      `state:${ns('claim_line')}[claim.trip="t121",expense_type="meals"]->rows`,
+      `state:${ns('claim_line')}[claim.trip="t121"]->rows`,
+    ]);
+  });
+
+  it('without the card\'s lookups no line resolves to the claim, so the operation fails rather than summing every hotel line', () => {
+    const claims = [...seed[ns('expense_claim')]!, submitted];
+    const observation = observeOperation({
+      op,
+      turn,
+      before: seed[ns('expense_claim')]!,
+      after: claims,
+      rowsByObject: { [ns('expense_claim')]: claims, [ns('claim_line')]: [...seed[ns('claim_line')]!, ...QUANTITY_LINES] },
+      auditActor: 'employee',
+    });
+    expect(observation.state!.slice(1).map((rows) => rows.length)).toEqual([0, 0, 0]);
+    expect(gradeCardOperation(scenario, op.id, observation).pass).toBe(false);
   });
 });

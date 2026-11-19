@@ -144,7 +144,7 @@ export const drawableUnderGrownOnceExplained: Record<
  * ------------------------------------------------------------------ */
 
 /**
- * The exported visualization union is the nine kinds `ListView` has a `case`
+ * The exported visualization union is the ten kinds `ListView` has a `case`
  * for — under the resolved spec AND under `main`'s. This is what makes the
  * change a re-spelling rather than a re-definition: the published type does not
  * move, only the way it is derived.
@@ -155,10 +155,10 @@ export const drawableUnderGrownOnceExplained: Record<
  * union) fails the build there first. That record and `ListView`'s `case` list
  * are where the new kind is drawn; this list follows them.
  */
-export type _VisualizationUnionIsTheNineDrawnKinds = Expect<
+export type _VisualizationUnionIsTheTenDrawnKinds = Expect<
   Equal<
     ListViewVisualization,
-    'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree'
+    'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree' | 'timesheet'
   >
 >;
 
@@ -172,6 +172,7 @@ const DRAWN_KINDS = [
   'map',
   'chart',
   'tree',
+  'timesheet',
 ] as const;
 
 describe('the undrawable table survives an upstream retirement (objectui#9880)', () => {

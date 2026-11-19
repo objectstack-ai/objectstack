@@ -58,6 +58,7 @@ import {
 import { t, tFormat, useMetadataLocale } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import { DisabledControlReason } from './inspectors/_shared.js';
 
 /**
  * The explain-report vocabulary is OWNED by `@objectstack/spec/security` and
@@ -333,6 +334,10 @@ export function AccessExplainPanel({ open, onOpenChange, defaultObject, packageI
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [decision, setDecision] = React.useState<ExplainDecision | null>(null);
+  // Explain and Pick both wait for an object, and say so on hover, on focus
+  // and to assistive tech (ux-conventions.disabled-control-reason). A run in
+  // flight gives none: Explain's label already says so.
+  const needObjectReason = objectName.trim() ? undefined : t('engine.studio.access.explain.needObject', locale);
   // objectui#11862 — the people this panel can name, by user id: the row the
   // user picker handed back, and the rows the same lookup answered for a
   // decision's principal. An id with no entry renders as the id.
@@ -604,18 +609,22 @@ export function AccessExplainPanel({ open, onOpenChange, defaultObject, packageI
                 placeholder={t('engine.studio.access.explain.recordPlaceholder', locale)}
                 className="h-8 min-w-0 flex-1 text-xs"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 shrink-0 gap-1 text-xs"
-                disabled={!objectName.trim()}
-                onClick={() => setRecordPickerOpen(true)}
-                title={t('engine.studio.access.explain.pickRecord', locale)}
-              >
-                <ChevronsUpDown className="h-3 w-3" />
-                {t('engine.studio.access.explain.pickRecord', locale)}
-              </Button>
+              <DisabledControlReason reason={needObjectReason} testId="explain-pick-record-reason" className="shrink-0">
+                {(describedBy) => (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1 text-xs"
+                    disabled={!objectName.trim()}
+                    onClick={() => setRecordPickerOpen(true)}
+                    aria-describedby={describedBy}
+                  >
+                    <ChevronsUpDown className="h-3 w-3" />
+                    {t('engine.studio.access.explain.pickRecord', locale)}
+                  </Button>
+                )}
+              </DisabledControlReason>
               {recordId && (
                 <Button
                   variant="ghost"
@@ -631,10 +640,20 @@ export function AccessExplainPanel({ open, onOpenChange, defaultObject, packageI
             </div>
           </div>
 
-          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={busy || !objectName.trim()} onClick={() => void run()}>
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <HelpCircle className="h-3.5 w-3.5" />}
-            {busy ? t('engine.studio.access.explain.running', locale) : t('engine.studio.access.explain.run', locale)}
-          </Button>
+          <DisabledControlReason reason={busy ? undefined : needObjectReason} testId="explain-run-reason">
+            {(describedBy) => (
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                disabled={busy || !objectName.trim()}
+                onClick={() => void run()}
+                aria-describedby={describedBy}
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <HelpCircle className="h-3.5 w-3.5" />}
+                {busy ? t('engine.studio.access.explain.running', locale) : t('engine.studio.access.explain.run', locale)}
+              </Button>
+            )}
+          </DisabledControlReason>
         </div>
 
         {/* ── result ── */}

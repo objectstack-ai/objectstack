@@ -33,6 +33,8 @@ import { describe, it, expect, vi } from 'vitest';
 // INSIDE objectql, and the package re-exporting it is this one.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { describeTurnedOffPackagedItem } from '@objectstack/types';
+import { READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+import { ACTION_KERNEL_PACKAGE_SCOPES } from './engine-actions.js';
 
 import { ObjectQL } from './engine.js';
 import {
@@ -317,8 +319,8 @@ describe('ActionActivationProjection — absence means ACTIVE', () => {
 
         // What happened, who can undo it and where, and what to do meanwhile.
         expect(message).toBe(
-            'This action is turned off for this deployment. An administrator can turn it on again under '
-            + 'Setup › Packaged Actions, or you can use another action.',
+            'This action is turned off for this deployment. An administrator can turn it on again '
+            + 'on the action in its package in Studio, or you can use another action.',
         );
         // The machine half (the ledger table, the ADR) belongs to the log line
         // and the envelope's code, never to what an end user reads.
@@ -404,6 +406,41 @@ describe('ObjectQL engine — the projection the dispatch doors consult', () => 
         expect(line).toContain('sys_metadata_activation');
         expect(line).toContain('ADR-0126 §8');
         expect(meta).toEqual({ action: 'convert_lead', refusal: 'ACTION_DISABLED' });
+    });
+
+    // [objectstack#34724, ruling 6944409840] Studio offers no switch for a
+    // platform (kernel-package) action, and a row written before Setup's page
+    // retired stays in force, so that action's sentence names the activation
+    // door. The package is the one the ledger row names, judged against the
+    // registry's installed manifest (`scope` `system` / `cloud`).
+    it('a switched-off platform action\'s sentence names the activation door; an app action\'s names Studio', async () => {
+        const engine = new ObjectQL();
+        const manifest = (id: string, scope?: string) =>
+            ({ id, name: id, version: '1.0.0', type: 'plugin', namespace: id.split('.').pop(), ...(scope ? { scope } : {}) }) as any;
+        engine.registry.installPackage(manifest('com.objectstack.plugin-auth', 'system'), 'code');
+        engine.registry.installPackage(manifest('com.example.crm'), 'code');
+        const store = new InMemoryActionActivationStore();
+        await store.setActive({ name: 'ban_user', packageId: 'com.objectstack.plugin-auth', active: false });
+        await store.setActive({ name: 'convert_lead', packageId: 'com.example.crm', active: false });
+        engine.setActionActivationStore(store);
+        await engine.hydrateActionActivations();
+
+        expect(engine.describeDisabledAction('ban_user')).toBe(describeTurnedOffPackagedItem('action', { platform: true }));
+        expect(engine.describeDisabledAction('ban_user')).toContain('POST /api/v1/actions/_activation/');
+        expect(engine.describeDisabledAction('convert_lead')).toBe(describeTurnedOffPackagedItem('action'));
+
+        // A flip made after boot carries its package the same way.
+        await engine.setActionActive({ name: 'revoke_api_key', packageId: 'com.objectstack.plugin-auth', active: false });
+        expect(engine.describeDisabledAction('revoke_api_key')).toBe(describeTurnedOffPackagedItem('action', { platform: true }));
+        // A row naming no package, or a package not installed, is not judged a platform one.
+        await engine.setActionActive({ name: 'env_action', active: false });
+        expect(engine.describeDisabledAction('env_action')).toBe(describeTurnedOffPackagedItem('action'));
+    });
+
+    it('the kernel scope list the sentence reads is the one the package doors read', () => {
+        // Spelled locally because `./core` must not import metadata-protocol;
+        // a test may, and holds the two equal.
+        expect([...ACTION_KERNEL_PACKAGE_SCOPES].sort()).toEqual([...READ_ONLY_PACKAGE_SCOPES].sort());
     });
 
     it('setActionActive flips the row and the projection together, in that order', async () => {

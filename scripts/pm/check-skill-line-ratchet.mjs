@@ -1442,7 +1442,14 @@ export const CEILINGS = new Map([
   // It is beside seat-lifecycle.md because the coordinator is not a
   // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
   // set at the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
+  // 49 → 51: an ordinary ruled raise. The ruling of record is the maintainer's
+  // 2026-11-19 word, verbatim: 「同意」 on the coordinator's three dispatch rules,
+  // 「用 fable先评审你这个意见」, then his decision-card choice 「加两行,并修代改级漏洞」;
+  // quoted in the body of the card it ordered, claim comment 7000373266. Two
+  // lines: open whenever a slot is free, ordering only by `Blocked-by:` and the
+  // seat's serial queue; a grade-only word writes the grade and opens nothing.
+  // Measured delta +2. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 51],
   // The external-text reference (whose text instructs, whose is data) and the
   // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
   // set at the landed line count, headroom 0, same convention as above.
@@ -1652,7 +1659,11 @@ export const CEILINGS = new Map([
   // area's loose-ends card, and the dedupe search before a review files. The
   // quota line (one card per defect) is untouched. Measured delta +3.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 82],
+  // 82 → 83: an ordinary ruled raise by the same ruling of record as
+  // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
+  // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
+  // as his. Measured delta +1. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1759,7 +1770,11 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
+  // Lowered 53 → 21: each repository's rules live in that repository, so the
+  // product content left for hotcrm's own AGENTS.md and docs/PRIORITIES.md. One
+  // pointer there and one to cross-repo-coordination.md stayed, beside the
+  // shared seat mechanics. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 21],
   // repo:mobile lane charter — the on-demand seat for the native shell that
   // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
   // on demand (Recommended)"). A NEW file, so this is an added row and no other
@@ -1937,7 +1952,11 @@ export const CEILINGS = new Map([
   // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
   // row and no other row moves; set at the landed line count (headroom 0,
   // same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
+  // Lowered 28 → 19 on the same ground as the hotcrm charter: cloud's first
+  // touch, grading, take order, enterprise and security rules are one pointer
+  // to the cloud repo; the cross-repo mechanics stayed. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 19],
   // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
   // accounts, each running area-lease mode and splitting areas through the lease tables on
   // their seat posts (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that

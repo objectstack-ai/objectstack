@@ -208,10 +208,19 @@ editable row. On `detail-view` and the `detail-section` node no default is
 resolved, so an omitted key keeps the section the same way, and only `true`
 hides it.
 
-When every section of a body is empty and at least two are kept, the body
-draws ONE **Show N empty fields** row for all of them. Revealing it draws each
-section folded on its own. On a print page every declared row prints, empty
-ones included, with no toggle.
+A `record:details` body, on an authored record page as on the default one,
+does not give each kept all-empty section a card of its own: it names them all
+in ONE line that closes the body — **Deal Narrative · Notes & Next Steps · 2
+empty sections · Expand** — and expanding that line draws each in its place as
+above. Sections with a value draw as before, their own **Show N empty fields**
+row included.
+
+Elsewhere (`detail-view`), when every section of a body is empty and at least
+two are kept, the body draws ONE **Show N empty fields** row for all of them.
+Revealing it draws each section folded on its own.
+
+Neither fold applies in edit mode, which draws every section, nor on a print
+page, where every declared row prints, empty ones included, with no toggle.
 
 ### Basic Example
 

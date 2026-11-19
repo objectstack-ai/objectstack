@@ -1402,7 +1402,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
 
         <FormSectionNavContext.Provider value={sectionNav.sink}>
         <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
-        <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+        {/* `relative`: the absolutely positioned hidden inputs in the form (a
+            Radix checkbox's or select's native stand-in) take this scroller as
+            their containing block, so it clips them and they scroll with it,
+            instead of overflowing the `overflow-hidden` dialog box, which a
+            scroll could then move off its title and footer (objectstack#35092). */}
+        <div className="@container relative flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>

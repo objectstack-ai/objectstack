@@ -1,5 +1,65 @@
 # @object-ui/collaboration
 
+## 18.6.0
+
+### Patch Changes
+
+- Updated dependencies [e53e02e]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [3372da0]
+- Updated dependencies [b019048]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [1078c73]
+- Updated dependencies [b4eea88]
+- Updated dependencies [8436f67]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [2b267b7]
+- Updated dependencies [4240719]
+- Updated dependencies [b86331d]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [758bbe7]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [cb7d514]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [59defa0]
+  - @object-ui/i18n@18.6.0
+  - @object-ui/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

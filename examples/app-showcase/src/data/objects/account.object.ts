@@ -141,6 +141,10 @@ export const Account = ObjectSchema.create({
       field: 'status',
       // Transitions are validated on update; insert sets the initial state.
       events: ['update'] as const,
+      // The entry state: `prospect`, the field's default and the machine's
+      // root. This machine runs on updates only, so the server does not check
+      // it on create; it states the entry the lifecycle assumes.
+      initialStates: ['prospect'],
       message: 'Invalid account lifecycle transition.',
       transitions: {
         prospect: ['active', 'churned'],

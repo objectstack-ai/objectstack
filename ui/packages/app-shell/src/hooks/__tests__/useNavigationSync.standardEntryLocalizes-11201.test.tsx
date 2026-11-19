@@ -94,7 +94,11 @@ function metaValue(dashboards: unknown[]): MetadataContextValue {
 /** Drive the real writer through a dashboard creation; return the entry it stored. */
 async function syncedDashboardEntry(): Promise<Record<string, unknown>> {
   const saveItem = vi.fn().mockResolvedValue({});
-  const adapter = { getClient: () => ({ meta: { saveItem } }) } as unknown as React.ComponentProps<
+  const adapter = {
+    getClient: () => ({ meta: { saveItem } }),
+    // objectstack#35054 — a navigation write starts from the stored app (the layers read).
+    getAuthoredItem: async (_type: string, name: string) => (name === crm.name ? crm : null),
+  } as unknown as React.ComponentProps<
     typeof AdapterCtx.Provider
   >['value'];
   function Site() {

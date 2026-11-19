@@ -56,6 +56,7 @@ export const WALKED_TYPE_STACK_KEYS = {
   position: 'positions',
   permission: 'permissions',
   book: 'books',
+  mapping: 'mappings',
 } as const;
 
 export type WalkedType = keyof typeof WALKED_TYPE_STACK_KEYS;

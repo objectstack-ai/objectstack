@@ -10,8 +10,9 @@
  *   applied               the write door answered success, every declared
  *                         post-state holds when the data API reads the row
  *                         back (by `id`, or by `where` for a row the write
- *                         created), and — when declared — the audit trail
- *                         names the acting persona. A value declared as the
+ *                         created; an aggregate `sum` / `each` over every row
+ *                         its `where` matches, at least one), and — when
+ *                         declared — the audit trail names the acting persona. A value declared as the
  *                         card's `asOf` (its "today", which the operation
  *                         prompt states) is also met by the run date when the
  *                         platform's clock stamped it, a field no write of the
@@ -456,6 +457,44 @@ function rowLabel(s: DeclaredPostState): string {
   return `${s.object}[${Object.entries(s.where ?? {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(',')}]`;
 }
 
+/** A summed figure equals the declared one: exact up to float noise (a millionth), so 0.1 + 0.2 meets 0.3. */
+const sumMeets = (total: number, declared: number): boolean => Math.abs(total - declared) < 1e-6;
+
+/**
+ * An aggregate post-state (`sum` / `each`) over every row its `where` matched.
+ * No row matched ⇒ one failing `->rows` check: an aggregate over nothing is
+ * never a pass (a sum of 0 or a vacuous "every row"). Otherwise one check per
+ * summed field (`.sum(field)`: a row reading no number there fails it) and
+ * one per `each` field (`.each(field)`: every row holds the value, compared
+ * as `values` compares it).
+ */
+function aggregateChecks(at: string, s: DeclaredPostState, rows: ReadonlyArray<Readonly<Record<string, unknown>>>): CheckResult[] {
+  if (rows.length === 0) return [check(`${at}->rows`, false, '0 row(s) read back, so there is nothing to aggregate')];
+  const out: CheckResult[] = [];
+  for (const [field, declared] of Object.entries(s.sum ?? {})) {
+    const name = `${at}.sum(${field})`;
+    const cells = rows.map((r) => r[field]);
+    const notNumbers = cells.filter((c) => typeof c !== 'number');
+    if (notNumbers.length > 0) {
+      out.push(check(name, false, `${notNumbers.length} of ${rows.length} row(s) read no number (${notNumbers.map((c) => JSON.stringify(c ?? null)).join(', ')}), declared a sum of ${declared}`));
+      continue;
+    }
+    const total = (cells as number[]).reduce((a, b) => a + b, 0);
+    out.push(check(name, sumMeets(total, declared), `read ${cells.join(' + ')} = ${total} over ${rows.length} row(s), declared ${declared}`));
+  }
+  for (const [field, declared] of Object.entries(s.each ?? {})) {
+    const off = rows.filter((r) => !same(r[field], declared));
+    out.push(check(
+      `${at}.each(${field})`,
+      off.length === 0,
+      off.length === 0
+        ? `${rows.length} of ${rows.length} row(s) read ${JSON.stringify(declared)}`
+        : `${off.length} of ${rows.length} row(s) read otherwise (${off.map((r) => JSON.stringify(r[field] ?? null)).join(', ')}), declared ${JSON.stringify(declared)}`,
+    ));
+  }
+  return out;
+}
+
 function noWriteCheck(obs: OperationObservation): CheckResult {
   if (obs.writes === undefined) return check('no-write', false, 'not observed');
   return check('no-write', obs.writes === 0, `${obs.writes} record(s) written`);
@@ -698,6 +737,10 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
       }
       if (s.absent === true) {
         checks.push(check(`${at}->absent`, rows.length === 0, `${rows.length} row(s) read back`));
+        return;
+      }
+      if (s.sum !== undefined || s.each !== undefined) {
+        checks.push(...aggregateChecks(at, s, rows));
         return;
       }
       // A `where` that matched two rows is not the one row the write meant:

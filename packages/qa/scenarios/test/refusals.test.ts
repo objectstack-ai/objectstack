@@ -123,6 +123,14 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a refusal code outside the platform error-code catalogue', (c) => (op(c, 'contact_bad_email').outcome.code = 'VALIDATION_BROKEN'), 'run.operations[3].outcome.code', /expected one of/],
   ['a post-state naming a created row by an id the seed lacks', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', id: 'ct9', values: { full_name: 'Fay Wu' } }), 'run.operations[0].outcome.state[0].id', /matched by `where`/],
   ['a post-state naming its row twice', (c) => (op(c, 'move_eli').outcome.state[0].where = { full_name: 'Dee' }), 'run.operations[1].outcome.state[0].id', /exactly one of `id` or `where`/],
+  // ── aggregate post-states (`sum` / `each`) and relation paths in `where` ──
+  ['an aggregate naming its row by `id`', (c) => (op(c, 'move_eli').outcome.state[0] = { object: 'contact', id: 'ct5', each: { account: 'ac1' } }), 'run.operations[1].outcome.state[0].id', /names its rows by `where`, never `id`/],
+  ['a post-state carrying both `values` and an aggregate', (c) => (op(c, 'add_contact').outcome.state[0].each = { account: 'ac3' }), 'run.operations[0].outcome.state[0].values', /exactly one of `values`, `absent` or an aggregate/],
+  ['an aggregate naming no field', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', where: { full_name: 'Fay Wu' }, each: {} }), 'run.operations[0].outcome.state[0].each', /names at least one field/],
+  ['a sum over a field the seed holds text in', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', where: { full_name: 'Fay Wu' }, sum: { email: 1 } }), 'run.operations[0].outcome.state[0].sum.email', /not a number to sum/],
+  ['a sum over a field the seed lacks', (c) => (op(c, 'add_contact').outcome.state[0] = { object: 'contact', where: { full_name: 'Fay Wu' }, sum: { amount: 1 } }), 'run.operations[0].outcome.state[0].sum.amount', /no seed row of `contact` carries `amount`/],
+  ['a `where` relation path through no declared lookup', (c) => (op(c, 'add_contact').outcome.state[0].where = { 'email.domain': 'acme.test' }), 'run.operations[0].outcome.state[0].where.email.domain', /`email` is not a lookup of `contact`/],
+  ['a `where` relation path ending on a field the target lacks', (c) => (op(c, 'add_contact').outcome.state[0].where = { 'account.region': 'west' }), 'run.operations[0].outcome.state[0].where.account.region', /no seed row of `account` carries `region`/],
   // ── reach: an operation its acting persona cannot reach has one outcome ──
   ['an applied create writing a field the persona must not read', (c) => (op(c, 'add_contact').values.email = 'fay@bitworks.test'), 'run.operations[0].outcome', /`sdr` must not read `contact.email`.*`PERMISSION_DENIED`/],
   ['an applied update on a row outside the persona\'s row scope', (c) => (op(c, 'move_eli').target = 'ct4'), 'run.operations[1].outcome', /row `ct4` is outside `sdr`'s row scope on `contact`.*`RECORD_NOT_FOUND`/],
@@ -170,6 +178,16 @@ describe('scenario card refusals', () => {
       o.outcome = { kind: 'refused', code: ErrorCode.parse('RECORD_NOT_FOUND') };
       c.run.guardrails[3].operation = 'add_contact';
       op(c, 'add_contact').outcome.auditActor = 'sdr';
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('an aggregate post-state over a relation path loads clean (control for `sum` / `each` and `where` paths)', () => {
+    const r = load((c) => {
+      op(c, 'add_contact').outcome.state.push(
+        { object: 'contact', where: { 'account.name': 'Bitworks' }, each: { account: 'ac3' } },
+        { object: 'account', where: { industry: 'tech' }, sum: { employees: 1 } },
+      );
     });
     expect(r.refusals.map(formatRefusal)).toEqual([]);
   });

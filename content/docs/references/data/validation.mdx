@@ -192,7 +192,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
-| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omitted or empty, insert is not checked; the author-time rule `state-machine-no-initial-states` refuses an active machine declared that way at publish and in `os validate`. |
 
 ### Nested Shape: `ConditionalValidation.then[type='format']`
 
@@ -313,7 +313,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
-| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omitted or empty, insert is not checked; the author-time rule `state-machine-no-initial-states` refuses an active machine declared that way at publish and in `os validate`. |
 
 ### Nested Shape: `ConditionalValidation.otherwise[type='format']`
 
@@ -532,7 +532,7 @@ const result = ConditionalValidationSchema.parse(data);
 | **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
-| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omitted or empty, insert is not checked; the author-time rule `state-machine-no-initial-states` refuses an active machine declared that way at publish and in `os validate`. |
 
 
 ---
@@ -599,7 +599,7 @@ This schema accepts one of the following structures:
 | **type** | `'state_machine'` | ✅ |  |
 | **field** | `string` | ✅ | State field (e.g. status) |
 | **transitions** | `Record<string, string[]>` | ✅ | Map of `{ OldState: [AllowedNewStates] }` |
-| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). |
+| **initialStates** | `string[]` | optional | States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omitted or empty, insert is not checked; the author-time rule `state-machine-no-initial-states` refuses an active machine declared that way at publish and in `os validate`. |
 
 ---
 

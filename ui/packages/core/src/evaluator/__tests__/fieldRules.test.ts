@@ -617,3 +617,19 @@ describe('resolveFieldRuleState — `requiredWhen` as a transition gate (objects
     ).toBe(false);
   });
 });
+
+// [ADR-0113 D1, as amended — objectstack#34905] The server judges a required
+// field's `visibleWhen` the way this reader does: only a clean TRUE shows the
+// field. A clean value that is not TRUE (an unset boolean reads `null`) hides
+// it, so the form drops the marker and the server waives the requirement on
+// the same record.
+describe('evalFieldPredicate — only a clean TRUE shows a field (the server reads it the same way)', () => {
+  it('an unset boolean (null) hides the field, without the fallback', () => {
+    expect(evalFieldPredicate('record.is_vip', { is_vip: null }, true)).toBe(false);
+  });
+
+  it('a clean non-boolean value hides it too; TRUE shows it', () => {
+    expect(evalFieldPredicate('record.tier', { tier: 'vip' }, true)).toBe(false);
+    expect(evalFieldPredicate('record.is_vip', { is_vip: true }, false)).toBe(true);
+  });
+});

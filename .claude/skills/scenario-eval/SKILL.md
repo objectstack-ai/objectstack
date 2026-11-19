@@ -50,8 +50,8 @@ metadata:
 - 规划写成一张表再动手:卡 × 配置 × 重复 → 命令条数 × 预计墙钟;超出 2 小时的一条拆开。
 - **问数日轮的卡** = 带数据集的卡:`grep -l '"datasetQuestions"' docs/qa/scenarios/*.json` 读出名单(写本技能时是
   `order_to_cash`、`travel_expense`),⛔ 不凭记忆列。只跑 `--modes ask --template F`:不搭建、不评 Build、不 iterate。
-  `F` 是该卡已验证的构建,命名空间与卡不符的会被跳过,所以一卡一条命令(`--only ID`);同一份构建跨轮复用,
-  换了构建,Reading 点名这一变量。
+  `F` 是该卡入库的已验证构建 `docs/qa/scenarios/builds/ID.json`(卡库 README〈Verified builds〉),命名空间与卡不符的
+  会被跳过,所以一卡一条命令(`--only ID`);同一份构建跨轮复用,换了构建(只经 PR),Reading 点名这一变量。
 - **问数日轮的节奏**:每天一轮 `--ask-repeats 1`,每周一轮 `--ask-repeats 5`;操作回合不重复,只跑一次(README〈Repeats〉)。
 - **问数日轮的开跑条件**:日轮在 #34911(ask 模式遇 `422 UNMANAGED_INSTALL_UNCOPYABLE` 改走托管安装)与 #34882
   (`asked-back` 不把候选个数、单写的年份算作数字)都合并之后开跑;开跑前查一次两者已合并,未合并就不开跑。
@@ -103,10 +103,11 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --model haiku --effort medium --create-version VERSION \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 
-# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,F 是该卡已验证构建的绝对路径(先查 §1 的开跑条件)
-OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/order_to_cash && mkdir -p "$OUT"
+# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,--template 是该卡入库构建的绝对路径(先查 §1 的开跑条件;
+# order_to_cash 的构建等 #34986,入库前只有 travel_expense 可跑)
+OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/travel_expense && mkdir -p "$OUT"
 nohup pnpm --filter @objectstack/scenarios run-scenarios \
-  --only order_to_cash --modes ask --template /abs/path/F.json \
+  --only travel_expense --modes ask --template "$(git rev-parse --show-toplevel)/docs/qa/scenarios/builds/travel_expense.json" \
   --ask-model haiku --ask-effort medium --ask-repeats 1 --create-version VERSION \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 ```
@@ -115,7 +116,8 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 
 维护者令(原话):"objectstack 公开仓,像 qa-run"。据此场景卡评测记录立在本仓、带全分(问数基线 ② 的
 数字仍不对外,见 `lanes/eval.md`)。运行产物 ⛔ 不进仓库树:run 记录 JSON、录音、日志留在 git-ignore 的默认
-`--out` 目录或本席的项目文件里;issue 就是报告,纯文本,⛔ 不放图。
+`--out` 目录或本席的项目文件里;issue 就是报告,纯文本,⛔ 不放图。轮所装的已验证构建不是运行产物而是 fixture,
+在树里(`docs/qa/scenarios/builds/`),只随 PR 改,⛔ 轮不写它。
 
 - **写入门**:立单、评论、关单全走 pm-dispatch 写入门,照 `checklist-test` §4 那一段;⛔ MCP `issue_write`。
 - **标题**:`Eval run · SCOPE × N configs × R reps · SHA8 · DATE`,如

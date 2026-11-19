@@ -87,6 +87,7 @@ export const SCHEMA_REGISTRY_METHOD_KINDS: Readonly<Record<SchemaRegistryMethodN
   getObject: 'read',
   getAllObjects: 'read',
   getObjectContributors: 'read',
+  getWithheldExtensionFields: 'read',
   getObjectExtensionsOf: 'read',
   getObjectOwner: 'read',
   getPackagedObjectOwner: 'read',

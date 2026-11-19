@@ -81,6 +81,10 @@ import {
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import {
+    aggregateOrderCutDirective, aggregateOrderCutRefusal, aggregateOrderCutRequestOf, assertAggregateOrderCutShape,
+    takeAggregateGroupCount, withAggregateOrderCutDirective,
+} from './aggregate-order-cut.js';
+import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
   RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
   relationGroupDriverRefusal, relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
@@ -161,7 +165,7 @@ export class DeleteAndAggregateFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'delete');
+    this.enforceTransactionOrigin(object, driver, 'delete', options?.context?.transaction);
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -971,6 +975,12 @@ export class DeleteAndAggregateFacet {
       // related read a relation group join is built from is this verb,
       // stopped at its driver call. Only the engine's own planner sets it.
       const scopePlan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
+      // [aggregate order and cut] The engine-internal request to order the
+      // groups by an aggregated column, cut them and count them, in the
+      // driver's own statement (`aggregate-order-cut.ts`). Its shape is judged
+      // once every door below has judged the query; the driver and the path
+      // are judged at the driver call.
+      const orderCut = aggregateOrderCutRequestOf(options);
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
@@ -1303,6 +1313,11 @@ export class DeleteAndAggregateFacet {
           );
           if (numeric !== query.having) query = { ...query, having: numeric };
       }
+      // [aggregate order and cut] Every door above has judged the query; now
+      // the request's order keys against the aggregated row it orders.
+      if (orderCut !== undefined) {
+          assertAggregateOrderCutShape(object, orderCut, aggregatedRowColumns(query.groupBy, query.aggregations));
+      }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
       // [relation group join] Every door above has judged the base query;
@@ -1486,6 +1501,21 @@ export class DeleteAndAggregateFacet {
             });
         const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
         const nativeAggregate = typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative);
+        // [aggregate order and cut] Served only as the driver's own statement,
+        // and refused — before the driver is asked — on every path that is not
+        // one (`aggregateOrderCutRefusal`): no in-memory sort, no slower path.
+        if (orderCut !== undefined) {
+            const refused = aggregateOrderCutRefusal(object, {
+                driver: drv,
+                nativeAggregate,
+                hasHaving: ast.having != null && typeof ast.having === 'object' && Object.keys(ast.having).length > 0,
+                hasRelationGroup: relationGroup !== undefined,
+            });
+            if (refused !== undefined) throw refused;
+            const directive = aggregateOrderCutDirective(orderCut, aggregatedRowColumns(ast.groupBy, []));
+            const cut = await drv.aggregate(object, withBucketZone(withAggregateOrderCutDirective(ast, directive)), aggregateOptions);
+            return takeAggregateGroupCount(object, drv, cut, orderCut);
+        }
         // [relation group join] Served only as the driver's own statement:
         // the rows path below cannot join. Each planned related read is
         // answered at this boundary, under these driver options, by the rule

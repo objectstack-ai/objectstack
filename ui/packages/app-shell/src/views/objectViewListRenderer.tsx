@@ -978,6 +978,11 @@ export function useObjectViewListRenderer({
             // rather than the old permanently-truthy husk, which is what
             // keeps the gate from offering a chart nobody configured.
             chart: holdBlock('chart', viewDef.chart),
+            // The timesheet binding the view DECLARED, forwarded whole for
+            // the reason the chart block above is: `ListView`'s capability
+            // gate and `case 'timesheet'` read its three keys by name
+            // (objectstack#34382).
+            timesheet: holdBlock('timesheet', viewDef.timesheet),
 
         };
 

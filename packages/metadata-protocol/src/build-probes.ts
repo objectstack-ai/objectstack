@@ -25,7 +25,9 @@
 
 import type { BuildProbeReport, RuntimeBuildIssue, StandardErrorCode } from '@objectstack/spec/api';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { PackageScopedNameRefusedError, describePackageScopedHolder, type PackageScopedRefusal } from '@objectstack/core';
+import { referenceTargetOf } from '@objectstack/spec/data';
+import { collectFlowGraphs } from '@objectstack/spec/automation';
+import { PackageScopedNameRefusedError, describePackageScopedHolder, resolveTenantFieldName, type PackageScopedRefusal } from '@objectstack/core';
 import { buildProbeUserMessage, buildProbeUserTextLocale } from './build-probes.user-text.js';
 
 /**
@@ -69,7 +71,11 @@ export type RuntimeBuildIssueCode =
     | 'widget_not_probed'
     | 'empty_query'
     | 'widget_query_failed'
-    | 'probes_unavailable';
+    | 'probes_unavailable'
+    | 'widget_empty_result'
+    | 'rollup_never_computed'
+    | 'seed_reference_unresolved'
+    | 'flow_connector_action_unresolved';
 
 /**
  * A finding as this module builds it: the wire shape, with the code closed
@@ -82,6 +88,14 @@ type ProbeFinding = RuntimeBuildIssue & { code: RuntimeBuildIssueCode; userMessa
 /** The single read the probes need from the data engine. */
 export interface ProbeEngine {
     find(objectName: string, query: unknown): Promise<Array<Record<string, unknown>>>;
+    /**
+     * The REGISTERED object definition (the authored body plus the columns the
+     * engine injects), which names the column a row's organization is stamped
+     * in (`resolveTenantFieldName`). Optional: an engine without it is read as
+     * one whose rows carry no organization, so the landed-data probes ask their
+     * existence questions unscoped, as the reference audit does for such a row.
+     */
+    getSchema?(objectName: string): unknown;
 }
 
 /** Optional analytics surface — when absent, widget probes degrade to a warning. */
@@ -127,6 +141,48 @@ export interface RunBuildProbesOptions {
      * sentence names; `message` and `fix` never read it.
      */
     userTextLocales?: readonly (string | null | undefined)[];
+    /**
+     * The kernel's automation engine, when one is mounted: the connector lookup
+     * a `connector_action` step dispatches through. Absent, or without the
+     * lookup, published flows' connector steps are not probed.
+     */
+    automation?: ProbeAutomation;
+    /**
+     * The package the published artifacts belong to (`null`: authored in the
+     * environment, no package). A `connector_action` step names its connector
+     * from its flow's package, so the probe asks the engine for that package.
+     */
+    packageId?: string | null;
+    /**
+     * The seed loader's own answer to "which rows did this publish's seeds
+     * land on" (`seedApplied.landed`, per object): the ids it created, and
+     * the pre-existing ids a seed key matched. The reference probe reads the
+     * seeds' rows by these ids. Absent, published seeds' references are not
+     * probed.
+     */
+    seedLanded?: ReadonlyArray<SeedLandedRows>;
+}
+
+/** One object's entry of `seedApplied.landed`, as far as the probes read it. */
+export interface SeedLandedRows {
+    object: string;
+    inserted: { ids: readonly string[] };
+    matched: { ids: readonly string[] };
+}
+
+/**
+ * The slice of the automation engine (`AutomationEngine`, service-automation)
+ * the connector probe reads — the same two lookups the `connector_action`
+ * executor makes before it dispatches, and the reason it gives for a degraded
+ * connector. All optional: a host whose engine lacks one is not probed.
+ */
+export interface ProbeAutomation {
+    resolveConnectorInstanceFor?(connectorId: string, callerPackageId: string | null):
+        | { status: 'instance'; packageId: string | null }
+        | { status: 'refused'; refusal: { message: string } }
+        | { status: 'none' };
+    resolveConnectorAction?(connectorId: string, actionId: string, packageId?: string | null): unknown;
+    getConnectorDegradedReason?(connectorId: string, packageId?: string | null): string | undefined;
 }
 
 type Rec = Record<string, unknown>;
@@ -218,6 +274,104 @@ async function hasRows(
         context: readContext,
     });
     return Array.isArray(rows) && rows.length > 0;
+}
+
+/** Rows sampled from an object by the data probes, and distinct values probed per column. */
+const PROBE_SAMPLE_ROWS = 50;
+
+/** The declared fields of an object body, by name, from either the map or the array shape. */
+function fieldsOf(body: Rec | undefined): Array<[string, Rec]> {
+    const raw = body?.fields;
+    if (Array.isArray(raw)) {
+        return raw.map(asRec).filter((f): f is Rec => !!f && typeof f.name === 'string').map((f) => [f.name as string, f]);
+    }
+    const map = asRec(raw);
+    return map ? Object.entries(map).flatMap(([n, f]) => (asRec(f) ? [[n, asRec(f)!] as [string, Rec]] : [])) : [];
+}
+
+/** The id strings a reference column holds on one row: an expanded `{ id }` and a blank are not ids. */
+function idsIn(value: unknown): string[] {
+    return (Array.isArray(value) ? value : [value]).filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * The identity a landed-data read runs under: the system (the probe judges
+ * data, not a caller's grants), kept inside one organization the way the
+ * engine's own reference audit keeps its existence probe (#19837,
+ * `inspectDanglingReferences`): the organization rides the context's
+ * `tenantId`, and the engine applies it to a tenant-scoped object and leaves an
+ * object with no tenant column (`sys_user`) unscoped. `null` reads unscoped, as
+ * the audit does for a row that carries no organization.
+ */
+function landedReadContext(organization: string | null): Rec {
+    return organization ? { isSystem: true, tenantId: organization } : { isSystem: true };
+}
+
+/**
+ * The organization column of an object as the engine registered it, or `null`
+ * when it has none or the engine does not say (`ProbeEngine.getSchema`).
+ */
+function organizationColumnOf(engine: ProbeEngine, objectName: string): string | null {
+    try {
+        return resolveTenantFieldName(engine.getSchema?.(objectName));
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * The organization a sampled row's references are held to: the publishing
+ * organization when the publish names one (every read is already inside it),
+ * else the row's own stamped organization, else none (#19837: "a
+ * NULL-organization row, or an object with no tenant column, probes
+ * unscoped").
+ */
+function rowOrganization(row: Rec, column: string | null, publishing: string | null): string | null {
+    if (publishing) return publishing;
+    const stamped = column ? row[column] : undefined;
+    return stamped === undefined || stamped === null || stamped === '' ? null : String(stamped);
+}
+
+/**
+ * The organizations a roll-up's children are judged in, one at a time: the
+ * publishing organization when the publish names one; else every
+ * organization a bounded read of the object's rows, projected to its tenant
+ * column alone, finds stamped; else (no tenant column, or the engine does not
+ * say) one unscoped pass, `null`. On an object that has a tenant column, a
+ * row stamped with no organization is not judged: an unscoped pass there would
+ * read every organization's rows together.
+ */
+async function probeOrganizations(engine: ProbeEngine, objectName: string, publishing: string | null): Promise<Array<string | null>> {
+    if (publishing) return [publishing];
+    const column = organizationColumnOf(engine, objectName);
+    if (!column) return [null];
+    const stamped = asArr(await engine.find(objectName, {
+        fields: [column],
+        limit: PROBE_SAMPLE_ROWS,
+        context: landedReadContext(null),
+    })).map(asRec).map((r) => rowOrganization(r ?? {}, column, null));
+    return [...new Set(stamped)].filter((o): o is string => o !== null);
+}
+
+/** Push `value` under `key` in a map of lists. */
+function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+    const list = map.get(key);
+    if (list) list.push(value);
+    else map.set(key, [value]);
+}
+
+/** A measure value that renders as an empty card: no value, or zero. */
+const isZeroish = (v: unknown): boolean => v === null || v === undefined || v === 0 || v === '0';
+
+/**
+ * Every measure the result carries reads zero or nothing on every row. Judged
+ * only on the measure columns the rows actually hold: a result that names none
+ * of the asked measures cannot be judged, and answers `false`.
+ */
+function everyMeasureZero(rows: unknown[], measures: readonly string[]): boolean {
+    const recs = rows.map(asRec).filter((r): r is Rec => !!r);
+    const visible = measures.filter((m) => recs.some((r) => m in r));
+    return visible.length > 0 && recs.every((r) => visible.every((m) => isZeroish(r[m])));
 }
 
 /**
@@ -533,6 +687,224 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         }
     }
 
+    // ── Roll-ups: a summary field must have been computed where it has children ──
+    //
+    // [#35146] A roll-up's stored value is written by three paths
+    // (`summary-aggregate.ts`): the insert of a parent, a child write that
+    // names the parent, and `os migrate summary-nulls`; an install door also
+    // materialises a roll-up a package install or upgrade adds
+    // (`summary-install-materialise.ts`). A `summary` declared on an object
+    // whose children had already landed reaches none of them on its own, so
+    // it reads blank on those parents while its definition is correct. Every
+    // check above reads the definition; this asks the data. Only parents that
+    // HAVE children are judged (a parent with none reads blank truthfully),
+    // and only a field left UNSET on all of them: a computed zero is a value.
+    // A roll-up with its own `filter` is not judged, since which children it
+    // counts is the filter's question.
+    //
+    // Judged one organization at a time, the way the reference audit keeps its
+    // probe (#19837): the publishing organization when the publish names one;
+    // else each organization the child object's rows are stamped with (its
+    // column named by `resolveTenantFieldName`), found by one read projected
+    // to that column alone; else, for an object with no tenant column, one
+    // unscoped pass. Inside an organization, two reads under
+    // `{ isSystem: true, tenantId }`, each projected to what it judges: a
+    // sample of children (their foreign key and the aggregated field), then
+    // the parents they name, `id $in` the named ids. The verdict and its count
+    // are formed inside that one organization, and the finding names the
+    // first organization whose parents all read blank (it quotes no row
+    // value, and no organization id).
+    for (const p of publishedObjects) {
+        const body = asRec(await readItem('object', p.name));
+        for (const [fieldName, def] of fieldsOf(body)) {
+            const ops = asRec(def.summaryOperations);
+            if (def.type !== 'summary' || !ops || ops.filter !== undefined) continue;
+            const childObject = typeof ops.object === 'string' ? ops.object : undefined;
+            if (!childObject) continue;
+            try {
+                const fk = typeof ops.relationshipField === 'string' && ops.relationshipField
+                    ? ops.relationshipField
+                    : childForeignKey(asRec(await readItem('object', childObject)), p.name);
+                if (!fk) continue;
+                const childField = ops.function !== 'count' && typeof ops.field === 'string' ? ops.field : undefined;
+                const organizations = await probeOrganizations(engine, childObject, organizationId ?? null);
+                let blank: Rec[] | undefined;
+                for (const organization of organizations) {
+                    const children = asArr(await engine.find(childObject, {
+                        fields: [...new Set(['id', fk, ...(childField ? [childField] : [])])],
+                        limit: PROBE_SAMPLE_ROWS,
+                        context: landedReadContext(organization),
+                    })).map(asRec).filter((r): r is Rec => !!r);
+                    const ids = [...new Set(children.flatMap((c) =>
+                        childField && (c[childField] === null || c[childField] === undefined) ? [] : idsIn(c[fk])))];
+                    if (ids.length === 0) continue;
+                    const parents = asArr(await engine.find(p.name, {
+                        where: { id: { $in: ids } },
+                        fields: ['id', fieldName],
+                        limit: ids.length,
+                        context: landedReadContext(organization),
+                    })).map(asRec).filter((r): r is Rec => !!r);
+                    if (parents.length > 0 && parents.every((r) => r[fieldName] === null || r[fieldName] === undefined)) {
+                        blank = parents;
+                        break;
+                    }
+                }
+                if (!blank) continue;
+                // [#15064] The plain run fills `count` and `sum` only; a `min`,
+                // `max` or `avg` roll-up is recomputed only when it is named.
+                const fillsByDefault = ops.function === 'count' || ops.function === 'sum';
+                const command = fillsByDefault
+                    ? '`os migrate summary-nulls --apply`'
+                    : `\`os migrate summary-nulls --apply --recompute-undefined-on-empty ${p.name}.${fieldName}\``;
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'warning',
+                    artifact: { type: 'object', name: p.name },
+                    ref: { type: 'object', name: p.name, member: fieldName },
+                    code: 'rollup_never_computed',
+                    message:
+                        `Roll-up "${p.name}.${fieldName}" is empty on all ${blank.length} parent row(s) of one organization that have ` +
+                        `"${childObject}" children — the field is configured, but its stored value was never computed for them. A ` +
+                        'roll-up is written when a parent is inserted, when a child write names the parent, by `os migrate ' +
+                        'summary-nulls`, and by the install door that adds it; one declared after its children landed reaches none ' +
+                        'of these on its own.',
+                    fix:
+                        `Check that "${childObject}" rows carry "${fk}" back to "${p.name}", then fill the stored values: ` +
+                        `${command} computes every parent that still reads blank` +
+                        (fillsByDefault ? '' : ` (a ${String(ops.function)} roll-up is filled only when named this way)`) +
+                        '. A package install or upgrade materialises a roll-up it adds at the install door, and a write to a ' +
+                        'child recomputes the parent that child names. Do not present the figure as working while it reads blank.',
+                    userMessage: say('rollup_never_computed', {
+                        object: labelIn(body, p.name),
+                        field: labelIn(def, fieldName),
+                        child: await labelOf('object', childObject),
+                        cause: fillsByDefault ? 'fills' : 'named',
+                    }),
+                });
+            } catch {
+                // A read the engine refused is not a roll-up that never ran:
+                // nothing is judged.
+            }
+        }
+    }
+
+    // ── Seed references: a reference column must name rows that exist ──────
+    //
+    // [#35146] The seed loader resolves what it can and reports the rest on
+    // `seedApplied`; this is the backstop over what LANDED. A seed load is a
+    // system write, which the engine does not check for references, so a value
+    // naming no row lands unchallenged and stays: an edit of the record later
+    // is not refused for it (#29062: the write check judges only the references
+    // a write ADDS). The finding is the column naming nothing, not a refusal
+    // the person will meet; the operator's reference audit
+    // (`inspectDanglingReferences`) reports the same rows later.
+    //
+    // The rows judged are the SEED's own: the ids the loader reports it landed
+    // (`seedApplied.landed`), read by `id`, so no row the loader did not land
+    // is matched, judged or quoted. Those it created always; those a seed key
+    // matched only when the seed's mode wrote them (`upsert`, `update`): under
+    // `ignore` a matched row was left as its writer left it, and may be a
+    // customer's. `landed` is per object, so two seeds of one object in one
+    // publish are judged over the object's landed rows together.
+    //
+    // Why this is not `ObjectQL.inspectDanglingReferences`: that audit reads
+    // the first rows of the whole object (no row filter, so it cannot read the
+    // seed's own), and asks one existence probe per value. Here each column's
+    // values are pushed into one `id $in` read per organization, projected to
+    // `id`, under the audit's scope (#19837): the publishing organization when
+    // the publish names one, else each value judged inside the organization
+    // its row is stamped with (unscoped for a row with none). One residual is
+    // stated, not hidden: under a `group` tenancy posture the audit leaves its
+    // probe unscoped, because the write rule's reach is the writer's
+    // membership set; this probe stays inside the row's own organization, so a
+    // seed row that names a row of a sibling organization would be reported.
+    // A seed loads into one organization and resolves its references there.
+    const landedByObject = new Map((opts.seedLanded ?? []).map((l) => [l.object, l] as const));
+    for (const p of published.filter((x) => x.type === 'seed')) {
+        const seed = asRec(await readItem('seed', p.name));
+        const objectName = typeof seed?.object === 'string' ? seed.object : undefined;
+        if (!objectName) continue;
+        const landed = landedByObject.get(objectName);
+        if (!landed) continue;
+        const mode = typeof seed?.mode === 'string' ? seed.mode : 'ignore';
+        const ids = [...new Set([
+            ...asArr(landed.inserted?.ids),
+            ...(mode === 'upsert' || mode === 'update' ? asArr(landed.matched?.ids) : []),
+        ].filter((id): id is string => typeof id === 'string' && id !== ''))].slice(0, PROBE_SAMPLE_ROWS);
+        if (ids.length === 0) continue;
+        const objectBody = asRec(await readItem('object', objectName));
+        const refFields = fieldsOf(objectBody).flatMap(([name, def]) => {
+            let target: string | undefined;
+            try {
+                target = referenceTargetOf(def);
+            } catch {
+                target = undefined;
+            }
+            return target ? [{ name, def, target }] : [];
+        });
+        if (refFields.length === 0) continue;
+        const orgColumn = organizationId ? null : organizationColumnOf(engine, objectName);
+        let rows: Rec[];
+        try {
+            rows = asArr(await engine.find(objectName, {
+                where: { id: { $in: ids } },
+                fields: [...new Set(['id', ...refFields.map((f) => f.name), ...(orgColumn ? [orgColumn] : [])])],
+                limit: ids.length,
+                context: landedReadContext(organizationId ?? null),
+            })).map(asRec).filter((r): r is Rec => !!r);
+        } catch {
+            continue;
+        }
+        for (const { name: field, def, target } of refFields) {
+            const byOrganization = new Map<string | null, string[]>();
+            for (const r of rows) {
+                for (const v of idsIn(r[field])) pushTo(byOrganization, rowOrganization(r, orgColumn, organizationId ?? null), v);
+            }
+            if (byOrganization.size === 0) continue;
+            const missing: string[] = [];
+            try {
+                for (const [organization, list] of byOrganization) {
+                    const values = [...new Set(list)];
+                    const existing = asArr(await engine.find(target, {
+                        where: { id: { $in: values } },
+                        fields: ['id'],
+                        limit: values.length,
+                        context: landedReadContext(organization),
+                    })).map(asRec);
+                    const found = new Set(existing.map((r) => String(r?.id ?? r?._id)));
+                    missing.push(...values.filter((v) => !found.has(v)));
+                }
+            } catch {
+                continue;
+            }
+            const distinct = [...new Set(missing)];
+            if (distinct.length === 0) continue;
+            // The values quoted are the landed rows' own column; nothing of
+            // the target is read beyond its `id`.
+            const shown = distinct.slice(0, 5).map((v) => `"${v}"`).join(', ');
+            issues.push({
+                layer: 'runtime',
+                severity: 'warning',
+                artifact: { type: 'seed', name: p.name },
+                ref: { type: 'object', name: objectName, member: field },
+                code: 'seed_reference_unresolved',
+                message:
+                    `Reference column "${objectName}.${field}" holds ${distinct.length} value(s) on the rows the seed landed that ` +
+                    `name no "${target}" row in their organization: ${shown}${distinct.length > 5 ? ', …' : ''}. The rows landed ` +
+                    'as a system write, which is not checked for references, so they point at nothing.',
+                fix:
+                    `Point "${objectName}.${field}" on those rows at real "${target}" records (in the seed, by a value the loader ` +
+                    'resolves), or clear it, then republish the seed.',
+                userMessage: say('seed_reference_unresolved', {
+                    object: labelIn(objectBody, objectName),
+                    field: labelIn(def, field),
+                    target: await labelOf('object', target),
+                    count: String(distinct.length),
+                }),
+            });
+        }
+    }
+
     // ── Dashboard widgets: the real dataset selection must return data ──────
     const dashboards = published.filter((x) => x.type === 'dashboard');
     let widgetsToProbe = 0;
@@ -619,6 +991,31 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                             object: await labelOf('object', objectName),
                         }),
                     });
+                } else if (everyMeasureZero(rows, selection.measures)) {
+                    // [#35146] The query ran and every measure it answered
+                    // reads zero or nothing (a dataset filter matching
+                    // nothing, a measure over a column no row fills), so the
+                    // card the person opens is an empty "0" tile. Zero can be
+                    // the truth, so a warning, never an error. A result with
+                    // no rows at all is `empty_query`'s question above
+                    // (#25484), and `everyMeasureZero` is false on it. A
+                    // no-dimension aggregate over an object with no rows the
+                    // caller sees answers one row reading `0`, and IS reported
+                    // here: the card shows that 0.
+                    issues.push({
+                        layer: 'runtime',
+                        severity: 'warning',
+                        artifact: { type: 'dashboard', name: p.name },
+                        ref: { type: 'dataset', name: dsName, member: widgetId },
+                        code: 'widget_empty_result',
+                        message:
+                            `Dashboard "${p.name}" widget "${widgetId}" runs its real query (dataset "${dsName}") and gets ` +
+                            'only zero/null measure values — the card renders as an empty "0" tile.',
+                        fix:
+                            `Fix the data dataset "${dsName}" reads (rows its filter matches, values in the measured columns), ` +
+                            'adjust the dataset\'s filter or measures, or tell the user why this card reads 0 right now.',
+                        userMessage: say('widget_empty_result', { ...named, dataset: labelIn(dataset, dsName) }),
+                    });
                 }
             } catch (e) {
                 // The query runs as the publishing caller, so read admission
@@ -688,5 +1085,100 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         });
     }
 
+    // ── Flows: a connector step must name a connector and action this kernel has ──
+    //
+    // [#35146] A `connector_action` step dispatches to whatever the engine
+    // resolves for its connector, named from the flow's package, then its
+    // action. The flow publishes whichever connector it names; one this
+    // environment does not serve fails every run that reaches the step. The
+    // probe asks the engine the same questions the step's executor asks, in
+    // the same order, with nothing dispatched. An engine without the lookups
+    // is not probed.
+    const automation = opts.automation;
+    const callerPackageId = opts.packageId ?? null;
+    if (automation && typeof automation.resolveConnectorAction === 'function') {
+        for (const p of published.filter((x) => x.type === 'flow')) {
+            const body = asRec(await readItem('flow', p.name));
+            if (!body) continue;
+            let graphs: ReturnType<typeof collectFlowGraphs>;
+            try {
+                graphs = collectFlowGraphs(body as Parameters<typeof collectFlowGraphs>[0]);
+            } catch {
+                continue;
+            }
+            for (const node of graphs.flatMap((g) => g.nodes as readonly unknown[]).map(asRec)) {
+                if (!node || node.type !== 'connector_action') continue;
+                const cfg = asRec(node.connectorConfig);
+                const connectorId = typeof cfg?.connectorId === 'string' ? cfg.connectorId : undefined;
+                const actionId = typeof cfg?.actionId === 'string' ? cfg.actionId : undefined;
+                if (!connectorId || !actionId) continue; // the schema's refusal, not a probe's
+                const nodeId = typeof node.id === 'string' ? node.id : 'connector_action';
+                let cause: 'refused' | 'no-action' | 'degraded' | undefined;
+                let why = '';
+                try {
+                    const instance = typeof automation.resolveConnectorInstanceFor === 'function'
+                        ? automation.resolveConnectorInstanceFor(connectorId, callerPackageId)
+                        : ({ status: 'instance', packageId: callerPackageId } as const);
+                    if (instance.status === 'refused') {
+                        cause = 'refused';
+                        why = instance.refusal.message;
+                    } else {
+                        const packageId = instance.status === 'instance' ? instance.packageId : undefined;
+                        const handler = packageId === undefined ? undefined : automation.resolveConnectorAction(connectorId, actionId, packageId);
+                        if (!handler) {
+                            const degraded = packageId === undefined ? undefined : automation.getConnectorDegradedReason?.(connectorId, packageId);
+                            cause = degraded ? 'degraded' : 'no-action';
+                            why = degraded
+                                ? `connector "${connectorId}" is degraded — ${degraded.replace(/\.\s*$/, '')}`
+                                : `no connector on this environment serves "${connectorId}.${actionId}"`;
+                        }
+                    }
+                } catch {
+                    continue; // a lookup that threw judges nothing
+                }
+                if (!cause) continue;
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'warning',
+                    artifact: { type: 'flow', name: p.name },
+                    ref: { type: 'connector', name: connectorId, member: actionId },
+                    code: 'flow_connector_action_unresolved',
+                    message:
+                        `Flow "${p.name}" step "${nodeId}" (connector_action) dispatches "${connectorId}.${actionId}", but ${why} — ` +
+                        'every run that reaches the step fails.',
+                    fix: cause === 'degraded'
+                        ? `Resolve what keeps connector "${connectorId}" degraded (its upstream or its credential), then re-run the flow.`
+                        : cause === 'refused'
+                        ? `Make "${connectorId}" name one connector from this flow's package (declare the dependency, or hold the connector in the package), then republish.`
+                        : `Point the step's connectorConfig at a connector and action this environment has, or install the package or plugin that provides "${connectorId}".`,
+                    userMessage: say('flow_connector_action_unresolved', {
+                        flow: labelIn(body, p.name),
+                        step: labelIn(node, nodeId),
+                        connector: connectorId,
+                        cause,
+                    }),
+                });
+            }
+        }
+    }
+
     return { issues, checked };
+}
+
+/**
+ * The one field on a child object that points back at `parent`, the
+ * foreign key a roll-up resolves when it names no `relationshipField`:
+ * a `master_detail` or `lookup` whose target is the parent. Two such fields
+ * leave the engine to refuse, so the probe judges neither.
+ */
+function childForeignKey(child: Rec | undefined, parent: string): string | undefined {
+    const candidates = fieldsOf(child).filter(([, def]) => {
+        if (def.type !== 'master_detail' && def.type !== 'lookup') return false;
+        try {
+            return referenceTargetOf(def) === parent;
+        } catch {
+            return false;
+        }
+    });
+    return candidates.length === 1 ? candidates[0][0] : undefined;
 }

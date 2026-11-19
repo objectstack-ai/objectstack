@@ -207,10 +207,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
   rule: 'view/layout-without-binding',
   covers: 'what each view type renders without its block',
   paragraphs: [
-    'Six list-view types read their layout from a config block named after the type: `kanban`, ' +
-      '`calendar`, `gantt`, `timeline`, `map` and `tree`. A view of one of them with no block parses ' +
-      'and publishes clean, but the surface the author asked for is not the one that renders. What ' +
-      'renders instead differs by type, as read from the renderer below; the rule is a warning on all six.',
+    'Seven list-view types read their layout from a config block named after the type: `kanban`, ' +
+      '`calendar`, `gantt`, `timeline`, `map`, `tree` and `timesheet`. A view of one of them with no ' +
+      'block parses and publishes clean, but the surface the author asked for is not the one that ' +
+      'renders. What renders instead differs by type, as read from the renderer below; the rule is a ' +
+      'warning on all seven.',
     '`calendar`: no date axis, and the renderer does not invent one. objectui\'s `ListView.tsx` ' +
       'calendar branch forwards only the bindings the view declared, so `getCalendarConfig` ' +
       '(`ObjectCalendar.tsx`) resolves `null` and the view renders its "Calendar configuration ' +
@@ -241,6 +242,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
       'authoring reports success. For `tree` a block is not the whole story either: every `tree` key ' +
       'is optional, and a tree with no resolvable parent pointer renders flat — that is ' +
       '`view/tree-without-parent-field`.',
+    '`timesheet`: objectui\'s `ListView.tsx` timesheet branch hands the block to `ObjectTimesheet` ' +
+      '(`@object-ui/plugin-timesheet`) as declared, and its `resolveTimesheetConfig` resolves `null` ' +
+      'without all three keys, so the view renders its "Timesheet configuration required" screen ' +
+      'instead of a grid, on any object. Declare `timesheet.rowFields`, `timesheet.dateField` and ' +
+      '`timesheet.valueField`, the three keys `TimesheetConfigSchema` requires.',
     'A `gallery` view is not judged: no `gallery` key is required, and its fallback mis-titles ' +
       'cards rather than emptying the view.',
   ],
@@ -1455,6 +1461,27 @@ const ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
     'The readonly rule on the same body (`action-api-update-readonly-when-field`) skips an unparseable ' +
       'body rather than guess at what the unread part wrote, so this finding is the one that describes ' +
       'the problem.',
+  ],
+};
+
+const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-does-not-compile',
+  covers: 'the wrapper an action body is compiled in',
+  paragraphs: [
+    'An action body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (input, ctx) => { … })` and calls it with the action\'s params and its context, so the ' +
+      'statements share a scope with two parameters the author never wrote. A source that is valid on its ' +
+      'own can fail to compile there, and then every run of the action fails, on every door, before any ' +
+      'statement runs.',
+    'The common case is declaring a parameter again: `const input = ctx.input || {}` or `let ctx = …` is a ' +
+      'redeclaration, a SyntaxError. Read the params as `input` (they are also `ctx.input`), or give the ' +
+      'local another name. `var input = …` is not a redeclaration and compiles.',
+    'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+      'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
+      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
+      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
+      'action answers a 500 that names the action and the compile error.',
   ],
 };
 
@@ -4059,7 +4086,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
       '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
-      '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
+      '`timeline`, `gallery`, `map`, `tree` or `timesheet` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
@@ -4069,7 +4096,8 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
-      '`gantt.objectField` stops every bar opening its record. A warning where one decoration ' +
+      '`gantt.objectField` stops every bar opening its record, and every `timesheet` binding is written ' +
+      'into each record a typed cell creates. A warning where one decoration ' +
       'drops and the rest renders — an optional colour, title, tooltip or cover binding, or a stale ' +
       '`hiddenFields` or `fieldOrder` entry, which hides or orders nothing.',
     LIST_VIEW_HEAD_ONLY,
@@ -4332,7 +4360,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'set\'s `name` that a package of this stack declares. `reports.NAME` a report\'s `name` that ' +
       'a package of this stack declares. `books.BOOK` a doc book\'s `name` that a package of this ' +
       'stack declares, or a package id (its implicit book), and `.groups.KEY` a group `key` that ' +
-      'book declares, not its label.',
+      'book declares, not its label. `mappings.MAPPING` an import mapping\'s `name` that a ' +
+      'package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -5527,13 +5556,16 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
   rule: 'ai-skill-tool-unresolved',
   covers: 'how a skill tool name resolves, and why it only warns',
   paragraphs: [
-    // The three sources and the wildcard are held to the rule by its test, each one silencing it.
+    // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; and the materialised action tools, one `action_<name>` per declarative ' +
-      'action in `stack.actions` or any object\'s `actions` (ADR-0109: the default path declares no ' +
-      'tool record at all). A trailing-wildcard entry (`action_*`, `crm_*`) resolves when any member ' +
-      'of that universe starts with its prefix.',
+      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
+      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
+      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
+      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
+      '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
+      '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
       '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +
@@ -5667,7 +5699,7 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
   ],
 };
 
-// ── Seed datasets (`validate-seed-replay-safety.ts`, `validate-seed-state-machine.ts`) ──
+// ── Seed datasets (`validate-seed-state-machine.ts`) ──
 
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
@@ -5702,26 +5734,6 @@ const ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION: RuleExplanation = {
       'intended; a target this stack does not declare is an organization\'s own queue and is not judged.',
     'Advisory (`info`): the shape mirrors `approval-approvers-may-resolve-empty`, and the engine never ' +
       'refuses an insert on a rule\'s account.',
-  ],
-};
-
-const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
-  rule: 'seed-insert-mode-duplicates-on-replay',
-  covers: 'why a seed dataset must be safe to replay',
-  paragraphs: [
-    'Seeds are replayed, not applied once: every `data` dataset is loaded again on each dev-server ' +
-      'boot and each package re-publish, so a dataset\'s mode must be idempotent. `mode: \'insert\'` ' +
-      'is the one that is not: the loader\'s insert path writes every record unconditionally, with no ' +
-      'existing-row check, so the table grows by the dataset\'s size on every restart (three rows, ' +
-      'then six, then nine).',
-    // The modes are held to the rule by its test, each one silent.
-    'The fix line names the idempotent modes, `ignore` (skip rows that already exist) and `upsert` ' +
-      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field ' +
-      '(`externalId: \'code\'`), ' +
-      'or a composite list of fields for a join or junction table with no single natural key ' +
-      '(`[\'team\', \'project\']`).',
-    'A warning, not a refusal: an insert seed loads and works on a fresh database, and the defect ' +
-      'shows only from the second boot on.',
   ],
 };
 
@@ -6240,6 +6252,83 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Publish-time refusals of metadata that parses and does nothing ──────────
+// (`validate-flow-node-executors.ts`, `lint-flow-patterns.ts`,
+// `validate-inert-object-declarations.ts`, `validate-action-object-binding.ts`)
+
+const FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-type-no-executor',
+  covers: 'which node types a flow may use',
+  paragraphs: [
+    'A flow node\'s `type` is an open name: plugins contribute node types, so the schema cannot list them and ' +
+      'refuses only the retired callout names. A node typed after anything the deployment does not run — most ' +
+      'often an AI author\'s own tool name, such as `query_records` for a read — parses and publishes, and then ' +
+      'every run that reaches it fails with NO_EXECUTOR.',
+    'The rule judges against the node types the deployment\'s automation engine runs, and only once the engine ' +
+      'has declared that vocabulary closed, at the end of boot. Before that a plugin can still add a type, so ' +
+      '"no executor" would be a verdict the boot can contradict. The CLI commands therefore judge nothing here: ' +
+      'which plugins a deployment loads is not part of the stack. The publish door of a running server judges ' +
+      'every node, region bodies included, and its message lists the types that deployment runs.',
+  ],
+};
+
+const FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-approval-decision-unrouted',
+  covers: 'how an approval decision picks its branch',
+  paragraphs: [
+    'An approval node continues down the out-edge whose `label` is exactly `approve` or `reject`, matching the ' +
+      'decision. A decision that no edge claims is not an error at run time: the engine falls back to every ' +
+      'out-edge, so the approving and the rejecting branch both run on the same decision.',
+    'So both labels must be on an out-edge, spelled exactly: `Approve`, `approved` or a translated label is ' +
+      'another label. An approval with no out-edge at all simply ends the flow and is not reported, and a ' +
+      '`fault` edge routes failures rather than decisions, so it is not counted. A `revise` edge (send back ' +
+      'for revision) is checked by the `flow-approval-revise-*` rules.',
+  ],
+};
+
+const FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-http-timeout-missing',
+  covers: 'why an http node needs a timeout',
+  paragraphs: [
+    'The `http` node arms a timer only when `config.timeoutMs` is a positive number (`0` arms none), and the ' +
+      'engine races a node against its node-level `timeoutMs` only when that is positive. With neither, the call ' +
+      'waits for as long as the transport does: an endpoint that never answers holds the run, and a flow ' +
+      'triggered by a record save holds that save with it. A `durable: true` node is not reported: it hands the ' +
+      'request to the HTTP outbox and does not wait on the endpoint.',
+    'A warning, not an error: the run is held, not lost, and a slow endpoint may be expected. Set `timeoutMs` to ' +
+      'the longest answer the flow should wait for, in milliseconds.',
+  ],
+};
+
+const STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION: RuleExplanation = {
+  rule: 'state-machine-no-initial-states',
+  covers: 'why a state machine needs an entry guard',
+  paragraphs: [
+    'A `state_machine` validation\'s `transitions` judge UPDATES: from this state, a record may move to those. ' +
+      'Nothing in them judges an insert, and a select field accepts any of its options on create, so without ' +
+      '`initialStates` a record can be created already `approved` or `done` and skip the whole process. An ' +
+      'empty `initialStates` list is the same as none: the engine reads it as no entry contract.',
+    '`initialStates` lists the states a record may be created in, and the server refuses an insert in any ' +
+      'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process. ' +
+      'A machine with `active: false` is not run, so it is not reported.',
+  ],
+};
+
+const ACTION_NO_OBJECT_BINDING_EXPLANATION: RuleExplanation = {
+  rule: 'action-no-object-binding',
+  covers: 'which actions need an objectName',
+  paragraphs: [
+    'Every action location is a surface of an object: its list toolbar, a list row, a record\'s header, menu, ' +
+      'related list or section. A standalone action reaches them only through `objectName`, which folds it into ' +
+      'that object\'s actions and keys its dispatch. Without it the action registers under the global scope and ' +
+      'the button it declares renders nowhere. The handler itself still runs when called: an object-less action ' +
+      'answers every object\'s action route, so only the placement is lost.',
+    'An action written inside an object\'s own `actions` is bound by that object and is never reported. An ' +
+      'action with no UI surface at all declares `locations: []`; one that omits `locations` is ' +
+      '`action-no-placement`\'s question.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6300,6 +6389,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -6451,7 +6541,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
-  [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
   [ACTION_NO_PLACEMENT_EXPLANATION.rule]: ACTION_NO_PLACEMENT_EXPLANATION,
@@ -6475,6 +6564,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
   [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
   [FIELD_LABEL_DUPLICATE_EXPLANATION.rule]: FIELD_LABEL_DUPLICATE_EXPLANATION,
+  [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
+  [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
+  [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
+  [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
+  [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

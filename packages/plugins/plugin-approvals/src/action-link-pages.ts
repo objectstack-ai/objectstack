@@ -85,10 +85,10 @@ export function renderConfirmPage(input: {
   actPath: string;
 }): string {
   const approving = input.action === 'approve';
-  const verb = approving ? 'Approve · 通过' : 'Reject · 拒绝';
+  const verb = approving ? 'Approve · 通过' : 'Reject · 驳回';
   return shell(`${verb} — Approval`, `
     <h1>${approving ? '✅ Approve this request?' : '⛔ Reject this request?'}</h1>
-    <p class="sub">${approving ? '确认通过该审批请求？' : '确认拒绝该审批请求？'}
+    <p class="sub">${approving ? '确认通过该审批请求？' : '确认驳回该审批请求？'}
       Acting as · 操作身份：<b>${esc(input.approverId)}</b></p>
     ${summaryRows(input.request)}
     <form method="post" action="${esc(input.actPath)}" class="actions">
@@ -100,7 +100,7 @@ export function renderConfirmPage(input: {
 
 const RESULT_COPY: Record<string, { cls: string; title: string; body: string }> = {
   approved:     { cls: 'ok',   title: '✅ Approved · 已通过',  body: 'The decision was recorded. · 审批结果已记录。' },
-  rejected:     { cls: 'ok',   title: '⛔ Rejected · 已拒绝',  body: 'The decision was recorded. · 审批结果已记录。' },
+  rejected:     { cls: 'ok',   title: '⛔ Rejected · 已驳回',  body: 'The decision was recorded. · 审批结果已记录。' },
   invalid:      { cls: 'err',  title: 'Invalid link · 链接无效', body: 'This link is not recognized. · 无法识别该链接。' },
   expired:      { cls: 'warn', title: 'Link expired · 链接已过期', body: 'Ask the requester to send a new reminder. · 请让申请人重新发送催办。' },
   consumed:     { cls: 'warn', title: 'Already used · 链接已使用', body: 'This link was already used once. · 该链接已被使用过。' },

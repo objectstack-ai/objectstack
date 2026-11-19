@@ -401,22 +401,53 @@ export const PersonaSchema = z
 
 export const OPERATION_KINDS = ['create', 'update', 'delete'] as const;
 
-/** A record as the data API should read it after an applied write. */
+/**
+ * A record as the data API should read it after an applied write — or, as an
+ * AGGREGATE, the rows a `where` matches taken together.
+ *
+ *   values  the one row its `id` / `where` names holds each value;
+ *   absent  no row matches;
+ *   sum     the field summed over every row the `where` matches (at least
+ *           one) equals the declared number;
+ *   each    every row the `where` matches (at least one) holds the value.
+ *
+ * An aggregate checks what a faithful write must come to without pinning how
+ * the agent split it into rows: two hotel nights are one line of quantity 2
+ * or two lines of quantity 1, and both sum to the same amount.
+ *
+ * A `where` key is a field of the object or a RELATION PATH through lookups
+ * declared in `expect.lookups` (`claim.trip`), read through the rows the data
+ * API returns after the turn: it scopes rows the write created to the parent
+ * row they belong to.
+ */
 export const PostStateSchema = z
   .strictObject({
     object: MachineNameSchema,
     /** A seeded row's id — or, for a row the write creates, `where` matches it. */
     id: z.string().min(1).optional(),
-    where: z.record(MachineNameSchema, ScalarSchema).optional(),
+    where: z.record(FieldPathSchema, ScalarSchema).optional(),
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
     absent: z.literal(true).optional(),
+    /** Aggregate: per field, the sum over every row the `where` matches. */
+    sum: z.record(MachineNameSchema, z.number()).optional(),
+    /** Aggregate: per field, the value every row the `where` matches holds. */
+    each: z.record(MachineNameSchema, ScalarSchema).optional(),
   })
   .superRefine((s, ctx) => {
     if ((s.id === undefined) === (s.where === undefined)) {
       ctx.addIssue({ code: 'custom', path: ['id'], message: 'a post-state names its row by exactly one of `id` or `where`' });
     }
-    if ((s.values === undefined) === (s.absent === undefined)) {
-      ctx.addIssue({ code: 'custom', path: ['values'], message: 'a post-state carries exactly one of `values` or `absent`' });
+    const aggregate = s.sum !== undefined || s.each !== undefined;
+    if ((s.values !== undefined ? 1 : 0) + (s.absent !== undefined ? 1 : 0) + (aggregate ? 1 : 0) !== 1) {
+      ctx.addIssue({ code: 'custom', path: ['values'], message: 'a post-state carries exactly one of `values`, `absent` or an aggregate (`sum` / `each`)' });
+    }
+    if (aggregate && s.id !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['id'], message: 'an aggregate (`sum` / `each`) reads every row a `where` matches, so it names its rows by `where`, never `id`' });
+    }
+    for (const key of ['sum', 'each'] as const) {
+      if (s[key] !== undefined && Object.keys(s[key]).length === 0) {
+        ctx.addIssue({ code: 'custom', path: [key], message: `\`${key}\` names at least one field` });
+      }
     }
   });
 

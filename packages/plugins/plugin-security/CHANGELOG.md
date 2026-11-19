@@ -1,5 +1,274 @@
 # @objectstack/plugin-security
 
+## 18.6.0
+
+### Minor Changes
+
+- 3e49033: fix(core, plugin-security, lint)!: a permission set's own field-mask row binds its own holders over that set's View All vote
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-own-field-mask-binds-over-own-view-all -->
+  
+  **BREAKING** for the holders of a permission set that grants View All (`viewAllRecords`) on an object and declares `readable: false` on a field of that object in its own `fields`. Per ADR-0066 D2 ⑧ as amended on 2026-11-15 (the maintainer's ruling on the card), that row wins over the same set's View All field vote: the set casts no read vote on the field, so a holder reads it only when another set they hold casts a read vote on it (that set's own `readable: true` row, or its View All or Modify All on the object). A co-held set that says nothing about the field does not restore it. Every reader of the field merge answers the same: the data doors, through `PermissionEvaluator.getFieldPermissions`, and the `fields` slot of `/auth/me/permissions`. Until this release the set's own View All voted the field readable, so the row bound none of the set's holders (the ADR's note of 2026-11-02).
+  
+  **Not moved.** Another set's View All or Modify All on the object still makes the field readable (and, under Modify All, editable) for a caller who holds both sets. A View All set still votes on every field it does not mask itself. An omitted `readable` parses to `true` and is not a mask. View All never granted an edit, so an edit lock beside it binds as before. Modify All is unchanged: a set holding `modifyAllRecords` on the object votes `readable: true` and `editable: true` on every field of it, its own rows included. The row-level bypass is untouched.
+  
+  **Who moves:** an administrator whose set pairs View All on an object with its own `readable: false` row for a field of that object, and whose holders are expected to keep reading the field. The row now hides the field from them, as it reads. Where the field is meant to be read, the row is the thing to delete. No default permission set the platform ships carries the pair.
+  
+  `@objectstack/lint`: `security-superuser-field-mask-inert` reports only a row that its own set's Modify All unbinds (a `readable: false`, an edit lock, or both). A `readable: false` beside the set's own View All is no longer reported, because it binds. The finding's `userTextParams` no longer carry `bypass` (Modify All is the only bypass the rule reports), and its message, hint and user sentence name Modify All. `security-controlled-by-parent-master-reference-hidden` is skipped only beside Modify All and is reported beside View All, and the roll-up source visibility rule reads a View All set's own mask as hiding the field. The rule ids are unchanged.
+  
+  `@objectstack/core`: the exported `superuserFieldVote(sets, objectName)` takes an optional third argument, the field name, and reads the `fields` of the sets it is given. Called with two arguments it answers the object-wide vote, as before.
+  
+  `@objectstack/spec`: the doc comment above `FieldPermissionSchema` states the exception, and the upgrade guide gains the semantic entry `permission-own-field-mask-binds-over-own-view-all`, which tells an administrator how to find the pair and what to decide. No schema, description or generated artifact changes.
+
+### Patch Changes
+
+- 4f20614: fix(plugin-security): the catalog reference boot report names a refused grant's candidates and the reviewed bind, and a refused audience-binding suggestion's fix follows its package column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The catalog reference boot report listed a grant naming no package, of a permission-set name two packages hold, as a grant naming a set the catalog does not resolve, with no candidates and the fix "declare the permission set again", which changes nothing. Such a grant is now listed on the same line with the resolver's refusal (`refusals` in the line's meta: the grant, the package its column names, the reason and every candidate), and the line's fix names `os migrate stored-references bind --table sys_user_permission_set --id ID --package PACKAGE` for a refused grant naming no package, and, for one that already names a package, to grant the candidate meant again naming its package and then remove the listed grant. The position half of the report already named its refusals and candidates.
+  
+  A suggestion refused for a `permission_set_package` column that already names a package (a package that no longer serves the set) no longer offers `os migrate stored-references bind`, which writes only a column naming no package. Its refusal now names the package and the fix that applies: install or enable that package again if its set is the one meant, or dismiss the suggestion. A suggestion whose column names no package keeps the bind.
+  
+  No grant or suggestion confers more or less: only the report's lines and the refusal's text move.
+- c59198f: fix(plugin-security, spec): the master-detail write refusal tells its user which master record needs their access, in their language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A write of a `controlled_by_parent` detail (create, edit, delete and the other write verbs) refused because the caller lacks edit access on its master record (or read access, on a detail that declares `writeRequiresMasterRead`) now carries a `userMessage`. It names the master object's label: the deployment's translation in the caller's language, else the declared label. The caller's language is the request locale, else the workspace default, else English. The console shows a refusal's `userMessage` in place of its generic "You don't have permission to save this record.", so a user creating a billing milestone under a contract they can read but not edit now reads that the missing access is on the contract.
+  
+  The sentences are new keys in the operation-message catalog (en, zh-CN, ja-JP, es-ES): `errors.master_record_edit_denied` and `errors.master_record_read_denied`, with `{{master}}`, and their `_opaque` forms, which name no master. The opaque forms answer a writer who cannot read the master reference (the refusal names no master to them) and a master object with no label. A deployment overrides any of the four with a `translation` item under that key.
+  
+  The HTTP status, `code`, `message` and `details` of the refusal are unchanged; only `userMessage` is added. The owner-rule refusal of a row whose optional master is empty is unchanged and carries no `userMessage`.
+- f7b2d02: feat(automation): `IAutomationService.dryRun` runs an unpublished flow definition once, unarmed, as a named user
+  
+  Clause-②: yes (widening) — `AutomationEngine.dryRun` admits a `runAs: 'system'` self-triggered draft for the named user (ruling B); `@objectstack/core` exports the shared flow-start rules (`aiAccountElevatedStartRefusal`, `requiredPermissionsStartRefusal`, `requiredPermissionsRefusal`, `missingCapabilities`, `isAiServiceAccount`, `AI_ACCOUNT_ELEVATED_START_REFUSAL`, `FlowStartPermissionRefusal`); plugin-security's registered `security` service serves `canWriteObject`
+  Metadata-protocol: none
+  
+  The automation service now implements `dryRun(definition, { userId, record, … })`, the method the `IAutomationService` contract declares. A dry run admits the definition by the checks `registerFlow` asks, then by the rules that admit a start by name, and then runs it once against the supplied record as the named user. It registers nothing and arms no trigger, and it writes, sends and pauses nothing:
+  
+  - Record writes (`create_record`, `update_record`, `delete_record`) are simulated. The step shows the values the run would write and a placeholder id for a new record. The named user's object-level write permission is judged as allowed, refused or not judged. A later read by id in the same run sees the simulated row.
+  - Routing and computing nodes (`assignment`, `decision`, gateways, loops, parallel branches, try/catch) run on the engine's own executors. A decision step shows the branch taken and the expressions it evaluated.
+  - Outbound nodes (`http`, email and the like) are never executed. The step shows the payload they would send.
+  - The run stops at a node that pauses (`approval`, `wait`, `screen`, a subflow) and names why. A node type the dry run cannot simulate stops it as `not_simulated`.
+  
+  Under maintainer ruling B (record 6917953931), a draft declaring `runAs: 'system'` whose type starts on its own trigger is admitted to a dry run for the named user, and the run is never elevated. The contract's admission text says so. A by-name start of a published flow keeps refusing such a flow.
+  
+  The AI service account rule and the flow's own `requiredPermissions` rule now live in `@objectstack/core`. The by-name start doors and the dry run both ask that one copy. `@objectstack/runtime` re-exports every symbol under the name it had. The registered `security` service now also exposes `canWriteObject`, so a dry run can judge a write without performing it.
+- 80cdbd4: fix(metadata-protocol, plugin-security): a package's save of its own permission set is no longer refused because a package of another namespace ships a set of that name
+  
+  Clause-②: yes (widening) — a save, a draft save or a draft's publish that a package addresses to its own permission set N, refused 403 `NOT_OVERRIDABLE` ("provided by a managed package and is sealed") while a package of another namespace ships N, now lands; the exported `MetadataAuthoringGateContext` (`@objectstack/metadata-protocol`) and `PermissionSetLockGateContext` (`@objectstack/plugin-security`) each gain an optional `packageId`; nothing the save door accepted is refused
+  Metadata-protocol: none
+  
+  A permission set is `(package, name)`, and a name holds one set per namespace (ADR-0150 D2/D9). The metadata door's managed seal (ADR-0126 / ADR-0131 D6) and plugin-security's packaged-permission-set lock both judged a save of a permission set by its name alone. So when package `crm` shipped a set `N`, a package `hr` of another namespace could not save its own set `N`: the save was refused as if it edited `crm`'s shipped set.
+  
+  These judges, and the managed seal the store applies to the write a save or a draft's publish hands it, now judge the package the write is addressed to. A save of `N` overrides a set a package `Q` ships, and stays sealed and locked exactly as before, when it names no package, is addressed to `Q`, is addressed to `Q`'s customization pair (whatever namespace the pair declares), or is addressed to a package that shares `Q`'s set of the name (a co-owner of `Q`'s namespace, a platform namespace, a package with no namespace, or a name the platform requests by spelling). Every package that ships the name is judged, so the answer is the same in every registration order. Any other package's save of its own `N` lands, is served at that package, and that package's grants confer its own set.
+  
+  What moves, for a save of `N` while a package of another namespace ships `N`:
+  
+  - FROM 403 `NOT_OVERRIDABLE` (sealed) TO saved, for a save addressed to a package of another namespace than every package that ships `N`, which is not the customization pair of any of them. The same holds for a draft save of that set and for its publish.
+  
+  When a package publish is refused on a runtime that cannot roll back its transaction, the undo of each promotion it made judges the same package the promotion addressed, so a package's own set `N` is taken back out and its draft is put back instead of being reported still live. Rollback and revert of such a set still judge the name alone, and other sealed package-scoped types keep the name-wide seal.
+  
+  `MetadataAuthoringGateContext` (`@objectstack/metadata-protocol`) gains an optional `packageId`: the package the write is addressed to (a save's `packageId`, a restore's row binding), absent for a write that names none. An authoring gate that judges an item keyed `(package, name)` reads it. Gates that ignore it are unaffected. `PermissionSetLockGateContext` (`@objectstack/plugin-security`), the subset of it the lock gate consumes, gains the same optional `packageId`.
+  
+  Nothing to migrate.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- bb169c3: fix(plugin-security): a record an action body inserts is owned by the user who ran the action
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An action body's `ctx.api` (and `ctx.engine`) runs the invoking user's context elevated to system. The security middleware's system bypass skipped the owner stamp a direct create gets, so a row the body inserted with `ctx.api.object(X).insert({...})` was stored with `owner_id` null, while `created_by` named the invoker. On an object with `sharingModel: 'private'` a non-admin invoker then could not read or update the record their own action had just created: `get` by the returned id answered not-found.
+  
+  An action body's insert now fills an EMPTY `owner_id` with the invoker, as a direct create by that user does:
+  
+  - every row of a batch insert whose owner is empty is stamped;
+  - an `owner_id` the body sets itself is kept, another user's included (the body is trusted code, as before);
+  - a guest invoker is stamped with nothing (ADR-0138 D1);
+  - under delegation the stamp names the same principal a direct create under that context names (ADR-0090 D10);
+  - a body that names an ownership queue and supplies `owner_id` empty beside it parks the row unowned in the queue; a body that names a queue and leaves `owner_id` out gets an owned row with that home queue (ADR-0142 D3).
+  
+  This covers every handler an action door dispatches, not only a script body's `ctx.api`. A host code action handler and an action reached through `ObjectRepository.execute` run under the same action context, and their inserts are stamped the same way.
+  
+  Assignment rules (ADR-0142 D5) route only a row whose `owner_id` and `queue` are both still empty. An action-body insert is now the invoker's own record, as a direct create by that user already was, so assignment rules route neither. Before this release, an action body's unowned, queue-less insert on an object a rule reaches was routed by the rule. It now goes to the invoker. A body has no spelling today that asks a rule to route its row.
+  
+  `@objectstack/core`: the header of the app-automation elevation mark (shipped in its type declarations) now names the owner stamp as a second reader beside the refusals.
+  
+  Unchanged: flows (`runAs: 'system'` or not), hooks with `runAs: 'system'`, seed, boot and import writes, and any other system context. They still store the owner they write, or none, and an unowned, queue-less insert from one of them is still routed by assignment rules. Rows stored before this release keep `owner_id` null; an administrator can assign their owners.
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- f84dc19: fix(plugin-security)!: a computed field over a field the caller cannot read is hidden from that caller
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — `skills/objectstack-data` teaches a rate as a `formula` over a `summary` and tells an author to mask the summary on a set that must not see it; that instruction is now complete as written, because the formula over the masked summary is withheld with it, so no page needs a new sentence.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row changes: what moves is which computed fields the field-level security read mask and query guard withhold from a caller, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller who is not served whole a field that a computed field reads. Field-level security now covers what a field's value is computed from: a computed field — a `formula`, computed on read, or a stored field declaring an `expression`, computed on write — is withheld from a caller who is not served whole a field it reads:
+  
+  - a field of its own record the caller may not read (a permission set marks it `readable: false`, or the caller fails its `requiredPermissions`) or is served masked (its `maskingRule`), whether the expression names it directly, inside a function such as `label()`, or through another computed field;
+  - a field the referenced object declares, on the record the expression reads through one reference, where the caller may not read that object, may not read the field (`readable: false`, or a failed `requiredPermissions`) or is served it masked, directly or through a computed field of the referenced object — including a stored field there that is withheld for what it reads through a reference of its own. This holds however long the chain, and where it comes back to an object it has already passed through.
+  
+  What is judged is the field, not the row: a computed field is not withheld because the caller may not read the particular record a reference points at. A formula reads `null` there, as before; a stored computed field keeps the value its writer computed.
+  
+  Who moves:
+  
+  - a holder of a permission set that withholds such a field, who read a computed field over it. That includes a View All / Modify All holder over a field whose `requiredPermissions` capability it does not hold, or that it is served masked: the vote lifts a permission set's `readable: false`, not a capability gate or a masking rule;
+  - every caller but a system context, for a computed field over a field whose `maskingRule` declares no unmask gate (no `requiredPermissions`): that field is served masked to every such caller;
+  - a delegate acting on behalf of a delegator who is not served such a field whole;
+  - every public-form submitter: the record the engine echoes for a public-form grant carries no computed field that reads through a reference, whatever the submitter could read there (the form submit route itself answers the created id only);
+  - a caller with edit on the object whose payload names a computed field it is not served whole, a computed field served masked by its own `maskingRule` included;
+  - a caller who reads a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL), while some other field of the object is not served whole to that caller; such a field is also withheld for what it reads through a reference, as any computed field is.
+  
+  For that caller, after this release, the computed field is withheld exactly as the field it reads is:
+  
+  - `find` / `findOne`, a projection naming it, and the record an `insert` / `update` echoes back carry no key for it. Before, a computed field over a field of its own record was served with its value; a stored one reading through a reference, with the value its writer computed; a formula reading through a reference, with `null` where the field there was not readable, and computed over the masked value where it was served masked.
+  - filtering, sorting, grouping or aggregating by a stored computed field over such a field is refused `403 PERMISSION_DENIED`. Before, it was admitted. (A `formula` is refused in those positions for every caller, as before.)
+  - a payload naming it in an `insert` / `update` is refused `403 PERMISSION_DENIED`, as a field the caller may not edit is, and so is a payload naming a computed field the caller is served masked by its own `maskingRule`; the write admission (`canWriteObject`), the write projection and the record field access give the same answer. Before, a formula named there was dropped and a stored one recomputed, reported as replaced only when the value sent differed from the stored one.
+  - the `$expand` of a `referenceNameVisible` reference to a record the caller may not read serves that record by id with the floor name when its name field is a computed field withheld from the caller. Before, it served the computed name.
+  - the read projections (`getReadableFields`, `getMetadataReadableFields`, and with them the export header and the object schema the metadata plane and `describe_object` serve), the query projection (`getQueryableFields`), the write projection (`getWritableFields`) and the record field access (`getRecordFieldAccess`, both halves) leave it out; the explain `fls` layer reports it masked from responses.
+  
+  A field the referenced object does not declare is no field to withhold: a formula naming one reads `null`, as before — unless the caller may not read the referenced object at all, when every computed field reading through that reference is withheld.
+  
+  The fix, when the caller should read the computed field: grant the caller's permission set read on every field the computed field reads, and on the object a reference reads through, unmasked — the capability a field's `requiredPermissions` names, which also lifts a `maskingRule` gated by it. A field whose `maskingRule` declares no gate is masked for every caller; to make it readable whole, give the field `requiredPermissions` (the capability then unmasks it) and grant that capability. When the caller should not read the computed field, nothing is owed.
+  
+  Unchanged: a computed field over fields the caller is served whole is served and listed as before; a system context reads every field and every computed field; a View All / Modify All holder reads a field a permission set marks `readable: false` and the computed fields over it, as before; a caller holding several permission sets reads a computed field when any set grants read on its inputs; the aggregate refusal of a field the caller cannot read is as before.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

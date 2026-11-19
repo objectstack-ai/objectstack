@@ -23,6 +23,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import { AuthProvider, useAuth } from '@object-ui/auth';
 import { preflightAuth } from '../lib/auth-preflight';
+import { readConsoleDiscovery } from '../lib/early-discovery';
+import { getSharedDiscovery } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 
 const TOKEN = 'tok_valid';
 const EARLY_SLOT = Symbol.for('objectui.earlySessionCheck');
@@ -339,5 +342,137 @@ describe('one page, one server origin', () => {
     runEarlySessionCheck(productionHtml);
 
     expect(sessionCalls()[0]![0]).toBe('/api/v1/auth/get-session');
+  });
+});
+
+describe('discovery starts at parse time beside get-session, and the console reads that request (objectstack#34211)', () => {
+  const DISCOVERY_SLOT = Symbol.for('objectui.earlyDiscovery');
+  const SERVER = 'https://api.example.test';
+  const discoveryCalls = () => fetchStub.mock.calls.filter(([input]) => urlOf(input).includes('/discovery'));
+
+  beforeEach(() => {
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+  });
+  afterEach(() => {
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+  });
+
+  it('is sent in the same parse pass as get-session, before any bundle code runs', () => {
+    localStorage.setItem('auth-session-token', TOKEN);
+    runScript('applyEarlyBranding');
+    runEarlySessionCheck();
+    runScript('startEarlyDiscovery');
+
+    const urls = fetchStub.mock.calls.map(([input]) => urlOf(input));
+    expect(urls).toEqual(['/api/v1/runtime/config', '/api/v1/auth/get-session', '/api/v1/discovery']);
+  });
+
+  it('main.tsx starts the console reader on every boot, over the same server base', () => {
+    expect(mainSource).toContain('void readConsoleDiscovery(SERVER_BASE)');
+  });
+
+  it("the console reader takes the parse-time request, and the adapter's connect joins it: one discovery per load", async () => {
+    runScript('startEarlyDiscovery', applyViteHtmlEnv(indexHtml, { VITE_SERVER_URL: SERVER }));
+    await settle();
+
+    const consoleRead = readConsoleDiscovery(SERVER);
+    // `ObjectStackAdapter.connect()` asks the same shared cache with a fetcher of its own.
+    const adapterFetcher = vi.fn(async () => ({ from: 'adapter' }));
+    const adapterRead = getSharedDiscovery(SERVER, adapterFetcher);
+
+    expect(await consoleRead).toBeNull();
+    expect(await adapterRead).toBeNull();
+    expect(adapterFetcher).not.toHaveBeenCalled();
+    expect(discoveryCalls()).toHaveLength(1);
+    expect(discoveryCalls()[0]![0]).toBe(`${SERVER}/api/v1/discovery`);
+  });
+
+  const authOf = (call: unknown[]) => new Headers((call[1] as RequestInit | undefined)?.headers).get('Authorization');
+
+  it('carries the stored Bearer, in the parse-time request and in the reader\'s own, and none without one', async () => {
+    localStorage.setItem('auth-session-token', TOKEN);
+    runScript('startEarlyDiscovery');
+    expect(authOf(discoveryCalls()[0]!)).toBe(`Bearer ${TOKEN}`);
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(1);
+
+    // The reader's own request: no slot left to take.
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(2);
+    expect(authOf(discoveryCalls()[1]!)).toBe(`Bearer ${TOKEN}`);
+
+    localStorage.clear();
+    clearSharedDiscoveryCache();
+    runScript('startEarlyDiscovery');
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(3);
+    expect(authOf(discoveryCalls()[2]!)).toBeNull();
+  });
+
+  it('a parse-time request sent with a token the preflight has since purged is not taken', async () => {
+    localStorage.setItem('auth-session-token', 'tok_stale');
+    runScript('startEarlyDiscovery');
+    localStorage.removeItem('auth-session-token');
+
+    await readConsoleDiscovery('');
+
+    expect(discoveryCalls()).toHaveLength(2);
+    expect(authOf(discoveryCalls()[1]!)).toBeNull();
+  });
+
+  it('a parse-time request that never answers rejects as a timeout within the 10 s bound, and is not asked again', async () => {
+    vi.useFakeTimers();
+    try {
+      (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT] = {
+        url: '/api/v1/discovery',
+        token: '',
+        body: new Promise(() => {}),
+      };
+      const read = readConsoleDiscovery('');
+      const outcome = read.then(() => 'answered', (err: Error) => err.message);
+      await vi.advanceTimersByTimeAsync(9_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toBe('discovery timeout');
+      expect(discoveryCalls()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the parse-time request itself is aborted at 10 s and hands over a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchStub.mockImplementationOnce(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+          }),
+      );
+      runScript('startEarlyDiscovery');
+      const slot = (globalThis as unknown as Record<symbol, { body: Promise<unknown> }>)[DISCOVERY_SLOT]!;
+      const outcome = slot.body.then(() => 'answered', (err: Error) => err.message);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await outcome).toBe('discovery timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed parse-time request is not reused: the reader asks the server itself', async () => {
+    fetchStub.mockImplementationOnce(async () => json({ error: 'boom' }, 503));
+    runScript('startEarlyDiscovery');
+    await settle();
+
+    await readConsoleDiscovery('');
+
+    expect(discoveryCalls()).toHaveLength(2);
   });
 });
