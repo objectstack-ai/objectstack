@@ -93,3 +93,74 @@ describe('planNamespaceRename — the one rename engine (#30794)', () => {
         });
     });
 });
+
+describe('planNamespaceRename — a copied capability, and every grant and requirement of it (#35157)', () => {
+    // The shape an AI-built app writes: the package DECLARES its capability,
+    // a set GRANTS it, an action and an object REQUIRE it (ADR-0066 D1).
+    const app = [
+        { type: 'object', name: 'demoasset_asset', body: {
+            name: 'demoasset_asset',
+            requiredPermissions: { delete: ['demoasset.manage_assets'], read: ['view_reports'] },
+            fields: {},
+        } },
+        { type: 'capability', name: 'demoasset.manage_assets', body: { name: 'demoasset.manage_assets', label: 'Manage assets', scope: 'org' } },
+        { type: 'capability', name: 'demoasset_decide_scrap', body: { name: 'demoasset_decide_scrap', label: 'Decide scrap' } },
+        { type: 'capability', name: 'audit_trail', body: { name: 'audit_trail', label: 'Audit trail' } },
+        { type: 'permission', name: 'demoasset_manager', body: {
+            name: 'demoasset_manager',
+            objects: { demoasset_asset: { allowRead: true } },
+            systemPermissions: ['demoasset.manage_assets', 'demoasset_decide_scrap', 'manage_users'],
+        } },
+        { type: 'action', name: 'demoasset_scrap', body: {
+            name: 'demoasset_scrap', objectName: 'demoasset_asset', requiredPermissions: ['demoasset_decide_scrap'],
+        } },
+    ];
+    const plan = (targetNamespace: string, items = app) => planNamespaceRename({
+        sourcePackageId: 'com.demo.asset', sourceNamespace: 'demoasset', targetNamespace, items, retryVerb: 'install',
+    });
+
+    it('a capability the package names with its prefix takes the target prefix, in either separator', () => {
+        const rename = plan('trial1');
+        expect(rename.copyName('capability', 'demoasset.manage_assets')).toBe('trial1.manage_assets');
+        expect(rename.copyName('capabilities', 'demoasset.manage_assets')).toBe('trial1.manage_assets');
+        expect(rename.copyName('capability', 'demoasset_decide_scrap')).toBe('trial1_decide_scrap');
+        expect(rename.rewrite('capability', 'demoasset.manage_assets', app[1]!.body))
+            .toEqual({ item: { name: 'trial1.manage_assets', label: 'Manage assets', scope: 'org' } });
+    });
+
+    it('every grant and requirement of a renamed capability follows it — and nothing else moves', () => {
+        const rename = plan('trial1');
+        const set = rename.rewrite('permission', 'demoasset_manager', app[4]!.body);
+        // The platform capability the set also grants is not the package's, so it keeps its name.
+        expect((set as { item: any }).item.systemPermissions).toEqual(['trial1.manage_assets', 'trial1_decide_scrap', 'manage_users']);
+        const action = rename.rewrite('action', 'demoasset_scrap', app[5]!.body);
+        expect((action as { item: any }).item.requiredPermissions).toEqual(['trial1_decide_scrap']);
+        // An object's per-operation map follows too; `view_reports` (a platform name) does not move.
+        const object = rename.rewrite('object', 'demoasset_asset', app[0]!.body);
+        expect((object as { item: any }).item.requiredPermissions)
+            .toEqual({ delete: ['trial1.manage_assets'], read: ['view_reports'] });
+    });
+
+    it('a capability declared WITHOUT the source prefix keeps its name — the save door refuses a second holder', () => {
+        const rename = plan('trial1');
+        expect(rename.copyName('capability', 'audit_trail')).toBe('audit_trail');
+    });
+
+    it('CONTROL: a copy that keeps the source namespace renames no capability', () => {
+        const rename = plan('demoasset');
+        expect(rename.copyName('capability', 'demoasset.manage_assets')).toBe('demoasset.manage_assets');
+        const set = rename.rewrite('permission', 'demoasset_manager', app[4]!.body);
+        expect((set as { item: any }).item.systemPermissions).toEqual(['demoasset.manage_assets', 'demoasset_decide_scrap', 'manage_users']);
+    });
+
+    it('a copy name another capability of the package declares is refused at its own name — two gates never merge', () => {
+        const rename = plan('trial1', [
+            ...app,
+            { type: 'capability', name: 'trial1.manage_assets', body: { name: 'trial1.manage_assets' } },
+        ]);
+        const refused = rename.rewrite('capability', 'demoasset.manage_assets', app[1]!.body);
+        expect(refused).toEqual({ refusal: expect.stringContaining("Capability 'demoasset.manage_assets' is not copied") });
+        expect((refused as { refusal: string }).refusal).toMatch(/then install again\.$/);
+    });
+});
+

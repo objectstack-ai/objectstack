@@ -85,23 +85,10 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             instructions: 'be helpful',
         },
     },
-    // [#5961] The third flagged type. ADR-0066 D1: packages DEFINE
-    // capabilities — an administrator minting one at runtime has no place in
-    // the capability / assignment / requirement separation, so the kind is
-    // code-only for the same reason `job` and `agent` are. This probe is
-    // schema-valid on purpose (see the note above): only a body the schema
-    // ACCEPTS proves the refusal came from the registry consult rather than
-    // from the 422 that #5961 also gave this type.
-    capability: {
-        name: 'rc3_capability_probe',
-        item: {
-            name: 'rc3_capability_probe',
-            label: 'C',
-            description: 'Probe capability.',
-            scope: 'org',
-            packageId: 'com.example.probe',
-        },
-    },
+    // [#5961] `capability` was the third flagged type, until #35157 made it
+    // runtime-creatable (an unmanaged install copies an app's capabilities
+    // into environment rows); its door is pinned in
+    // `protocol.capability-write-door.test.ts`.
     // [#5488] The fourth flagged type. `api` declared `allowRuntimeCreate:
     // true` and the runtime never honoured it: `matchEndpoint` reads
     // `MetadataManager.listForIndex('api')` (the manager's registry plus its
@@ -308,8 +295,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
     // ── the flags are data: keep the suite honest about new ones ──────────
 
     it('covers every code-only type the registry declares', () => {
-        // Today: job (#4509), agent (ADR-0063 §2), capability (#5961,
-        // ADR-0066 D1), api (#5488, ADR-0049 remove side — the maintainer
+        // Today: job (#4509), agent (ADR-0063 §2), api (#5488, ADR-0049 remove side — the maintainer
         // ruling of 2026-08-07 withdrew a runtime create door the endpoint
         // matcher could never read) and field (#7893, the same remove side —
         // ruled 2026-08-12; a `field` write minted a standalone row nothing
@@ -323,7 +309,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
         expect([...CODE_ONLY_TYPES].sort()).toEqual([
-            'agent', 'api', 'assignment_rule', 'capability', 'field', 'job', 'picklist', 'queue', 'sharing_rule',
+            'agent', 'api', 'assignment_rule', 'field', 'job', 'picklist', 'queue', 'sharing_rule',
         ]);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();

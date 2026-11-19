@@ -145,14 +145,17 @@ export const BUILT_IN_SECURITY_CATALOG_NAMES: Readonly<Record<SecurityCatalogTyp
 /**
  * The catalog types the environment catalog can hold, which are the ones the
  * cold-boot check reads (module doc, "The cold boot"): the metadata-type registry
- * declares `position` and `permission` `allowRuntimeCreate: true`, so an
- * environment can author either. A `capability` is code-only
- * (`allowRuntimeCreate: false`): the runtime metadata API refuses to create one,
- * so the environment catalog holds none.
+ * declares all three `allowRuntimeCreate: true`, so an environment can author
+ * each. `capability` joined the other two when an `unmanaged` install began
+ * copying an app's capabilities into environment rows (#35157): a name the
+ * environment holds and a package then declares is the same second holder for
+ * a capability as for a set, and a capability's `scope` decides who may
+ * administer the sets that grant it (ADR-0090 D12 (c)).
  */
 export const ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES: readonly SecurityCatalogType[] = Object.freeze([
   'position',
   'permission',
+  'capability',
 ]);
 
 /** Who holds a security catalog name (module doc, "The holders"). */

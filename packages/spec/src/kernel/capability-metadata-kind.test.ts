@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #5961 — `capability` is a REGISTERED metadata kind, and a code-only one.
+ * #5961 — `capability` is a REGISTERED metadata kind; #35157 — runtime-creatable,
+ * overlay-closed.
  *
- * ## The hole this closes
+ * ## The hole #5961 closed
  *
  * `capability` was ENFORCED BUT UNDECLARED — the mirror of `declared ≠
  * enforced`, and the exact shape #5271 closed for `api`. Three registries were
@@ -13,32 +14,23 @@
  *   2. `BUILTIN_METADATA_TYPE_SCHEMAS` (schema resolution), and
  *   3. `DEFAULT_METADATA_TYPE_REGISTRY` (who may write, and how it is loaded).
  *
- * Meanwhile `PLURAL_TO_SINGULAR` has mapped `capabilities` → `capability`
- * since #5870, `AppPlugin` registers stack-declared capabilities under exactly
- * that name, and `bootstrapDeclaredCapabilities` reads them back to seed
- * `sys_capability`. So the kind was live; it just had no contract.
+ * So `getMetadataTypeSchema('capability')` answered `undefined`, `saveMetaItem`
+ * took its "unregistered type → store without validation" branch, and
+ * `PUT /api/v1/meta/capability/:name` accepted ANY JSON into the live
+ * authorization namespace. That half stands: a write is judged by
+ * `CapabilityDeclarationSchema`.
  *
- * Two consequences, and the second is why this is an authorization bug rather
- * than a tidiness one:
- *
- *   • `getMetadataTypeSchema('capability')` answered `undefined`, so
- *     `saveMetaItem` took its documented "unregistered type → store without
- *     validation" branch and `PUT /api/v1/meta/capability/:name` accepted ANY
- *     JSON. Capabilities are resolved BY NAME STRING from both the grant side
- *     (`systemPermissions`) and the requirement side (`requiredPermissions`),
- *     so an arbitrary-JSON row landed in the live authorization namespace.
- *   • `/meta/types` synthesised a FAKE descriptor for it —
- *     `allowRuntimeCreate: true`, no schema, hence a raw-JSON textarea form —
- *     advertising a runtime authoring surface the platform never designed.
- *
- * ## Why `allowRuntimeCreate: false`
+ * ## Why `allowRuntimeCreate: true` now (#35157)
  *
  * ADR-0066 D1: packages DEFINE capabilities, permission sets GRANT them,
- * resources REQUIRE them. An administrator minting a brand-new capability at
- * runtime has no place in that separation — nothing in code would ever require
- * the name, so the row is an unreferenced grant target in the authorization
- * namespace. Paired with `allowEnvironmentOverlay: false` this is #5086's CODE-ONLY
- * declaration, which `saveMetaItem` enforces on every kernel.
+ * resources REQUIRE them. The kind was first code-only on the reading that a
+ * runtime-minted capability has no requirement side. Environment metadata now
+ * carries both other edges (an action, flow or object authored there declares
+ * `requiredPermissions`; a set authored there grants), and an `unmanaged`
+ * install (ADR-0131 D6) copies an app into environment rows through the save
+ * door — so an app that gates its own actions could not be copied at all.
+ * `allowEnvironmentOverlay: false` stays: a capability a package ships is not
+ * an environment author's to re-declare, so nobody re-scopes it.
  *
  * The enforcement half lives in
  * `@objectstack/metadata-protocol`'s `protocol.capability-write-door.test.ts`
@@ -78,16 +70,18 @@ describe('capability is a registered metadata kind', () => {
     expect(listMetadataTypeSchemaTypes()).toContain('capability');
   });
 
-  it('has a registry entry, and it declares the kind CODE-ONLY', () => {
-    // The pair is the declaration: `allowRuntimeCreate: false` AND
-    // `allowEnvironmentOverlay: false` together are #5086's "no runtime write channel
-    // at all". Either one alone leaves a door open — which is why they are
-    // asserted together rather than in two cases.
+  it('has a registry entry: runtime-creatable, never an overlay of a packaged declaration (#35157)', () => {
+    // The pair is the declaration: `allowRuntimeCreate: true` lets an
+    // environment (an unmanaged copy among them) declare its own capability;
+    // `allowEnvironmentOverlay: false` keeps it from re-declaring one a
+    // package ships — a re-declaration could re-scope `org` ↔ `platform`.
+    // Asserted together, because flipping the second with the first would
+    // open the re-scoping door.
     expect(entry('capability')).toMatchObject({
       domain: 'security',
       supportsOverlay: false,
       allowEnvironmentOverlay: false,
-      allowRuntimeCreate: false,
+      allowRuntimeCreate: true,
     });
   });
 
@@ -98,11 +92,9 @@ describe('capability is a registered metadata kind', () => {
     expect(entry('capability')!.loadOrder).toBeLessThan(entry('position')!.loadOrder);
   });
 
-  it('declares file patterns, so the code-only refusal can prescribe a remedy', () => {
-    // `codeOnlySourceHint` reads `filePatterns[0]` back into the 403 body —
-    // "Declare it in source (…) and redeploy". An entry with an empty array
-    // would refuse the write and then say nothing about the alternative, and
-    // the filesystem loader globs this same list, so it is not decoration.
+  it('declares file patterns, so the loader finds a `*.capability.ts` file', () => {
+    // The filesystem loader globs this list, and the CLI derives the file name
+    // `objectstack generate` writes from it, so it is not decoration.
     expect(entry('capability')!.filePatterns[0]).toMatch(/\.capability\./);
   });
 

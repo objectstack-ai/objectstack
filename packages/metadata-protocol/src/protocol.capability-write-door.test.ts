@@ -25,63 +25,38 @@
  *     textarea.
  *
  * ---------------------------------------------------------------------------
- * The three doors, and which one each case is about
+ * #35157 — runtime-creatable, overlay-closed, one name per holder
  * ---------------------------------------------------------------------------
- * `capability` is CODE-ONLY (`allowRuntimeCreate: false` +
- * `allowEnvironmentOverlay: false`, ADR-0066 D1 — packages DEFINE capabilities). That
- * makes the ORDER inside `saveMetaItem` load-bearing, and this file pins the
- * order rather than asserting a 422 that the real code never reaches:
+ * `capability` is no longer code-only: `allowRuntimeCreate: true` with
+ * `allowEnvironmentOverlay: false`, because an `unmanaged` install (ADR-0131
+ * D6) copies an app's capabilities into environment rows through this door,
+ * and an app that gates its own actions could not be copied without them.
+ * What the door now pins, in the order `saveMetaItem` meets them:
  *
- *   1. DEFAULT — #5086's code-only refusal fires FIRST: 403 `not_creatable`,
- *      on every kernel, before any schema is consulted. Nothing is stored.
- *   2. ESCAPE HATCH — with `OS_METADATA_WRITABLE=capability` (ADR-0005's one
- *      documented operator door) the write reaches the spec-conformance check,
- *      and THAT is where the new schema earns its keep: 422 `invalid_metadata`
- *      instead of storing the body verbatim.
- *   3. PACKAGE DECLARATION — untouched. `AppPlugin` registers stack
- *      `capabilities[]` through `registerInMemory` and the filesystem loader
- *      globs `filePatterns`; neither goes through `saveMetaItem`, so
- *      `bootstrapDeclaredCapabilities` still seeds `sys_capability` exactly as
- *      before. Asserted here as the "legal payload still gets in" half.
+ *   1. SCHEMA — every write is judged by `CapabilityDeclarationSchema`: a
+ *      garbage body is 422 `invalid_metadata` and nothing is stored, with no
+ *      operator hatch needed to reach the check. A valid one saves.
+ *   2. PLATFORM FLOOR — a curated platform capability's name is refused
+ *      `NAMESPACE_CONFLICT` / 422 before any read: a declaration under it
+ *      would re-declare a platform power's `scope` (ADR-0090 D5 revision,
+ *      boundary 1; D12 (c)).
+ *   3. ONE NAME, ONE HOLDER — a name a package holds, or the environment or
+ *      another package stores, is refused the same way: a grant and a
+ *      requirement match a capability by name across the whole deployment.
+ *   4. PACKAGE DECLARATION — untouched: `AppPlugin` registers stack
+ *      `capabilities[]` through `registerInMemory`, never this door.
+ *
+ * #5961's reverse verification (below) measured the schema binding as a
+ * genuine second line of defence; with the code-only gate gone it is the first.
  *
  * ---------------------------------------------------------------------------
- * Reverse verification, direction predicted BEFORE running
+ * Reverse verification of #5961, as recorded then
  * ---------------------------------------------------------------------------
- * Two limbs, two predictions, both ordinary red. Each limb was rebuilt before
- * measuring — this package resolves `@objectstack/spec` from `dist`, so an
- * unbuilt limb measures the OLD spec and reports a false green (it did, once).
  *
- *   • **Limb 1 — delete the `capability` row from
- *     `DEFAULT_METADATA_TYPE_REGISTRY`.** Predicted: `isRuntimeCreateAllowed`
- *     falls into its "no static entry ⇒ synthesised as creatable" branch, so
- *     the refusal cases RESOLVE instead of rejecting and `/meta/types` shows
- *     the synthesised descriptor again. Measured: 7 red / 3 green, with the
- *     refusals failing as `promise resolved "{ success: true, …(4) }" instead
- *     of rejecting` — the open door, reproduced on demand.
- *
- *     One case failed in a SHARPER shape than predicted, and it is worth
- *     writing down rather than smoothing over: the first case (garbage body,
- *     no hatch) did not resolve — it turned into `422 invalid_metadata`,
- *     because with the registry row gone the write sails past the code-only
- *     gate and reaches the schema check, which is still bound and still
- *     rejects. So the two limbs are not merely additive: the schema binding is
- *     a genuine second line of defence behind the registry row, and only a
- *     body that is BOTH well-formed and unauthorised (case 2) isolates the row
- *     on its own.
- *
- *   • **Limb 2 — delete `capability: CapabilityDeclarationSchema` from
- *     `BUILTIN_METADATA_TYPE_SCHEMAS`.** Predicted: `resolveOverlaySchema`
- *     answers null, the escape-hatch case SAVES the garbage body instead of
- *     422-ing, and `/meta/types` emits an entry with no schema. Measured:
- *     3 red / 7 green, exactly those three, `promise resolved "{ success:
- *     true, …(4) }" instead of rejecting` and `expected undefined to be
- *     defined`.
- *
- * The green halves are not slack. A "fix" that made `capability` unwritable
- * under every condition would pass every refusal case here and fail the
- * behind-the-hatch save; a harness that could not save anything at all would
- * pass the refusals for the wrong reason. Both are excluded by cases that stay
- * green in the fixed tree and move in only one of the two limbs.
+ *   • Deleting the `capability` registry row made `isRuntimeCreateAllowed`
+ *     answer "creatable" and the refusals resolve; deleting the schema binding
+ *     made a garbage body save. Only the second half still applies to the
+ *     door as it stands, and case 1 below pins it.
  *
  * Harness: the real write path over a stub engine — the same shape as
  * `protocol.flow-org-override-closed.test.ts`. The gates run INSIDE
@@ -105,7 +80,10 @@ interface Row {
     metadata: string;
 }
 
-function makeStubEngine(registeredTypes: string[] = []) {
+function makeStubEngine(
+    registeredTypes: string[] = [],
+    packageHeld: Array<{ catalogType: string; name: string; packageIds: string[] }> = [],
+) {
     const rows = new Map<string, Row>();
     let nextId = 0;
     const keyOf = (w: Record<string, unknown>) =>
@@ -121,7 +99,13 @@ function makeStubEngine(registeredTypes: string[] = []) {
             }
             return null;
         },
-        async find() { return []; },
+        async find(_t: string, opts?: { where?: Record<string, unknown> }) {
+            if (_t !== 'sys_metadata') return [];
+            const where = opts?.where ?? {};
+            return [...rows.values()].filter((row) =>
+                (where.type === undefined || row.type === where.type)
+                && (where.state === undefined || row.state === where.state));
+        },
         async insert(_t: string, data: Record<string, unknown>) {
             if (_t !== 'sys_metadata') return { id: 'side_effect_skip' };
             nextId += 1;
@@ -144,13 +128,20 @@ function makeStubEngine(registeredTypes: string[] = []) {
             getItem: () => undefined,
             getArtifactItem: () => undefined,
             getRegisteredTypes: () => registeredTypes,
+            // The registry's own package-held reading (`@objectstack/objectql`
+            // `packageHeldSecurityCatalogNames`), which the save door asks.
+            packageHeldSecurityCatalogNames: () => packageHeld,
         },
     };
     return { engine, rows };
 }
 
-function makeProtocol(registeredTypes?: string[], environmentId?: string) {
-    const { engine, rows } = makeStubEngine(registeredTypes);
+function makeProtocol(
+    registeredTypes?: string[],
+    environmentId?: string,
+    packageHeld?: Array<{ catalogType: string; name: string; packageIds: string[] }>,
+) {
+    const { engine, rows } = makeStubEngine(registeredTypes, packageHeld);
     const protocol = new ObjectStackProtocolImplementation(
         engine,
         () => new Map(),
@@ -180,7 +171,7 @@ const NOT_A_CAPABILITY = {
 
 const entry = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type);
 
-describe('#5961 — capability: the runtime write door is closed, and validated behind the hatch', () => {
+describe('#5961 / #35157 — capability: runtime-creatable, schema-judged, one name per holder', () => {
     beforeEach(() => {
         delete process.env.OS_METADATA_WRITABLE;
         ObjectStackProtocolImplementation.resetEnvWritableCache();
@@ -190,150 +181,110 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
         ObjectStackProtocolImplementation.resetEnvWritableCache();
     });
 
-    // ── door 1: the default, and the acceptance criterion ─────────────────
+    // ── 1. the schema judges every write ──────────────────────────────────
 
-    it('PUT /meta/capability/:name is refused 403 — nothing reaches sys_metadata', async () => {
-        // The write that used to succeed with ANY body. `environmentId` is set
-        // here and omitted in the next case on purpose: the refusal must not
-        // depend on deployment topology.
+    it('a garbage body is 422 INVALID_METADATA — nothing reaches sys_metadata, no hatch needed', async () => {
+        // #5961's regression, on the open door: the body the old unregistered
+        // type stored verbatim. With or without an environment id — the
+        // answer must not depend on deployment topology (#5086).
+        for (const environmentId of ['env_prod', undefined]) {
+            const { protocol, rows } = makeProtocol([], environmentId);
+            await expect(
+                protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: NOT_A_CAPABILITY }),
+            ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+            expect(rows.size).toBe(0);
+        }
+    });
+
+    it('a WELL-FORMED declaration saves — the environment may declare its own capability (#35157)', async () => {
+        // The control for the case above, and the acceptance criterion of
+        // #35157: an unmanaged copy writes its capabilities through this door.
         const { protocol, rows } = makeProtocol([], 'env_prod');
-
-        await expect(
-            protocol.saveMetaItem({
-                type: 'capability',
-                name: 'billing.refund',
-                item: NOT_A_CAPABILITY,
-            }),
-        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
-
-        // Refused, not "refused after writing". The stored row is the bug.
-        expect(rows.size).toBe(0);
-    });
-
-    it('a WELL-FORMED declaration is refused too — the door is about WHO writes, not what', async () => {
-        // The distinction that makes this a code-only kind rather than a
-        // validation improvement: a perfectly valid capability is still not
-        // authorable through the runtime API, because ADR-0066 D1 says
-        // packages DEFINE capabilities. If this ever goes green, the kind has
-        // silently become runtime-creatable.
-        const { protocol, rows } = makeProtocol([], 'env_prod');
-
-        await expect(
-            protocol.saveMetaItem({
-                type: 'capability',
-                name: 'billing.refund',
-                item: CAPABILITY,
-            }),
-        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
-        expect(rows.size).toBe(0);
-    });
-
-    it('the refusal does not depend on deployment topology (no environmentId either)', async () => {
-        // #5086's finding: keying an authorization rule off `environmentId`
-        // left the flagship showcase — a host config boots with NO
-        // environmentId — running with the gate disengaged, on a surface whose
-        // `PUT /api/v1/meta/*` is an END-USER door.
-        const { protocol, rows } = makeProtocol();
-
-        await expect(
-            protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY }),
-        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
-        expect(rows.size).toBe(0);
-    });
-
-    it('the refusal prescribes where to declare it instead', async () => {
-        // `codeOnlySourceHint` reads the registry row's own `filePatterns[0]`,
-        // so the remedy cannot drift from the entry. A refusal that only says
-        // "no" sends the author looking for a workaround.
-        const { protocol } = makeProtocol();
-
-        await expect(
-            protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY }),
-        ).rejects.toThrow(/\.capability\./);
+        const result = await protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY });
+        expect(result.success).toBe(true);
+        expect(rows.size).toBe(1);
     });
 
     it('the plural spelling is judged by the same rule', async () => {
         // `STATIC_REGISTRY_TYPES` / `RUNTIME_CREATE_ALLOWED_TYPES` add
         // `SINGULAR_TO_PLURAL[type]` alongside each entry, so
-        // `PUT /meta/capabilities/:name` must not be a second, open door.
+        // `PUT /meta/capabilities/:name` is never a second, looser door.
         const { protocol, rows } = makeProtocol();
-
         await expect(
-            protocol.saveMetaItem({ type: 'capabilities', name: 'billing.refund', item: CAPABILITY }),
-        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
-        expect(rows.size).toBe(0);
-    });
-
-    // ── door 2: behind the operator escape hatch, the schema bites ────────
-
-    it('with OS_METADATA_WRITABLE=capability, a garbage body is 422 — not stored verbatim', async () => {
-        // THE regression this issue is about, isolated. Reaching the
-        // spec-conformance check requires opening ADR-0005's documented hatch,
-        // because the code-only refusal fires first — so this is the one place
-        // the new schema binding is observable on the write path, and without
-        // it this body was persisted.
-        process.env.OS_METADATA_WRITABLE = 'capability';
-        ObjectStackProtocolImplementation.resetEnvWritableCache();
-        const { protocol, rows } = makeProtocol([], 'env_prod');
-
-        // [#6190] The `organizationId` this case used to pass was incidental —
-        // the door under test is the SCHEMA one, not the org one. Since the
-        // #6190 ruling an org-scoped write of a non-org-overridable type is
-        // refused BEFORE the schema is consulted (and `OS_METADATA_WRITABLE`
-        // deliberately does not unlock the org dimension), so keeping the org
-        // here would have turned this into a test of that other refusal and
-        // left the 422 unmeasured. Env-wide keeps it pointed at the schema.
-        // The hatch-plus-org interaction is pinned in
-        // `protocol.org-scoped-write-refused.test.ts` (case R7).
-        await expect(
-            protocol.saveMetaItem({
-                type: 'capability',
-                name: 'billing.refund',
-                item: NOT_A_CAPABILITY,
-            }),
+            protocol.saveMetaItem({ type: 'capabilities', name: 'billing.refund', item: NOT_A_CAPABILITY }),
         ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
         expect(rows.size).toBe(0);
     });
 
-    it('behind the same hatch a VALID declaration saves — the 422 is about the body', async () => {
-        // The control that stops the case above from passing for the wrong
-        // reason. Without it, a change that made `capability` unwritable under
-        // every condition would look identical.
-        process.env.OS_METADATA_WRITABLE = 'capability';
-        ObjectStackProtocolImplementation.resetEnvWritableCache();
+    // ── 2. the platform floor ─────────────────────────────────────────────
+
+    it('a platform capability name is refused NAMESPACE_CONFLICT / 422, before any write', async () => {
+        // `manage_users` declared `scope: 'org'` by the environment would make
+        // every set granting it pass condition (c) of the organization
+        // boundary (ADR-0090 D12): an organization administrator could hand
+        // out user management. The floor is absolute.
         const { protocol, rows } = makeProtocol([], 'env_prod');
-
-        const result = await protocol.saveMetaItem({
+        const refused = protocol.saveMetaItem({
             type: 'capability',
-            name: 'billing.refund',
-            item: CAPABILITY,
+            name: 'manage_users',
+            item: { name: 'manage_users', label: 'Manage users', scope: 'org' },
         });
+        await expect(refused).rejects.toMatchObject({ code: 'NAMESPACE_CONFLICT', status: 422 });
+        await expect(refused).rejects.toThrow(/platform capability/);
+        expect(rows.size).toBe(0);
+    });
 
+    // ── 3. one name, one holder ───────────────────────────────────────────
+
+    it('a name a package holds is refused — the environment cannot re-declare (re-scope) it', async () => {
+        const { protocol, rows } = makeProtocol([], 'env_prod', [
+            { catalogType: 'capability', name: 'billing.refund', packageIds: ['com.acme.billing'] },
+        ]);
+        const refused = protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY });
+        await expect(refused).rejects.toMatchObject({ code: 'NAMESPACE_CONFLICT', status: 422 });
+        await expect(refused).rejects.toThrow(/package "com\.acme\.billing"/);
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL: a permission set of the same name held by a package does not hold the capability name', async () => {
+        // The reading is per catalog type: a set and a capability that share a
+        // spelling are two different names.
+        const { protocol, rows } = makeProtocol([], 'env_prod', [
+            { catalogType: 'permission', name: 'billing.refund', packageIds: ['com.acme.billing'] },
+        ]);
+        const result = await protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY });
         expect(result.success).toBe(true);
         expect(rows.size).toBe(1);
     });
 
-    // ── door 3: the package-declaration channel, untouched ────────────────
+    it('re-saving the environment\'s own capability is untouched — the owner meets itself', async () => {
+        const { protocol, rows } = makeProtocol([], 'env_prod');
+        await protocol.saveMetaItem({ type: 'capability', name: 'billing.refund', item: CAPABILITY });
+        const again = await protocol.saveMetaItem({
+            type: 'capability', name: 'billing.refund', item: { ...CAPABILITY, label: 'Refund payments' },
+        });
+        expect(again.success).toBe(true);
+        expect(rows.size).toBe(1);
+    });
+
+    // ── 4. the package-declaration channel, untouched ─────────────────────
 
     it('the package channel does not go through saveMetaItem at all', async () => {
         // `AppPlugin` calls `metadata.registerInMemory('capability', name, item)`
         // for every stack-declared capability, and the filesystem loader globs
-        // `filePatterns` — neither reaches the gate above, which is why
-        // `allowRuntimeCreate: false` closes the ADMIN door without breaking
-        // the one ADR-0066 D1 actually prescribes. Asserted structurally: the
-        // registry row is what the loader reads, and it must carry patterns.
+        // `filePatterns` — neither reaches the door above. Asserted
+        // structurally: the registry row is what the loader reads, and it
+        // must carry patterns; the overlay channel stays closed, so a package's
+        // declaration is never an environment author's to re-declare.
         const row = entry('capability')!;
-        expect(row.allowRuntimeCreate).toBe(false);
+        expect(row.allowRuntimeCreate).toBe(true);
+        expect(row.allowEnvironmentOverlay).toBe(false);
         expect(row.filePatterns.length).toBeGreaterThan(0);
-
-        // And the declaration itself is spec-valid, so the seeding pass that
-        // reads it back (`bootstrapDeclaredCapabilities`) is being handed a
-        // body this schema accepts rather than one it would now reject.
         const { getMetadataTypeSchema } = await import('@objectstack/spec/kernel');
         expect(getMetadataTypeSchema('capability')!.safeParse(CAPABILITY).success).toBe(true);
     });
 
-    // ── /meta/types no longer publishes a fiction ─────────────────────────
+    // ── /meta/types serves the registry descriptor ────────────────────────
 
     it('/meta/types serves the REAL registry descriptor, not a synthesised one', async () => {
         const { protocol } = makeProtocol(['capability']);
@@ -342,19 +293,13 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
         const descriptor = entries.find((e: any) => e.type === 'capability');
 
         expect(descriptor).toBeDefined();
-        // The three tells of the synthesised branch, each asserted against the
-        // value the registry actually declares.
-        expect(descriptor.allowRuntimeCreate).toBe(false);   // was: true
-        expect(descriptor.domain).toBe('security');          // was: 'system'
-        expect(descriptor.loadOrder).toBe(entry('capability')!.loadOrder); // was: 1000
-        expect(descriptor.label).toBe('Capability');         // was: 'capability'
+        expect(descriptor.allowRuntimeCreate).toBe(true);
+        expect(descriptor.domain).toBe('security');          // the synthesised branch said 'system'
+        expect(descriptor.loadOrder).toBe(entry('capability')!.loadOrder); // …and 1000
+        expect(descriptor.label).toBe('Capability');         // …and 'capability'
     });
 
     it('/meta/types emits a real JSON Schema, so the admin form is not a raw-JSON textarea', async () => {
-        // The read-side consequence of the missing schema binding. The engine
-        // picks its controls from this; with no schema it falls back to a free
-        // text area, which is how arbitrary JSON got authored in the first
-        // place.
         const { protocol } = makeProtocol(['capability']);
 
         const { entries } = await protocol.getMetaTypes();
