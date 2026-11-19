@@ -287,13 +287,13 @@ never `password`, which on a generic object is **plaintext at rest**; `user` is 
 picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` envelope —
 `F\`...\`` in TypeScript; see **objectstack-formula**).
 
-- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`
-  and never `required`: a checkbox always holds one of its two values, so
-  `required` can only read as "must be true", and a form that reads it that way
-  refuses the unchecked state — the one state a new record starts in. "Must be
-  accepted" (terms, a confirmation) is a `validations[]` rule, not `required`.
-  The default also lands seeded or imported rows that omit the column on a real
-  `false` instead of a null that only looks unchecked.
+- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`.
+  `required` on it refuses only `null`: an unchecked box is a value, so it
+  never means "must be checked". A box that must be checked (terms, consent)
+  is a `validations[]` rule: `{ name: 'terms', type: 'script',
+  condition: { dialect: 'cel', source: 'record.accepted != true' }, message: 'Accept the terms.' }`.
+  The default also lands seeded or imported rows that omit the column on
+  `false`, not a null that only looks unchecked.
 - A person on the record (approver, reviewer) is `type: 'user'` with
   no `reference`, and optional unless the request says otherwise — the platform
   already stamps the owner and `created_by`.
@@ -330,11 +330,11 @@ picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` enve
 The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
 `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
 
-A `state_machine` rule also declares `initialStates` whenever the status has a
-real starting point — without it a record can be created already `approved` /
-`paid` and walk past the process. List only the genuine entry states (usually
-one: `draft` / `pending` / `new`), never a terminal one; keys and values are
-option `value`s, never labels.
+A `state_machine` rule that runs on insert declares `initialStates`, or publish
+refuses it (`state-machine-no-initial-states`): a record could be created
+already `approved`. An update-only machine (`events: ['update']`) needs none.
+List only entry states (usually one: `draft` / `new`), never a terminal one;
+keys and values are option `value`s, never labels.
 
 > **There is NO `unique` validation type** — uniqueness is a unique **index**
 > with its scope ([rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
