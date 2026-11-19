@@ -20,7 +20,7 @@ const rule: StateMachineValidation = {
   type: 'state_machine',
   name: 'case_lifecycle',
   label: 'Case Lifecycle',
-  field: 'status',
+  field: 'status',                 // the field that holds the state
   message: 'Invalid status transition.',
   initialStates: ['new'],          // states a record may be CREATED in
   transitions: {
@@ -64,7 +64,7 @@ Since **ADR-0019** there is no standalone approval-process type. An approval is
 authored as an **Approval node** (`type: 'approval'`) on an ordinary flow — the
 run **suspends** when it reaches the node and **resumes** down the node's
 `approve` / `reject` out-edge once a decision is recorded. Multi-step review is
-successive Approval nodes wired together.
+successive Approval nodes.
 
 > There is no `approvals: [...]` stack collection. The approval *state* (`sys_approval_request` /
 > `sys_approval_action`, the record lock, the status mirror, approver
@@ -142,7 +142,7 @@ Three pieces author it:
    the approval node MUST be typed `'back'`. This is the *only* thing that
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
    as a DAG, so an **unmarked** cycle is rejected. At
-   run time a back-edge traverses normally (it just re-enters the node).
+   run time a back-edge traverses normally.
 3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
    send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
    edge). `maxRevisions: 0` disables send-back, so never pair `0` with a `revise`
