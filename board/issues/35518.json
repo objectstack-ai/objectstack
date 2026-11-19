@@ -1,0 +1,32 @@
+{
+  "number": 35518,
+  "kind": "issue",
+  "title": "os package install does not print the install answer's stored-expression fill advisories; cli.mdx omits the install door from the fill list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T13:33:02Z",
+  "updated_at": "2026-11-19T13:48:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35518",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): os-dev round of #35390 (PR #35514, report 7010586784, out-of-scope findings 1 and 2). ⛔ Not a claim.\nReader: `domain:devx` (`packages/cli/src/commands/package/install.ts`, `content/docs/deployment/cli.mdx`). Suggested-grade: p3 · output and docs only. Parent: #35390. Land after PR #35514.\nDedupe: `package install advisories print`, `stored-expression-filled CLI` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：用命令行安装或升级应用包时，会直接看到\"已为哪些字段补算了多少条记录\"，不用去翻原始返回结果。\n- 为什么做：升级补算已经上线，但命令行没有把结果打印出来，文档里列举\"哪些操作会补算\"也漏了安装升级这一项。\n- 出错会怎样：只是输出和文档；不改的话作者看不到补算结果。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nAfter PR #35514 the install-local answer carries `advisories` (rule `stored-expression-filled` / `stored-expression-fill-incomplete`, per field). `os package install` prints neither. The `os migrate stored-expressions` row in `content/docs/deployment/cli.mdx` lists the metadata doors that fill at the change but not the install door.\n\n## Expected\n\n`os package install` prints each advisory (field, rows written / remaining, hint) the way other CLI commands print advisories; cli.mdx names the install/upgrade door beside the metadata doors.\n\nAlso (L1-a nit on #35514, 7010697020): `publish-and-preview.mdx` says \"the boot log names the field\". That holds only for rows holding NULL; the boot sample does not detect rows holding an old expression's value. Narrow that sentence in the same docs change.\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x -->"
+}

@@ -2,8 +2,8 @@
   "number": 35167,
   "kind": "issue",
   "title": "objectql: insert and delete keep the after-abort unit at the door while update moves it inside the middleware",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T09:28:45Z",
-  "updated_at": "2026-11-19T08:14:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T11:48:38Z",
+  "closed_at": "2026-11-19T11:47:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35167",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35165 (card #35142) moves `update`'s own after-abort unit inside `executeWithMiddleware`, so the authorization gate's reads run before `BEGIN`. `insert` and `delete` still open their unit at the door, around the whole middleware chain:\n\n- `packages/objectql/src/engine-insert.ts:332`: `return this.inAfterAbortUnit(() => this.insert(object, data, options));`\n- `packages/objectql/src/engine-delete-and-aggregate.ts:153`: `return this.inAfterAbortUnit(() => this.delete(object, options));`\n\nSo on an object that opens a unit (a metadata `before*` hook that side-writes, #34412, or a blocking or conditioned metadata `after*` hook, #22782), a middleware's post-`next()` work runs inside the row's unit for insert and delete but after the commit for update. On SQLite, the door-level unit also serialises concurrent writers behind the gate.\n\n## Readings so far (from the #35142 rounds, not re-measured)\n\n- A concurrent insert of one id gives the loser `DUPLICATE_RECORD` / 409 in all four cells (private or public_read, hooked or not), the same as update after #35165.\n- The loser of a concurrent delete answers `false` with no metadata `beforeDelete` hook and `RECORD_NOT_FOUND` / 404 with one. The row really is gone, so this is not ADR-0142 D4's defect, but the answer depends on whether a hook is bound.\n\n## To decide\n\nShould insert and delete move their unit inside `executeWithMiddleware` the same way, for one rule across the three verbs? Or should the asymmetry be stated where the unit is documented? Either way, should the delete loser's answer stop depending on a hook binding?\n\n## Origin\n\nL1 note N1 on PR #35165 (comment 6974452034).\n\nRe-check: `git grep -n \"inAfterAbortUnit(() => this\\.\" origin/main -- packages/objectql/src`"

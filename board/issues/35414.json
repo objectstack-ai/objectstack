@@ -1,0 +1,37 @@
+{
+  "number": 35414,
+  "kind": "issue",
+  "title": "记录页的页签条吸顶后是半透明的，滚动时下面的内容透出来叠在页签上",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:31:49Z",
+  "updated_at": "2026-11-19T13:25:13Z",
+  "closed_at": "2026-11-19T13:24:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35414",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19；本地 HotCRM，控制台是 objectstack `origin/main` 7ece0204a6 的构建（服务端 18.5.0），zh-CN，2026-11-19 上同样出现）\n\n- 打开商机记录页，向下滚动。「明细 / 相关 / 互动」页签条吸在顶部。\n- 页签条的背景是 60% 透明加 8px 模糊：下面滚过的卡片标题、复选框、「显示 N 个空字段」会透出来，与页签文字叠在一起；深色主题下更明显（卡片标题「资格评估」直接压在页签条上方）。\n- 实测样式：`position: sticky; top: 0; z-index: 20; background: oklab(… / 0.6); backdrop-filter: blur(8px)`。\n- 来源：`ui/packages/components/src/renderers/layout/containers.tsx:1185`（`sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60`）。\n- 页签条的宽度只到左栏为止，右栏的卡片在它旁边继续滚，没有分界。\n\n## 要做的\n\n1. 吸顶的页签条用实底背景（与页面底色一致），下边框保留；不再让内容透出。\n2. 吸顶时页签条上方不留能看到内容的空隙（现在页签条上面还露出一截滚过的卡片）。\n\n## 不做的\n\n- 不改页签本身的样式和顺序；不改竖排页签。\n\n## 验收\n\n- 浅色、深色主题下滚动商机记录页，页签条区域内看不到任何下层内容。\n- 加一条几何或截图钉子覆盖吸顶状态。\n\nReader: `domain:ui` 车道，`containers.tsx` 的 tabs 容器。\n\nDedupe: `页签 吸顶 透明`（objectstack，open）→ 0。"
+}

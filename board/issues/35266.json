@@ -11,20 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "area:devpath",
+    "area:package",
     "domain:devx",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T00:40:03Z",
-  "updated_at": "2026-11-19T07:48:54Z",
+  "updated_at": "2026-11-19T12:26:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35266",
   "body": "sweep#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 00:32Z in the objectstack priorities discussion thread: 「可以拆的都同意。」 (the split list's item 4: split #35132; the template-mode gate becomes its own card behind #35157, the rest of #35132 queues now). Rule: #35259 item 8.\n\nFiling gate: ③ split from a maintainer-directed card (#35132; its filing words: 「客户可以从应用市场中下载安装试用」). Reader: the `domain:devx` seat, from `pm:queue` once #35157 closes. Dedupe: this is #35132's Ask items 2–3, moved; no other card.\n\nGrade: p2 · area:devpath · Task · inherits #35132's grade\n\nBlocked-by: #35157\n\n## Ask (moved unchanged from #35132)\n\n1. **Export requires the unmanaged install to pass.** `gallery-refresh` also runs `template` mode on each card's passing scratch build, and a card exports only when both modes pass. A refused install, or a failed template half, keeps the card out, with the reason in the PR body under `Refused`. The scorecard gains the `template` column, and `scorecard.md` shows it.\n2. **The sample data in the template run.** The template half installs with the seed copy on and asks its questions over the copied rows, not over rows the runner seeds itself. This proves that what a trial user gets can answer the gallery's questions.\n3. Tests: a template-half refusal keeps a card out; the sample-data questions run over the copied rows.\n\n## Why it waits\n\nUntil #35157 lands, an AI-built app cannot be a template, so the template half refuses every card and the gate would block all exports. #35132 (manifest fields, listing facet, title, sample data, the check) ships first and needs no template run. #35134 (publishing) waits on this card.\n"

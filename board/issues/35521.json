@@ -1,0 +1,33 @@
+{
+  "number": 35521,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): cube door answers a formula total with the virtual-field remedy",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T13:41:26Z",
+  "updated_at": "2026-11-19T14:10:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35521",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nFixes #35353\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：分析模型里对「公式」字段求合计、平均、最大或最小值的度量被拒时，提示不再叫人「改成数记录条数」，而是说「把它建成按同一公式存值的字段，再对那个字段求合计」，和数据集、数据引擎两处的提示一字不差。\n- 为什么做：数记录条数不是合计，照做会得到一个看起来合理的错数；你对公式字段求合计的裁决只在另外两处生效，分析服务这一处还在给旧提示。\n- 出错会怎样：只改了一句拒绝提示，哪些查询被拒、错误码和状态码都不变；回滚即恢复旧提示。\n- 要你做什么：无，席位落地。\n\n## 席位核对\n\n### Reachability (Ask step 1, measured before the change)\n\nThe formula pair DOES reach `assertCubeMeasureFieldTypesAccepted` without passing the dataset compiler, on two paths: a configured cube (`AnalyticsServicePlugin({ cubes })`, measure `{ type: 'sum', sql: 'expected' }` over a `formula` field) and an inferred cube's suffix measure (`cube: OBJECT`, `measures: ['expected_sum']`). Measured with the new test against the UNMODIFIED door at base `895dd437f4`, real `AnalyticsServicePlugin` over a real `ObjectQL` + `SqlDriver` (SQLite): both refused `INVALID_FIELD` / 400 and the message ended \"...; aggregate a field of one of those types, or count the rows with count. Each SQL dialect would coerce the stored form to a number or fail, so the answer would depend on the backend.\" So step 2 of the Ask applies.\n\n### What changes\n\n- `packages/services/service-analytics/src/cube-measure-field-type-door.ts`: when `virtualFieldAggregateRemedy(aggregate, declared)` answers, the route after the accepted set is `VIRTUAL_FIELD_AGGREGATE_REMEDY` verbatim (no count route, no dialect reason: the sentence carries its own reason), as PR #35338 did for the engine door. Every other refused pair keeps today's words byte for byte. The verdict is unchanged (still the table's), so no caller that got an answer now gets a refusal.\n- New pin `src/cube-measure-formula-remedy.test.ts`: sum / avg / min / max over a formula, on a configured cube and on an inferred cube, refused `INVALID_FIELD` / 400 with `member` / `field` / `object`, the remedy verbatim, no count route, nothing read; CONTROL: `sum` over `text` keeps \"; aggregate a field of one of those types, or count the rows with count.\" and carries no remedy.\n- `.changeset/35353-cube-measure-formula-remedy.md`: `@objectstack/service-analytics` patch.\n\n### Tests\n\n<details><summary>Card test, package test, typecheck (head 8079c387bd)</summary>\n\n- Pre-change probe (base door): `Tests 2 failed | 1 passed (3)` (the two formula cases red, CONTROL green).\n- After: `pnpm --filter @objectstack/service-analytics test`: `Test Files 219 passed (219)`, `Tests 5609 passed | 345 skipped (5954)`; `typecheck` (`tsc --noEmit`) exit 0. Lock `VERDICT command-exit 0`.\n- Ablation (committed fix, `scripts/ablation-replace.mjs`, test resolves the door from `src/` by relative import, so no dist leg): anchor `const remedy = virtualFieldAggregateRemedy(aggregate, declared);` x1 -> x0, blob `0b40ef51d09b -> e09549c4d11a`; card test `Tests 2 failed | 1 passed (3)` (CONTROL green); restored by the tool and the trap (`git checkout HEAD --`), `git diff HEAD` empty, file hash equals the HEAD blob.\n\n</details>\n\n### Acceptance notes\n\n- `Clause-②: no`: measured on the diff, the refused set is the table's and untouched; only the route sentence of a refused formula pair changed. No dogfood battery owed.\n- Header docblock left as is: it describes the verdict and the envelope, both unchanged.\n\n### Verification\n\n<details><summary>Gates (head 8079c387bd)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 63 families; all run locally; `--ran` reconciliation: \"63 derived, 62 run, 1 NOT-MEASURED, 0 UNRUN\".\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: exit 3 PREREQUISITE NOT MET (needs every package's dist; CI builds it).\n- `node scripts/check-nul-bytes.mjs`: OK. `node scripts/pm/overlap-check.mjs --branch=HEAD`: VERDICT clean exit 0.\n- `test:repo` not run locally (diff does not touch that project); CI's Test Core runs it.\n\n</details>\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6Ca1jJvsA1dHsPwMiQb\n"
+}

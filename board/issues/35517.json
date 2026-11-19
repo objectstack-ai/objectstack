@@ -1,0 +1,35 @@
+{
+  "number": 35517,
+  "kind": "issue",
+  "title": "Install door and metadata doors keep two copies of the stored-expression fill notice composer; export one from metadata-protocol",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T13:32:36Z",
+  "updated_at": "2026-11-19T13:48:13Z",
+  "closed_at": "2026-11-19T13:48:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35517",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): os-dev round of #35390 (PR #35514, report 7010586784, open question 1). ⛔ Not a claim.\nReader: `domain:server` (`packages/metadata-protocol/src/protocol-stored-expression-fill.ts`, `packages/cloud-connection/src/marketplace-install-local-plugin.ts`). Suggested-grade: p3 · refactor, no behaviour change. Parent: #35390. Land after PR #35514.\nDedupe: `fillStoredExpressionChange export install door` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：无（内部整理）。\n- 为什么做：升级补算和元数据保存补算现在各有一份提示文字的生成代码，日后容易改了一处忘了另一处。\n- 出错会怎样：只是提示文字；改错时两处提示可能不一致。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nPR #35514 makes the install-local door fill stored computed fields and report `stored-expression-filled` / `stored-expression-fill-incomplete` advisories. The #32527 notice composer (`fillStoredExpressionChange`) and its rule-id constants are not exported from `@objectstack/metadata-protocol`, so the door carries a mirrored composer (~80 lines) with the same rule ids and element shape.\n\n## Expected\n\nExport the composer and rule ids from `@objectstack/metadata-protocol` (wording parameterised: \"this change\" vs \"this install\"), have the install door call it, delete the mirror; the door's fill pins stay green."
+}

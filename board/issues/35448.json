@@ -1,0 +1,36 @@
+{
+  "number": 35448,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Studio Automations list shows each flow by the package's translated label",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T09:35:06Z",
+  "updated_at": "2026-11-19T10:23:57Z",
+  "closed_at": "2026-11-19T10:23:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T10:23:55Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35448",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6v19uPsX6gX42G8tGcvvzb)_\nFixes #35319\n\nrepo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户看到的变化：中文界面下，Studio 里一个包的「自动化」列表每一行都显示包自带的中文流程名，和打开后的标题一致；没有翻译的流程仍显示原名。\n- 为什么：管理员在列表里找中文流程名却只看到英文名，要点开才知道是哪一个。\n- 如果判断错：只影响列表的显示和搜索，流程本身不变；最坏情况是列表回到显示原名。\n- 需要您做的：无。\n\n## What changes\n\n- **One rule, reused.** `flow-label-translations.tsx` gains `useFlowLabelOf()`: for any flow name it returns `flowLabelTranslations(activeFlowsBundle(...)).flowLabel` in the console's active language. That is the exact reading the designer header already makes for the open flow (the sibling designer fix), so a rail row and the flow it opens cannot disagree. No second loader, no second copy of the resolution.\n- **The Automations rail.** In `AutomationsPillar` (`StudioDesignSurface.tsx`, call-site lines only) each row's text and its hover title use the pack's `flows.NAME.label` when the bundle has one, else the authored label, as before.\n- **Search matches what the row shows.** The rail search now matches the shown (translated) label, the authored label and the machine name. So a zh-CN admin can type the Chinese name, and an author who knows the English label or the API name still finds the row.\n- **No pack entry, or a language the pack does not speak:** today's label, byte for byte.\n\n## Tests\n\n<details><summary>Pins (one new top-level describe in the existing rail harness)</summary>\n\n`AutomationsPillar.railSearch-11794.test.tsx`, describe \"a rail row names its flow by the package's translated label\", the real `AutomationsPillar` under an `I18nProvider` whose resource tree carries a zh-CN pack labelling two of four flows:\n- zh-CN: rows read `夜间摘要`, `Approve order`, the long authored label, `欢迎新成员`; the row title starts with the translated label.\n- zh-CN: the search finds the row by `夜间` (shown label), `DIGEST` (authored label) and `welcome_new` (machine name).\n- en: the zh-CN pack does not speak for English, every row reads as authored, and `夜间` matches nothing.\n\nThe harness now finds the search box and the last row by test id (the zh placeholder and row name are Chinese); the four existing cases are unchanged and green. The file gains the module-top `import '@objectstack/lint'` that `check:test-source-alias` prescribes.\n</details>\n\n<details><summary>Runs (head c211406605 unless noted)</summary>\n\n- `cd ui && vitest run` over `app-shell/src/views/studio-design/`, `app-shell/src/views/metadata-admin/previews/` (includes `FlowCanvas.test.tsx` and `flowNodeLabels.sites-13200`), `plugin-form/src/affordanceGrantMap-12082`, `components/.../clickableNonControlCensus-13461`, `homeRecoveryRedirectsFollowDeclaration-7373`, `openPathObjectReaders-12811` → `Test Files 516 passed (516)`, `Tests 4615 passed (4615)`, lock `VERDICT command-exit 0`.\n- Earlier targeted run (a508a9ff5f) adding `ui/scripts/__tests__/spec-symbol-ledger-app-shell-7265` and the two `noSetupMetadataLink`/`noRetiredSetupLink` census files: 25 files, 266 tests green after the test-harness fix.\n- `pnpm --filter @object-ui/app-shell run type-check` → `VERDICT command-exit 0` (a508a9ff5f; the later commits are a main merge touching no `ui/` file and one test-file import line).\n- Ablation (fix committed, `scripts/ablation-replace.mjs`): `railLabel` reverted to the authored label → the two zh-CN cases fail, the en case and the four existing cases pass; restored, blob after restore == HEAD blob `138ce670`, `git diff HEAD` empty.\n</details>\n\n## Acceptance notes\n\n- `useFlowLabelOf` follows `useFlowLabelTranslations`: recomputed on every render, reading the live resource tree, so a language switch or a late pack load shows on the next render.\n- The greyed rows for flows another package ships on this package's objects (`ContributedRailRow`, shared by every pillar) still print the contributor's authored label. They live in a shared component outside this card's surface. Noted, not filed.\n- `utils/flowsBundle.ts`'s docblock still lists three reader surfaces; the designer and now the rail also read it. The file is outside the surface, so it is left as it is.\n- The live zh-CN reading (HotCRM Revenue → 定制 → 自动化) is not taken in this run; the pins drive the real pillar against a real `createI18n` tree loaded with a spec `TranslationData` pack, the same fixture shape the designer fix pinned.\n\n## Verification\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` (tree 4f9ba32534): 38 families, all run, each `exit 0`; `check:test-source-alias` was red once on the new harness import reach and is green after the prescribed module-top import. `--ran` reconciliation: `38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero ...)`.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD` before each push: `VERDICT clean`.\n- The wider CI run (lint, UI typecheck, full UI test shards, dogfood) is left to CI.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbSphdunq2aJq7ktuY\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY -->\n"
+}

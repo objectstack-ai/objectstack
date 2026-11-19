@@ -1,0 +1,32 @@
+{
+  "number": 35411,
+  "kind": "issue",
+  "title": "右侧整高抽屉四角是 20px 圆角，贴着屏幕边缘；改成直角",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:29:43Z",
+  "updated_at": "2026-11-19T08:57:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35411",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n维护者 2026-11-19 原话：「现在是 area:ux 右侧drawer 圆角改直角立卡了吗？是还没派发吗？」（查过三个仓库，此前没有这张卡，本卡补立。）\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19）\n\n- 点顶栏铃铛，「消息中心」从右侧整高展开（`fixed inset-y-0 right-0`，840–1280px，0–800px）。实测 `border-radius: 20px`，四个角都是圆的。\n- 抽屉贴着屏幕的上、右、下三条边，圆角在屏幕边缘被切掉一块，左上、左下两个角与页面之间露出弧形缺口。\n- 来源不是抽屉组件本身（`ui/packages/components/src/ui/sheet.tsx` 的 `sheetVariants` 没有圆角），而是控制台的全局样式 `ui/apps/console/src/index.css:505`：`[role=\"dialog\"] { border-radius: 1.25rem !important; }`。所有 `role=\"dialog\"` 的右侧抽屉（消息中心、记录抽屉、表单抽屉等）都被套上了圆角。\n- AI 助手面板是停靠栏，不是 `role=\"dialog\"`，已经是直角。\n\n## 要做的\n\n1. 贴边的整高抽屉（左、右两侧的 Sheet）四角改成直角。\n2. 居中的弹窗（Dialog）、底部弹出的手机面板保持现有圆角；全局规则只作用于它们，不再覆盖贴边抽屉。\n3. 检查用到右侧 Sheet 的各处（代码里 `side=\"right\"` 约 26 处），直角后边框和阴影没有残留的圆角痕迹。\n\n## 不做的\n\n- 不改抽屉的宽度、动画和内容。\n\n## 验收\n\n- 消息中心、记录抽屉、右侧表单抽屉的 `border-radius` 为 0；居中弹窗仍是圆角。\n- 加一条样式钉子：贴边 Sheet 不被 `[role=\"dialog\"]` 的圆角规则命中。\n\nReader: `domain:ui` 车道，`ui/apps/console/src/index.css` 与 `ui/packages/components/src/ui/sheet.tsx`。\n\nDedupe: `drawer 圆角`、`抽屉 圆角`、`直角`、`drawer rounded`、`radius`（objectstack / cloud / hotcrm，含已关闭）→ 0。"
+}

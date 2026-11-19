@@ -1,0 +1,32 @@
+{
+  "number": 35440,
+  "kind": "issue",
+  "title": "plugin-auth: the remove-sso-user audit row is missing from the route ledger note and the auth docs; ban/unban write no admin audit row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T09:11:02Z",
+  "updated_at": "2026-11-19T09:59:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35440",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nArea: data-1 · follow-up of #34404 (PR #35422, L1-a 7004734980; dev report 7004204444)\n\n## 维护者速读\n- **问题：** 移除待加入人员现在会写审计记录，但接口清单和认证文档还没写这一点；封禁和解封用户也没有单独的管理员审计记录。\n- **要做：** 补上文档里的这句；对封禁和解封，要么补审计记录，要么写明为什么不需要。\n- **不做会怎样：** 读文档的人不知道这条审计记录的存在；封禁操作在管理员审计里查不到。\n- **你要做的：** 无。\n\n## What\n1. `packages/plugins/plugin-auth/src/auth-route-ledger.ts` (the note for `POST /api/v1/auth/admin/remove-sso-user`) and the `content/docs/**/authentication.mdx` section on that door don't mention the admin audit row PR #35422 adds (`user.admin_removed_pending`, action `delete`, written only on a committed removal).\n2. `admin/ban-user` and `admin/unban-user` write no explicit admin audit row. The sibling doors do, through the shared `writeAdminAudit` (`admin-user-endpoints.ts`): create-user, set-user-password, add/import/remove SSO user. Decide whether ban/unban should write one too, or record why they are exempt (e.g. if another audit path already covers them; measure it).\n\n## Done when\nThe ledger note and doc name the remove-sso-user audit row. ban/unban either write a row (pinned in the shared harness, with an ablation) or carry a recorded exemption.\n\nGrade: `area:data · Docs + Bug · reach: admins reading auth docs / auditing ban actions · evidence: read` → p3."
+}

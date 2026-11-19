@@ -2,7 +2,7 @@
   "number": 35362,
   "kind": "pull_request",
   "title": "feat(plugin-grid): report an aggregate bulk handler's BulkActionResult per row",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T06:17:26Z",
-  "updated_at": "2026-11-19T08:17:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-19T08:44:33Z",
+  "closed_at": "2026-11-19T08:44:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T08:44:32Z",
   "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35362",

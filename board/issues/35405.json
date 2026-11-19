@@ -2,8 +2,8 @@
   "number": 35405,
   "kind": "issue",
   "title": "i18n: the label ResolveOptions (request locale, fallback chain, sourceLocale else defaultLocale) is assembled in four copies that can drift (follow-up to #34030)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T08:14:13Z",
-  "updated_at": "2026-11-19T08:14:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T08:53:42Z",
+  "closed_at": "2026-11-19T08:53:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35405",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② should-fix S2 of the `CONTRACT_REVIEW_TIER` record on PR #35351 (comment 7003535421), routed by seat 5 as a follow-up under #34030. ⛔ Not a claim; triage sets lane and grade (the seat suggests p3).\n\n## What drifts\n\nOnce PR #35351 lands, the `ResolveOptions` that `translateObject` is handed for a label read are assembled in four places:\n\n- `metaTranslateOptions` (`packages/rest/src/meta-item-read-gate.ts`, the `/meta` route)\n- `readerOptionLabels` (`packages/objectql/src/formula-option-labels.ts`)\n- `labelTranslationOf` (objectql validation message context, added by #35351)\n- `denialLabels` (plugin-security authz middleware, added by #35351)\n\nThe language rule itself lives in one place (`translateObject`). How its options are put together (request locale, the declared `fallbackChain`, then `sourceLocale` else `defaultLocale`) is repeated, so a later change to one copy can leave refusals and `/meta` speaking different languages again — the defect #34030 fixed. #35351's claim allowed no new shared helper, so it is a follow-up.\n\n## Fix direction\n\nOne exported builder that the four call, with a pin that every label reader gets the same options as `/meta` for the same request.\n\nDedupe: issue search `ResolveOptions builder copies`, `metaTranslateOptions labelTranslationOf denialLabels` → none."

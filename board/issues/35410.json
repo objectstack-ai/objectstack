@@ -1,0 +1,33 @@
+{
+  "number": 35410,
+  "kind": "issue",
+  "title": "console list page: the inbox badge's notification-receipt read waits on the inbox-message read and now sets the page's last request layer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:29:09Z",
+  "updated_at": "2026-11-19T13:42:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35410",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35306 dev (os-dev-report 7003358029, PR #35398), measured live on the showcase list page; named as owed by the L1-a reviewer (ACCEPT 7003826152). It is a follow-up of the #34211 page-load work, nested under #34211.\nReader: `domain:ui` (console inbox badge). Suggested grade: p2, the same reach as #35306 (an extra request layer on a daily page).\nDedupe: `sys_notification_receipt`, `inbox badge request layer`, `notification receipt waits inbox message`. Only #35306 matches, and it is a different read.\n\n## 维护者速读\n\n- 用户能看到什么变化：列表页最后一批请求是收件箱角标的已读回执，它要等收件箱消息先回来，拖慢页面完成。\n- 为什么做：页面加载分层工作的后续，前一张卡去掉了查找字段的重复读取后，这一步成了最后一层。\n- 出错会怎样：改错会让收件箱角标数字不准；回滚即撤销。\n- 要你做什么：无。\n\n## Facts (showcase `/apps/com.example.showcase/showcase_task`, PR #35398 head `047e7f29`)\n\n- After #35398, the page's trailing request group is `data/sys_notification_receipt`, which starts only after `data/sys_inbox_message` answers. The page sends 25 requests across 6 layers.\n\n## Ask\n\nTrace the badge's two reads live and confirm the dependency. Then either fetch the receipts alongside the messages (one request, or both in parallel keyed by the user), or explain in the PR why the receipt read must wait. Done when the page's layer count before and after is measured on showcase, and the badge count stays correct (pin: unread count with some and with no receipts).\n\n⛔ Not a claim."
+}

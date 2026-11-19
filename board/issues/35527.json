@@ -1,0 +1,30 @@
+{
+  "number": 35527,
+  "kind": "issue",
+  "title": "docs/tests: the disabled-package search rule is missing from the searchAll contract docblock and the handbook, and has no real-registry pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T14:11:27Z",
+  "updated_at": "2026-11-19T14:11:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35527",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: the three nits (N1–N3) of contract review 7003145171 on PR #35367 (card #35195, merged `ee40658d0d`), collected into one follow-up as the review allowed.\n\n## 维护者速读\n- 用户能看到什么变化：用户无感；文档补上“停用的模块不出现在全局搜索里”，再加一条用真实环境验证的测试。\n- 为什么做：全局搜索的停用规则已经上线，但说明文字和测试只覆盖了一半。\n- 出错会怎样：只是文档和测试，行为不变，撤回即可。\n- 要你做什么：无。\n\n## Items\n- N1: `searchAll`'s contract docblock in `packages/metadata-protocol/src/protocol.ts` lists each skip (exposure, read admission) but not the disabled-package one; the reason sits only at the guard in `protocol-record-reads.ts`.\n- N2: `content/docs/deployment/marketplace-handbook.mdx` \"Data plane\" bullet names the data routes and by-name metadata reads but not global search (\"global search leaves the module's records out\"). Docs-only.\n- N3: no pin drives the search door over the real `SchemaRegistry` with a really disabled package (disable, then `GET /api/v1/search`); the unit pin uses a registry double. A runtime-level case covers the wiring.\nAlso (os-dev note on #35195): `protocol-meta-list-reads.ts` cites `protocol.package-disable-enforcement.test.ts`, which does not exist in `packages/metadata-protocol/src`.\n\nSuggested-grade: p3 · domain:server · area:package (rides a same-file p2 PR, e.g. #35427's)."
+}

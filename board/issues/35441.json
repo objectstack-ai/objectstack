@@ -1,0 +1,35 @@
+{
+  "number": 35441,
+  "kind": "pull_request",
+  "title": "test(schema-catalog): the gallery waits for a lazy tile to paint before reading its authored content",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T09:21:23Z",
+  "updated_at": "2026-11-19T10:23:39Z",
+  "closed_at": "2026-11-19T10:23:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T10:23:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35441",
+  "body": "Fixes #35407\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：组件目录画廊测试在检查看板和 Markdown 两类示例时，先确保它们延迟加载的真实内容已经出现，再判断内容是否上屏；断言本身一条未改、未放宽、未跳过。\n- 为什么改：这个测试有时读到的是加载中的占位骨架而不是真实内容，于是时红时绿，把改到表格插件等相关包的 PR 从合并队列里踢出去（#35371 三次里红了两次）。\n- 风险与回滚：只改一个测试文件，不动任何产品代码，用户无感；回滚即撤销本 PR。\n- 先看：`ui/examples/schema-catalog/test/catalog-gallery-render.test.tsx` 顶部新增的两行模块预加载，以及 `renderEntry` 开头新增的一次 `act` 让步。\n- 两分钟验证：`pnpm --dir ui exec vitest run examples/schema-catalog/test/catalog-gallery-render.test.tsx -t \"puts its authored content on screen\"`，预期 19 个用例全绿（修复前稳定 5 个红）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOne test file, `ui/examples/schema-catalog/test/catalog-gallery-render.test.tsx`; no product source.\n\n1. **Module-scope loads of the two lazy implementation modules**, per the ui/AGENTS.md lazy-boundary rule: `../../../packages/plugin-kanban/src/KanbanImpl` and `../../../packages/plugin-markdown/src/MarkdownImpl`, with a one-line comment.\n2. **`await act(async () => {})` at the start of `renderEntry`**, before the existing settles.\n\nWhy both: `renderEntry`'s settle waits for `drewSomething`, and a Suspense Skeleton fallback (an element, no text) satisfies it. The preload alone was measured NOT to be enough: with it, the isolated run still failed 2 of 5 — the first-rendered kanban and markdown tile. `React.lazy` still suspends on its first render even when the module is loaded, because `import()` settles a tick later and the settle returns on the fallback before that tick. The `act` yield lets that tick reach the screen; it is only sufficient because the module is already loaded, which is what (1) guarantees. Both halves were ablated (below) and each is necessary.\n\n**Same modules as the components' `import()`** — two proofs:\n\n- Path: the vitest alias table maps `@object-ui/plugin-kanban` to `ui/packages/plugin-kanban/src` and `@object-ui/plugin-markdown` to `ui/packages/plugin-markdown/src`. `KanbanBoardCore.tsx` there holds `React.lazy(() => import('./KanbanImpl'))`, and plugin-markdown's `index.tsx` holds `React.lazy(() => import('./MarkdownImpl'))`. Resolving the test's specifiers and the lazy targets gives the same realpath for each pair (`same= true` for kanban and markdown).\n- Behaviour: removing only the preload turns the isolated run back to 5 failed. A preload of a different module instance could not have turned it green.\n\nNo changeset: `@object-ui/example-schema-catalog` is `private: true` and the diff is a test file, so nothing publishes (`skip-changeset`).\n\n## Tests\n\nNo assertion added, removed or loosened. The pins are the existing `puts its authored content on screen` cases.\n\n## Acceptance notes\n\n- The order named route A (preload only). Preload alone was measured insufficient, so the fix adds the `act` yield inside the same file. Both halves are ablation-proven.\n\n## Verification\n\n<details><summary>Before / after — isolated run red 5 to green, whole file 579/579</summary>\n\n- Before, at base `3f88af4c`: `pnpm --dir ui exec vitest run --maxWorkers=2 examples/schema-catalog/test/catalog-gallery-render.test.tsx -t \"puts its authored content on screen\"` gave `Tests 5 failed | 14 passed | 560 skipped (579)`. The 5 were kanban advanced-with-badges and basic-board, and markdown advanced-features, basic and tables.\n- Preload only, at `56183817`: same command gave `Tests 2 failed | 17 passed | 560 skipped`, the first kanban and the first markdown tile.\n- After, at `e605f090`: same command gave `Tests 19 passed | 560 skipped (579)`, lock VERDICT command-exit 0.\n- After, whole file at `e605f090`: `Test Files 1 passed (1)`, `Tests 579 passed (579)`.\n- After, whole package (`examples/schema-catalog/`): `Test Files 45 passed (45)`, `Tests 2438 passed (2438)`.\n- `pnpm --filter @object-ui/example-schema-catalog run type-check` (`tsc -p tsconfig.test.json` included): exit 0.\n</details>\n\n<details><summary>Ablation — each half removed alone turns the isolated run red</summary>\n\nThrough `scripts/ablation-replace.mjs`; every leg was restored to the HEAD blob `a06cdce606ec` with `git diff HEAD` empty.\n\n- Preload lines deleted: blob became `f2aada8cbe58` and the run gave `Tests 5 failed | 14 passed | 560 skipped`.\n- `act` yield deleted: blob became `ca339620f405` and the run gave `Tests 2 failed | 17 passed | 560 skipped`.\n</details>\n\n<details><summary>Gates: 22 of 22 derived families exit 0 at e605f090</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 22 commands for 1 path, against merge base `3f88af4c9`. All 22 exited 0, with each exit code captured before any pipe. They include `check:cross-package-test-inputs`, `check:test-source-alias`, `check:undeclared-dep-imports`, `check:nul-bytes`, `check:type-check-coverage` and `check:type-check-debt`. The `--ran` reconciliation reads `22 derived famil(ies) accounted for, 22 run, 0 NOT-MEASURED`. Two more local checks: ui `check:new-line-citations` exited 0, and eslint on the changed file exited 0. CI owns Test UI and the type-check lanes.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 35354,
   "kind": "issue",
   "title": "Working calendars ①: ADR for the platform working calendar (objects, resolution, clock key, pushdown)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:workflow",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T06:03:38Z",
-  "updated_at": "2026-11-19T08:14:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T13:51:50Z",
+  "closed_at": "2026-11-19T13:48:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35354",
   "body": "③ maintainer-directed task · Source: maintainer ruling on #35340 (Bill, 2026-11-19 05:47Z 「同意 p1」, ruling comment https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747; sub-cards approved 06:03Z 「同意」「都是 p1」).\n\n## 维护者速读\n- **问题：** 平台工作日历的设计已裁决，但还没写成 ADR，后面三张实现卡没有合同可依。\n- **要做：** 写一份 ADR，把 #35340 裁决的七条落成合同。\n- **不做会怎样：** 对象、公式函数、审批时钟三张卡各自理解，口径不一。\n- **你要做的：** 无（ADR 合入按 Tier 规则走）。\n\n## Scope\nWrite the ADR recording the #35340 ruling, one decision per item:\n1. Calendars are org-editable runtime data: `sys_work_calendar` (weekly pattern, `HH:mm` periods, required `timezone` in the `iana_time_zone` domain, `is_default`) and `sys_work_calendar_exception` (dated off/on overrides covering holidays, 调休 make-up workdays, shutdowns). Packages reference by code and may seed rows. Precedent `sys_exchange_rate` (ADR-0144).\n2. Resolution: explicit code at the consumer → org default → refuse. No silent wall-clock fallback. Business-unit inheritance deferred (ADR-0049: `sys_business_unit.timezone` has no reader).\n3. Holiday data: org-entered + import first; a calendar records a \"maintained through\" date, and computing past it warns or refuses. CN holiday/调休 data as a marketplace package later, never in core.\n4. Consumers: formula functions (`addWorkingDays`, `workingDaysBetween`, `addWorkingHours`) and approval `escalation.clock`, shipping in the same release as the objects (the #13655 constraint: no calendar without its formula surface).\n5. Clock key: `escalation.clock: 'wall_clock' | 'working_time'` + optional `calendar` code, default `wall_clock`; only `timeoutHours` gets it.\n6. Pushdown: working-day functions evaluate in memory only; pushdown refuses them; filter on due time via a write-time datetime column compared with `{now}`.\n7. Periods crossing midnight are refused in the first cut.\n\nAlso record the second source of truth found in `ui/packages/types/src/zod/objectql.zod.ts:2956-2957` (gantt `skipWeekends` / `holidays`) as a follow-up.\n\n## Done when\nADR merged; it names the three implementation cards (②③④ under #35340) as its enforcement.\n\n## Non-goals\nShift rostering, finite-capacity scheduling, payroll calendars, fiscal periods.\n\nAnalysis: `/mnt/project-files/card-35340/design-analysis.md` (project files)."

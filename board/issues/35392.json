@@ -2,9 +2,9 @@
   "number": 35392,
   "kind": "pull_request",
   "title": "fix(fields): hold the filter-condition builder until the object schema answers",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T07:56:00Z",
-  "updated_at": "2026-11-19T08:21:19Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-19T08:45:54Z",
+  "closed_at": "2026-11-19T08:45:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T08:45:52Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35392",
   "body": "Fixes #35057\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化：管理员在共享规则里编辑已保存的筛选条件时，字段类型读回来之前，条件编辑器会短暂置灰、不接受输入；读回后照常可编辑，输入的数字按数字保存，不再存成文本。\n2. 为什么做：控制台操作体验一系列卡片中的一张；之前的测试修复发现，类型读得慢时，提前输入的数字会被存成文本。\n3. 出错会怎样：最坏情况是编辑器一直置灰、改不了条件（读取失败或宿主不提供字段类型时不会置灰）；回滚这一个提交即可恢复。\n4. 要你做什么：无，席位落地。\n\n## What changes\n\n`ui/packages/fields/src/widgets/FilterConditionField.tsx` (the `filter-condition` widget behind `sys_sharing_rule.criteria_json`):\n\n- The schema answer is keyed by the object it answers for, so a render that names a new object never reads the previous object's field types.\n- `schemaPending` = the host offers `getObjectSchema` and it has not answered for this object yet. While it holds, the builder sits in a `fieldset disabled` with `aria-busy`, and `handleBuilderChange` emits nothing.\n- A failed read settles to an empty field list and releases the builder. A host with no `getObjectSchema` never holds it. Raw-JSON mode is not held.\n\nRoute chosen: hold, not retype on arrival. Retyping would have to survive the widget's re-seed effect, which replaces the rows whenever what they emit differs from the stored value, so a held-then-retyped edit would be wiped by that effect.\n\n## The reading (os-dev-report 7002349726)\n\nRows `amount` 5, 6, 12, 30, 100, a `number` field, through the real ObjectQL engine and SqlDriver. Each cell is the amounts returned.\n\n| comparand | number | raw driver, `\"6\"` | engine `where`, `\"6\"` | engine `filter`, `\"6\"` |\n|:--|:--|:--|:--|:--|\n| `$eq` / implicit | [6] | [6] | [6] | [6] |\n| `$gt` | [12,30,100] | same | same | same |\n| `$lte` | [5,6] | same | same | same |\n| `$gte`+`$lte` 6..30 | [6,12,30] | same | same | same |\n| `$in` [6,12] | [6,12] | same | same | same |\n\nSQLite (better-sqlite3) and PostgreSQL 16.15 gave identical results. No stored filter compares wrongly, and the card stays p2. The engine's number-comparand declared-type door already narrows a numeric string to its number before any driver. This PR removes the race at the producer.\n\n## Tests\n\nNew pin `FilterConditionField.schemaPendingHold-35057.test.tsx` (6 cases):\n\n- A held `getObjectSchema`, for implicit equality, `$gt` and `$lte`: the stored row's box is disabled, and a change fired at it emits nothing. After the answer, typing `6` emits the number (`{\"amount\":{\"$gt\":6}}`).\n- CONTROL: when the schema answers first, the same number is emitted straight away.\n- Bounds of the hold: a failed read releases the builder, and a host without `getObjectSchema` never holds it. Both of these still emit the typed text, because no type is known.\n\n<details><summary>Readings</summary>\n\nAll readings below were taken on the working tree that was then committed unchanged as `53cd5c9d` (component blob `ace20001`), on base `8b550f81`. The reverse verification ran before the commit, so its restore was proven by hash rather than by checking out `HEAD`.\n\n- Pin: `pnpm --dir ui exec vitest run packages/fields/src/widgets/__tests__/FilterConditionField.schemaPendingHold-35057.test.tsx`: Tests 6 passed.\n- Reverse verification, component file swapped back to base `8b550f81` and then restored (hash `ace20001` checked after restore): 4 failed, 2 passed. The three held cases failed with \"Received element is not disabled\", and so did the failed-read release case, whose pre-answer leg asserts the hold. The two controls passed. This is the predicted direction.\n- `pnpm --dir ui exec vitest run packages/fields/src/widgets/` on the final tree: Test Files 147 passed (147), Tests 1437 passed (1437).\n- `pnpm --filter @object-ui/fields run type-check`: 0 `error TS`.\n- Derived gates (`dispatch-gates --commands`): 38 derived, 38 run, every one exit 0. That includes `pnpm --dir ui exec vitest run scripts/` (Test Files 171 passed, 2 skipped).\n\n</details>\n\n## Acceptance notes\n\n- The app-shell `FilterConditionField` (dataset / related-list filters) has no such window, read at source: it mounts the builder only once the caller's typed field list is non-empty.\n- A criteria already stored with a string bound is not rewritten. The server reads it as the number it spells.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CajiB6BSQKWowy6YLB)_\n"

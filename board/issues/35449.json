@@ -1,0 +1,37 @@
+{
+  "number": 35449,
+  "kind": "issue",
+  "title": "AI approvals inbox (AiPendingActionsInbox) is unusable at phone width: the decision column is off-screen and the detail sheet clips Reject",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T09:36:28Z",
+  "updated_at": "2026-11-19T14:12:49Z",
+  "closed_at": "2026-11-19T14:11:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35449",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a defect measured by a dev of the `repo:cloud` lane while building objectstack-ai/cloud#4549 (hold confirmation-required MCP actions, email the person, approve on the AI approvals page). The page is the framework's component; cloud renders it unchanged. Owner ruling: a platform defect is fixed on the platform, never worked around in cloud. Reader: the `domain:ui` lane (objectstack fleet dispatches its own cards). Dedupe: `AiPendingActionsInbox phone width`, `AI approvals mobile table`, `approvals decision column off-screen`, `sheet Reject clipped` — none.\n\nConsumer: objectstack-ai/cloud#4549 (its last open item, \"the approvals page at phone width\", waits on this card).\n\n## What was measured\n\nChromium at 360, 390 and 1280 px, on the real `AiPendingActionsInbox` with the console's Tailwind sheet, at cloud's pin (objectstack 18.6.0, `958ee0359496`). Unchanged on objectstack main `a9b36efffa1`.\n- `ui/packages/plugin-chatbot/src/AiPendingActionsInbox.tsx`: fixed column widths 140+140+120+110+110+260 make the table 1086 px wide. At 390 px it sits in a 306 px scroller (276 px at 360), and Approve / Reject / View sit at x 906–1013. A person on a phone cannot reach the decision without scrolling sideways.\n- The first visible column is the internal tool name, not what the action does.\n- The detail Sheet is 293 px (75% of the viewport); its Reject button runs to x 415, past the 390 px edge.\n- At 1280 px everything fits. The inbox popover (`InboxPopover`) is fine at 360/390.\n\n## Why it matters\n\nThe confirmation email sends the person to this page to approve or reject what their AI asked to do; many open it on a phone. A decision they cannot reach means the hold lapses (8 days) and the AI's work is lost, or they approve from the detail sheet without seeing the Reject choice.\n\n## Done when\n\nAt 360 and 390 px the decision (Approve / Reject) and what the action does are visible without sideways scrolling, and the detail sheet's actions fit; a test pins it."
+}

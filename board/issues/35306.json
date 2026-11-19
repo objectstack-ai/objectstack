@@ -2,8 +2,8 @@
   "number": 35306,
   "kind": "issue",
   "title": "console list page: a lookup target object is read twice (presence read, then by name), adding one request layer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,7 +16,6 @@
     "finding",
     "lease:ux-2",
     "performance",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -25,11 +24,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T03:41:21Z",
-  "updated_at": "2026-11-19T08:03:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T10:40:21Z",
+  "closed_at": "2026-11-19T10:39:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35306",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: maintainer ruling on #34211, option A, condition 2 (analysis project file `objectstack-seat5/area-ux/decision-34211.md`). ⛔ Not a claim. Lease `ux-2`.\n\n## What happens (read from code, not yet traced live)\n\nWhen a list has a lookup field to an object that is outside the package (on the showcase, `sys_user`), the console first asks whether the object exists with one `?names=` read: `servedByName` → `readObjectPresence` (`ui/packages/app-shell/src/.../appObjectScope.ts:499-512`, `:522-538`). That answer already carries the definition (`fetchScopeNames`, `MetadataProvider.tsx:1529-1546`). Once the name is answered as served, `readNames(lookups)` (`appObjectScope.ts:800`) asks for it again by name (`fetchScopeName` → `readItem` → `getObjectSchema`, `MetadataProvider.tsx:1472-1474`, `:1031-1038`). The pair came in with PR #34299 (presence read to stop 404s). On the showcase list page this is the trailing request layer; about 0.5 s separates the two reads, and the cause is unknown.\n\nThe batch scope is kept apart on purpose (`MetadataProvider.tsx:182-194`: no `sortability` envelope, cannot tell absent from refused). The fix has to keep that distinction.\n\n## Do\n\nTrace it on a real app first (showcase and HotCRM list pages, network panel) and confirm both reads and their order. Then serve the by-name read from the presence answer when it carries everything the by-name path needs, or explain in the PR why it cannot.\n\n## Done when\n\nThe list page reads a lookup target once. The layer count before and after is measured on both apps, the absent/refused distinction stays pinned, and #34299's no-404 pin still passes."

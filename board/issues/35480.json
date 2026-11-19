@@ -1,0 +1,31 @@
+{
+  "number": 35480,
+  "kind": "issue",
+  "title": "Skills docs: a seed record in a keyed mode must carry every externalId field or it is refused at load (seeds.md)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T11:17:32Z",
+  "updated_at": "2026-11-19T11:50:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35480",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② Skills-docs follow-up owed by PR #35459 (#34857 + #35336, ruling B1), L1-a R1 7007542258. ⛔ Not a claim.\nReader: `domain:skills` (`skills/objectstack-data/references/seeds.md`). Suggested-grade: p2 · same grade as the cards it follows. Same file as #35456 (fold candidate under the seat's rules; both add save/load rules to seeds.md).\nDedupe: `seeds.md externalId blank refused` in open issues: #35456 covers the unknown-object rule only.\n\n## 维护者速读\n\n- 用户能看到什么变化：用技能写初始化数据时，会被提醒每条记录都要填上唯一标识字段，否则这条记录加载时会被拒收。\n- 为什么做：加载时拒收留空标识的记录已经上线（你选的方案 B1），技能文档还没写这条规矩。\n- 出错会怎样：只是文档；不改的话，按技能写出的数据可能在加载时被拒收一部分记录。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nAfter PR #35459, in the keyed seed modes (`ignore`, `upsert`, `update`) the loader refuses a record whose externalId value is blank (no value, `null` or `''`) in any composite component or in the single key field (`name` by default), naming the object, record index, field and fix; other records load. `skills/objectstack-data/references/seeds.md` does not say so at :48 (the externalId row), :68 (composite keys) or :93 (externalId selection).\n\n## Expected\n\nseeds.md states the rule at those three anchors: a record in a keyed mode carries every externalId field (or the default `name`), whitespace counts as a value, and a blank one is refused at load. Optionally one eval in `skills/objectstack-data/evals/` that authors a keyed seed with a blank key and expects the refusal. Land after PR #35459."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 35477,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0113 \"Author-time fence\" still says every formula read warns; add a note for the narrowed visibleWhen warning once #35190 lands",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T11:02:05Z",
+  "updated_at": "2026-11-19T11:04:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35477",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: **(c) a residual a card's review names** — out-of-scope item reported by area b1-A from #35190 (draft PR #35475, os-dev-report 7007181589). Lands after PR #35475 merges; until then the ADR text still matches main.\n\n## Gap\n- #35190 narrows the required-field formula `visibleWhen` warning (lint and Studio) to formulas the author-time check cannot evaluate, instead of warning on any formula read.\n- ADR-0113's \"Author-time fence\" section still states that any formula read warns. After #35475 a reader of the ADR (agents included) would expect a warning the platform no longer gives.\n\n## Scope\n- One append-only dated note under ADR-0113 \"Author-time fence\" naming the narrowed criterion and pointing at #35190 / PR #35475. ⛔ No rewrite of the original decision text.\n- Check whether `skills/**` quotes the same sentence; fix the quote in the same PR if it does.\n\n## Reader\n`domain:skills` (governed text: `docs/adr/**`, Tier per the path fork). Suggested grade: p3 (documentation following a landed implementation)."
+}

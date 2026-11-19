@@ -1,0 +1,31 @@
+{
+  "number": 35456,
+  "kind": "issue",
+  "title": "Skills docs: a saved seed must name an existing object (seeds.md + one unknown-object 422 eval)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T10:07:42Z",
+  "updated_at": "2026-11-19T13:50:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35456",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ① skills drift owed by a merged PR: PR #35388 (#34864, merged fe3ebc8767) declares `Skills-docs: follow-up owed`, and the seat files that card after merge. ⛔ Not a claim.\nReader: `domain:skills` (`skills/objectstack-data/`). Suggested-grade: p2 · the published skill teaches a seed shape the save door now refuses. Parent: #34864.\nDedupe: `seed unknown object skills seeds.md` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：给 AI 用的数据技能说明会讲清楚：运行时保存的示例数据必须指向一个已存在的对象（草稿对象也算）。\n- 为什么做：#35388 让保存入口拒收指向不存在对象的示例数据（422），技能说明还没写这条。\n- 出错会怎样：只改说明和一条评测；写错了重改即可，不影响运行。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nSince PR #35388, saving a `seed` at runtime whose `object` resolves to nothing is refused with a 422 (`unknownSeedObjectRefusal`). A seed for a draft object is accepted when it is itself a draft. `skills/objectstack-data/references/seeds.md` describes the seed fields and the save path but says nothing about this, and `skills/objectstack-data/evals/hooks-security-seeds-datasources.json` has no case for it.\n\n## Expected\n\n1. `seeds.md`, in the seed field table or the save notes: a runtime-saved seed must name an object that exists, and a draft object is enough for a draft seed. State the 422 refusal once, in the save-door's own words.\n2. `hooks-security-seeds-datasources.json`: one eval that saves a seed naming an unknown object and expects the 422, with the reason in `expected_output`.\n\n## Done when\n\n- Both files are changed as above. The skill's eval runner and the skills lint pass.\n- Nothing else in `skills/objectstack-data/` contradicts the new sentence (search `seed` and `object`)."
+}

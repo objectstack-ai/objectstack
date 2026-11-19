@@ -1,0 +1,34 @@
+{
+  "number": 35470,
+  "kind": "issue",
+  "title": "Fleet patrol: stop asking pm:epic cards for a type, and stop asking run records for a grade",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T10:30:12Z",
+  "updated_at": "2026-11-19T13:51:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35470",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaAqjP52wVTzs99H5G\n\nFiling gate: ① a defect with a named location, owed by landed work (PR #35385). Source: fleet. Grading: `area:fleet · Bug · p2 · reach: the live daily sweep lists four open epic cards as \"missing a type\" (measured 2026-11-19 against main) · evidence: measured`.\n\nBusiness reason: since PR #35385, the rules say an epic card takes no type and a run record takes no grade. Two patrol instruments still say otherwise. Triage is told to fill whatever the sweep lists, so it is pointed at work the rules forbid: typing epic cards, and grading run records. The readers are fleet-1 (this area), in one PR, and triage, which stops getting the false rows.\n\nDuplicate search, open and closed: `is:issue first-touch-sweep pm:epic type` found 4 hits, `is:issue lacksType epic` found 1, and `is:issue GRADELESS_CARD_LABELS` found 0. None is this defect. The nearest, #35234, moves the sweep and H13 from `domain:*` to `area:*` and type, and says nothing on epic cards or record grades. The source is the PR #35385 review record: comment 7005275823, items E3, N4 and N5.\n\n## What changes\n\n- **R5 (E3, N5):** in `scripts/pm/first-touch-sweep.mjs`, the type row (`lacksType`) exempts `pm:epic` as well as `tracking`. Only the type row changes; area and grade rows are unchanged. Today it lists #27108, #27314, #31527 and #34571. Pin it with a self-test case: an epic card draws no type row, and a `pm:epic` card that lacks an area still draws the area row.\n- **R6 (N4):** in `scripts/pm/check-half-states.mjs`, add the run-record labels `qa-run` and `eval-run` to `GRADELESS_CARD_LABELS`, so that a record card named in a `Blocked-by:` line draws no H78 row. Pin it with one self-test case.\n- **Rides here if the maintainer picks A on the record-card area decision (E2):**\n  - R1: `eval-run` joins the exclusion sentence in `triage-duties.md` and `EXCLUDED_LABELS` in `first-touch-sweep.mjs`, with its pins.\n  - R2: `eval-run` joins `H13_EXEMPT_LABELS` and `H74_EXEMPT_LABELS`.\n  - R3: one North Star sentence: run records take no area.\n  - R4: drop the stopgap lines in `scenario-eval/SKILL.md`.\n\n  The analysis is in the seat's decision card; R1–R6 share files and pinned self-test counts, hence one PR. If the decision is still open when R5 and R6 are ready, R5 and R6 go first as their own PR, because both follow rule text already on main.\n\n## Done when\n\nThe daily sweep lists no `pm:epic` card for a missing type, H78 stays silent on a run-record blocker, and both are pinned by self-tests. If E2 is ruled A, R1–R4 have landed too; if it is ruled otherwise, they are dropped here with a pointer to that ruling."
+}

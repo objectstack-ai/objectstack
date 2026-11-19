@@ -1,0 +1,38 @@
+{
+  "number": 35444,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol)!: $expand and a relation condition stop serving a disabled package's object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "security",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T09:30:05Z",
+  "updated_at": "2026-11-19T12:18:20Z",
+  "closed_at": "2026-11-19T12:18:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T12:18:17Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35444",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgPKDiLo5gfWzDLyAK6J6UjZ)_\nFixes #35427\n\nClause-②: no (narrowing: `$expand` withholds a disabled package's object and a relation condition on one is refused, the answer its own data route already gives)\nMetadata-protocol: none\nSkills-docs: none — no skill teaches what a package disable does per data door, or which lookup targets `$expand` serves; the change moves a runtime answer, not anything an author writes\n\n## 维护者速读\n\n- 用户能看到什么变化：某个应用包停用后，别的应用通过关联字段展开读它的记录时，只拿到关联记录的编号，不再拿到整条记录；按停用包记录的字段做关联筛选会被直接拒绝，与直接打开该对象时的提示一致。\n- 为什么做：停用包的数据本应在所有读取入口都看不到，全局搜索已修好，这是同一类问题的另一个入口。\n- 出错会怎样：最坏情况是展开时仍带出停用包的记录（即今天的样子）；没有停用任何包的环境不受影响，撤回本改动即可恢复原状。\n- 要你做什么：无。\n\n## 席位核对\n\n- Files to read first: `packages/metadata-protocol/src/protocol-query-validation.ts` (the two guards in `servesExpansionTarget` and `refuseUnservedRelationTarget`), `packages/metadata-protocol/src/protocol.expand-disabled-package-35427.test.ts`, `.changeset/35427-expand-disabled-package.md`.\n- Two-minute check: `pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.expand-disabled-package-35427.test.ts` — 12 tests green (head 1153f761).\n- Ruling zone followed as written: same predicate as the data route and #35195 (`isObjectOfDisabledPackage`), expand withheld (bare id), relation condition refused with `objectPackageDisabledError`.\n\n## What changes\n\n- `servesExpansionTarget` now also asks `isObjectOfDisabledPackage(registry, target)`: an `$expand` entry (comma list, POST relation map, by-id `expand`, any nesting level) whose target belongs to a disabled package is withheld exactly as an `apiEnabled: false` target already is. The lookup keeps its stored id; the engine reads nothing of the target. `referenceNameVisible` titles are produced inside the engine's expansion loop over the handed map (`expandRelatedRecords` → `serveReferenceNames`), so a withheld entry gets no title either.\n- `refuseUnservedRelationTarget` first asks the same predicate: a nested-relation condition on such a target throws `objectPackageDisabledError(target)` (404 `OBJECT_PACKAGE_DISABLED`, `object` set) with `param` set to the position, before the query runs. Both the engine-gate hook (`beforeRelationTarget`) and the no-gate walk route through this one function, so the filter, aggregation filters and an expand entry's own filter are covered.\n- No other file moves; `protocol.ts` docblocks untouched (fence).\n\n## Tests\n\nNew `protocol.expand-disabled-package-35427.test.ts` (fake engine, the `protocol.expand-target-exposure` harness shape): 6 pins + 6 CONTROLs at head 1153f761. The by-id unit pin was dropped in 1153f761: a `getData` double needs a `findOne` double, which `check:engine-double-contract` wants recorded in a ledger outside the fence. By-id is covered at the real door below and runs through the same `servedExpand` as the pinned list path.\n\n<details><summary>RED at ee40658d (base), measured on the 13-test version at d18331a0: 7 failed | 6 passed (13)</summary>\n\nAll 7 pins red (list comma, POST map, by-id, second level; relation condition for member and system, and inside an expand entry's filter); the 6 CONTROLs green.\n</details>\n\n<details><summary>Real door (HttpDispatcher + MetadataPlugin + ObjectQLPlugin + SqlDriver, in-memory SQLite), area probe re-run, throwaway (not committed)</summary>\n\nAt ee40658d, with `beta_obj`'s package disabled: `GET /data/alpha_obj?$expand=b_ref` 200 with `b_ref` = full row incl. `secret_note`; `GET /data/alpha_obj/:id?expand=b_ref` 200, same; relation `$filter` hit 1 row / miss 0 rows (oracle).\nAt d18331a0 (metadata-protocol rebuilt): list `$expand` and by-id `expand` 200 with `b_ref` the bare id; relation `$filter` hit and miss both 404 `OBJECT_PACKAGE_DISABLED`; `GET /data/beta_obj` 404 unchanged; CONTROL with the package enabled still expands to the full row.\n</details>\n\n<details><summary>Ablation (each guard, on-disk via scripts/ablation-replace.mjs, restored to HEAD blob 69c71bdf)</summary>\n\n- (counts on the 13-test version at d18331a0) expansion guard replaced by `&& true`: 4 failed | 9 passed (the four `$expand` pins).\n- relation guard `if (false)`: 3 failed | 10 passed (the three relation-condition pins).\n- (A first expansion-guard attempt used replacement `;`, which ablation-replace refused as not provably landed — no run; redone with a distinctive marker.)\n</details>\n\n<details><summary>Package suite at d18331a0</summary>\n\n`pnpm --filter @objectstack/metadata-protocol test`: Test Files 360 passed | 9 skipped (369), Tests 23247 passed | 45 skipped. `typecheck` exit 0.\n</details>\n\n## Acceptance notes\n\n- Not this PR (card's read-only note, not measured): `service-analytics` object gate has no disabled-package check.\n- `test:repo` is CI's (Test Core).\n\n## Verification\n\nGates and dogfood battery readings are in the os-dev-report comment on the card, at this head.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbP6iSEGkWb5fn8yqd\n\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd -->\n"
+}

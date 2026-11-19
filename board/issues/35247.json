@@ -12,18 +12,18 @@
   },
   "labels": [
     "area:fleet",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T18:42:49Z",
-  "updated_at": "2026-11-19T03:04:02Z",
+  "updated_at": "2026-11-19T10:07:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35247",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nSource: topic #35205\n\nFiling gate: owed follow-up named in the acceptance notes of PR #35223 (L1 6988050932, item C1); child of epic #35205. ⛔ Not a claim.\n\nGrade: p3 · area:fleet · Task · blocks no running work\n\nBlocked-by: #35223\n\n## What to do\n\nUnder the rules #35223 lands, a fleet-filed card must carry area, issue type, grade and a grade line at filing. `scripts/pm/issue-create.mjs` does not check any of them yet, and the relay's `issue_create` takes a closed parameter set with no issue type. Carry `type` through the op. Then refuse a fleet card that is missing any of the four. Record cards (seat posts, mailboxes, eval-run, qa-run) and anchor cards are exempt.\n\n## Done when\n\nA fleet card missing area, type, grade or the grade line is refused before any request leaves, the exemptions are pinned, and the self-test covers both."

@@ -1,0 +1,32 @@
+{
+  "number": 35499,
+  "kind": "issue",
+  "title": "Studio form: a refused save marks a field row only when an issue's path equals the row's key, so nested causes (label.xx, visibleWhen.*, columns.N.*) leave the row unmarked (form side of #35400)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T12:06:05Z",
+  "updated_at": "2026-11-19T12:50:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35499",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② maintainer-directed. The scope ruling on #35400 (7008570921) picked 「每层都去掉,表单另立单」: the server drops the bare 「输入无效」 union head at every layer, and the form side goes on its own card. This is that card. ⛔ Not a claim; triage sets lane and grade.\n\n## What the author sees\n\nAfter a refused metadata save, Studio's form editor draws an issue under a field row only when the issue's `path` equals that row's top-level key. A cause at a nested path (`label.not_a_locale`, `visibleWhen.dialect`, `columns.0.field`) lights no row today. Until #35400 the row was lit only by the bare union head at the top-level key, which said 「输入无效」 and nothing more. Once #35400 drops that head, about 25 keys across 12 metadata types show no red line under the field after a refused save. For types with no live client validator (dataset, field, book, seed, plus view), the line stays missing until the next edit. The place is still named in the Save button's tooltip and, for types with a live validator, in the banner.\n\n## Where (read at `ee40658d0d`, not driven in a browser)\n\n- `ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx:1196-1202`: `issuesByPath` keys by `i.path` verbatim. Rows read it at `:1327` and `:1733`, and nested `SchemaForm` instances get no issues (`:2349-2356`). The row draws a red text line (`:1915`, `:2046-2048`, `:2107-2111`), with no border and no `aria-invalid`.\n- `ResourceEditPage.tsx`: the 422 map is at `:2215-2218` and set at `:2232`. `drawnInline` (`:2257-2259`) and the banner filter (`:3414-3416`) compare paths exactly. The live client pass replaces issues 200 ms after mount and on each edit (`:894-938`). The banner for types without a live validator reads the stored body's verdict (`:3385-3391`).\n- `EmbeddedItemEditor.tsx:204-213` trims its prefix and feeds the same `SchemaForm`.\n- The Studio Design surface (`studio-design/metadataError.ts:190-208`) already locates by prefix and is not affected.\n\n## Fix direction (to be designed on this card)\n\nA naive rollup onto the top-level row is not enough. `drawnInline` and the banner filter would show one mistake twice, and the client walk's nested issues (object `fields.*`, view `config.columns.*`, flow nodes) would light top-level rows for every type. The analysis notes that a rollup onto the top-level row is not the form's end state either. Ui PR #28395 (+340/−10, 9 files) is the size reference.\n\nEvidence: `/mnt/project-files/objectstack-seat5/area-ux/ux-3/decision-35400-scope-fable.md` (A-1 row and Evidence), `report-35400.md` (readings.A1).\n\nDedupe: issue search `SchemaForm issuesByPath exact path nested`, `form row nested issue path not highlighted`, `refused save row red line nested` → only #35400."
+}

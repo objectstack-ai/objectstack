@@ -1,0 +1,36 @@
+{
+  "number": 35407,
+  "kind": "issue",
+  "title": "ui test race: the schema-catalog gallery's \"puts its authored content on screen\" reads the Suspense fallback of kanban / markdown lazy boundaries, so the merge queue goes red for plugin-grid PRs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T08:24:54Z",
+  "updated_at": "2026-11-19T10:24:58Z",
+  "closed_at": "2026-11-19T10:23:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35407",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ② a required check red on the merge queue, measured. Found by the #35334 dev while triaging PR #35371's queue red (os-dev-report 7003772430).\nReader: `domain:ui` (`ui/examples/schema-catalog/test/catalog-gallery-render.test.tsx`). Suggested grade: p1. It removes PRs from the merge queue: #35371 was red 2 of 3 times, and every PR whose affected set includes the gallery's imports (for example `@object-ui/plugin-grid`) is exposed.\nDedupe: `catalog-gallery-render authored content flaky`, `React.lazy Suspense fallback gallery`, `kanban markdown puts its authored content on screen`. None open.\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；只修一个测试的时序问题。\n- 为什么做：这个测试时红时绿，把改到表格插件的 PR 从合并队列里踢出去。\n- 出错会怎样：只影响测试本身；回滚即撤销。\n- 要你做什么：无。\n\n## Facts (dev readings at `f8e9c2cb`)\n\n- `renderEntry` waits for `drewSomething` (elements > wrapper count, or non-empty text). The Suspense fallback of `KanbanBoardCore`'s `import('./KanbanImpl')` and of plugin-markdown's `import('./MarkdownImpl')` (a Skeleton, no text) satisfies that wait.\n- In a whole-file run, earlier \"renders without a red tile\" cases usually warm the import, so the result depends on speed. With `-t \"puts its authored content on screen\"`, the same 5 cases fail deterministically. They are the kanban advanced-with-badges and basic-board cases and the markdown advanced-features, basic and tables cases. They fail the same way with #35371's diff reverted.\n- CI: on slot 10/16, the same diff went red at 13.6 s and 15.9 s and green at 19.4 s.\n\n## Ask\n\nLoad the lazy implementation modules at module scope in the test, with specifiers that resolve to the same modules the components' `import()` resolves to, plus a one-line comment explaining why. This is the ui/AGENTS.md rule for content behind a `React.lazy` boundary. Pin: the `-t` isolated run goes green, and the whole file stays green. ⛔ Do not skip, quarantine or loosen the assertion.\n\n⛔ Not a claim."
+}

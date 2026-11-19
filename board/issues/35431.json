@@ -1,0 +1,31 @@
+{
+  "number": 35431,
+  "kind": "issue",
+  "title": "scenarios: the order_to_cash card title is 131 characters, over the 128 the marketplace display name allows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:56:07Z",
+  "updated_at": "2026-11-19T09:59:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35431",
+  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjNq58cmHeqckjZkTFE\n\nFiling gate: ② a contract violation by a named producer, found by the os-dev of #35132 (report 7004393928) and measured by this seat.\n\n- The producer: `docs/qa/scenarios/order_to_cash.json` `title.en` is 131 characters: \"Order to cash: accounts, an activity stream, sales orders with lines, a discount approval, invoices, payments and receivables aging\".\n- The contract: `packages/spec/src/marketplace/package.zod.ts:213` `displayName: z.string().min(1).max(128)`. Since #35132 (PR #35430), the gallery exporter writes the card's `title.en` as the exported `objectstack.manifest.json` `displayName`, so that app's manifest fails `TemplateManifestSchema` (measured by the dev), and publishing it (#35134) would be refused.\n- Fix: shorten `title.en` (and check `title.zh`) to 128 characters or fewer in the card. The producer is the card (contract-first); the exporter deliberately does not refuse, because refusing deletes a listed app on refresh.\n\nSeam: spec:PackageSchema.displayName max(128) → runtime: gallery exporter listing manifest; consumer: `os package publish`.\nSuggested-grade: p3 · one-line card edit; blocks only #35134's publish of this one app.\nDedupe words: order_to_cash title length, displayName 128, gallery listing name."
+}

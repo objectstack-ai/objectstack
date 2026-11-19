@@ -1,0 +1,34 @@
+{
+  "number": 35445,
+  "kind": "issue",
+  "title": "应用里的 AI 助手面板：去掉「构建」字样与切换应用，标题栏收成一行；回答表格、「正在看」标签与输入区整理（附效果图）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T09:33:00Z",
+  "updated_at": "2026-11-19T13:02:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35445",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「看一下右侧的界面，很混乱。」；「构建两个字不需要吧，切换应用也不需要吧，不管问数还是构建，始终就是当前应用。」；看过图 27 后：「立卡」。\n\n## 效果图（图 27，右半部分）\n\n![27 应用里 AI 助手打开时](https://github.com/objectstack-ai/objectstack/blob/81546ba0148c3e7749e5cb57bfe4e6f3075d9a52/27-app-ai-dock.png?raw=true)\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台比 `origin/main` 旧），zh-CN，视口 1167×762，2026-11-19；销售应用「商机 / 进行中商机」列表，AI 助手停靠在右侧）\n\n- 面板约 410px 宽，标题区两行共 7 个控件。第一行：「AI 用量：额度充足」图标、历史、展开、收起对话。第二行：「构建」字样、「切换应用」（显示「销售」）、「构建诊断」（虫子图标）、分享。\n- 来问数据的业务用户也看到「构建」「构建诊断」。\n- 回答里的表格比面板宽：第一条回答的表格列排到 x=1190，超出视口（1167），最后一列被切。表格工具的名称是英文「Copy table」「Download table」。\n- 「正在看：商机」标签浮在对话内容上，压住正文最后一行。\n- 输入区：模型选择占 179px 仍被截成「Fast · Claude Haiku…」；「发送」「Shift+ 换行」提示被挤成两行小字；左侧「+」按钮没有无障碍名称。模型列表对用户显示倍率（×1、×2.2、×20、×40）。\n\n## 要做的\n\n1. 去掉第二行：不显示「构建」字样，不提供「切换应用」。助手的对象始终是当前应用；标题「AI 助手」旁用小字只读显示应用名。问数还是搭建由助手按输入判断，不让用户先选。\n   - 这改掉 objectstack-ai/objectstack#35014 里「范围选择器保留」的做法（已随 #35078 落地）；对话仍按应用分开、切应用自动换对话，这部分不变。\n2. 标题栏一行：历史、「···」、关闭（关闭按钮见 objectstack-ai/objectstack#35426）。用量、分享、铺满、构建诊断收进「···」；构建诊断只对有搭建权限的人显示。\n3. 回答里的表格宽度不超过面板，列多时在表格内部横向滚动；表格工具按钮用当前语言。\n4. 「正在看：…」放进输入框上沿，不再浮在对话内容上。\n5. 输入区：模型选择只显示档位名（如「快速」），列表里不显示倍率数字（改成「消耗较多」一类说明）；快捷键提示只占一行，或只在输入框为空时显示；「+」补上名称「添加附件」。\n\n## 待维护者确认的一点（立卡时未答复）\n\n首页、「全部文档」这类页面没有「当前应用」。协调席的建议：在这些页面上助手只问数和问用法（范围是整个环境），要改应用时提示「请先进入要改的应用」；新建应用仍走首页的「用 AI 搭建」。车道动这一块前请先在卡上确认。\n\n## 不做的\n\n- 不改对话按应用存取的逻辑；不改 Studio 里的 AI 面板。\n- 左侧列表被挤的问题另卡。\n\n## 验收\n\n- 销售应用里打开 AI 助手：标题区只有一行，页面上没有「构建」字样和「切换应用」；切到服务应用再打开，标题旁显示「服务」，对话是服务应用的。\n- 问一个返回 5 列表格的问题：表格不超出面板。\n- 没有搭建权限的用户看不到「构建诊断」。\n\nReader: `domain:ui` 车道，`ui/packages/app-shell/src/layout/ChatDock.tsx`、`ChatDockConversation.tsx`，文案 `ui/packages/i18n/src/locales/zh-Hans.ts:2194`（switchApp）、`:2245`（buildDoctor）。\n\nDedupe: `AI 助手 构建 切换应用 标题栏`、`chat dock header scope picker remove`（objectstack，open）→ 0。"
+}

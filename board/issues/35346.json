@@ -2,8 +2,8 @@
   "number": 35346,
   "kind": "issue",
   "title": "lint: warn when a text field named like a currency, country or time zone code declares no valueDomain",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,7 +13,6 @@
   "labels": [
     "area:build",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T05:49:01Z",
-  "updated_at": "2026-11-19T07:09:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T12:01:45Z",
+  "closed_at": "2026-11-19T12:00:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35346",
   "body": "③ maintainer-directed task. Source: maintainer, 「同意」 (2026-11-19T05:46Z), accepting the analysis item \"evals plus one warning-level lint\", then 「立卡 p1」 (05:47Z). Both are in the project thread on #35328. Child of #35328, sibling of #35345.\n\n## 维护者速读\n- **问题：** 套件里像 `country`、`currency_code`、`time_zone` 这样的字段，作者常常写成普通文本，忘了挂平台的标准值域。结果是「CN / China / 中国」都能存进去，跨套件也对不上。\n- **要做：** `os lint` 加一条警告。字段名像币种、国家或时区代码，类型是 `text`，又没写 `valueDomain` 时，提示应该挂哪个值域。只警告，不报错。\n- **你要做的：** 无，已裁。\n\n## Business reason\n- **Who benefits:** every metadata-app project. The managed suites come first, because their cross-suite key contracts (#35328: party key = country + credit code) only match when the country is an ISO code.\n- **If not done:** each suite stores free-text countries and currencies. Every later match or ERP link then starts with data cleaning, the same story as `uom` in #35339.\n\n## Current state (read)\n- `Field.valueDomain` exists and is enforced on `text` fields. The vocabulary is `iana_time_zone`, `iso_4217_currency` and `iso_3166_alpha2` (`packages/spec/src/shared/value-domain.zod.ts:96-100`). The type set is in `packages/spec/src/data/field.zod.ts`, around line 161. This was ruled 2026-09-02, option A on #14168.\n- No lint rule reads field names against it (`packages/lint/src`: `valueDomain` appears only in one test file).\n- Skills mention the domain once, for currency only (`skills/objectstack-data/rules/field-types.md:168`). Teaching the other two is part of #35345.\n\n## Scope\n- One `os lint` rule at **warning** severity, with an entry in `rule-explanations.ts` and a fix sentence naming the domain to add.\n- It fires when all three hold: the field `type` is `text`, no `valueDomain` is declared, and the field name (after the namespace prefix, case-insensitive) is in a small fixed word list.\n  - `iso_4217_currency`: `currency`, `currency_code`.\n  - `iso_3166_alpha2`: `country`, `country_code`.\n  - `iana_time_zone`: `time_zone`, `timezone`, `tz`.\n- Keep the word list in one place next to the value-domain vocabulary, so the catalog in #35345 and this rule never diverge.\n- ⛔ Warning only. A false positive should never push an author to rename a correct field.\n- ⛔ No object-name shadow warning (an app object like `*_attachment` or `*_exchange_rate`). That waits for an inventory of what hotcrm and hotsrm duplicated.\n\n## Reader\nThe `area:build` lint seat: one PR with the rule, its explanation, tests (fires and does not fire, including a field that already declares the domain and a `select` field) and a changeset.\n\n## Dedupe\n- `valueDomain lint text field currency country` → 3 hits, all closed. They are #14168 (the field-level domain, which landed), #15162 and #22136, none of them a lint rule.\n- No open card covers this.\n\n## Grade\n`area:build · Feature · maintainer-sourced, grade set by the maintainer (「立卡 p1」) · reach: no lint fires on a free-text country or currency field today (read, packages/lint/src) · evidence: read`"

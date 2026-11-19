@@ -2,8 +2,8 @@
   "number": 33345,
   "kind": "issue",
   "title": "refusal and remedy copy from the v18.4.0 sweep (5 rows)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-14T17:15:01Z",
-  "updated_at": "2026-11-19T08:01:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T09:20:40Z",
+  "closed_at": "2026-11-19T09:19:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33345",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## Rows\n- 60 (#33025 · 6844741021, #33081 · 6850173588), `studio-authoring.removed-key-save-door-refusal`: view and form refusals carry a sibling bare 'Invalid input' issue at path `''`. The suggester proposes `aria` → `areas`. An empty key renders as empty backticks.\n- 108 (#33048 · 6846028996), `automation.flow-reference-package-resolution`: the remedy 'Declare a dependency…' reads wrong when the holder is the environment.\n- 130 (#33048), `studio-authoring.access-permission-set-lifecycle`: the ITEM_LOCKED sentence says 'Clone', but Studio labels the action 'New similar'.\n- 164 (#33058 · 6846283471), `cli.flag-command-error-ux`: an unknown subcommand at topic level prints no `--help` pointer.\n- 233 (#33092 · 6850793622): `content/docs/ai/connect-mcp.mdx` says FORBIDDEN where a non-reader gets 404.\n\n## Do\nFix each sentence where it is produced. Update a checklist item only if its clause quotes the old text.\n\n## Grade\n**p3**: copy only.\n\n## Reader\n`domain:server`. Areas by row: 60 E1 · 108 A5 · 130 A2 · 164 A5 · 233 docs. Pilot **Area A5** holds the card."

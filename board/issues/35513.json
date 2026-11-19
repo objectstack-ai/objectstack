@@ -1,0 +1,31 @@
+{
+  "number": 35513,
+  "kind": "issue",
+  "title": "Studio landing page lists installed packages by their English manifest.name in every locale: a package has no per-locale display name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T13:01:47Z",
+  "updated_at": "2026-11-19T13:48:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35513",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ②**: a gap measured on 18.6.0 by the hotcrm#2704 dev. It is a child of objectstack-ai/objectstack#34571 (console core experience topic). There, the maintainer agreed to「给各包补上 zh-CN 的包显示名，使 Studio 里与启动器里的叫法一致」, and an app cannot author that today.\n\n**Business reason.** A zh-CN admin opens Studio. The heading and sections are in Chinese (应用构建, 已安装的应用), but the seven HotCRM cards read HotCRM, HotCRM Service, HotCRM Revenue, HotCRM Marketing, HotCRM Order to Cash, HotCRM Expenses and HotCRM Project Delivery. The launcher calls the same apps 销售, 服务, 营销, 订单与回款, 费用报销 and 项目交付. The two pages do not name the same thing the same way.\n\n**Reach** (objectstack 18.6.0, release commit 958ee035; measured with `objectstack dev` and Chromium in zh-CN):\n- `ManifestSchema.name` is one plain string (`packages/spec/src/kernel/manifest.zod.ts` ~669–675). The manifest is strict: `translations`, `label` and `displayName` are refused as `unrecognized_keys`.\n- `TranslationDataSchema` (`packages/spec/src/system/translation.zod.ts` ~2618–2629) has no package group, so `packages` is refused.\n- Studio's landing page renders `p.name` (`ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx` ~521, ~567). It reads `manifest.name ?? row.name ?? id` (`packages-io.ts` ~115–122). The request at ~392–396 sends no locale, and `GET /packages` (`packages/runtime/src/domains/packages.ts` ~2225–2312) returns rows untranslated.\n- The only per-locale display name in the spec is on the Control Plane `sys_package` row (`packages/spec/src/marketplace/package.zod.ts` ~104–107, `PackageTranslationSchema`). Neither the local manifest nor the landing page reads it.\n\n**Expected:**\n- A package can declare a per-locale display name, for example a `translations.<locale>.name` on the manifest, or a package group in the translation bundle.\n- Studio's landing page, and any other package list, renders it for the viewer's locale and falls back to `manifest.name`.\n\n**Note for the shape:** packages and apps are not one to one. HotCRM ships seven packages and six apps, and `revenue` contributes to Sales without an app of its own. So the package name is the app author's choice, not a copy of the launcher label.\n\n**Dedupe:** searched `package display name locale`, `manifest.name translations` and `Studio landing package name`. None covers it. #35196 is the Packages-page menu door, a different gap.\n\n**Reader.** objectstack triage routes it to the owning lane. Not a claim. hotcrm#2704 waits on it."
+}

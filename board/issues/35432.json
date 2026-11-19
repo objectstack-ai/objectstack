@@ -1,0 +1,37 @@
+{
+  "number": 35432,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the storage-sync-refused notice names no door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T08:59:50Z",
+  "updated_at": "2026-11-19T10:03:10Z",
+  "closed_at": "2026-11-19T10:03:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T10:03:08Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35432",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgPKDiLo5gfWzDLyAK6J6UjZ)_\nFixes #32958\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化：管理员在回滚、撤销提交或发布对象后，若数据库没能跟上对象结构，看到的警告不再说\"这次保存\"、也不再叫人\"重新发布\"，而是给出在任何入口都管用的补救办法（重启服务，或再次正式写入该对象）。\n2. 为什么做：删除对象扩展后存量数据未重算那张卡的剩余一项，提示文字在保存以外的入口上说错了话。\n3. 出错会怎样：只是警告文字变化，规则编号和严重级别不变，最坏情况是措辞不顺，直接回滚即可。\n4. 要你做什么：无，席位落地。\n\n## 席位核对\n\n### What changes\n- `objectStorageSyncRefusedNotice` (`packages/metadata-protocol/src/protocol-registry-hydration.ts`), that function only: message says \"is registered and served\" and \"the columns this change added\"; hint says to run the storage sync again: a restart, or the next live write of the object. Rule id, severity, `where`, `path` and the driver-reason quoting rule are unchanged.\n- Read first: that function; then the new pin file; then the one added assertion in `protocol.revert-commit-honest-outcome.test.ts`.\n\n### Premise readings at origin/main 7ece0204\n- A1 holds: the message said \"was saved and is served ... this save added\"; the hint said \"publish the object again\".\n- A2: one builder. Callers that put its value on an answer: `saveMetaItem` publish mode (`protocol-save.ts`), `runPublishSideEffects` (`publishMetaItem`, `publishPackageDrafts`), `rollbackMetaItemUnaudited` and `revertCommit` (`protocol-package-commits.ts`). Callers that discard it: remote mutation apply (`protocol-class-head.ts`), batch object registration. The delete door (`deleteMetaItem`, `protocol-diff-delete-load.ts`) does not run the sync and does not raise this notice (it calls `fillStoredExpressionChange` without `storageRefused`), so the dispatch's \"it also rides the delete door's answer\" did not hold on this tree.\n- A3: no server test pinned the notice's wording; `protocol.publish-side-effects-canonical-type.test.ts` pins \"publish the object again\" on the separate `console.error` line (left alone, outside the fence). Two `ui/` tests carry a hand-written copy of the old text as fixture data; they parse nothing from the server.\n- A4: the save door in publish mode runs `ensureObjectStorage` on every live write, and rollback and revert run it too; a restart syncs every registered object. So both named remedies work from every door that raises it. \"Publish again\" was true only by way of the save door, so it is no longer named.\n\n### Tests\n- New `protocol.storage-sync-refused-notice-wording.test.ts`: the notice names no save and no publish; CONTROL: it still names the object, the failure and both remedies.\n- `protocol.revert-commit-honest-outcome.test.ts`: the revert door's advisory equals the builder's value, whole, and names no save or publish.\n- Ablation (committed fix, `scripts/ablation-replace.mjs`, source import so no build): \"this change added\" back to \"this save added\" landed (anchor 1 to 0, blob 445e3e1a to 2753623b), 2 failed / 31 passed; restored to blob 445e3e1a, `git diff HEAD` empty.\n\n<details><summary>Verification at a171c69b</summary>\n\n- `pnpm --filter @objectstack/metadata-protocol test`: Test Files 359 passed, 9 skipped (368); Tests 23228 passed, 45 skipped. Lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/metadata-protocol typecheck` (tsc --noEmit, includes src test files): exit 0.\n- `dispatch-gates --commands` (68 commands): 66 exit 0 locally. `check:dual-build-cjs-loads` exit 3, NOT MEASURED (needs the whole workspace built), left to CI. `check:lean-entry-closure` exit 3 before the closure build, exit 0 after it. `check:test-source-alias` was red on the new file and is green after the module-top lint import.\n- `overlap-check --branch=HEAD`: VERDICT clean exit 0.\n</details>\n\n### Acceptance notes\n- The delete door does not raise this notice, so nothing changed there.\n- Not changed, outside the fence: the operator-facing `console.error` line in `ensureObjectStorage` still says \"was published\" and \"publish the object again\". It is a server log line, not an answer, and a test pins it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbP6iSEGkWb5fn8yqd\n"
+}

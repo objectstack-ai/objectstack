@@ -2,8 +2,8 @@
   "number": 34269,
   "kind": "issue",
   "title": "ui: the grid's aggregate bulk reader drops the handler's resolve value, so a BulkActionResult (per-row succeeded/failed) is reported as all rows succeeded",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:ui",
     "finding",
     "lease:data-2",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T03:24:34Z",
-  "updated_at": "2026-11-19T06:20:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T08:45:40Z",
+  "closed_at": "2026-11-19T08:44:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34269",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nThe reader half of #34216. PR #34267 declares `BulkActionResultSchema` in `@objectstack/spec/ui` (seat ruling 6905490575, option A: resolve-only), with the shape `{ succeeded: string[], failed: { id: string, message: string }[] }`, as the whole resolve value of an `execution: 'aggregate'` bulk handler. That PR marks it `[PLANNED — not enforced]`, and says that until this card lands a handler that cannot cover the whole selection must still reject (review#2 M1, record 6906386763).\n\n**Where it is read today** (re-pointed per review#1 N4, 6930439659). #34213 has landed and removed the old aggregate `bulkCall` closure. In `ui/packages/plugin-grid/src/hooks/useBulkExecutor.ts` the aggregate dispatch is now the `if (isAggregate)` block, and the \"must reject\" sentence lives in the `runAggregate` option's doc. The reader must also decide how a parsed per-row result sits beside the new `aggregateRejection` field. The dialog reports in `ui/packages/plugin-grid/src/components/BulkActionDialog.tsx`. Measure current lines at dispatch.\n\n**Ask.**\n1. On an aggregate dispatch only, parse the resolve value with `BulkActionResultSchema` and report per row: the moved count, and the failed rows with their messages.\n2. Apply the reader rules the contract states:\n   - ids outside `params._selectedIds` are dropped;\n   - a duplicate id counts once;\n   - an id listed in both `succeeded` and `failed` counts as failed;\n   - a selected id in neither list is reported as not confirmed, never as succeeded;\n   - a value that carries a `succeeded` or `failed` member but does not parse is reported as an unreadable result, never as full success;\n   - a value with neither member keeps today's report.\n   - when one id appears twice in `failed` with different messages, the first entry wins.\n   - **Declared behaviour change:** once this reader lands, an existing aggregate handler whose own return value uses a top-level `succeeded` or `failed` member in another form (e.g. counts) moves from the success report to \"unreadable\". State that in this PR's changeset (review r2 N2 on PR #34267, 6907153374), and decide how \"not confirmed\" and \"unreadable\" are shown.\n3. Rejection is unchanged: it stays the one-outcome report.\n4. Pins: each rule, plus a CONTROL showing that a handler returning nothing keeps today's report.\n5. In the same PR, remove the `[PLANNED — not enforced]` marker from the spec describe/TSDoc and from the reference page.\n\nFollow-ups that are not part of this card: skills teaching is #34268, and the invocation audit row (`runResolvedActionAsRest` records `succeeded` for a 200 carrying `failed` rows) is a server card the seat files.\n\n"

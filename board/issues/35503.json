@@ -1,0 +1,31 @@
+{
+  "number": 35503,
+  "kind": "issue",
+  "title": "ADR-0126: record that capability is runtime-creatable since #35157 (status-line amendment to the code-only rows)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T12:21:15Z",
+  "updated_at": "2026-11-19T12:27:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35503",
+  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjNq58cmHeqckjZkTFE\n\nFiling gate: ③ the ADR bookkeeping a landed ruling owes (execution-duties.md: the ADR record line belongs to the landing seat, filed after the merge citing the merge commit; AGENTS.md Prime Directive 13: reversing a recorded decision needs an amendment, not a changeset that quietly does the opposite).\n\n## What landed\n\nPR #35261 merged as `6ffa816e55d6eb42a4fb6de2c21e9c6286633598` (part of #35157). On the maintainer's ruling recorded on #35157 (comment 6999763503, option A, verbatim: 「同意」) and the bound ruling 7000639892 (option 「接受现有边界」): `capability` is now runtime-creatable (`allowRuntimeCreate` in `DEFAULT_METADATA_TYPE_REGISTRY`, `packages/spec/src/kernel/metadata-plugin.zod.ts`), a platform capability name and a package-declared name are refused at the save door, and an unmanaged copy copies an app's capabilities, renamed with the copy.\n\n## What ADR-0126 still says (read on `origin/main` after the merge)\n\n`docs/adr/0126-packaged-metadata-customization-model.md` lists `capability` as code-only in four places:\n- line 88: `| **C — code-only** | field, job, api, capability, agent | nothing — no runtime write channel exists |`\n- line 154: \"**Code-only** types (field, job, api, capability, agent — …\"\n- line 179: the \"outside\" row, \"field, job, api, capability, agent (code-only)\"\n- line 497 (§9, not chartered): \"Reopening any code-only type (field, job, api, capability, agent).\"\n\nSo the ADR and the registry now disagree on `main`.\n\n## Ask\n\nA governed docs-only PR (Tier H: `docs/adr/**`) adding an amendment note to ADR-0126 that records the #35157 ruling: `capability` leaves the code-only set (runtime-creatable; overlay stays closed, so a packaged declaration cannot be re-scoped), with the save-door bound of 7000639892, citing the merge commit above and the two ruling comments. Whether the rows are edited or an amendment block is appended is the skills lane's call under the ADR's own amendment convention.\n\nReader: the `domain:skills` lane (triage sets the domain). Card #35157 stays `pm:blocked` on this card and closes when it lands; nothing else remains on it."
+}

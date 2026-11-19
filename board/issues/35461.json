@@ -1,0 +1,36 @@
+{
+  "number": 35461,
+  "kind": "pull_request",
+  "title": "fix(react): a print page is never the record page an object falls back to",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T10:15:57Z",
+  "updated_at": "2026-11-19T11:39:55Z",
+  "closed_at": "2026-11-19T11:39:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T11:39:53Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35461",
+  "body": "Fixes #35250\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户看到的变化:对象只配了打印页、没有默认记录页时,打开记录不再变成打印文档,而是显示平台自动生成的标准记录页(路径、页签、相关列表、编辑都在);打印页仍可从打印入口打开。\n- 为什么改:之前\"没有默认页就取第一张记录页\"的兜底把打印页也算进去,应用只好额外写一张占位记录页来绕开。\n- 改错的后果与回滚:若判断有误,只配打印页的对象会显示标准记录页而非打印页;单独回滚本次改动即可恢复,不涉及数据。\n- 需要你做的:无,席位落地(当前有两处旧测试数据依赖旧行为,等席位批准扩面后补一行即绿)。\n\n## What changes\n\n`usePageAssignment` (`ui/packages/react/src/hooks/usePageAssignment.ts`) picks an object's record page in three slots: the page scoped to the route's app (`PageSchema.apps`), then the declared default (`isDefault`, read through the spec's `defaultRecordPageObject`), then declaration order. The declaration-order fallback took `candidates[0]`, so a page that declares `print` (`PageSchema.print`, a print page) became the record page of every object that had no default. It now takes the first candidate that does not declare `print`, and with none it answers null, so `RecordDetailView` draws the synthesized default record page.\n\nLeft as it was, on purpose:\n\n- `isRecordPageOf` is unchanged: the named record page route (`:objectName/record/:recordId/page/:pageName`) asks for the print page by `pageName` and accepts it through `isRecordPageOf`, so the print route still opens the print page.\n- A print page the author declares as the default (`isDefault: true`) or scopes to an app (`apps`) still opens there. Those slots are the spec's one reading of the default record page, and this hook keeps its stated invariant that the page the platform judges to be the default is the page that opens. The showcase invoice print page is declared `isDefault: true`, so it is unaffected. Whether a print page should be refused as a default is an open question in the report, not decided here.\n\n## Tests\n\nNew file `ui/packages/react/src/hooks/__tests__/usePageAssignment.printPage-35250.test.tsx`, every fixture parsed through `PageSchema` first:\n\n- repro: an object whose only page is a print page resolves to null; a print page declared first does not shadow a later record page; declaration order holds among the pages that do not print; an app named on the route with no scoped page still skips the print page;\n- controls: a lone non-default record page still wins; the `isDefault` record page wins over an earlier print page; `pageName` still returns the print page and `isRecordPageOf` accepts it; an `isDefault` print page and an app-scoped print page still open in their slots.\n\n<details><summary>Red on origin/main, green on the fix</summary>\n\nThe hook restored from `origin/main` (test committed first, restored with `git checkout HEAD`, hash and `git diff HEAD` checked empty after):\n\n```\nTests  4 failed | 6 passed (10)\nExpected: \"quote_detail\"   Received: \"quote_print_page\"\nExpected: \"first_detail\"   Received: \"quote_print_page\"\n```\n\nOn the fix, head fd38571b: `pnpm --dir ui exec vitest run packages/react/` passes every file in the package, including the new 10 tests.\n\n</details>\n\n## Acceptance notes\n\nKnown gap, named: two app-shell test fixtures pin the old fallback and go red on this head. `RecordDetailView.printAction-11958.test.tsx` (its `boundPage`) and `RecordDetailView.printPageHeaderActions-12906.test.tsx` (its `PRINT_PAGE`, whose own comment calls it \"The invoice's default record page ... as the showcase invoice's is\") mount a print page with no `isDefault` and reach it only through the declaration-order fallback. The remedy is one line each, `isDefault: true`, matching what those fixtures say they model; measured green with it applied (3 files, 14 tests, plus the named-route file). Those files are outside this claim's declared file surface, so they are not in this PR until the seat extends the surface.\n\n## Verification\n\n<details><summary>Local gates at fd38571b</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 derived families; all 38 run, each exit 0 (`pnpm check:query-options-erasure` timed out once at a 300 s cap and passed on a rerun).\n- `pnpm --dir ui exec vitest run scripts/`: 171 files passed, 2 skipped.\n- `pnpm --filter @object-ui/react type-check`: exit 0.\n- `pnpm --dir ui check:new-line-citations`: 0 new citations.\n- Unit run that included the app-shell print tests: 3 failed / 1597 passed, the 3 being the two fixtures named above.\n\n</details>\n\nSession: https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

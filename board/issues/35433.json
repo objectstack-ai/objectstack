@@ -1,0 +1,32 @@
+{
+  "number": 35433,
+  "kind": "issue",
+  "title": "data API refusal: fields[] lists the union head as an \"Invalid input\" invalid_shape entry ahead of the entries that explain it (sibling of #35400)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:59:58Z",
+  "updated_at": "2026-11-19T13:19:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35433",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② maintainer-directed sibling. Ruling 7003683081 on #35400: \"The data API's sibling wrapper is out of this card and gets its own finding card.\" Evidence from the #35400 os-dev report (`/mnt/project-files/objectstack-seat5/area-ux/ux-3/report-35400.md`). ⛔ Not a claim; triage sets lane and grade.\n\n## What the caller sees\n\nA data-API write refused on a union-typed field gets, in `fields[]`, an entry `{ field, code: 'invalid_shape', message: 'Invalid input' }` ahead of the branch entries that name the real cause. It is the record-door twin of the metadata-save wrapper #35400 removes.\n\n## Where\n\n- Producer: `packages/spec/src/api/zod-issues-to-fields.ts` (docblock ~:137, push ~:214), `zodIssuesToFields`.\n- Consumers: `packages/rest/src/batch-routes.ts` (~:320, :583, :640) and the REST `createValidationError`.\n- Pinned: `packages/metadata-protocol/src/union-branch-policy.cross-package-parity.test.ts` ~:420-421 (codes `['invalid_shape','required']`).\n- Taught: `content/docs/api/error-handling-server.mdx` ~:179-183 (\"that entry PLUS the entries of the branch\").\n\n## Why it is a separate decision\n\nIt is a published response shape (`fields[]`, ADR-0114 catalog) taught in the docs. Whether it follows #35400's rule is its own contract choice; the maintainer's #5364 ruling kept the metadata envelope and `fields[]` from being aligned. Any change is `packages/spec/src` non-test (L2 contract record).\n\nDedupe: issue search `invalid_shape union wrapper fields`, `zodIssuesToFields union head`, `data API Invalid input fields entry` → only #35400."
+}

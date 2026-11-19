@@ -2,8 +2,8 @@
   "number": 35246,
   "kind": "issue",
   "title": "fleet scripts: check-half-states H14/H15/H67 stop ranking pm:blocking above p1 (follow-up of #35223)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:fleet",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T18:42:17Z",
-  "updated_at": "2026-11-19T07:53:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T10:28:46Z",
+  "closed_at": "2026-11-19T10:24:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35246",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nSource: topic #35205\n\nFiling gate: owed follow-up named in the acceptance notes of PR #35223 (L1 6988050932, item C1); child of epic #35205. ⛔ Not a claim.\n\nGrade: p3 · area:fleet · Task · blocks no running work\n\nBlocked-by: #35223\n\n## What to do\n\n`scripts/pm/check-half-states.mjs` H14, H15 and H67 still model `pm:blocking` as a rank above p1, and H14 derives it without knowing which area is being dispatched. Under the rules #35223 lands, a card blocking another p1 takes that grade, and dispatch goes by epic and area. These checks must stop treating `pm:blocking` as a rank of its own.\n\n## Done when\n\nH14, H15 and H67 read the grade the rules give, and no rule ranks `pm:blocking` above p1. The self-tests cover it."

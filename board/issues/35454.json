@@ -1,0 +1,32 @@
+{
+  "number": 35454,
+  "kind": "issue",
+  "title": "`os doctor` ends with \"Run with --verbose to see fix suggestions.\" when only warnings that have no fix suggestion fired",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T10:06:32Z",
+  "updated_at": "2026-11-19T10:10:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35454",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect (user-visible misleading copy) · Source: fleet · out-of-scope finding of PR #35377 (card #34866), os-dev-report 7002333905; L1 ACCEPT 7005940659 named it a follow-up card owed. ⛔ Not a claim.\n\nGrade: area:build · Bug · Cosmetic · builders, often · measured once at the public door `os doctor` (built binary) → p2 (Cosmetic × builders, often).\n\n## Business reason\n\nA developer runs `os doctor`, sees warnings, and is told to re-run with `--verbose` \"to see fix suggestions\". For five kinds of warning there is no fix suggestion in either mode, so the re-run adds nothing and the developer is left without a next step on their first contact with the CLI.\n\n## What happens\n\n`packages/cli/src/commands/doctor.ts`: the `hasWarnings` summary prints the hint whenever any warning fired and `--verbose` is off (after PR #35377). Five warning paths print a bare `printWarning` with no fix channel in either mode: missing tests (`findMissingTests`), `@deprecated` usages (`findDeprecatedUsages`), circular dependencies, unused objects, orphan views.\n\nreach: public door `os doctor` — built binary (`node packages/cli/bin/run.js doctor`) in a temp cwd carrying `packages/spec/src/a.zod.ts` with no `a.test.ts`: the plain run ends \"Run with --verbose to see fix suggestions.\"; the `--verbose` run adds nothing to the \"Missing test\" warning (os-dev-report 7002333905).\n\n## Expected\n\nThe hint is printed only when at least one warning that fired has a fix suggestion to show under `--verbose`, or those five warnings gain a real fix line. Either way, the summary never promises a suggestion that `--verbose` does not print.\n\n## Done when\n\nA pin with only a fix-less warning shows no hint; a pin with a fix-bearing warning keeps it.\n\nWho acts: the area that owns `packages/cli` (area:build, CLI area).\nDedupe: `repo:objectstack-ai/objectstack is:issue doctor \"fix suggestions\"` → 2 hits (#34866, the parent card, fixed by PR #35377; #5382 closed, unrelated)."
+}

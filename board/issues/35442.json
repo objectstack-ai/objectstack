@@ -1,0 +1,32 @@
+{
+  "number": 35442,
+  "kind": "issue",
+  "title": "平台 MCP 提供查找与阅读应用文档的工具，并写明回答应用规则的顺序与出处",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T09:22:19Z",
+  "updated_at": "2026-11-19T09:59:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35442",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「我在使用过程中，如果接入了AI，可以提问吗？比如什么是发票，什么是回款？可以的审批流程是怎样的？」；「AI 的回答是真实的查了系统中的元数据和相关文档，还是编的」；对 objectstack-ai/cloud#4892：「这个标准平台的 mcp 应该先处理吧 4892 等平台处理完再优化」；优先级：「都是 p1」。\n\n## 现状\n\n- 「在应用文档中查找 / 阅读应用文档」这两个工具名登记在平台（`packages/spec/src/system/constants/platform-tool-names.ts:66,68`：`read_package_doc`、`search_package_docs`），但实现和使用说明只在 cloud 的应用内助手里（cloud `packages/service-ai-studio/src/skills/package-docs-skill.ts`）。\n- 平台 MCP 这一侧：2026-11-19 连接到一个环境的 ObjectStack MCP（自报 `@objectstack/skills 18.5.0+unreleased.8436f67a2d52`）列出的工具里有 `describe_metadata`、`list_metadata`、`get_metadata_schema`、`get_authoring_rules`、`query_records` 等，没有查找或阅读应用文档的工具；服务端说明里也没有「回答应用规则前先查手册」这一类指引。（依据是该连接的工具清单，未逐行核对 `packages/mcp` 源码，车道接手时请先确认。）\n- 结果：通过 MCP 接入的外部 AI（用户自己的 Claude 等）问「什么是回款」「商机审批流程是怎样的」，没有标准途径读到已安装应用的手册；应用内助手能读，是 cloud 自己加的一层。\n- 应用内助手同日实测（cloud#4892 有全文）：流程类问题读了手册、答案与手册一致，但没读流程定义、没给出处；概念类问题完全没查手册。\n\n## 要做的\n\n1. 平台 MCP 提供应用文档的两个工具（沿用已登记的名字）：按关键词在已安装应用的手册里查找；按名称读一篇。遵守调用者的可见范围（看不到的包的文档不返回）。\n2. 在 MCP 服务端说明或已发布的 skills 里写明回答应用问题的顺序：\n   - 概念类（「什么是 X」，X 是已安装应用里的对象、字段或手册术语）：先查手册；手册没有再用通用解释，并说明手册未涉及。\n   - 流程与规则类（审批、路由、门槛）：读手册，同时用 `describe_metadata` 读实际的流程或规则定义；两者不一致时以实际配置为准并指出。\n   - 回答末尾写明依据（手册篇名、流程名）。\n3. 工具返回里带上可打开的文档地址（`/_console/apps/<app>/docs/<book>/<doc>`），让调用方能给出可点击的出处。\n4. 加一组评测或契约测试：上面两句原话，经 MCP 能查到《订单与回款手册》和《商机——阶段、提醒与审批》。\n\n## 不做的\n\n- 不改 cloud 应用内助手（cloud#4892 等本卡落地后在其上优化，届时改为复用平台这套工具与说明）。\n- 不改文档内容。\n\n## 验收\n\n- 用 MCP 连接一个装了 HotCRM 的环境：工具清单里有查找与阅读应用文档的工具；问「什么是回款」能读到《订单与回款手册》的相应篇目并给出地址。\n- 问「商机的审批流程」：既读手册，也读 `opportunity_approval` 的定义。\n\nReader: MCP / skills 车道（`packages/mcp`、`packages/skills`、`packages/spec` 的平台工具名）。\n\nDedupe: `MCP package docs search tool`、`mcp search_package_docs`、`MCP 文档 查找 手册`（objectstack，open）→ 见立卡时检索结果，无同题卡。"
+}

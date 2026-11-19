@@ -1,0 +1,32 @@
+{
+  "number": 35413,
+  "kind": "issue",
+  "title": "Seed save-door follow-ups: restore door skips the unknown-object judgment; probe reads a two-package name as missing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:31:16Z",
+  "updated_at": "2026-11-19T08:57:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35413",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): seat L2 on PR #35388 (#34864), record 7003894547, nits N1 + N2; plus the os-dev out-of-scope note on the same PR. ⛔ Not a claim.\nReader: `domain:server` (`packages/metadata-protocol/src/protocol.ts`, `packages/metadata-protocol/src/build-probes.ts`). Suggested-grade: p3 · docblock + wording; one product question (item 1). Parent: #34864.\nDedupe: `refuseRestoredBodyTheSaveDoorRefuses seed object` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：目前无；这是保存示例数据时新增\"对象不存在就拒收\"之后留下的两处收尾。\n- 为什么做：恢复旧版本时不做这项检查，代码里也没写明原因；发布后的检查在少见情形下会把\"名字被两个包占用\"说成\"对象不存在\"。\n- 出错会怎样：只是说明和提示文字不准，行为不变；回退即可。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\n1. **Restore door (N2).** `refuseRestoredBodyTheSaveDoorRefuses` in `protocol.ts` lists what the restore door asks and what it does not, each with its reason. After PR #35388 the save door refuses a `seed` whose object nothing resolves (`unknownSeedObjectRefusal` in `protocol-save-door-refusals.ts`); the restore door does not ask this, and the list does not say so. The same list also omits the #28952 seed refusal the restore door does ask (os-dev out-of-scope note on PR #35388). `protocol.ts` is at its line ceiling.\n2. **Probe two-holder name (N1).** In `build-probes.ts` the seed probe's `readItem` returns `undefined` for a name two packages hold, so when the engine also registers no such object the probe reports cause `missing`. The save door treats the same two-holder refusal as \"known\". Wording only; narrow window.\n\n## Expected\n\n1. The restore-door list records the unknown-object judgment and the #28952 seed refusal with their reasons. Decide (seat/maintainer) whether a restore should refuse a seed version whose object is gone, as it does for grants; if yes, that is a narrowing and needs its own ledger entry.\n2. The probe treats a two-holder name as known (cause stays `unreadable` or a dedicated wording), matching the save door; pin it."
+}

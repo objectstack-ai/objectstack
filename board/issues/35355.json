@@ -12,18 +12,18 @@
   },
   "labels": [
     "area:data",
-    "pm:blocked",
+    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T06:03:51Z",
-  "updated_at": "2026-11-19T06:03:51Z",
+  "updated_at": "2026-11-19T13:52:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35355",
   "body": "③ maintainer-directed task · Source: maintainer ruling on #35340 (comment https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747; sub-cards approved 2026-11-19 06:03Z 「同意」「都是 p1」).\n\n**Blocked by #35354** (ADR). Ships in the same release as ③ and ④.\n\n## 维护者速读\n- **问题：** 平台没有地方存工作日、工作时段、节假日和调休。\n- **要做：** 建两张日历对象、一个计算服务，并在 Setup 里给管理员维护。\n- **不做会怎样：** 公式函数和审批时钟没有数据可读。\n- **你要做的：** 无。\n\n## Scope\n- `sys_work_calendar`: code, name, weekly working pattern, `HH:mm` working periods per weekday (several allowed), required `timezone` (`valueDomain: 'iana_time_zone'`, prefilled from the org's effective time zone), `is_default` (one per org), `maintained_through` date.\n- `sys_work_calendar_exception`: calendar, date, kind (off / on), optional periods, note. One table for holidays, 调休 make-up workdays and shutdowns.\n- Packages may reference a calendar by code and seed rows (follow `sys_exchange_rate`, ADR-0144).\n- Calendar service: resolve (explicit code → org default → refuse, never fall back to wall-clock); `isWorkingTime`, `addWorkingDays`, `addWorkingHours`, `workingDaysBetween`; computing past `maintained_through` warns or refuses per the ADR; cache with invalidation on writes.\n- Refuse periods that cross midnight.\n- Setup page to maintain calendars and exceptions, plus import of exception rows.\n\n## Done when\nObjects, service and Setup page land with tests (incl. a 调休 make-up Saturday and a National Day week), and ③ ④ consume the service.\n\n## Non-goals\nBusiness-unit inheritance, CN holiday data package, shift rostering."

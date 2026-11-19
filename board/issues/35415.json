@@ -1,0 +1,32 @@
+{
+  "number": 35415,
+  "kind": "issue",
+  "title": "审批请求页：标题是流程名而不是业务记录名，记录名被截断，没有入口打开原记录",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:32:59Z",
+  "updated_at": "2026-11-19T08:57:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35415",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19）\n\n- 审批请求页的大标题是「采购申请审批」（流程名），页头第一格「流程」又写了一遍「采购申请审批」。\n- 审批人真正要看的业务记录「验收申请 T-002（cloud#2549 邮件链接）」只在「提交时的内容」卡里，并且被截成「验收申请 T-002（cloud#2549 邮件…」，右边还有大片空白。\n- 页面上没有打开原记录的入口（审批中心列表里那一行有，进了详情反而没有）。\n- 「通过」是浅灰蓝底，「驳回/拒绝」是饱和红底：主操作比否决操作弱，看起来像禁用。\n- 同一页两种时间写法：页头「2026/11/10 下午8:25」，审批动态「2026/11/5 10:03:17」。\n\n## 要做的\n\n1. 大标题用业务记录名，副标题写流程名；记录名可点击打开原记录。\n2. 「提交时的内容」里的文本字段按可用宽度显示，不在有空位时截断。\n3. 「通过」用主按钮样式；「驳回」用描边的危险样式。\n4. 本页时间统一成一种写法。\n\n## 不做的\n\n- 不改审批进度与审批动态两张卡的结构。\n\n## 验收\n\n- 上述请求页标题为「验收申请 T-002（cloud#2549 邮件链接）」，点它打开采购申请记录；「通过」是页面上最醒目的按钮。\n\nReader: `domain:ui` 车道，审批请求记录页（`sys_approval_request`）。\n\nDedupe: `审批请求 标题 记录名`（objectstack，open）→ 0。"
+}

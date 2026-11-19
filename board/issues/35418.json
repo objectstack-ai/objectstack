@@ -1,0 +1,32 @@
+{
+  "number": 35418,
+  "kind": "issue",
+  "title": "审批动态里显示内部岗位名（crm_sales_manager），系统转交的操作人显示为「—」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:35:30Z",
+  "updated_at": "2026-11-19T08:58:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35418",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：本地 HotCRM，控制台是 objectstack `origin/main` 7ece0204a6 的构建（服务端 18.5.0），zh-CN，2026-11-19，商机 Wayne Enterprise License 记录页的「审批」卡）\n\n- 审批动态里有两条：「评论 · — · 销售经理审核 \"审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「crm_sales_manager」无人任职。\"」（另一条是 `crm_sales_director`）。\n- 岗位用的是内部名，不是显示名（销售经理 / 销售总监）。\n- 这是系统自动转交，类型却写「评论」，操作人是「—」。\n\n## 要做的\n\n1. 岗位用显示名；取不到显示名时再退回内部名。\n2. 系统自动产生的条目，操作人写「系统」，类型写「转交」（或「系统」），不写「评论」。\n\n## 不做的\n\n- 不改转交规则本身。\n\n## 验收\n\n- 同一条动态显示为「转交 · 系统 · 销售经理审核：岗位「销售经理」无人任职，已转交本组织管理员处理」这一类写法，页面上不出现 `crm_sales_manager`。\n\nReader: 审批插件车道（这句话在服务端生成，`packages/plugins/plugin-approvals`）与 `domain:ui` 审批动态渲染。\n\nDedupe: `岗位 内部名 审批动态`（objectstack，open）→ 0。"
+}

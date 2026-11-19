@@ -1,0 +1,37 @@
+{
+  "number": 35412,
+  "kind": "issue",
+  "title": "从应用里的「待我审批」打开审批请求，会跳进「系统设置」应用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:30:43Z",
+  "updated_at": "2026-11-19T13:47:21Z",
+  "closed_at": "2026-11-19T13:46:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35412",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19）\n\n- 在「销售」应用左侧菜单点「待我审批」（`/_console/apps/app.objectstack.hotcrm/component/approvals/inbox`），点列表里的一条。\n- 地址变成 `/_console/apps/com.objectstack.setup/sys_approval_request/record/areq_…`：顶栏应用名变成「系统设置」，左侧菜单整个换成系统设置的菜单。\n- 业务用户处理完审批后，左侧已经没有销售应用的菜单；只能靠面包屑「审批中心」或浏览器后退回去。\n- 加载过程中面包屑先显示 `#areq_9e5…` 这样的内部编号，再换成流程名。\n\n## 要做的\n\n1. 从某个应用的审批中心打开审批请求时，留在该应用里（应用名、左侧菜单不变）；地址用当前应用的路径。\n2. 从首页「我的工作」、通知、邮件链接打开时没有来源应用，这时的落点另行决定（建议：不带应用侧栏的审批页，而不是系统设置）。\n3. 面包屑加载中不显示内部编号（显示「审批请求」或骨架）。\n\n## 不做的\n\n- 不改审批请求页本身的内容排布（标题问题另卡）。\n\n## 验收\n\n- 上述路径打开审批请求后，顶栏仍是「销售」，左侧仍是销售应用菜单；通过/驳回后「处理后打开下一条」仍可用。\n\nReader: `domain:ui` 车道，审批中心行点击的路由目标（`ui/packages/app-shell` 审批收件箱）。\n\nDedupe: `审批 系统设置 应用 跳转`（objectstack / cloud / hotcrm，open）→ 0。"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 35526,
+  "kind": "issue",
+  "title": "runtime: callData's aggregate arm answers a relation condition on a disabled package's object (a 1/0 oracle) while the data route and callData's query arm answer 404 OBJECT_PACKAGE_DISABLED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T14:10:48Z",
+  "updated_at": "2026-11-19T14:10:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35526",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: escalated by contract review 7007338672 on PR #35444 (③, \"the seat measures it and files a card under #35195 if it serves\"). Measured by area pkg-2 at `88ea36c3`.\n\n## 维护者速读\n- 用户能看到什么变化：某个应用包停用后，通过动作或 AI 助手做统计时，仍能用它的记录字段做条件，从结果是 1 还是 0 推出字段内容。修好后会和直接读取一样被拒绝。\n- 为什么做：停用的包本该在所有读取入口都看不到。关联展开已经修好，这是同一类问题在统计入口的另一扇门。\n- 出错会怎样：最坏情况和现在一样。没有停用任何包的环境不受影响。\n- 要你做什么：只有一点需要你定：系统身份调用时要不要也拒绝（见 Open point）。\n\n## Reach (measured)\nReal kernel (MetadataPlugin + ObjectQLPlugin + SqlDriver, in-memory SQLite, protocol service present). Probe: `callData(dispatcher.actionExecutionDeps, …)`, the data mouth the `/mcp` HTTP bridge's `aggregate_records` tool calls (`domains/mcp.ts:1309`). Package B owns `beta_obj`; `alpha_obj.b_ref → beta_obj`. B disabled:\n- `aggregate alpha_obj where {b_ref:{secret_note:'BETA_SECRET'}}` gives count **1**; the same with `'NOPE'` gives **0**. This holds for both member and system callers: a yes/no oracle on the disabled object's field.\n- `query alpha_obj` with the same relation condition (through the protocol) answers **404** `OBJECT_PACKAGE_DISABLED` for member and system (the #35427 fix).\n- CONTROL: with B re-enabled, the aggregate gives 1/0 and the query returns 1 record.\n\n## Seam\n`packages/runtime/src/action-execution.ts`: `refuseUnservedRelationTargets` (~:340) reads the target with `registry.getObject` and asks only `checkApiExposure(target, RELATION_CONDITION_TARGET_ACTION)`. It is used by the aggregate arm (~:976) and by the query fallback on a host with no protocol (~:937). It runs only when `exposureGated` (= `!isSystem`, ~:629). `refuseUnexposedDataAction` covers only the addressed object. Read only and not measured live: the stdio twin (`packages/mcp/src/stdio-data-bridge.ts` `enforceRelationTargetExposure`, ~:919) reads through the protocol's by-name read, so it refuses a disabled target for a non-system caller. Route: ask `registry.isObjectPackageDisabled(site.target)` (the predicate behind `isObjectOfDisabledPackage`) per relation-condition site and refuse with `OBJECT_PACKAGE_DISABLED`.\n\n## Open point\nThe data route's `assertObjectRegistered` asks the package predicate of every caller, including system, and #35427 refuses system callers too. Here, the exposure decision skips system contexts by design. Whether the package check also skips them needs a ruling. Ruling 6545646924 keeps in-process access served: a hook's `ctx.api` is a system context.\n\nPermissions: same class as #35195 and #35427, a disable not honoured. Caller-level permissions were not measured.\n\nRelated: #35195 (parent), #35427 (data route, PR #35444), #34900, the analytics card under #35427.\nSuggested-grade: p2 (same class)."
+}

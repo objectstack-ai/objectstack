@@ -1,0 +1,30 @@
+{
+  "number": 35524,
+  "kind": "issue",
+  "title": "metadata-protocol: a bare save of a member only the dependent holds rewrites the dependent's row while the bare read at that member answers 404, then 409",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T14:09:27Z",
+  "updated_at": "2026-11-19T14:09:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35524",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: out-of-scope finding (class a) of the os-dev on #34681 (os-dev-report 7005535521), measured on `main` `8596c80eda` and on PR #35450's head.\n\n## 维护者速读\n- 用户能看到什么变化：一个翻译类的元数据，只有依赖包存了某个语言、基座包没有时，按名字读这个语言显示“找不到”，按名字保存却成功并改了依赖包那一行，再读就变成“有歧义”。修好后读和写给同一个答案。\n- 为什么做：读写各说各话，用户刚保存完就读不到，违反“读写同一地址”的既有裁定。\n- 出错会怎样：最坏是保存仍改到依赖包那一行，和现在一样；只影响基座和依赖包都存了同一元数据的环境。\n- 要你做什么：无。\n\n## Reach (measured)\nBundled type `email_template`. Authored base package WA holds an `en-US` row; authored dependent WD (declares WA) holds an `fr-FR` row for the same member name.\n1. `GET /api/v1/meta/email_template/NAME?member=fr-FR` → **404** (the base's address; the base has no fr-FR).\n2. `PUT /api/v1/meta/email_template/NAME` with member fr-FR (in process `saveMetaItem`) → **200**, rewrites WD's row.\n3. The same bare read at fr-FR → **409** `RESOURCE_CONFLICT`.\nThe write lands in a row the read never serves, and the read's answer changes after the save.\n\n## Rule\nEpic ruling 6781691009 on #31527: \"a write resolves its address exactly as the read at the same address resolves it\", and \"A 200 read followed by a 409 save blocks editing …\"; #34348 ruling (b): \"reads and writes give the same answer.\" Which of the two answers is right (the read follows the dependent, or the write refuses) is for the claiming lane to read against those rulings; not built over here.\n\nRelated: #34681 (PR #35450: the five bare write doors follow the row-held base), #34441 (PR #34644), #34348, #34682 (seat 4, bundle member selector).\nSuggested-grade: p2 · domain:server · area:package.\nDedupe words: non-canonical member addition bare save dependent row read 404 then 409."
+}

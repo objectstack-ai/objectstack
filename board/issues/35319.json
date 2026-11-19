@@ -2,8 +2,8 @@
   "number": 35319,
   "kind": "issue",
   "title": "Studio: a package's Automations list shows flows by their English labels in a zh-CN UI, while the opened flow shows the translated title",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T04:30:51Z",
-  "updated_at": "2026-11-19T08:01:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T10:25:00Z",
+  "closed_at": "2026-11-19T10:23:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35319",
   "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, measured once.\n\n**Business reason.** An administrator in a Chinese UI looks for 已接受的报价单起草合同 in the list and finds only \"Accepted Quote Drafts a Contract\". This is the page HotCRM's docs send admins to for switching packaged flows on or off.\n\n**Reach.** objectstack-ai/hotcrm PR #2667 (18.6.0, admin, zh-CN): home → 在 Studio 中新建 → HotCRM Revenue → 定制 → 自动化. The list shows English labels; opening a flow shows the pack's `flows.NAME.label`.\n\n**Relation.** #34903 (closed 2026-11-17) fixed the flow designer, which is the opened-flow view. The list is its sibling.\n\n**Dedupe:** `Studio automations list flow label translation` returned 29 hits. The nearest is #34903, which is the designer, not the list.\n\n**Reader.** objectstack triage grades it and routes it to the owning lane. Not a claim; awaits triage. Filed on the maintainer's word in hotcrm seat 2's session (2026-11-19): 「平台缺口全部立卡」, after an independent fable-tier review of HotCRM's pending decisions surfaced it."

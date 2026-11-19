@@ -15,17 +15,15 @@
     "pm:awaiting-maintainer",
     "priority:p2"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T00:40:01Z",
-  "updated_at": "2026-11-19T00:51:22Z",
+  "updated_at": "2026-11-19T09:28:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35265",
   "body": "sweep#1 · os-warren · session_01JQwxbYJqoPAoSpWTMpH1yq\n\nSource: maintainer — Warren, 2026-11-19 00:32Z in the objectstack priorities discussion thread: 「可以拆的都同意。」 (the split list's item 3: move #31168's upstream PR to its own maintainer card). Earlier: 2026-11-07 23:56Z 「31168 转维护者处理卡片」「我换账户提交」 (recorded on #31168, comment 6714742026). Rule: #35259 item 7.\n\nFiling gate: ③ a task the maintainer dispatched. Reader: the maintainer (his other GitHub account). Dedupe: open cards naming better-auth upstream SAML — none besides #31168.\n\nGrade: p2 · area:ux · Task · inherits #31168's grade\n\n## Why\n\n#31168 (SAML refusals name their cause) waits on @better-auth/sso keeping samlify's error cause. The patch, the PR text and the checks were drafted on #31168 (2026-11-07; drafted against better-auth `main` `ba59f5d8ec`). Submitting them upstream is the maintainer's step; #31168 now points its `Blocked-by:` here.\n\nMaintainer-action: run the upstream checks in `notes.md` and submit `upstream-pr.md` + `upstream.patch` (project files `issue-31168/`, drafted against better-auth `main` `ba59f5d8ec`) to better-auth/better-auth from the maintainer's other account — done when an upstream PR URL is on this card\n\n## After\n\nClose this card with the URL. #31168 then waits on the upstream release (`pm:on-hold` with `Restart-when:` an @better-auth/sso release carrying the fix); the two-week clock of ruling 6709033929 starts on the submission date.\n"

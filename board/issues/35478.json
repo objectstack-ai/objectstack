@@ -1,0 +1,36 @@
+{
+  "number": 35478,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): draw the approval band once on a record page split around a body table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T11:02:25Z",
+  "updated_at": "2026-11-19T12:00:47Z",
+  "closed_at": "2026-11-19T12:00:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T12:00:44Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35478",
+  "body": "Fixes #35253\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户看到的变化：待审批被锁定的记录，详情页里如果有正文子表（例如明细行），「审批锁定」提示现在只显示一次（在子表上方），不再在子表上下各出现一次。\n- 为什么改：默认详情页会把字段区按子表切成两段，每段各画一遍审批提示，看起来像有两把锁，用户会误以为有两个审批在进行。\n- 改错的后果：最坏情况是拆分页面上的审批提示（含撤回按钮和进度）消失或仍然重复；不涉及数据与权限，单纯回退本 PR 即可恢复原状。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe synthesized default record page splits its details around a body table (a `relatedList: 'primary'` list): one `record:details` part per run of sections. Each part mounts its own `DetailView` with its header suppressed, and each drew the record's approval band, so an approval-locked record showed \"Locked for approval\" twice: above the table and again above the next section.\n\nMechanism: a module-internal `ApprovalBandContext` (in `defaultRecordPage.ts`, default `true`, not in the barrel, neither a `DetailView` prop nor a schema key, the same pattern as `EmptySectionsLineContext`). `RecordPageColumns` draws the details column through `drawDetailsNodes`, which wraps every `record:details` node after the first in the provider with `false`; `DetailView` gates its approval band on it. The band (status chip, recall lever, tally, recall error) therefore stays with the first details part, above the body table.\n\nWhy this does not drop the chip elsewhere:\n- An authored page's details body, a standalone `DetailView` and the record drawer are never under `RecordPageColumns`, so they read the default `true` and keep their band.\n- A default page with one details part has that part as the first one, so it keeps its band.\n- The locked-or-editable reading is untouched: it is still `resolveApprovalLock` over the host-threaded state, the same for every part. A `lockRecord: false` node reads as an editable approval (\"In approval · editable\"), now drawn once, never as locked.\n\nNo spec key, no app-shell source, no new i18n key.\n\n## Tests\n\nNew top-level describe in the existing `RecordPageColumns.test.tsx` harness (\"the approval band is drawn once per page\"). The harness's `record:details` stub now optionally mounts the `DetailView` the real block mounts (`showHeader: false`, inline edit on), opted in by this describe only; the other describes keep the bare stub.\n\n- wide / two-column / stack: a locked record split around its body table draws \"Locked for approval\" exactly once, and before the body table in document order.\n- CONTROL: a default page with one details part draws one chip.\n- CONTROL: an authored details body outside the laid-out page draws one chip.\n- CONTROL: no approval running draws no band.\n- A `lockRecord: false` approval on the split page draws \"In approval · editable\" once and no lock chip.\n\n<details><summary>Red first, on the test commit before the fix (df979eef, test only)</summary>\n\n```\n× wide: a locked record split around its body table draws \"Locked for approval\" once, above the table\n× two-column: ... × stack: ...\n× a `lockRecord: false` approval on the split page reads as editable, once — never as locked\nAssertionError: expected [ span, span ] to have a length of 1 but got 2\nTests  4 failed | 22 passed (26)\nos-verify-lock: VERDICT command-exit 1\n```\nThe three CONTROL cases were green on that run.\n</details>\n\n<details><summary>Green on 0122020a</summary>\n\n```\npnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/\nTest Files  387 passed | 1 skipped (388)\nTests  3519 passed | 18 skipped (3537)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @object-ui/plugin-detail type-check   (tsc --noEmit && tsc -p tsconfig.test.json; the test file is in the second program's --listFiles)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- Scope is the laid-out default page, which is what draws the synthesized page at every tier. A synthesized page that cannot be laid out (`buildDefaultPageColumns` answers null, so the host draws it as its tab strip) renders its Details tab through the generic `page:tabs` block, outside this package; a split there would still draw one band per part. Not measured on any real object; noted, not filed.\n- An authored page that places two `record:details` nodes on purpose still draws a band in each. The card's Expected is about the synthesized split; noted, not filed.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, 38) on 0122020a</summary>\n\nAll 38 derived commands ran locally, each EXIT=0 (captured before any pipe); `dispatch-gates --ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN. `check:new-line-citations` (ui): 0 new citations. Every other family is CI's and is read from this PR's check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ)_\n"
+}

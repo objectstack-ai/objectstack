@@ -1,0 +1,32 @@
+{
+  "number": 35476,
+  "kind": "issue",
+  "title": "顶栏左上角精简：只留标志加产品名；折叠按钮移到菜单底部，只有一个应用时不显示应用切换，组织名只在多组织时显示；记录页加载时不显示内部编号",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T10:59:33Z",
+  "updated_at": "2026-11-19T11:50:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35476",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派；专题范围含「云端入口」）。⛔ 不是认领。\n维护者 2026-11-19 原话：「你看下右侧 frappe cloud 的页面，他们的业务和我们很像，再看看我们的页面」；「结合我们的代码现状，具体评估应该如何改，然后再画效果图」；看过图 28、29 后：「立卡」。\n维护者同日追问：「左上角显示组织名称有必要吗？还是放到右侧切换？实际我们左侧还有应用下拉菜单，这个叫云会不会很乖。」；「然后还有左侧菜单折叠和返回首页的 logo」。\n\n## 效果图（图 28 的顶栏与左侧菜单底部）\n\n![28 云端环境详情](https://github.com/objectstack-ai/objectstack/blob/15ba063813f4ae350a9917d090b21e3c72de2667/28-cloud-env.png?raw=true)\n\n## 现状（界面实测：`cloud.objectos.app`（ObjectOS Cloud Staging），组织 test1016，zh-CN，1167 宽，2026-11-19；源码按 cloud `origin/main` 核对；顶栏是环境内控制台与云端控制台共用的外壳）\n\n- 左上角从左到右五样：侧栏折叠按钮、标志（回首页的链接）、组织名「test1016」、应用切换「云 ▾」、「预览版」。\n- 组织名只是文字，不能点；头像菜单里已有「我的组织 · test1016」，页面正文的环境卡又写一遍。\n- 应用切换里四项：云、Cloud Admin、返回首页（⌘⇧H）、所有应用。Cloud Admin 是内部管理端；普通客户账号下这里有几项，立卡时未用非内部账号实测。\n- 记录页加载过程中，面包屑先显示内部编号（「#8e25d44e…」「#areq_9e5…」），加载完才换成名称；相关列表的数量徽标先显示 0。\n\n## 要做的\n\n1. 侧栏折叠按钮从顶栏左上角移到侧栏底部。注意与 objectstack-ai/objectstack#35062（收起后完全隐藏、左边缘悬停浮出）配合：收起后要有办法再展开（边缘浮出的菜单底部同样有这个按钮）。\n2. 应用切换器：查看者只能看到一个应用时不显示切换器，只显示标志加产品名；「返回首页」不再单列（点标志即回首页）。\n3. 组织名：查看者只属于一个组织时顶栏不显示；属于多个组织时显示并可切换。头像菜单里的「我的组织」保留。\n4. 记录页加载中，面包屑与标题显示骨架或对象名，不显示内部编号；相关列表的数量在加载完之前不显示 0。\n5. 这些是外壳行为，环境内控制台同样适用；改动前在卡上列出受影响的页面并截图对比。\n\n## 不做的\n\n- 不改环境内的应用切换器在多应用时的样子。\n- 云端应用的显示名「云」改名在 cloud 卡里做。\n\n## 验收\n\n- 单组织、单应用的云端客户：左上角只有标志、产品名和「预览版」。\n- 环境内控制台（多应用）：应用切换器照常；折叠按钮在侧栏底部，收起后能再展开。\n- 慢网下打开任一记录页：加载过程中看不到「#」开头的内部编号。\n\nReader: `domain:ui` 车道，`ui/packages/app-shell` 的顶栏（`layout/AppHeader.tsx`、`AppSwitcher.tsx`）、`UnifiedSidebar.tsx`、记录页面包屑。\n\nDedupe: `顶栏 组织名 应用切换 折叠按钮`、`app switcher single app hide`（objectstack / cloud，open）→ 0。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 35497,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the compact related card labels its rows from the list columns when they leave the name out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T12:00:27Z",
+  "updated_at": "2026-11-19T13:04:39Z",
+  "closed_at": "2026-11-19T13:04:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T13:04:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35497",
+  "body": "Fixes #35263\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户看到的变化:记录页右侧的紧凑关联卡片,如果关系声明了要显示的列且这些列不含子记录名称,每行改用其中第一个可读的查找列(例如所属商机)来命名,不再每行都重复当前页面记录的名字。\n- 为什么改:产品页上的商机明细行名称是产品标题的副本,卡片三行都显示同一个产品名,看不出是哪几笔交易;作者已声明了能区分各行的列,只有紧凑卡片没用。\n- 改错的后果与回滚:最坏情况是某些卡片的行名从记录标题变成一个查找值;未声明列、列中含名称、无可读查找列或使用标题模板的卡片保持原样;只动一个渲染组件,直接回滚即可。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe compact related card (record page, right column) labelled every row by the child's record title. A child whose name field is a stored copy of the parent's title (an opportunity line named by its product's title, seen from the product page) therefore read the page's own name on every row, even though the relationship declared the columns that tell the rows apart.\n\n`compactNameField` in `ui/packages/plugin-detail/src/RelatedList.tsx` keeps the objectstack#27524 Target 11 rule unchanged (child's name field IS the key back to this record: first authored column, then declared field, that is not the key). The guard that returned `undefined` for every other child, `resolveNameField(objectSchema) !== referenceField`, now opens a second, narrower path (route N of the dispatch):\n\n- the list declares authored columns, and none of them is the child's name field (`resolveNameField`), and\n- the title is not a template (`titleFormat` with no declared name keeps the template title),\n- then the row is labelled from the first AUTHORED column that passes the existing candidate test (not the key back, not redacted, not a platform column, declared on the child, readable by the principal) AND is a reference-bearing field (`isExpandableFieldType`: lookup / master_detail / tree / user). Declared-but-unauthored fields are not read on this path.\n- Otherwise `undefined`: the row keeps the record title, as before.\n\nobjectstack#27056 Target 2 holds: `compactSelect` already projects `compactNameField` in place of the name, so the card asks for `id` plus the label column (and its `$expand` root) and nothing more. Optional secondary text from the next authored column is out of scope.\n\n## Tests\n\nNew top-level `describe` in the shared harness `RelatedPanel.header-27524.test.tsx` (six cases):\n\n- A1: columns `[quantity, opportunity]`, name `product_title` (a copy of the product title) labels the rows `Acme renewal` / `Globex pilot`; A2: the request is `$select: ['id', 'opportunity']`, `$expand: ['opportunity']`.\n- Controls: columns include the name (title kept); no authored columns (title kept); no lookup among the columns (title kept); template title (kept); the lookup unreadable under field-level security (title kept, the value is not drawn and not in `$select`).\n- The three existing Target 11 cases stay green unchanged.\n\n<details><summary>Red on main's RelatedList.tsx (tree-only restore from the merge base 609b6751, then restored from HEAD and proven by blob hash)</summary>\n\n```text\n × columns that leave the name out label the row from their first lookup, and the card asks for exactly that\nAssertionError: expected [ 'Widget', 'Widget' ] to deeply equal [ 'Acme renewal', 'Globex pilot' ]\n Test Files  1 failed (1)\n      Tests  1 failed | 14 passed (15)\nos-verify-lock: VERDICT command-exit 1\n```\n</details>\n\n<details><summary>Green at 4bba85e4</summary>\n\n```text\nRelatedPanel.header-27524.test.tsx: Test Files 1 passed (1) · Tests 15 passed (15) · VERDICT command-exit 0\npnpm --filter @object-ui/plugin-detail test: Test Files 387 passed | 1 skipped (388) · Tests 3517 passed | 18 skipped (3535)\npnpm --filter @object-ui/plugin-detail type-check (tsc --noEmit && tsc -p tsconfig.test.json): exit 0\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- Metadata-protocol measured as `none`: no key, value or default an author writes changes; `relatedListColumns` keeps its meaning (the columns the related list draws) and the compact card now reads it as it already did for Target 11.\n- Follow-up idea, not filed: secondary row text from the next authored column (the card's Expected mentions it; the dispatch put it out of scope).\n- The reference-type test uses the existing `isExpandableFieldType` (lookup, master_detail, tree, user), the same set the card's `$expand` is built from, so a chosen label column is always one the server can expand.\n\n## Verification\n\nLocal gate subset derived by `node scripts/pm/dispatch-gates.mjs --commands` at 4bba85e4: 36 of 38 families exit 0; `pnpm check:type-check-debt` and `pnpm --dir ui exec vitest run scripts/` are NOT MEASURED locally (verify-lock queue timeout behind a sibling's long suite; the second was SIGKILLed on the shared box) and are left to CI. Full gate farm and dogfood belong to CI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

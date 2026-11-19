@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T07:39:25Z",
-  "updated_at": "2026-11-19T07:49:33Z",
+  "updated_at": "2026-11-19T10:01:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35384",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② out-of-scope finding from the #34030 os-dev report (comment 7001158402, out_of_scope_findings class b), routed by the L1-a ACCEPT of PR #35351 (7002854859, out of scope (a)). ⛔ Not a claim; triage sets lane and grade.\n\n## What the user sees\n\nIn a deployment whose `i18n.sourceLocale` differs from `i18n.defaultLocale` (for example English-authored, users defaulting to zh-CN), an `en` reader of an approval request, an approval notification or an audit activity summary sees the object or option label in the defaultLocale language, while `/meta` and (after PR #35351) every validation and refusal message show the authored label.\n\n## Why (read from source at the #35351 head; not measured at a public door)\n\nPR #35351 (#34030) moved the objectql label readers and the plugin-security denial texts onto `translateObject` with the metadata route's resolve options (request locale, declared fallback chain, `sourceLocale` else `defaultLocale`). These producers still read labels through `t()`:\n\n- plugin-approvals `readerLabelsFor` (object label via `t(objectLabelKey)`) and the approval-notification-text subject params.\n- plugin-audit `activity-summary-message.ts` (field option labels via `t()`).\n\n## Fix direction\n\nThe #34030 rule: resolve the label through `translateObject` with the same resolve options `/meta` builds, so `t()` carries messages only.\n\n## Reader\n\nplugin-approvals / plugin-audit owners (`domain:server`).\n\nDedupe: issue search `readerLabelsFor sourceLocale`, `activity summary option label sourceLocale`, `approval label sourceLocale t()` → only #34030 itself."

@@ -1,0 +1,30 @@
+{
+  "number": 35529,
+  "kind": "issue",
+  "title": "metadata-protocol: follow-ups from the #35450 contract review: the spec exception text, three door-request comments, and a rollback pin over real history",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T14:12:53Z",
+  "updated_at": "2026-11-19T14:12:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35529",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: nits N4–N6 of contract review 7011078775 on PR #35450 (card #34681, VERDICT PASS at `914e61af`, no must-fix or should-fix). The seat asked for them as one p3.\n\n## 维护者速读\n- 用户能看到什么变化：没有。这张卡只补说明文字和一条测试。\n- 为什么做：写操作跟随基座包修好后，规范说明漏了两种情形，几处代码注释还按旧规则写。\n- 出错会怎样：不改的话，读文档或注释的人会以为按名字写一律被拒。\n- 要你做什么：无。\n\n## Items\n- **N4.** The row-held-base exception in the five `packageId` descriptions in `packages/spec/src/api/protocol.zod.ts` omits the case of a name no package ships in code, and assumes exactly one dependent. Widen the sentence to cover both, then regenerate `content/docs/references/api/protocol.mdx`.\n- **N5.** `packages/metadata-protocol/src/protocol-door-requests.ts:67-69`, `:119-121` and `:151-152` still state the two-package refusal with no row-held-base exception. Align the comments with the shipped behaviour.\n- **N6.** The read-only-base rollback pin in `packages/runtime/src/domains/meta-bare-write-doors-follow-base-34681.test.ts` runs over rows with no history. Seed a history row so that the pin exercises a real rollback.\n\nRelated: #34681 (parent), PR #35450.\nSuggested-grade: p3."
+}

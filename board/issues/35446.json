@@ -1,0 +1,34 @@
+{
+  "number": 35446,
+  "kind": "issue",
+  "title": "应用列表页在 AI 助手面板打开时：「操作」列压住金额列，后面的列看不到也没有提示（附效果图）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T09:33:31Z",
+  "updated_at": "2026-11-19T13:21:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35446",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「看一下右侧的界面，很混乱。」；看过图 27 后：「立卡」。\n\n## 效果图（图 27，左半部分）\n\n![27 应用里 AI 助手打开时](https://github.com/objectstack-ai/objectstack/blob/81546ba0148c3e7749e5cb57bfe4e6f3075d9a52/27-app-ai-dock.png?raw=true)\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台比 `origin/main` 旧），zh-CN，视口 1167×762，2026-11-19；销售应用「商机 / 进行中商机」列表，AI 助手停靠在右侧）\n\n- 面板打开后主区域宽 699px，表格没有跟着变：各列仍按原宽排开（商机名称 64–284、所属客户 284–464、阶段 464–604、金额 604–744、成交概率 744–857、预期收入 857–1017、预计成交日期 1017–1157）。\n- 「操作」列固定在 691–747，压在金额列上：金额只露出「¥94,0」「¥1,200,0」。\n- 成交概率、预期收入、预计成交日期三列完全在可视区外，没有可见的横向滚动条或任何提示。\n- 页头一行里挤着标题、说明文字、新建、导入、更多。\n- 同类问题在 Studio 已处理（objectstack-ai/objectstack#35061），应用里的列表页没有。\n\n## 要做的\n\n1. 主区域变窄时，名称列冻结，其余列横向滚动，底部滚动条保持可见。\n2. 「操作」列不压住数据列：每行的「⋮」改为悬停或选中该行时出现，或并入冻结区；任何宽度下数据单元格都不被固定列遮住。\n3. 页头在窄宽度下：说明文字不显示，「导入」收进「更多」。\n4. 不只针对 AI 面板：任何让主区域变窄的情况（窗口缩小、记录抽屉打开）同样适用。\n\n## 不做的\n\n- 不自动隐藏用户配置的列；不改列表的列配置。\n\n## 验收\n\n- 1167px 宽的窗口里打开 AI 助手面板：金额列完整可读，能看到横向滚动条并滚到「预计成交日期」；「⋮」不遮住任何单元格。\n- 加一条几何钉子：固定列与相邻数据单元格不重叠。\n\nReader: `domain:ui` 车道，`ui/packages/plugin-grid` 的固定列与容器宽度处理、列表页页头。\n\nDedupe: `列表 AI 面板 金额 操作列 遮挡`、`list page columns clipped assistant docked`（objectstack，open）→ 0。"
+}

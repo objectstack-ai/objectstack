@@ -2,8 +2,8 @@
   "number": 35174,
   "kind": "issue",
   "title": "platformSystemApi on a host code action handler's api sheds the 'action' mark and leaves the runtime seams",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:server",
     "finding",
     "lease:data-1",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T09:49:26Z",
-  "updated_at": "2026-11-19T07:33:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T11:40:49Z",
+  "closed_at": "2026-11-19T11:39:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35174",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35124 (card #35052) publishes `platformSystemApi(api)` from `@objectstack/objectql`. It returns a system api derived through the symbol-keyed member `ScopedContext#[PLATFORM_SYSTEM_API]`, which sheds the `'action'` app-automation mark and `flowRunId`. The member guards only app-authored hook apis (`if (this.appAuthored) return ScopedContextFacet.sudo.call(this);`).\n\nA host code action handler registered through `engine.registerAction` receives runtime's `buildActionApi` api: `ql.createContext(buildActionExecutionContext(ec))` (`packages/runtime/src/action-execution.ts`), carrying the `'action'` mark and not app-authored. Two consequences:\n\n1. **Mark shed.** `platformSystemApi(ctx.api)` on that api returns a system api with neither the mark nor the run, so its identity-assignment writes (`sys_member`, `sys_user_position`, `sys_user_permission_set`, `sys_invitation`) and its append-only inserts pass as platform writes. `content/docs/permissions/system-context.mdx` rows 1b and 2 say a host code action handler's context carries the mark and is refused those writes.\n2. **Seams left behind.** Runtime's `deriveThroughSeam` (`packages/runtime/src/stored-metadata-reader-seam.ts`, the switch near line 410-444 on main) wraps `object`, `sudo`, `withRunAs`, `transaction` and `beginTransaction`; its `default` arm binds any other member, the symbol member included, to the unwrapped target. The derived api comes back outside the stored-metadata read seam (#21454) and the landed-write answer (#28861).\n\nNot a reach gain today: the handler's package registers through `ql` and can already call `ql.createContext({ isSystem: true })`. The engine cannot tell this api from the platform hook api the audit writer holds (both non-app-authored, both carrying an inherited `'action'` mark), so a guard like #35124's needs a new signal. PR #35124's module header in `packages/objectql/src/platform-system-api.ts` now states this gap (contract review 6972571588 F1, closed in prose).\n\n## Routes to decide when picked up\n\n- **A.** Add `[PLATFORM_SYSTEM_API]` to `deriveThroughSeam`'s walk, so the derived api stays seam-wrapped (closes 2, not 1).\n- **B.** Give the action door's api a provenance flag that the facet guards on, the way `appAuthored` guards hook apis (closes 1; with A, both).\n\n## Origin\n\nContract review 6972571588 on PR #35124 (F1, optional follow-up), os-dev report 6974855751 (out of scope finding), L1-a 6974907139.\n\nRe-check (after #35124 merges): `git grep -n \"default:\" origin/main -- packages/runtime/src/stored-metadata-reader-seam.ts` and `git grep -n \"PLATFORM_SYSTEM_API\" origin/main -- packages/runtime/src`"

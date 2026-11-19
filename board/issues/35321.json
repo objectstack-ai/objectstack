@@ -13,21 +13,19 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T04:31:50Z",
-  "updated_at": "2026-11-19T04:32:18Z",
+  "updated_at": "2026-11-19T09:26:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35321",
   "body": "review-split thread · os-warren · session_01JQwxbYzM6act7DgRZuPrxu\n\nSource: maintainer — Warren, 2026-11-19, review-split discussion thread: 03:16Z 「以上都同意」; 03:17Z 「北极星、AGENTS.md、改车队规则的技能条文（谁能做什么、怎么定级、怎么合并）也需要fable 吧」; 03:17Z 「spec：收紧作者能写的东西（会让现有应用报错），也需要fable 吧？」; 04:24Z 「1+2+4」 (point 1: fleet rule text goes back to the maintainer, overriding the 2026-09-18 ruling that handed all of `.claude/**` to seats on a contract review); 04:30Z 「「已裁定的照抄只核对、不再审」 同意」. Scope of \"rule text the maintainer decides\" (04:28–04:30Z): what an agent may do without him (merge, bypass checks, change repo settings); what gets done and in what order (grading, dispatch, scope); what must go to him (decisions, maintainer actions). Process steps, scripts, wording, slimming and file moves stay with the reviewer.\n\nFiling gate: ③ a task the maintainer dispatched. Child of epic #35205. Read-only findings behind it: the guard scripts are not governed today (`node scripts/pm/check-governed-merges.mjs --test scripts/pm/check-governed-queue-guard.mjs scripts/pm/check-governed-merges.mjs scripts/pm/dispatch-gates.mjs` answers 0 of 3 hits on `00cfb78f`), and the queue leg runs the guard from the merge group's own tree, so a PR that edits the guard is judged by its own copy. CODEOWNERS routes those files but the ruleset requires no code-owner review.\n\nGrade: p2 · area:fleet · Task · fleet machinery, no product surface\n\n## 维护者速读\n\n- 改了什么：守门脚本本身改动要你批；`.claude/**` 里改「agent 不经你能做什么、先做什么、什么必须找你」的要你批，只改措辞的评审核实后落地；让现有应用报错的协议收紧要你批。\n- 为什么：你 11-19 的「1+2+4」与 04:30Z 两条；今天改守门脚本可以绕开所有拦截。\n- 最坏：判错一类 PR 会多来找你或少来找你；改动可整 PR 回滚。\n- 需要你做的：无（PR 到时请你批）。\n\n## What changes\n\n1. **The guard instruments join `GOVERNED_SURFACES`, Tier H, scoped to objectstack**: `scripts/pm/check-governed-merges.mjs`, `scripts/pm/check-governed-queue-guard.mjs`, `scripts/pm/record-recognisers.mjs`, `scripts/pm/dispatch-gates.mjs` (it holds `CONTRACT_REVIEW_TIER`). If the workflow split (`readWorkflowDiff`) can read an edit to `.github/workflows/governed-surface-guard.yml` as Tier S, that file joins the always-H list too.\n2. **`.claude/**` splits by declaration.** The row stays governed; its Tier S holds only when the PR body carries a line-start `Rule-change: none` (or `Rule-change: ruled` with a line-start `Ruling-ref:` quoting the maintainer's words, source and time) AND the PASS `## Contract review` record for the current head carries `Rule-change-verified: none` (or `ruled`). A missing line, `Rule-change: yes`, or a record that does not verify ⇒ Tier H. `.claude/settings*.json` and `.claude/hooks/**` are always Tier H (they are the agents' own permissions and guardrails). `ui/.claude/**` stays Tier H as today.\n3. **A narrowed spec change lands like Tier H.** A PR whose body or a changeset declares `Metadata-protocol: narrowed`, or a `Clause-②` line with the `(narrowing)` arm, is refused by the queue guard until an authorized APPROVED review and a PASS contract review for the head are on record. `added`, `semantic` and `none` are unchanged (reviewer only).\n4. **The `workflows` row adds `hotcrm`** (audit mirror; hotcrm's own AGENTS.md lists `.github/workflows/**` as governed in its own PR).\n5. Prose: `AGENTS.md` Prime Directive #14 says the new rows and the `.claude/**` declaration split in one or two sentences; the pm-dispatch path-fork region names the new surfaces (`pnpm check:pm-governed-prose`); `references/contract-review.md` gains the `Rule-change-verified:` record line in its template.\n\n## Done when\n\n- `node scripts/pm/check-governed-merges.mjs --self-test` and `node scripts/pm/check-governed-queue-guard.mjs --self-test` pin each branch: guard file ⇒ H; `.claude/` wording with both lines ⇒ S; missing line / `yes` / unverified ⇒ H; settings and hooks ⇒ H; narrowed declaration without approval ⇒ refused; `added` ⇒ unchanged.\n- `pnpm check:pm-governed-prose` green; no card number or dated quote enters skill text (`pnpm check:pm-skill-id-lint`).\n- Ordering: the pm-dispatch `SKILL.md` edit overlaps #35259's PR; this PR opens after that one merges."

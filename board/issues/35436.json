@@ -1,0 +1,37 @@
+{
+  "number": 35436,
+  "kind": "issue",
+  "title": "plugin-security: the per-variant officer cases in org-admin-assignment-boundary.posture.test.ts hit vitest's 5000 ms default on a loaded Test Core shard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T09:06:09Z",
+  "updated_at": "2026-11-19T10:47:34Z",
+  "closed_at": "2026-11-19T10:46:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35436",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nArea: data-1 · found on PR #35386 (#35167), measured in 7004581195 and 7004622123\n\n## 维护者速读\n- **问题：** 一组权限测试在 CI 负载高的时候会超时，跟改动无关，却让别的 PR 一直是红的。\n- **要做：** 给这组测试定一个实测的时间预算，或把每个测试的工作量拆小。\n- **不做会怎样：** 改到写入路径的 PR 会因为这组测试反复变红、没法合入。\n- **你要做的：** 无。\n\n## What\nThe 12 \"adding and removing a holder\" cases (2 postures × 6 callers) in `packages/plugins/plugin-security/src/org-admin-assignment-boundary.posture.test.ts` (around :1153) take about 0.5 s each locally. On loaded Test Core shards today, the shards that also run scenarios, service-messaging and verify, they took 2 to 5.5 s:\n- main scheduled run 44484542279: 3217 ms;\n- PR #35383 run 44480050457: 4705 ms;\n- PR #35386: 5534 ms, then two timeouts on the re-run.\n\nThe whole file takes 75 to 179 s on CI. For every variant, each case does a grant insert, a removal by id, a bulk removal and a position holding.\n\n## Fix\nFix the time budget, not the assertions. Either declare a measured per-case budget with its class (the AGENTS.md suite-weight rule), or split the per-variant loop so each case does less work. Do not raise the global `testTimeout`, and do not skip anything.\n\n## Done when\nThe file's cases carry a declared, measured budget (or are split), with the measurement recorded. PR #35386 goes green after this lands and main is merged in.\n\nBlocks: #35386 (PR of #35167).\n\nGrade: `area:data · Bug (test infra) · reach: any PR whose Test Core shard is loaded · evidence: measured` → p2 (takes the grade of what it blocks)."
+}

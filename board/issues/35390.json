@@ -2,24 +2,34 @@
   "number": 35390,
   "kind": "issue",
   "title": "A package upgrade that turns a formula into a stored expression field leaves existing rows NULL on a hosted tenant: the #32527 fill covers the metadata authoring doors, not the managed install or upgrade",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-19T07:50:44Z",
-  "updated_at": "2026-11-19T07:50:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T14:12:40Z",
+  "closed_at": "2026-11-19T14:11:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35390",
   "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ②**: a gap read in source plus a measured local reading. The hosted half is not yet measured, so this card is to be read first.\n\n**Business reason.** HotCRM wants to store the lead's name (`crm_lead.full_name`, today a `Field.formula` read on the fly) the way the contact's is stored, so that it can be searched, sorted and reported on (objectstack-ai/hotcrm#2685, PR objectstack-ai/hotcrm#2702). Every lead list leads with that field. If a hosted tenant's upgrade leaves it NULL on every existing lead, every lead the tenant already has shows a blank name in every list, and nothing on a hosted tenant can fill it.\n\n**Reach.**\n- **Measured locally** (objectstack 18.6.0, SQLite): a database seeded from hotcrm `main`, then booted on the branch, has all 22 existing leads at `full_name` NULL. REST reads `null`. The boot WARN names `os migrate stored-expressions`. `os migrate stored-expressions --object crm_lead --field full_name --apply` wrote 22/22, and a re-run reports nothing to fill.\n- **Read in source** (`origin/main` 81c09477):\n  - #32527 fills existing rows when a change is made live through the metadata authoring doors. The list at `packages/metadata-protocol/src/protocol-stored-expression-fill.ts` ~11–40 is `saveMetaItem` in publish mode, `publishMetaItem`, `publishPackageDrafts`, rollback, revert and delete.\n  - A boot never fills (`packages/objectql/src/stored-expression-backfill.ts` ~858).\n  - The seat found no call from the managed package install or upgrade path (`packages/cloud-connection/**`, the marketplace installer) to `captureStoredExpressions` / `backfillStoredExpressions`.\n  - #32596 (open) is a one-time fill across hosted tenants at a rollout, not a per-upgrade fill.\n\n**Asked:**\n1. **Measure** whether a managed upgrade of a package version that adds a stored expression field, or turns a formula into one, fills that field's existing rows on a hosted tenant.\n2. **If it does not:** the install or upgrade door fills the changed fields once, as the #32527 doors do: every row, every organization, under `preserveAudit`, and reported on the answer.\n3. **Either way:** say in the package-author docs what an upgrade does with existing rows, so an app can know whether turning a formula into a stored field is safe to ship.\n\n**Dedupe:**\n- #29961 (closed) gave the CLI step and the boot notice.\n- #32527 (closed) gave the authoring doors.\n- #32596 (open) is the one-time hosted sweep.\n- #34096 (closed) is the roll-up twin.\n\nNone covers the package upgrade door.\n\n**Reader.** objectstack triage routes it to the owning lane. Not a claim. Until this is answered, HotCRM keeps the lead's name a formula and holds the stored half of hotcrm#2685."

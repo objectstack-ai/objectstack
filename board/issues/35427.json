@@ -1,0 +1,36 @@
+{
+  "number": 35427,
+  "kind": "issue",
+  "title": "metadata-protocol: $expand and a relation condition serve a disabled package's records through an enabled object's lookup, while the data route answers 404 OBJECT_PACKAGE_DISABLED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T08:50:49Z",
+  "updated_at": "2026-11-19T12:19:02Z",
+  "closed_at": "2026-11-19T12:18:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35427",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbP6iSEGkWb5fn8yqd\n\nFiling gate ①: escalated by contract review 7003145171 on PR #35367 (③, \"file a card if it serves\"), measured by area pkg-2 on origin/main adcb9f8e.\n\n## 维护者速读\n- 用户能看到什么变化：某个应用包停用后，别的应用通过“关联字段展开”仍能读到它的记录全文；修好后只看到关联记录的编号，跟直接打开时一样被挡住。\n- 为什么做：停用包的数据本该在所有读取入口都看不到，全局搜索刚修好，这是同一类的另一扇门。\n- 出错会怎样：最坏情况是展开时仍带出停用包的记录，和现在一样；未停用任何包的环境不受影响。\n- 要你做什么：无。\n\n## Reach (measured)\nReal kernel (MetadataPlugin + ObjectQLPlugin + SqlDriver, in-memory SQLite) via `HttpDispatcher.dispatch`. Package B owns `beta_obj`; package A's `alpha_obj` has lookup `b_ref → beta_obj`. `engine.registry.disablePackage(B)`:\n- `GET /data/beta_obj` → **404** `OBJECT_PACKAGE_DISABLED` (as designed).\n- `GET /data/alpha_obj?$expand=b_ref` → **200**, `b_ref` expanded to the full beta row (every field).\n- `GET /data/alpha_obj/:id?expand=b_ref` → **200**, same.\n- `$filter={\"b_ref\":{\"secret_note\":VALUE}}` → 200 with 1 row for the true value, 0 for a false one: a yes/no oracle on a disabled object's fields.\n- CONTROLs: `$select` / dotted `$filter` across the lookup are refused for every target (400 INVALID_FIELD); without `$expand` the lookup stays the bare id.\nCaller was `isSystem`; the guards involved are object-level and caller-independent (non-system caller not measured).\n\n## Seam\n`packages/metadata-protocol/src/protocol-query-validation.ts`: `servesExpansionTarget` and `refuseUnservedRelationTarget` ask only declared API exposure (`canServeApiOperation` / `apiExposureDenialReason`), never `isObjectOfDisabledPackage` (already imported there; `assertObjectRegistered` uses it). Route: a disabled target drops out of the expand map (bare id, as an `apiEnabled:false` target today); a relation condition on a disabled target is refused with `objectPackageDisabledError`. Engine `serveReferenceNames` titles ride the same expansion, so the same fix covers them.\n\n## Not measured (read only)\n`service-analytics`: its object gate (`isRegisteredObject` = `engine.getObject(name) != null`, `api-exposure-door.ts`) has no disabled-package check for base objects or joins. Measure before filing.\n\nPermissions: both paths read the related object AS THE CALLER through `engine.find` with the caller's context (`engine-summaries-and-expansion.ts` ~956-1024: the security middleware applies the referenced object's CRUD gate, requiredPermissions, RLS and FLS to the expansion, #7626; `engine-query-lowering.ts` `lowerRelationConditions` reads ids \"as the caller\"). So nothing reaches a reader who could not read those rows with the package enabled: a disable not honoured, the same class as #35195, not a permission breach.\n\nRelated: #35195 (search door, PR #35367), #34900 (in-process `ctx.api`, ruled served by 6545646924), #7557.\nSuggested-grade: p2 · domain:server (same class as #35195, graded p2 by triage 6980431022)."
+}

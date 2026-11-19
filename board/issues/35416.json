@@ -1,0 +1,32 @@
+{
+  "number": 35416,
+  "kind": "issue",
+  "title": "托管环境整页打开记录页约 16 秒：启动请求分 5 段串行，`/api/v1/packages` 每次整页都下载 472KB",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:33:43Z",
+  "updated_at": "2026-11-19T08:57:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35416",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n维护者 2026-11-19 补充：「整页打开很慢（托管环境）。是网速的问题。你也可以具体分析一下。」\n\n## 现状（单次测量：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19；浏览器 Resource Timing + 响应里的 Server-Timing；JS/CSS 全部命中本地缓存，传输 0 字节）\n\n整页打开 `…/crm_opportunity/record/<id>`，最后一个页面数据请求在 16.3 秒返回。\n\n| 段 | 时间 | 这一段在等什么 |\n|---|---|---|\n| 1 | 0–0.9s | HTML（TTFB 908ms） |\n| 2 | 0.9–1.9s | `/auth/get-session`（服务端 616ms） |\n| 3 | 2.0–5.8s | 12 个并发请求；最慢 `/auth/me/permissions` 服务端 3252ms、`/meta/app/crm_enterprise/bundle` 3374ms |\n| 4 | 5.8–7.2s | `/meta/page`、`/me/apps`，再 `/meta/object` |\n| 5 | 7.2–16.3s | 16 个并发请求；`/data/crm_opportunity/<id>/page` 服务端 4422ms，浏览器侧 TTFB 8983ms |\n\n- 网络基线：到边缘节点（LAX）一个来回约 300ms；空闲时小接口约 430ms（`origin` 约 100ms）。5 段串行就是约 1.5–2.5 秒纯往返。\n- 带宽：`/api/v1/packages` 压缩后 472KB（解压 3.2MB），第 5 段里它下载了 6.3 秒；同一条 HTTP/2 连接上的其他小响应（1–4KB）服务端 3 秒左右就算完了，浏览器却在 8–9 秒才收到。这一部分确实随网速变化。\n- 服务端：空闲时 0.1–0.6 秒的接口，并发时 `runtime` 变成 2–4.4 秒（例如 `/i18n/locales` 空闲约 100ms，启动时 2598ms）。这一部分与网速无关（容器并发处理能力，属 cloud 侧，本卡只记录数据）。\n- 另见：中文界面仍加载了 `i18n-locale-en`（198KB，已缓存）。\n\n⚠ 只测了一次，测时面板在后台，绝对数值可能偏大；各段的先后关系和 Server-Timing 数值不受影响。\n\n## 要做的\n\n1. `/api/v1/packages`：启动时不取全量（记录页用不到 3.2MB 的包清单）；改成按需、或只取启动需要的字段，或可缓存（ETag/304）。\n2. 把串行的段压平：`/auth/me/permissions`、`/meta/page`、`/me/apps`、`/meta/object` 能并发的并发，页面数据请求不必等到第 5 段才发。\n3. 先出页面骨架：会话确认后就渲染应用外壳，不停在「正在打开你的控制台…」直到全部元数据到齐。\n4. 在卡上回贴改动前后同一页面的分段时间。\n\n## 不做的\n\n- 不在本卡处理服务端并发耗时（如需要，另立 cloud 卡）。\n\n## 验收\n\n- 同一环境、同一页面、JS 已缓存的整页打开，页面数据请求的发出时间从 7.3 秒明显提前，`/api/v1/packages` 不再出现在记录页的启动请求里（或返回 304）。\n\nReader: `domain:ui` 车道，控制台启动链路（`ui/apps/console`、`ui/packages/app-shell` discovery/bootstrap）。\n\nDedupe: `packages 整页 加载 慢`、`performance console boot waterfall`、`/api/v1/packages payload`（objectstack / cloud，open）→ 0。"
+}

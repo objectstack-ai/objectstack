@@ -1,0 +1,32 @@
+{
+  "number": 35502,
+  "kind": "issue",
+  "title": "cli: a hard kill or Ctrl+C during the `os skills` swap phase can leave mixed skill directories that only `--force` repairs, and the next write deletes the stranded old copies",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T12:20:47Z",
+  "updated_at": "2026-11-19T12:50:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35502",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect · Source: fleet · out-of-scope finding of PR #35495 (card #35079), named in its Acceptance notes and os-dev-report 7008338749; L1 ACCEPT 7008910233 ruled a card owed. ⛔ Not a claim.\n\nGrade: area:build · Bug · Impeded · rare (a kill inside a millisecond rename window) · read from the code → p3.\n\n## Business reason\n\nA user who presses Ctrl+C (or whose machine loses power) while `os skills install` / `update` is swapping directories can be left with some skills at the new version and some at the old, under a record that matches neither. The only way out is `--force`, the flag PR #35495 removed the need for on every failure the process survives.\n\n## What happens\n\nAfter PR #35495, `applySkillsWrite` (`packages/cli/src/utils/skills-install-state.ts`) stages new skills in a hidden sibling, renames each old directory aside into `<staging>/old`, renames the staged copy into place, and renames the record last; a thrown error undoes the renames. A hard kill (SIGKILL, power loss) or Node's default SIGINT exits without running that undo. The next write's `removeStagingLeftovers` then deletes the leftover staging directory, including the `old/` copies the kill stranded, so the old versions cannot be recovered either.\n\n## Expected\n\nAn interrupted swap is detected and completed or rolled back by the next run: for example a small journal written before the first rename, read and replayed in `runSkillsWrite` (`packages/cli/src/utils/skills-command.ts`) before the plan is computed, so leftovers are restored rather than deleted.\n\n## Done when\n\nA pin that stops a write after the first skill's swap and before the record rename (simulating the kill) shows that the next plain `os skills update` ends with every skill and the record at one version, without `--force`.\n\nWho acts: the area that owns `packages/cli` (area:build, CLI area).\nDedupe: `repo:objectstack-ai/objectstack is:issue skills staging swap interrupted` → 6 hits; the only related one is #35079 (the parent card, fixed by PR #35495); none covers the kill window."
+}

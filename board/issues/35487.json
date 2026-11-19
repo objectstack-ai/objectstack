@@ -1,0 +1,37 @@
+{
+  "number": 35487,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): Setup → Users can remove a pending person on a managed environment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T11:36:46Z",
+  "updated_at": "2026-11-19T12:32:06Z",
+  "closed_at": "2026-11-19T12:32:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T12:32:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35487",
+  "body": "Fixes #35220\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:托管环境里,平台管理员在 Setup → Users 中对\"尚未首次登录\"的人员行,可以点\"移除待登录用户\",确认后该行被删除,其邀请随之取消。\n- 为什么做:管理员填错邮箱或加错人后,此前没有任何按钮能把这条待登录记录撤回,陌生人手里的邀请会一直有效。\n- 出错会怎样:按钮只在\"托管环境 + 平台管理员 + 待登录行\"三者同时成立时出现;服务端本身仍逐条把关,对方已登录或托管组织联系不上时不会删除任何人,回滚即撤下这个按钮。\n- 要你做什么:无,席位落地。\n\n## What changes\n\n- `sys_user` gains the row action `remove_sso_user` (label \"Remove Pending User\", Users list row + record header). It posts the row id as `userId` to plugin-auth's existing `/api/v1/auth/admin/remove-sso-user`, behind a `confirmText` confirmation (no params, so the question rides `confirmText`, the `impersonate_user` precedent).\n- Visibility: the Add / Import standing and managed flag (`current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true`), then `has(record.source) && record.source == 'idp_pending'`, the field the door itself checks (`isPendingSsoSource(target.source)`).\n- The confirmation promises no more than the door does: it says no one is removed if the person has signed in meanwhile or the hosting organization cannot be reached (the door's 409 and 503).\n- Labels through the regenerated translation bundles (`node scripts/check-i18n-bundles.mjs --write`), hand-translated for zh-CN, ja-JP and es-ES; the other seven locales carry the source copy with its source hash, as Add / Import do.\n- The server door is unchanged.\n\n## Tests\n\n- New `packages/platform-objects/src/identity/remove-pending-sso-user-visibility.test.ts`: the predicate evaluated through `@objectstack/formula`. Offered on pending + managed + platform admin; CONTROLs hidden on an `idp_provisioned` row, an `env_native` row, a row with no `source`, flag off, no flag served, and an org owner below the rung. Also pins the target, `recordIdParam: 'userId'`, no params, no `requiresFeature`.\n- `pnpm --filter @objectstack/platform-objects exec vitest run`: Test Files 124 passed (124), Tests 2061 passed (2061). `pnpm --filter @objectstack/platform-objects typecheck`: exit 0.\n\n## Acceptance notes\n\n- The live drive \"dialog posts to the door and the row is gone\" sits beside the door's own tests in plugin-auth `pending-sso-users.test.ts` (the `[#33186]` block drives Add / Import declared actions); that file is outside this claim's surface, so no live-drive pin for `remove_sso_user` was added there. The door's removal and invitation cancellation are already pinned by its own suites.\n\n## 席位核对\n\n- Deviation (approved by the seat before widening): `packages/platform-objects/src/feature-gate-guard.test.ts` gains one row, `['sys_user.actions.remove_sso_user', 'cloudManaged']` in `SHOWN_WHEN_ON`. The guard's reverse walk books every `features.*` reference in an action predicate, so without it the guard goes red.\n- A1: at origin/main no `sys_user` action targets `remove-sso-user` (grep: only plugin-auth tests and dogfood route rosters name it), and `userActions` opens `edit` only, so the standard delete is off. The gap holds.\n- A2: siblings use `MANAGED_ADD_PERSON_VISIBLE`; pending is `record.source == 'idp_pending'`, the value the door checks.\n- A3: no forward or allow entry. `buildApiActionRequest` is generic and stamps `organizationId`, which the door's `unknownBodyKeys` admits. The standing census in `platform-admin-affordance-standing.test.ts` is a floor that picks the action up by its target; it passes unchanged. `platform-objects.test.ts` rows are not exhaustive for `SysUser`; unchanged.\n- A4: body `{ userId }` (closed key set plus stamped `organizationId`); refusals 409 (not pending / not managed), 503 (host unreachable), 404, 400. The confirmation names only the 409 and 503 cases.\n\n<details><summary>Ablation (one-shot, restored, blob checked against HEAD)</summary>\n\n- Dropped the pending term (`node scripts/ablation-replace.mjs`, anchor 1 to 0): 3 failed, 5 passed; the three non-pending CONTROLs went red. Restored: blob == HEAD, `git diff HEAD` empty.\n- Replaced the standing and managed terms with `true`: the flag-off, no-flag and org-owner CONTROLs went red. Restored the same way.\n- The first pending-term attempt used a replacement that already occurred 684 times, so the tool refused it as unverifiable and restored. That run was a no-op. It was redone with a distinct marker.\n- The suite imports `./sys-user.object.js` from source, so no `dist/` leg applies.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, exit codes captured before any pipe)</summary>\n\n- 65 of 66 derived families ran, each exit 0 (including `check:i18n` \"platform-objects in sync (32 bundle(s))\", `check:i18n-stale-fill`, `check:nul-bytes`, `check:cross-package-test-inputs`, `check:type-check-coverage`, the changeset families).\n- NOT MEASURED: `check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET (exit 3). It needs a whole-workspace `pnpm build` and this container has partial `dist/`. Left to CI as a declared narrowing.\n- `test:repo` not run locally: no file of that project changed. CI's Test Core covers it.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca1jJvsA1dHsPwMiQb)_\n"
+}

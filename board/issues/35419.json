@@ -1,0 +1,32 @@
+{
+  "number": 35419,
+  "kind": "issue",
+  "title": "手机记录页待审批时有两个主按钮：顶部「通过」与底部操作栏的第一个动作都是主色",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T08:36:10Z",
+  "updated_at": "2026-11-19T08:58:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35419",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：本地 HotCRM，控制台是 objectstack `origin/main` 7ece0204a6 的构建（服务端 18.5.0），zh-CN，2026-11-19，375×812，商机 Wayne Enterprise License，状态「待你审批」）\n\n- 顶部审批条：「通过」（主色实底）、「拒绝」（红色实底）、「更多审批操作」。\n- 底部操作栏：「生成报价单」（主色实底）、「克隆商机」、「…」。\n- 同一屏有两个主色实底按钮加一个红色实底按钮；此时记录是锁定的，审批人要做的只有通过或驳回。\n- 另：审批中心已是「驳回」，这里的审批条仍是「拒绝」。本地服务端是 18.5.0，可能是服务端文案未更新；请在服务端同步后的环境上确认，仍不一致就在本卡一并改。\n\n## 要做的\n\n1. 记录处于「待你审批」时，底部操作栏的动作全部降为次要样式（描边），主色只留给「通过」。\n2. 确认记录页审批条的否决按钮在 zh-CN 下是「驳回」（承 objectstack-ai/objectstack#35021）。\n\n## 不做的\n\n- 不调整底部操作栏里有哪些动作。\n\n## 验收\n\n- 上述页面一屏内只有「通过」一个主色实底按钮；否决按钮写「驳回」。\n\nReader: `domain:ui` 车道，`ui/packages/app-shell` 手机记录操作栏与审批条。\n\nDedupe: `手机 记录页 主按钮 审批`（objectstack，open）→ 0。"
+}

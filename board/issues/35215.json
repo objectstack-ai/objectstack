@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T15:21:47Z",
-  "updated_at": "2026-11-19T07:47:17Z",
+  "updated_at": "2026-11-19T09:24:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35215",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1 on the maintainer's 「基于新的规范，分诊现有的 skills 是不是也要改。座位帖上有时候临时交代的事情，变成了他的长期skills，这个也有问题」 (2026-11-18 15:19Z). ⛔ Not a claim.\n\nRuns after #35207 merges (that PR adds the rule \"current values never go into a skill\").\n\n## What to do\n\nRead pm-dispatch (`SKILL.md`, `references/**`, `lanes/**`) end to end. List every entry that looks like one of these:\n- A **current value**: something with an end condition, such as a freeze, a pause, a focus on one area, \"p1 only\", or a concurrency number.\n- A **one-off instruction**: something said to one seat, or to one card.\n\nFor each entry, give:\n- the line;\n- where it came from (the commit or PR that added it, and the maintainer words it cites);\n- a recommendation: delete, keep, or move to a seat post or project memory.\n\nCandidates the discussion thread noticed. Verify where each came from; don't assume:\n- `lanes/triage.md`:14, the \"four themes\" emphasis;\n- `references/filing-gate.md` rule 9, which quotes one maintainer sentence directly.\n\n## Done when\n\nThe list is on this card, and the maintainer has said delete or keep for each entry. A follow-up PR applies the deletes."

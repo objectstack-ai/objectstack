@@ -1,0 +1,37 @@
+{
+  "number": 35464,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): an uninstall takes the package's seed datasets off the shared replay list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T10:21:40Z",
+  "updated_at": "2026-11-19T11:39:53Z",
+  "closed_at": "2026-11-19T11:39:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T11:39:51Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35464",
+  "body": "Fixes #35375\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n1. 用户能看到什么变化：多组织部署里，运行中卸载一个应用包之后、重启之前新建的组织，不再收到这个已卸载包的示例数据，也不会因为它的对象已不存在而报错。\n2. 为什么做：来自“安装、升级与卸载可靠性”这条主线，升级时旧示例数据不再重放已经修好，这是同一条规则在卸载上的另一半。\n3. 出错会怎样：若有误，卸载后到重启前新建的组织可能少了其他应用的示例数据；撤回本次改动即可恢复原状，重启后也会自行恢复。\n4. 要你做什么：无，席位落地。\n\n## 席位核对\n\n### What changes\n\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, uninstall path only (`handleUninstall`): once the running kernel's registry withdrawal succeeded (`!withdrawal`, the same gate and the same entry id the handler unbinding just above it uses), the door calls the new `withdrawSeedDatasets(ctx, manifestId)`, which is `mergeSeedDatasetsIntoKernel(ctx, [], manifestId)` (the owner-keyed replace from the upgrade fix, with nothing to put back) inside a catch that warns with the consequence. No change to the merge helpers, the runtime, or the spec.\n- Owner key: the install merges under `String(manifest.id)` in `applySideEffects`, and the install door's `manifestId` is that parsed id (the ledger key the uninstall reads); a composed artifact (ADR-0130 D4) is merged ONCE under its entry id, all package bodies' datasets together, so the entry's single withdrawal takes them all off. Member ids are not owners on the list, so nothing is withdrawn per member.\n- Placement: after the registry withdrawal and before the copies and cleanups. Every refusal that returns early (guards, the registry's 409 pre-check, the ledger write) leaves the list as it was, and so does a withdrawal the running kernel refuses (the package stays loaded until the restart, and its datasets with it).\n- Changeset: `@objectstack/cloud-connection` patch.\n\n### Tests\n\nNew top-level describe `#35375` in the door's shared seed harness `marketplace-install-local-seed-replayer.test.ts` (five pins: install, uninstall, create an organization replays none of the sets; CONTROL another package's sets kept and still replayed; CONTROL the registry's up-front 409 leaves the list as it was; CONTROL a refused kernel withdrawal leaves the list as it was; the runtime helper is handed the package id and an empty list), and one in `marketplace-install-local-composed-bundle-seeds.test.ts` (a composed entry's uninstall takes off every package body's sets and keeps another package's).\n\nAll runs on head `17ad8a248`, behind the shared verify lock, after building the dependency closure (`pnpm --workspace-concurrency=2 --filter '@objectstack/cloud-connection^...' build`, VERDICT command-exit 0).\n\n<details><summary>Readings</summary>\n\n- The two touched suites: `Test Files 2 passed (2)`, `Tests 38 passed (38)`.\n- Ablation (one-time, committed fix first; `scripts/ablation-replace.mjs`, anchor `if (!withdrawal) await this.withdrawSeedDatasets(ctx, manifestId);` 1 -> 0, blob d45808448611 -> e8c44a024ee2): `Tests 4 failed | 34 passed (38)`. Red: the main pin (`expected [ { object: 'crm_x', ... } ] to deeply equal []`: the removed package's set still on the list), the other-package control, the helper leg, and the composed pin. The two refused-uninstall controls stay green, as they should: they assert the list is unchanged. This ablation is also the red-first reproduction of the defect (it removes exactly the added call). Restore: `git checkout HEAD --`, `git diff HEAD` empty, blob == HEAD (d45808448611).\n- Whole package: `pnpm --filter @objectstack/cloud-connection test`: `Test Files 91 passed (91)`, `Tests 1341 passed (1341)`; `pnpm --filter @objectstack/cloud-connection typecheck`: exit 0 (both `tsc` programs, the test one included).\n\n</details>\n\n### Acceptance notes\n\n- `DELETE /api/v1/packages/:id` (the protocol's `deletePackage`) is a different door; this change touches only the install-local uninstall, which is the door the install-local merge belongs to.\n- A withdrawal-failure warn, not error: the list is in-memory replay state that the next restart rebuilds from the ledger, so it is a functional degradation, matching the install path's warns on the same callee.\n\n### Verification\n\n<details><summary>Derived gate families</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` on `17ad8a248` derived 71 commands for the 4 changed paths; 70 ran locally with exit 0 (five re-run after the closure build, which they read). `pnpm check:dual-build-cjs-loads` is NOT MEASURED locally (PREREQUISITE NOT MET: it reads every workspace package's `dist/`, and only the cloud-connection closure was built); CI's Lint & Repo Gates runs it. `--ran` reconciliation: 71 derived, 70 run, 1 unrun (that one). No symbol renamed or removed, so the platform checklist pass does not apply. `overlap-check.mjs --branch=HEAD` before each push: VERDICT clean exit 0, 0 PR heads share a file.\n\n</details>\n\nTwo-minute check: `pnpm --filter @objectstack/cloud-connection exec vitest run src/marketplace-install-local-seed-replayer.test.ts -t 35375` shows five passing pins; files to read first: the `handleUninstall` hunk (the `!withdrawal` gate), then `withdrawSeedDatasets`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaysxGzF62ACvZ1x9x)_\n"
+}

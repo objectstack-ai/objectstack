@@ -1,0 +1,36 @@
+{
+  "number": 35501,
+  "kind": "pull_request",
+  "title": "fix(components): a record page's stuck tab strip is a solid bar, flush with the page top",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T12:19:01Z",
+  "updated_at": "2026-11-19T13:24:16Z",
+  "closed_at": "2026-11-19T13:24:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T13:24:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35501",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6v19uPsX6gX42G8tGcvvzb)_\nFixes #35414\n\nrepo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户看到的变化：在记录页向下滚动时，吸在顶部的「明细 / 相关 / 互动」页签条是实底（与页面底色一致，浅色深色主题各用自己的底色），下边线保留；下面滚过的卡片不再透出来压在页签文字上，页签条上方也不再露出一截滚过的内容。\n- 为什么：原来页签条是半透明加模糊，而且停在离页面顶边还有一段距离的位置，滚动时内容与页签文字叠在一起，深色主题下尤其明显。\n- 如果判断错：只影响页签条吸顶时的底色和停靠位置；页签样式、顺序、竖排页签都不变，最坏情况是吸顶位置与原来一样。\n- 需要您做的：无。\n\n## What changes\n\nAll in the `page:tabs` renderer (`containers.tsx`), horizontal strips only.\n\n- **Solid fill.** The stuck strip's classes go from `sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60` to `sticky top-0 z-20 bg-background`: the theme token with no alpha and no blur, so the dark theme gets its own page colour from the same token (no hard-coded colour). The bottom rule (the strip's inset shadow) is untouched; tab style, order and vertical tabs are untouched.\n- **The strip above it — the cause.** The record page's scroller is padded (`p-3 sm:p-4 lg:p-6` on the page scroller in `RecordDetailView`). Chromium sticks a `top: 0` box at the scroll container's padding edge, not its visible edge, so the stuck strip hung 12 to 24px below the top and the cards scrolling past showed in that gap. Measured in the preinstalled Chromium on a 24px-padded scroller scrolled 600px: scroller top 50, sticky box top 74 with `top: 0`; 50 and 50 with `top: -24px`.\n- **The fix for it, without moving other layouts.** A small hook, `useStickyTopInset`, finds the strip's sticky scroll container (the nearest ancestor whose overflow is not visible or clip, the same box the browser sticks it in) and sets the strip's `top` to minus that container's top padding, re-read on the container's resize and on window resize (the padding changes at breakpoints). An unpadded host, or a page that scrolls at the document root, measures 0 and the strip keeps plain `top-0`, so nothing moves there. Before the first measure the strip is at today's `top-0`. The offset only applies while the strip is stuck; at rest the strip is where it was. The page scroller itself is not edited.\n\n## Tests\n\n<details><summary>Pins (a new top-level describe in the existing strip harness)</summary>\n\n`page-tabs-overflow-cue-27521.test.tsx`, describe \"the stuck strip is a solid bar flush with its scroller top\":\n- the horizontal strip carries `sticky`, `top-0`, `z-20`, `bg-background`, no alpha-suffixed `bg-background` class, no `backdrop` class, and keeps its bottom-rule shadow;\n- inside a scroller with 24px top padding the strip's `top` is `-24px`;\n- after the scroller's padding becomes 12px and the window resizes, `top` is `-12px`;\n- CONTROL: an unpadded scroller leaves `top` unset;\n- CONTROL: a vertical strip is never sticky and never offset.\n\nThe file also gains the module-top `import '@object-ui/react-runtime'` that `check:test-source-alias` prescribed for an edited harness reaching `react-page`.\n</details>\n\n<details><summary>Runs</summary>\n\n- Dependency closure: `pnpm --workspace-concurrency=2 --filter '@object-ui/components^...' build` → lock `VERDICT command-exit 0`.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/components/` then `pnpm --filter @object-ui/components run type-check` (tree 7de836ed9c) → `Test Files 487 passed | 1 skipped (488)`, `Tests 4671 passed | 24 skipped (4695)`, type-check script echoed, lock `VERDICT command-exit 0`.\n- The harness file at head 14bc269ae1 → `Tests 8 passed (8)`, lock `VERDICT command-exit 0`.\n- Ablation (fix committed, `scripts/ablation-replace.mjs`, each leg restored to the HEAD blob with `git diff HEAD` empty): the `top` style removed → the 24px and resize pins fail (`2 failed | 6 passed`); the old translucent blurred class put back → the solid-fill pin fails (`1 failed | 7 passed`).\n</details>\n\n## Acceptance notes\n\n- When a strip has more tabs than fit, its existing edge-fade cue is a `mask-image` on the strip itself, so in that fade band (2.5rem at the hidden edge) the fill fades too and content under a stuck strip can show through there. Desktop record pages with three tabs do not overflow; the cue is not changed here. Noted, not filed.\n- The card's other observation, that the strip spans only the left column while the right column keeps scrolling beside it, is not in this card's two items and is unchanged.\n- The live record page in the running console was not driven in this run; the geometry was read in real Chromium on a padded scroller (above), and the pins drive the real renderer.\n\n## Verification\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` (tree 7de836ed9c): 38 families, each run with its exit code recorded. `check:test-source-alias` was red once (exit 1, the module-top import above) and is green (exit 0) at 14bc269ae1; the other 37 exit 0. `--ran` reconciliation: `38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero ...)`.\n- `pnpm check:new-line-citations` → `0 new citation(s)`.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD` → `VERDICT clean`.\n- The wider run (lint, UI typecheck, full UI test shards, E2E, dogfood) is left to CI.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CbSphdunq2aJq7ktuY\n"
+}

@@ -2,8 +2,8 @@
   "number": 34780,
   "kind": "issue",
   "title": "scenarios: a build-over-the-draft-door mode, and with it a measured answer to how much hosted rule text is still needed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:cloud",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T10:15:27Z",
-  "updated_at": "2026-11-19T05:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T12:25:45Z",
+  "closed_at": "2026-11-19T12:25:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34780",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nWhether the draft door stages working apps, and whether the rule text the hosted product still serves earns its place, are both open questions that only a build run can answer. Today the audit of that rule text is a reading of the code, not a measurement.\n\nWho acts: the devx lane (`packages/qa/scenarios`). Reader: the eval seat, and the maintainer when the hosted rule text is cut.\n\n## Evidence\n\n- The scenario runner builds through local project files only; no mode builds through MCP.\n- No build-accuracy eval drives the hosted MCP door either.\n- The rule-by-rule audit of the hosted corpus judged 15 of 60 rules already covered by a check; that judgement was not tested by removing them.\n\n## Scope\n\n- A runner mode in which the authoring client has the draft door's tools and the published skills, and no project files; the build is graded as today after a person-equivalent publish step.\n- Arms: with and without the build skill; with and without a named set of rule texts, so a rule's removal can be measured.\n\n## Done when\n\n- One round at five repetitions per arm is on record as an `eval-run`.\n\n## Relations\n\n- Parent: #34659.\n- Blocked-by: #34766\n- Dedup, open and closed: `scenario card dataset grader` none."
