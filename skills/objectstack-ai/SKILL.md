@@ -67,11 +67,11 @@ conditions.
 
 ### Naming the tools: the resolution ladder
 
-A `skill.tools[]` entry resolves against the union of three sources
-(`collectToolUniverse` in `packages/lint/src/validate-ai-tool-references.ts`):
+A `skill.tools[]` entry resolves against the union of four sources
+(`packages/lint/src/validate-ai-tool-references.ts`):
 
-1. **`stack.tools[].name`** — records your own stack declares. ADR-0109: the
-   default third-party path declares **none** (see *Tool metadata* below).
+1. **`stack.tools[].name`** — records your own stack declares (none by
+   default: *Tool metadata* below).
 2. **`PLATFORM_PROVIDED_TOOL_NAMES`** — the statically-registered platform
    tools, flattened from `PLATFORM_TOOLS_BY_PACKAGE` in
    `packages/spec/src/system/constants/platform-tool-names.ts`: data /
@@ -81,8 +81,11 @@ A `skill.tools[]` entry resolves against the union of three sources
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
+4. **`MCP_FILE_TOOL_NAMES`** (same file) — the MCP door's file tools, resolved
+   only for a skill MCP can offer (`mcpPrompt` not `false`): no in-product turn
+   registers them.
 
-A name in none of the three raises **`ai-skill-tool-unresolved`** (warning,
+A name none of them resolves raises **`ai-skill-tool-unresolved`** (warning,
 ADR-0078 advisory-first). The rule exists because one audited app shipped 10
 fictional tools across 6 skills through `validate` / `lint` clean, and became a
 copilot claiming abilities it did not have.
@@ -332,11 +335,27 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
    there is no storage backend to choose — and neither is a gate. For a gate
    that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
-   the **action**, or `approval: 'always'` on an MCP tool binding. AI metadata
-   edits are already gated: they land as drafts a human must publish (ADR-0033).
+   the **action** (its door only, pitfall 2), or `approval: 'always'` on an MCP
+   tool binding. AI metadata edits are already gated: they land as drafts a
+   human must publish (ADR-0033).
    ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2; retired
    above). There is no `requireApprovalFor` field.
-2. **Indexing everything.** A knowledge source without a `where` filter and
+2. **Gating the action, not the state.** `ai.requiresConfirmation` guards the
+   action's own door only: an agent can still write the field it changes with
+   `update_record` or any data write, and the write lands. An irreversible
+   transition is a gated action **plus a lock on that field**: a `script`
+   action, whose body writes elevated (`isSystem`), over a field a non-system
+   write cannot set — `readonly: true` (the value is stripped,
+   **objectstack-data** → `readonly`) or field permissions leaving the caller
+   no `editable` on it (refused `403`; any set granting it wins,
+   **objectstack-data** `rules/security.md`). A declarative
+   `operation: 'update'` action, and a `flow` action under `runAs: 'user'`,
+   write as the caller, so the lock stops them too. `readonlyWhen` and a
+   `state_machine` rule bind the elevated body as well, so neither is the
+   door; a `state_machine` dead-end (`closed: []`) still makes the reached
+   state final for every writer (**objectstack-automation**
+   `references/state-machines-and-approvals.md`).
+3. **Indexing everything.** A knowledge source without a `where` filter and
    curated `contentFields` fills the index with drafts and boilerplate that
    pollute retrieval. Source hygiene is the metadata's job; relevance tuning
    belongs to the adapter.
@@ -350,10 +369,6 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 | Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + a toolset where every name resolves; pick a `surface` |
 | Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at boot via `KnowledgeServicePlugin({ sources })` |
 | Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none, agents are platform-supplied, and `tools` is not the default path |
-
-Default for metadata apps: push business capability into **skills**, expose
-business logic as **AI-exposed Actions**, wire domain knowledge through
-**knowledge sources**.
 
 ---
 
@@ -400,8 +415,12 @@ there but is read: `registerSkillPrompts` offers a skill on `prompts/list` /
 `prompts/get` only when its server lists every tool the skill binds — a plain
 name by that tool, a wildcard by any match, an `action_*` entry also by
 `run_action`. That covers the HTTP door and any host server that calls it; the
-plugin's own stdio transport lists every skill. Bind a tool no MCP family
-serves (the MCP table above) and no filtering server offers the skill.
+plugin's own stdio transport lists every skill except one with
+`mcpPrompt: false`. That optional key is the owner's opt-out: `false` = written
+for the in-product agents only, never offered over MCP on any connection,
+whatever the binding; absent or `true` = the binding rule above. Bind a tool no
+MCP family serves (the MCP table above) and no filtering server offers the
+skill.
 `visualize_data` is the only built-in that draws a chart (an inline `data-chart`
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.
