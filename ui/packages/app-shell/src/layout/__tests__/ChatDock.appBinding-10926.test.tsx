@@ -25,7 +25,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
 
@@ -585,5 +585,51 @@ describe('the drawer follows the app (objectstack#35014)', () => {
     expect(await settledConversationId()).toBe(askThread);
     expect(window.localStorage.getItem(cacheKey('ask'))).toBe(askThread);
     expect(window.localStorage.getItem(cacheKey('app:app.notes:ask'))).toBeNull();
+  });
+});
+
+describe('the drawer offers Share and the Build Doctor in its 「···」 menu (objectstack#35445)', () => {
+  function openMenu(): HTMLElement {
+    fireEvent.keyDown(screen.getByTestId('chat-dock-more'), { key: 'Enter' });
+    return screen.getByTestId('chat-dock-menu');
+  }
+
+  it('the pane row under the title keeps the app chip and draws no Share or Build Doctor of its own', async () => {
+    renderDock('app.crm');
+    expect(await screen.findByTestId('ai-build-package-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-chat-share-button')).toBeNull();
+    expect(screen.queryByTestId('ai-chat-debug-button')).toBeNull();
+  });
+
+  it('a user who may build gets the Build Doctor; Share and the doctor wait for the thread to exist', async () => {
+    renderDock('app.crm');
+    await screen.findByTestId('ai-build-package-chip');
+    let menu = openMenu();
+    expect(within(menu).getByTestId('chat-dock-share')).toHaveAttribute('data-disabled');
+    expect(within(menu).getByTestId('chat-dock-build-doctor')).toHaveAttribute('data-disabled');
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    await sendFirst();
+    await settledConversationId();
+    await waitFor(() => {
+      menu = openMenu();
+      expect(within(menu).getByTestId('chat-dock-share')).not.toHaveAttribute('data-disabled');
+    });
+    expect(within(menu).getByTestId('chat-dock-build-doctor')).not.toHaveAttribute('data-disabled');
+  });
+
+  it('a user who may not build never sees the Build Doctor, even on a build thread', async () => {
+    state.canAuthor = false;
+    // A target naming the build agent puts the drawer on it without maker convergence.
+    renderDock('app.crm', { agent: 'build' });
+    await screen.findByTestId('ai-build-package-chip');
+    const menu = openMenu();
+    expect(within(menu).getByTestId('chat-dock-share')).toBeInTheDocument();
+    expect(within(menu).queryByTestId('chat-dock-build-doctor')).toBeNull();
+  });
+
+  it('CONTROL: the same build thread for a user who may build lists it', async () => {
+    renderDock('app.crm', { agent: 'build' });
+    await screen.findByTestId('ai-build-package-chip');
+    expect(within(openMenu()).getByTestId('chat-dock-build-doctor')).toBeInTheDocument();
   });
 });
