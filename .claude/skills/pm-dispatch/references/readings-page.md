@@ -1,0 +1,21 @@
+# 平台读数:公开仓零配额网页读
+
+- 文档载明未实测:条件请求答 `304` 不计 core 池;公开仓零配额读法两档,payload 档优先。
+- 网页档可达性逐会话逐 URL 形状分叉:一处容器 `/actions/**` 与 api. 回 403,另一处网页全 200。
+- ⇒ 要用哪个形状先探哪个;本地权限分类器在网络之前的拒绝是第三种机制,⛔ 不记 403。
+- 单卡页 `/issues/N` 内嵌 JSON 载原始 body:取含 `bodyHTML` 的 `script[type="application/json"]` 块。
+- 读 `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`。
+- 评论表与标量字段都不可信:时间线只渲染前 15 项且 `hasNextPage: true`。
+- `assignees` 实测为陈旧空值而权威读非空;`labels`/`state` 由此存疑、未实测,⛔ 不写成已测。
+- ⇒ ⛔ 认领承载字段(`assignees`、`pm:*` 标签、`state`)永不从本档读。
+- ⛔ 本档的缺席不是读数:要么 `hasNextPage: false`,要么第二通道。
+- 两数组各比 `edges` 长度与 `totalCount`:短即最新几项缺席,认领检查走分页 `get_comments`。
+- 自己刚写的按原写入通道回读;失效方向是空转与重发。
+- 成因:本档经 CDN 缓存,专对最新内容失效且绕不掉,cache-busting 查询串与 no-cache 头都无效。
+- 内容可滞后数分钟到数十分钟;它没有位置性对照 —— 更早内容全在,只有最新几条缺席。
+- ⇒ 前 15 项判别式在此不成立,唯一出路是第二通道;失效方向是据它判他人工作无认领。
+- PR 页把正文与每条评论的原始 markdown 放进 `clipboard-copy` 的 value 属性,是另一条零配额读。
+- issue 页无此载体,且盲态与好态的提及计数相同 ⇒ 卡片评论只走 API,⛔ 不套 PR 页读法。
+- 边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读,搜索页只给锚点不给正文。
+- ⛔ 永不拿渲染列表定规模:静默只显一页。渲染层 WebFetch 仍在,~15 分缓存、有损。
+- issue 查询页有 SSR 锚点且 `label:` 是真 AND:小结果与 REST 逐号相等,大结果静默截到十余条。
