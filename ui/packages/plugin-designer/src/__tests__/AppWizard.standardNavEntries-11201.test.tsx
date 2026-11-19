@@ -97,7 +97,7 @@ async function createWithAllObjects(): Promise<Array<Record<string, unknown>>> {
   next(); // → objects
   for (const o of OBJECTS) fireEvent.click(screen.getByTestId(`object-card-${o.name}`));
   next(); // → navigation, generated from the selected objects' authored reads
-  await waitFor(() => expect(screen.getByTestId('wizard-next')).not.toBeDisabled());
+  await screen.findByTestId('wizard-step-navigation-content');
   expect(getAuthoredItem).toHaveBeenCalledTimes(OBJECTS.length);
   next(); // → branding
   fireEvent.click(screen.getByTestId('wizard-complete'));
