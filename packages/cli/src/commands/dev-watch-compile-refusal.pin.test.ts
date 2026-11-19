@@ -76,6 +76,23 @@ vi.mock('chokidar', () => ({
 // not for a server boot path it never reaches.
 vi.mock('./serve.js', () => ({ resolveAuthBaseUrl: () => undefined }));
 
+// `check:test-source-alias` (its "source reach") follows this file's static reach
+// through `dev.ts`, past the relative `./serve.js` mock above, to these literal
+// dynamic loads inside function bodies. The watch loop under test calls none of
+// them; a factory answers each, so no case could pay a dist transform inside a
+// clocked window if one ever did.
+vi.mock('@objectstack/service-settings', () => ({}));
+vi.mock('@objectstack/metadata-protocol', () => ({}));
+vi.mock('@objectstack/metadata', () => ({}));
+vi.mock('@objectstack/plugin-hono-server', () => ({}));
+vi.mock('@objectstack/rest', () => ({}));
+vi.mock('@objectstack/service-datasource', () => ({}));
+vi.mock('@objectstack/cloud-connection', () => ({}));
+vi.mock('@objectstack/driver-turso', () => ({}));
+vi.mock('@objectstack/driver-sql', () => ({}));
+vi.mock('@objectstack/platform-objects/plugin', () => ({}));
+vi.mock('@objectstack/plugin-security', () => ({}));
+
 import Dev from './dev.js';
 
 interface WatchOpts {
