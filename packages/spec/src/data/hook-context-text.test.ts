@@ -71,8 +71,8 @@ describe('HookContext.text — the declared-text call a typed handler makes', ()
 
   it('the parse keeps the bound function instead of stripping it', () => {
     const text: HookTextReader = async () => 'sentence';
-    const parsed = HookContextSchema.parse({ object: 'crm_lead', event: 'afterInsert', input: {}, text });
-    expect(parsed.text).toBe(text);
-    expect('text' in HookContextSchema.parse({ object: 'crm_lead', event: 'afterInsert', input: {} })).toBe(false);
+    const bare = { object: 'crm_lead', event: 'afterInsert', input: {}, ql: {} };
+    expect(HookContextSchema.parse({ ...bare, text }).text).toBe(text);
+    expect('text' in HookContextSchema.parse(bare)).toBe(false);
   });
 });
