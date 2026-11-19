@@ -1243,7 +1243,13 @@ export class DatasetExecutor {
     // sub-query (measure-scoped, totals, compareTo) shares one instant.
     const { compiled, selection } = resolveSelectionTokens(compiledInput, selectionInput, context);
 
-    const result = await this.executeSelection(compiled, selection, context, options?.groupCount);
+    // [query_dataset totalGroups] The count reaches the caller's slot only once
+    // the whole call has answered. The `totals` reads below can still throw — a
+    // missing-source error the service then serves as an empty answer — and a
+    // count already written would pair `rowCount: 0` with the groups of a grid
+    // that was never served.
+    const counted: GroupCountRequest | undefined = options?.groupCount ? {} : undefined;
+    const result = await this.executeSelection(compiled, selection, context, counted);
 
     // Server-side totals (#1753) — re-run the selection grouped by each
     // requested dimension subset, so a subtotal/grand total is the measure's
@@ -1278,6 +1284,7 @@ export class DatasetExecutor {
       result.totals = totals;
     }
 
+    if (options?.groupCount && counted?.outcome) options.groupCount.outcome = counted.outcome;
     return result;
   }
 
