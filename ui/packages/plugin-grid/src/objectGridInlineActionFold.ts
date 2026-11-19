@@ -112,9 +112,11 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
           return;
         }
       } else if (overflow > OVERFLOW_SLACK_PX && box.querySelector('[data-testid^="row-action-inline-"]')) {
-        // Fold first: the column's placement is read from the menu-only face.
+        // Fold first: the column's placement is read from the menu-only face,
+        // once it has drawn, whether or not the fold resizes the box.
         unfoldedWidthRef.current = tableWidth;
         decide(true);
+        schedule();
         return;
       }
       if (!box.querySelector('th[data-column-key="_actions"]')) return;
