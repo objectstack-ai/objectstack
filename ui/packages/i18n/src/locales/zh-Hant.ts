@@ -1209,7 +1209,7 @@ const zhHant = {
     searchViews: '搜尋檢視',
     addNewView: '新建檢視',
     // objectstack#35624 — a new view the app's customization package could not take.
-    savedOutsideApp: '此檢視已作為草稿儲存在本應用之外，因為此處無法使用本應用的自訂套件。本應用的草稿列不會計入或發佈它：請在首頁發佈。',
+    savedOutsideApp: '此檢視已作為草稿儲存在本應用之外，因為此處無法使用本應用的定製包。本應用的草稿條不會計入或釋出它：請在首頁釋出。',
     done: '完成',
     noViewsFound: '沒有匹配的檢視。',
     // objectstack#27594 — the list title's view switcher.
