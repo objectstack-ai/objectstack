@@ -17,6 +17,8 @@ import {
 
 const TITLE = { title: { type: 'text', label: 'Title' } };
 const MASTER = { parent: { type: 'master_detail', reference: 'deal', required: true } };
+/** An ADR-0015 `external` object: the remote database owns its storage. */
+const EXTERNAL = { external: { remoteName: 'customers' } };
 
 function objectWith(extra: Record<string, unknown>, fields: Record<string, unknown> = TITLE) {
   return { name: 'deal_note', label: 'Probe', fields, ...extra };
@@ -66,6 +68,40 @@ describe('isTransferEligible — the structural test', () => {
     expect(transferIneligibilityReason(pinned)).toContain('owner_id readonly');
     const writable = objectWith({}, { ...TITLE, owner_id: { type: 'lookup', reference: 'sys_user', readonly: false } });
     expect(isTransferEligible(writable)).toBe(true);
+  });
+
+  it('reads a readonly owner_id in the array fields shape too', () => {
+    const pinned = {
+      name: 'deal_note',
+      label: 'Probe',
+      fields: [{ name: 'title', type: 'text' }, { name: 'owner_id', type: 'lookup', reference: 'sys_user', readonly: true }],
+    };
+    expect(isTransferEligible(pinned)).toBe(false);
+    expect(transferIneligibilityReason(pinned)).toContain('owner_id readonly');
+    const writable = { ...pinned, fields: [{ name: 'owner_id', type: 'lookup', reference: 'sys_user', readonly: false }] };
+    expect(isTransferEligible(writable)).toBe(true);
+  });
+
+  it('is not eligible on an external object whose owner is unprovable, and is once the owner is declared or mapped', () => {
+    const unmapped = objectWith(EXTERNAL);
+    expect(isTransferEligible(unmapped)).toBe(false);
+    expect(transferIneligibilityReason(unmapped)).toContain('external object');
+    expect(transferIneligibilityReason(unmapped)).toContain('external.columnMap');
+    const mapped = objectWith({ external: { remoteName: 'customers', columnMap: { account_owner: 'owner_id' } } });
+    expect(isTransferEligible(mapped)).toBe(true);
+    const declared = objectWith(EXTERNAL, { ...TITLE, owner_id: { type: 'lookup', reference: 'sys_user' } });
+    expect(isTransferEligible(declared)).toBe(true);
+    // The structural arms still answer first: an external object with no owner tier
+    // is refused for that, not for an unprovable anchor.
+    expect(transferIneligibilityReason(objectWith({ ...EXTERNAL, ownership: 'none' }))).toContain("ownership: 'none'");
+  });
+
+  it('carries each arm\'s own prescription in its reason', () => {
+    const pinned = objectWith({}, { ...TITLE, owner_id: { type: 'lookup', reference: 'sys_user', readonly: true } });
+    expect(transferIneligibilityReason(pinned)).toContain('drop readonly from owner_id');
+    expect(transferIneligibilityReason(objectWith({ ownership: 'none' }))).toContain("set ownership to 'user'");
+    expect(transferIneligibilityReason(objectWith(EXTERNAL))).toContain('declare owner_id or map');
+    expect(transferIneligibilityReason(objectWith({ managedBy: 'config' }))).not.toContain('to offer it');
   });
 
   it('answers the same for a parsed schema as for the bare record', () => {
@@ -173,6 +209,21 @@ describe('ObjectSchema — userActions.transfer at parse', () => {
     ));
     expect(transferIssues(pinned)).toHaveLength(1);
     expect(transferIssues(pinned)[0]!.message).toContain('owner_id readonly');
+    expect(transferIssues(pinned)[0]!.message).toContain('drop readonly from owner_id');
+  });
+
+  it('refuses transfer: true on an external object with no provable owner, and accepts it once mapped', () => {
+    for (const transfer of [true, { enabled: true }]) {
+      const issues = transferIssues(ObjectSchema.safeParse(objectWith({ ...EXTERNAL, userActions: { transfer } })));
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.message).toContain('no owner is provable');
+    }
+    const mapped = ObjectSchema.safeParse(objectWith({
+      external: { remoteName: 'customers', columnMap: { account_owner: 'owner_id' } },
+      userActions: { transfer: true },
+    }));
+    expect(mapped.success, mapped.success ? '' : JSON.stringify(mapped.error.issues)).toBe(true);
   });
 
   it('accepts closing the switch, or a predicate-only form, on an ineligible object', () => {

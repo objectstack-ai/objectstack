@@ -427,7 +427,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "ユーザー操作",
-        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。所有者の変更はこのマトリクスに含まれません。既定は共有モデルに従います（その項目を参照）。"
       },
       "userActions.create": {
         label: "作成",
@@ -451,7 +451,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "userActions.transfer": {
         label: "所有者の変更",
-        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でない）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
+        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
       },
       editMode: {
         label: "編集の開き方",

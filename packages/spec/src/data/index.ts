@@ -417,7 +417,8 @@ export * from './injected-system-columns';
 // [ruling 7000907189 point 1] Which objects offer the Change Owner action: the
 // structural test (`isTransferEligible`) and the switch `userActions.transfer`
 // resolved onto its sharingModel default (`resolveUserActionTransfer`) — the one
-// answer the server's Change Owner endpoint and the console's action both read.
+// answer the server's Change Owner endpoint (#35402) and the console's action
+// (#35403) will read; neither exists yet.
 export * from './user-action-transfer';
 
 // injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
