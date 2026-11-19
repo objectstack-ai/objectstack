@@ -4150,6 +4150,7 @@ const es = {
     composer: {
       queued: "Se enviará cuando termine la respuesta actual",
       queuedCancel: "Cancelar",
+      fileTooLarge: "Demasiado grande para adjuntar (límite {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Mostrar respuesta completa',

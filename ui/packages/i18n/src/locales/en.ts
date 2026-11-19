@@ -5004,6 +5004,7 @@ const en = {
     composer: {
       queued: 'Sends when the current reply finishes',
       queuedCancel: 'Cancel',
+      fileTooLarge: 'Too large to attach (limit {{limit}}): {{files}}',
     },
     answer: {
       showFull: 'Show full answer',
