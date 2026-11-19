@@ -39,13 +39,11 @@ name: Queue Duration Budget
 #
 # ## The run red, and what it means
 #
-# The `measure` job fails only when the objectstack reading could not be taken
-# (exit 2: NOT MEASURED — the API refused, a window could not be listed whole,
+# The `measure` job fails only when the module's offline self-test fails, or
+# when the objectstack reading could not be taken (exit 2: NOT MEASURED — the API refused, a window could not be listed whole,
 # or the sample fell under the budget's floor). That is the patrol reporting its
 # own death, never a verdict on the queue. hotcrm's reading is report-only: a
 # line in the run summary, no card, and its failure never reds the run.
-#
-# dispatch-gates: no-check-families -- the steps are a live Actions API reading (a token and the network) and a card write, not named local checks; the script's offline check is its --self-test, which Lint & Repo Gates runs
 
 on:
   schedule:
@@ -91,6 +89,13 @@ jobs:
 
       # No `pnpm install`: the script loads node builtins and one repo-local
       # helper, and a weekly reading must not fail on a lockfile.
+      #
+      # The offline self-test first (sub-second; Lint & Repo Gates runs it too):
+      # a reading taken by a module whose verdict or card rules no longer hold
+      # is not one to file a card from.
+      - name: Self-test the reading and the card writer
+        run: node scripts/ci/queue-duration.mjs --self-test
+
       - name: Read the objectstack queue
         id: reading
         timeout-minutes: 12
