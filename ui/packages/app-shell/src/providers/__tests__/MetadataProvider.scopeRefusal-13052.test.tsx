@@ -16,6 +16,10 @@
  *       `invalidate` of the name asks it exactly once more;
  *   (d) CONTROL: a served object is present, nothing failed, nothing refused,
  *       one request.
+ *
+ * objectstack#35306 — after a `?names=` presence read: a name it SERVED is
+ * answered with that definition and asked by name never; a name it left out
+ * is still asked by name, so a refusal is still told apart from an absence.
  */
 
 import { act, cleanup, render, waitFor } from '@testing-library/react';

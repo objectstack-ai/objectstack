@@ -9,9 +9,9 @@
  * scope it alone asked for started one permission round trip later.
  * `useAppObjectScopePrefetch` (mounted by `ConsoleShell`'s root action runtime)
  * asks the scope as soon as the app list names the app: the package list,
- * then by name the route object's lookup targets outside the package, each
- * once the one `?names=` presence read has answered it served
- * (objectstack#34244).
+ * then the route object's lookup targets outside the package in one `?names=`
+ * presence read (objectstack#34244), whose served answer is each target's
+ * definition: none is asked again by name (objectstack#35306).
  *
  * CONTROLs: a route outside an app and a record form overlay ask nothing here
  * (`AppContent` reads the whole registry there). An app item with no package
