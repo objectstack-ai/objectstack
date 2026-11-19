@@ -26,6 +26,7 @@ import { preflightAuth } from '../lib/auth-preflight';
 import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
+import { SessionUserScope } from '../../../../packages/auth/src/ActiveOrganizationStorage';
 
 const TOKEN = 'tok_valid';
 const EARLY_SLOT = Symbol.for('objectui.earlySessionCheck');
@@ -408,6 +409,68 @@ describe('no stored token: the cookie session is asked at parse time and handed 
     expect(probe.current?.isLoading).toBe(false);
     expect(probe.current?.user).toBeNull();
   });
+
+  // A handed-on signed-out answer never reaches `loadSession`, so the purge its
+  // conclusive-signed-out branch runs is run by AuthProvider's boot path: a
+  // browser that held a user drops that user's client state before the
+  // sign-in page shows (an expired cookie session on a shared browser).
+  const SIGNED_OUT_ANSWERS: Array<[string, () => Response]> = [
+    ['200 with no user', () => json(null)],
+    ['401 UNAUTHENTICATED', () => json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401)],
+  ];
+  const PRIOR_USER_KEY = 'list-state:u_alice:account';
+  const PRIOR_METADATA_KEY = 'objectui:metadata:app:org_a:abc';
+
+  async function bootSignedOut(answer: () => Response, priorUser: string | null) {
+    SessionUserScope._resetForTests();
+    if (priorUser !== null) SessionUserScope.adopt(priorUser);
+    localStorage.setItem(PRIOR_USER_KEY, JSON.stringify({ perView: { all: { sort: [] } } }));
+    sessionStorage.setItem(PRIOR_METADATA_KEY, '{}');
+    localStorage.setItem('vite-ui-theme', 'dark');
+    sessionAnswer = answer;
+    runEarlySessionCheck();
+    await preflightAuth(authUrlFor());
+    expect((globalThis as unknown as Record<symbol, unknown>)[PREFLIGHT_SLOT]).toBeDefined();
+    // Nothing has purged before AuthProvider mounts: the preflight's
+    // no-token path hands on and clears nothing.
+    expect(localStorage.getItem(PRIOR_USER_KEY)).not.toBeNull();
+    const probe = renderApp();
+    expect(await screen.findByText('sign-in')).toBeTruthy();
+    await act(async () => { await settle(); });
+    expect(sessionCalls()).toHaveLength(1);
+    expect(probe.current?.user).toBeNull();
+  }
+
+  it.each(SIGNED_OUT_ANSWERS)(
+    'a handed-on signed-out answer (%s) on a browser that held a user purges that user\'s client state',
+    async (_label, answer) => {
+      try {
+        await bootSignedOut(answer, 'u_alice');
+        expect(localStorage.getItem(PRIOR_USER_KEY)).toBeNull();
+        expect(sessionStorage.getItem(PRIOR_METADATA_KEY)).toBeNull();
+        // The sweep keeps the device's keys, as every sign-out purge does.
+        expect(localStorage.getItem('vite-ui-theme')).toBe('dark');
+      } finally {
+        sessionStorage.clear();
+        SessionUserScope._resetForTests();
+      }
+    },
+  );
+
+  it.each(SIGNED_OUT_ANSWERS)(
+    'CONTROL: a handed-on signed-out answer (%s) on a browser that never held a user purges nothing',
+    async (_label, answer) => {
+      try {
+        await bootSignedOut(answer, null);
+        expect(SessionUserScope.current()).toBeNull();
+        expect(localStorage.getItem(PRIOR_USER_KEY)).not.toBeNull();
+        expect(sessionStorage.getItem(PRIOR_METADATA_KEY)).toBe('{}');
+      } finally {
+        sessionStorage.clear();
+        SessionUserScope._resetForTests();
+      }
+    },
+  );
 
   it('CONTROL: with a stored Bearer a 401 is still a stale token, purged, and nothing handed on', async () => {
     localStorage.setItem('auth-session-token', 'tok_stale');
