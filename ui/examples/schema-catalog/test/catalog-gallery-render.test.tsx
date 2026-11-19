@@ -150,6 +150,9 @@ import '@object-ui/plugin-timeline';
 import '@object-ui/plugin-view';
 import '@object-ui/plugin-form';
 import '@object-ui/plugin-grid';
+// ui/AGENTS.md lazy-boundary rule: the modules kanban's and markdown's React.lazy import() loads, so a tile never asserts on its Suspense fallback (objectstack#35407).
+import '../../../packages/plugin-kanban/src/KanbanImpl';
+import '../../../packages/plugin-markdown/src/MarkdownImpl';
 import { SidebarProvider } from '@object-ui/components';
 import { registerLayout } from '@object-ui/layout';
 import { ComponentRegistry } from '@object-ui/core';
