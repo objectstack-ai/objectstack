@@ -4063,6 +4063,7 @@ const de = {
     composer: {
       queued: "Wird gesendet, sobald die aktuelle Antwort fertig ist",
       queuedCancel: "Abbrechen",
+      fileTooLarge: "Zu groß zum Anhängen (Limit {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Ganze Antwort anzeigen',
