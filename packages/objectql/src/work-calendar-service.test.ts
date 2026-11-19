@@ -55,8 +55,8 @@ function readDouble(calendars: Row[], exceptions: Row[]) {
       reads.push({ object, query });
       const src = object === WORK_CALENDAR_OBJECT ? calendars : exceptions;
       const tenant = query.context?.tenantId;
-      const hits = src.filter((r) =>
-        (tenant === undefined || r.organization_id === undefined || r.organization_id === tenant) &&
+      const scoped = tenant === undefined ? src : src.filter((r) => r.organization_id === undefined || r.organization_id === tenant);
+      const hits = scoped.filter((r) =>
         Object.entries(query.where ?? {}).every(([k, v]) => {
           // Equality only: a combinator or an operator object is refused, never answered wrong.
           if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`readDouble answers equality only, not ${k}`);
@@ -306,7 +306,7 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
   });
 
   it('a create that leaves the time zone out takes the organization\'s (D7)', async () => {
-    await engine.insert(WORK_CALENDAR_OBJECT, { ...CN, id: 'c1', timezone: undefined, organization_id: 'org_z' }, { context: { isSystem: true } });
+    await engine.insert(WORK_CALENDAR_OBJECT, { ...CN, id: 'c1', timezone: undefined, organization_id: 'org_z' }, { context: { isSystem: true, tenantId: 'org_z' } });
     const [row] = await engine.find(WORK_CALENDAR_OBJECT, { where: { id: 'c1' }, context: { isSystem: true } });
     expect(row?.timezone).toBe('Asia/Shanghai');
     expect(zoneAsked).toEqual(['org_z']);
@@ -379,11 +379,14 @@ describe('the calendar hooks take the organization from the session', () => {
     });
   }
 
-  it('a system writer writes where its row names', async () => {
+  it('a system writer reads in its session\'s organization too', async () => {
     const h = bound('isolated');
-    const e = await refusal(Promise.resolve(h.insert({ isSystem: true }, created('org_b'))));
+    const e = await refusal(Promise.resolve(h.insert({ isSystem: true, organizationId: 'org_b' }, created('org_b'))));
     expect(e.message).toContain('plant_b');
     expect(h.zoneAsked).toEqual(['org_b']);
+    const other = bound('isolated');
+    await other.insert({ isSystem: true }, created('org_b'));
+    expect(other.reads).toEqual([]);
   });
 
   it('isolated: a write that names no organization reads nothing', async () => {

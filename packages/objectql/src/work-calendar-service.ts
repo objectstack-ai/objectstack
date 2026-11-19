@@ -59,11 +59,10 @@
  * per organization. A create that leaves `timezone` out takes the
  * organization's `localization.timezone` (D7), stored as the calendar's own.
  *
- * The hooks take the organization from the session. A system writer (a seed,
- * a package install, the import engine) writes where it names: its row's own
- * `organization_id`, else the call's tenant, else the session's. An update
- * reads in the stored row's own organization. Outside the `single` posture no
- * hook reads without an organization, the service's rule.
+ * The hooks take the organization from the session, every writer's alike: a
+ * seed or an import writes under its organization's tenant, so its session
+ * names it. An update reads in the stored row's own organization. Outside the
+ * `single` posture no hook reads without an organization, the service's rule.
  */
 
 import {
@@ -284,22 +283,13 @@ function periodsRefusal(field: string, value: unknown): FieldRefusal | undefined
 }
 
 /**
- * Where an insert's elevated reads run (see the module note): `read: false`
- * when the hooks make none.
+ * Where an insert's elevated reads run: the session's organization (see the
+ * module note), `read: false` when the hooks make none.
  */
 function insertReadOrganization(ctx: any, row: Row, posture: TenancyPosture): ReadScope {
-  let organizationId: string | undefined;
-  if (ctx?.session?.isSystem === true) {
-    // A system writer writes where it names.
-    organizationId = organizationOf(row.organization_id)
-      ?? organizationOf(ctx?.input?.options?.tenantId)
-      ?? organizationOf(ctx?.session?.organizationId);
-  } else {
-    // Any other writer: the session's organization only.
-    organizationId = organizationOf(ctx?.session?.organizationId);
-    const named = organizationOf(row.organization_id);
-    if (named !== undefined && named !== organizationId) return { read: false };
-  }
+  const organizationId = organizationOf(ctx?.session?.organizationId);
+  const named = organizationOf(row.organization_id);
+  if (named !== undefined && named !== organizationId) return { read: false };
   return mayReadIn(organizationId, posture) ? { read: true, organizationId } : { read: false };
 }
 
