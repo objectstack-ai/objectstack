@@ -824,7 +824,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // object form) to `user` and respelled them `data.type in ['lookup','user']`,
     // an `in`-list outside this rule, so two `==` literal comparisons left the
     // census.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(63);
+    // It is 65 today: #35047's `field :: percentDisplay` gate also opens for a
+    // percent formula, `data.type == 'formula' && data.returnType == 'percent'`,
+    // two more single-quoted literal comparisons.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

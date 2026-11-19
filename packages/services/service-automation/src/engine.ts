@@ -129,6 +129,7 @@ import {
     startConditionHolds,
     executeWithoutRetry,
     type runUserOf,
+    type ValueEnvelopeRefusal,
 } from './dag-traversal.js';
 import { activeDryRunExecuteNode, dryRun as dryRunBody, type DryRunHost } from './dry-run.js';
 // [#25222] The run history's bodies: recording a run's log entry, finishing a
@@ -11669,7 +11670,7 @@ export class AutomationEngine implements IAutomationService {
     private valueEnvelopeRefusals(
         value: unknown,
         fieldTypes?: Readonly<Record<string, string>>,
-    ): { message: string; source: string }[] {
+    ): ValueEnvelopeRefusal[] {
         // The body lives in ./dag-traversal.ts (#25222).
         return valueEnvelopeRefusals(value, fieldTypes);
     }
