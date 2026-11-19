@@ -199,9 +199,13 @@
 
       The request is that reader's byte for byte: the same URL (the server
       origin through the same Vite HTML env substitution as the scripts above),
-      `credentials: 'include'` and the same `Accept`. A request that fails or
-      answers non-OK hands over a rejection, and the reader asks the server
-      itself, as it always did.
+      `credentials: 'include'`, the same `Accept`, and the stored Bearer from
+      the same `localStorage` key when there is one; the slot carries the URL
+      and the token, and the reader takes it only when both match. It keeps
+      the reader's 10 s bound: a request still open then is aborted and
+      rejects as a timeout, which the reader reports. A request that fails
+      otherwise or answers non-OK hands over a rejection, and the reader asks
+      the server itself.
 
       `src/__tests__/sessionCheckBootDedup.test.tsx` executes THIS script's
       text against the real `readConsoleDiscovery()`, so a drift between the
@@ -213,16 +217,32 @@
         const injected = '%VITE_SERVER_URL%';
         const base = (injected.charAt(0) === '%' ? '' : injected).replace(/\/+$/, '');
         const url = base + '/api/v1/discovery';
-        const body = fetch(url, {
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        }).then(function (res) {
-          if (!res.ok) throw new Error('discovery ' + res.status);
-          return res.json();
-        });
-        // The reader treats a failure as "ask again"; it is never unhandled.
+        // The stored Bearer rides along, as on every console request; blocked
+        // storage sends none, exactly as the reader then does.
+        let token = '';
+        try {
+          token = localStorage.getItem('auth-session-token') || '';
+        } catch (_) { /* storage blocked */ }
+        const headers = { Accept: 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        // The reader's 10 s bound: a hung request rejects as a timeout, which
+        // the reader reports instead of asking again.
+        const ctrl = new AbortController();
+        const timer = setTimeout(function () { ctrl.abort(); }, 10000);
+        const body = fetch(url, { credentials: 'include', headers: headers, signal: ctrl.signal })
+          .then(
+            function (res) {
+              if (!res.ok) throw new Error('discovery ' + res.status);
+              return res.json();
+            },
+            function (err) {
+              throw err && err.name === 'AbortError' ? new Error('discovery timeout') : err;
+            },
+          )
+          .finally(function () { clearTimeout(timer); });
+        // The reader treats any other failure as "ask again"; it is never unhandled.
         body.catch(function () {});
-        globalThis[Symbol.for('objectui.earlyDiscovery')] = { url: url, body: body };
+        globalThis[Symbol.for('objectui.earlyDiscovery')] = { url: url, token: token, body: body };
       })();
     </script>
     <script>

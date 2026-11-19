@@ -389,6 +389,83 @@ describe('discovery starts at parse time beside get-session, and the console rea
     expect(discoveryCalls()[0]![0]).toBe(`${SERVER}/api/v1/discovery`);
   });
 
+  const authOf = (call: unknown[]) => new Headers((call[1] as RequestInit | undefined)?.headers).get('Authorization');
+
+  it('carries the stored Bearer, in the parse-time request and in the reader\'s own, and none without one', async () => {
+    localStorage.setItem('auth-session-token', TOKEN);
+    runScript('startEarlyDiscovery');
+    expect(authOf(discoveryCalls()[0]!)).toBe(`Bearer ${TOKEN}`);
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(1);
+
+    // The reader's own request: no slot left to take.
+    clearSharedDiscoveryCache();
+    delete (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT];
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(2);
+    expect(authOf(discoveryCalls()[1]!)).toBe(`Bearer ${TOKEN}`);
+
+    localStorage.clear();
+    clearSharedDiscoveryCache();
+    runScript('startEarlyDiscovery');
+    await readConsoleDiscovery('');
+    expect(discoveryCalls()).toHaveLength(3);
+    expect(authOf(discoveryCalls()[2]!)).toBeNull();
+  });
+
+  it('a parse-time request sent with a token the preflight has since purged is not taken', async () => {
+    localStorage.setItem('auth-session-token', 'tok_stale');
+    runScript('startEarlyDiscovery');
+    localStorage.removeItem('auth-session-token');
+
+    await readConsoleDiscovery('');
+
+    expect(discoveryCalls()).toHaveLength(2);
+    expect(authOf(discoveryCalls()[1]!)).toBeNull();
+  });
+
+  it('a parse-time request that never answers rejects as a timeout within the 10 s bound, and is not asked again', async () => {
+    vi.useFakeTimers();
+    try {
+      (globalThis as unknown as Record<symbol, unknown>)[DISCOVERY_SLOT] = {
+        url: '/api/v1/discovery',
+        token: '',
+        body: new Promise(() => {}),
+      };
+      const read = readConsoleDiscovery('');
+      const outcome = read.then(() => 'answered', (err: Error) => err.message);
+      await vi.advanceTimersByTimeAsync(9_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toBe('discovery timeout');
+      expect(discoveryCalls()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the parse-time request itself is aborted at 10 s and hands over a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchStub.mockImplementationOnce(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+          }),
+      );
+      runScript('startEarlyDiscovery');
+      const slot = (globalThis as unknown as Record<symbol, { body: Promise<unknown> }>)[DISCOVERY_SLOT]!;
+      const outcome = slot.body.then(() => 'answered', (err: Error) => err.message);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await outcome).toBe('discovery timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a failed parse-time request is not reused: the reader asks the server itself', async () => {
     fetchStub.mockImplementationOnce(async () => json({ error: 'boom' }, 503));
     runScript('startEarlyDiscovery');
