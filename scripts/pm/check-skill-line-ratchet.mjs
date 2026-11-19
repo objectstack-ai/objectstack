@@ -1209,12 +1209,14 @@ export const CEILINGS = new Map([
   // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
   // paid by that ruling and by nothing else.
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
-  ['.claude/skills/pm-dispatch/references/readings-queue.md', 89],
-  ['.claude/skills/pm-dispatch/references/readings-channels.md', 76],
+  // readings-queue 89 → 86, readings-channels 76 → 71, readings-write-shapes 84 → 81 (#35215 G-D): stale
+  // platform readings trimmed, the lesson kept; landed counts.
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 86],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 71],
   ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
   ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
   ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
-  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 84],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 81],
   ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
   ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
   ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
