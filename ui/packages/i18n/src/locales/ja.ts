@@ -894,6 +894,7 @@ const ja = {
     },
     search: "検索",
     filter: "フィルター",
+    filterRecords: "レコードをフィルター",
     filterActive: "フィルター、{{count}} 件適用中",
     filterActive_one: "フィルター、{{count}} 件適用中",
     filterActive_other: "フィルター、{{count}} 件適用中",
@@ -4886,6 +4887,7 @@ const ja = {
       after: 'より後',
     },
     sort: {
+      advanced: 'すべての並べ替えレベル',
       direction: '方向',
       ascending: '昇順',
       descending: '降順',

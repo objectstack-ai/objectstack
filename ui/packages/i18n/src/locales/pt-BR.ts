@@ -918,6 +918,7 @@ const pt = {
     },
     search: "Pesquisar",
     filter: "Filtrar",
+    filterRecords: "Filtrar registros",
     filterActive: "Filtrar, {{count}} ativos",
     filterActive_one: "Filtrar, {{count}} ativo",
     filterActive_many: "Filtrar, {{count}} ativos",
@@ -5022,6 +5023,7 @@ const pt = {
       after: 'depois de',
     },
     sort: {
+      advanced: 'Todos os níveis de ordenação',
       direction: 'Direção',
       ascending: 'Crescente',
       descending: 'Decrescente',

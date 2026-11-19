@@ -241,12 +241,34 @@ export interface SortPanelProps {
   onDone?: () => void;
   /** A row under the field list (the host's note on fields it cannot sort by). */
   footer?: React.ReactNode;
+  /**
+   * Every sort level in one panel, drawn by the host (today's `SortBuilder`),
+   * behind the field list's footer, as the filter panel's advanced step.
+   */
+  renderAdvanced?: () => React.ReactNode;
   testId?: string;
 }
 
-export function SortPanel({ fields, shownFields, value, onChange, onDone, footer, testId = 'sort-panel' }: SortPanelProps) {
+export function SortPanel({
+  fields,
+  shownFields,
+  value,
+  onChange,
+  onDone,
+  footer,
+  renderAdvanced,
+  testId = 'sort-panel',
+}: SortPanelProps) {
   const { t } = useListConditionTranslation();
   const [order, setOrder] = React.useState<'asc' | 'desc'>('asc');
+  const [advanced, setAdvanced] = React.useState(false);
+  if (advanced && renderAdvanced) {
+    return (
+      <div className="w-[calc(100vw-2rem)] max-w-[600px] p-3 sm:w-[600px] sm:p-4" data-testid={`${testId}-advanced`}>
+        {renderAdvanced()}
+      </div>
+    );
+  }
   const header = (
     <div className="flex gap-1 border-b p-1.5" role="radiogroup" aria-label={t('listConditions.sort.direction')}>
       {(['asc', 'desc'] as const).map((dir) => (
@@ -273,7 +295,24 @@ export function SortPanel({ fields, shownFields, value, onChange, onDone, footer
       fields={fields}
       shownFields={shownFields}
       header={header}
-      footer={footer}
+      footer={
+        footer || renderAdvanced ? (
+          <>
+            {footer}
+            {renderAdvanced && (
+              <button
+                type="button"
+                onClick={() => setAdvanced(true)}
+                className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                data-testid={`${testId}-open-advanced`}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('listConditions.sort.advanced')}
+              </button>
+            )}
+          </>
+        ) : undefined
+      }
       testId={`${testId}-fields`}
       onPick={(item) => {
         onChange(addSortLevel(value, item.value, order, newConditionId()));

@@ -869,6 +869,7 @@ const zh = {
     },
     search: '搜索',
     filter: '筛选',
+    filterRecords: '筛选记录',
     filterActive: '筛选，{{count}} 个生效',
     filterActive_one: '筛选，{{count}} 个生效',
     filterActive_other: '筛选，{{count}} 个生效',
@@ -4943,6 +4944,7 @@ const zh = {
       after: '晚于',
     },
     sort: {
+      advanced: '全部排序级别',
       direction: '方向',
       ascending: '升序',
       descending: '降序',

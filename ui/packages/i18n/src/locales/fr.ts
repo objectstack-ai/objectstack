@@ -918,6 +918,7 @@ const fr = {
     },
     search: "Rechercher",
     filter: "Filtrer",
+    filterRecords: "Filtrer les enregistrements",
     filterActive: "Filtrer, {{count}} actifs",
     filterActive_one: "Filtrer, {{count}} actif",
     filterActive_many: "Filtrer, {{count}} actifs",
@@ -5023,6 +5024,7 @@ const fr = {
       after: 'après',
     },
     sort: {
+      advanced: 'Tous les niveaux de tri',
       direction: 'Sens',
       ascending: 'Croissant',
       descending: 'Décroissant',

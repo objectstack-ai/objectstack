@@ -948,6 +948,7 @@ const ru = {
     },
     search: "Поиск",
     filter: "Фильтр",
+    filterRecords: "Фильтр записей",
     filterActive: "Фильтр, активных: {{count}}",
     filterActive_one: "Фильтр, {{count}} активный",
     filterActive_few: "Фильтр, {{count}} активных",
@@ -5179,6 +5180,7 @@ const ru = {
       after: 'после',
     },
     sort: {
+      advanced: 'Все уровни сортировки',
       direction: 'Направление',
       ascending: 'По возрастанию',
       descending: 'По убыванию',

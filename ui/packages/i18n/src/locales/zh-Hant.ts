@@ -869,6 +869,7 @@ const zhHant = {
     },
     search: '搜尋',
     filter: '篩選',
+    filterRecords: '篩選記錄',
     filterActive: '篩選，{{count}} 個生效',
     filterActive_one: '篩選，{{count}} 個生效',
     filterActive_other: '篩選，{{count}} 個生效',
@@ -4943,6 +4944,7 @@ const zhHant = {
       after: '晚於',
     },
     sort: {
+      advanced: '全部排序級別',
       direction: '方向',
       ascending: '升序',
       descending: '降序',

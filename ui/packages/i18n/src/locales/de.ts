@@ -894,6 +894,7 @@ const de = {
     },
     search: "Suche",
     filter: "Filtern",
+    filterRecords: "Datensätze filtern",
     filterActive: "Filtern, {{count}} aktiv",
     filterActive_one: "Filtern, {{count}} aktiv",
     filterActive_other: "Filtern, {{count}} aktiv",
@@ -4884,6 +4885,7 @@ const de = {
       after: 'nach',
     },
     sort: {
+      advanced: 'Alle Sortierebenen',
       direction: 'Richtung',
       ascending: 'Aufsteigend',
       descending: 'Absteigend',

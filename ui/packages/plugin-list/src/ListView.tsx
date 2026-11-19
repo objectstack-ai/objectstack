@@ -1401,6 +1401,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // THIS copy, so a divergence would make the two paths disagree on one control.
   'table.search': 'Search…',
   'list.filter': 'Filter',
+  'list.filterRecords': 'Filter Records',
   // The Filter trigger's accessible name while filters are active: its
   // `aria-label` replaces the count badge in the name, so the count rides
   // here (objectui#12500). A count family, like `list.recordCount`.
@@ -6801,14 +6802,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (sortDiffersFromDeclared) handleResetSort();
   }, [currentFilters, onFilterChange, sortDiffersFromDeclared, handleResetSort]);
   // The advanced panel behind the Filter panel's footer and an OR group's
-  // chip: today's `FilterBuilder`, props unchanged.
+  // chip: the panel the Filter trigger opened before, today's `FilterBuilder`
+  // with its props unchanged. The Sort panel's advanced step is
+  // `sortPanelBody`, below.
   const advancedFilterBuilder = () => (
-    <FilterBuilder
-      fields={filterFields}
-      value={currentFilters}
-      extraOperators={LIST_VIEW_EXTRA_OPERATORS}
-      onChange={applyPanelFilters}
-    />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b pb-2">
+        <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
+      </div>
+      <FilterBuilder
+        fields={filterFields}
+        value={currentFilters}
+        extraOperators={LIST_VIEW_EXTRA_OPERATORS}
+        onChange={applyPanelFilters}
+      />
+    </div>
   );
   // Under the Sort panel's field list: why a linked column is not listed
   // (objectui#12528), and that a picked one sorts by the stored ID.
@@ -6833,8 +6841,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
     </div>
   ) : undefined;
-  // The Sort panel: the toolbar Sort popover draws it, and so does the
-  // Display panel below `sm` (`sortInDisplay`).
+  // The Sort panel: every sort level at once. The toolbar Sort popover draws
+  // it as the shared field list's advanced step (objectstack#35550), and the
+  // Display panel draws it below `sm` (`sortInDisplay`).
   const sortPanelBody = (
     <div className="space-y-4">
       <div className="flex items-center justify-between border-b pb-2">
@@ -7271,6 +7280,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 onChange={applySort}
                 onDone={() => setShowSort(false)}
                 footer={sortPanelNote}
+                renderAdvanced={() => sortPanelBody}
               />
             </PopoverContent>
           </Popover>

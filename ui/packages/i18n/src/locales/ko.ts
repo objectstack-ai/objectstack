@@ -894,6 +894,7 @@ const ko = {
     },
     search: "검색",
     filter: "필터",
+    filterRecords: "레코드 필터",
     filterActive: "필터, {{count}}개 적용됨",
     filterActive_one: "필터, {{count}}개 적용됨",
     filterActive_other: "필터, {{count}}개 적용됨",
@@ -4883,6 +4884,7 @@ const ko = {
       after: '이후',
     },
     sort: {
+      advanced: '모든 정렬 단계',
       direction: '방향',
       ascending: '오름차순',
       descending: '내림차순',

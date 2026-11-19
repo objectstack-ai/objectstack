@@ -1131,6 +1131,7 @@ const en = {
     },
     search: 'Search',
     filter: 'Filter',
+    filterRecords: 'Filter Records',
     filterActive: 'Filter, {{count}} active',
     filterActive_one: 'Filter, {{count}} active',
     filterActive_other: 'Filter, {{count}} active',
@@ -5637,6 +5638,7 @@ const en = {
       after: 'after',
     },
     sort: {
+      advanced: 'All sort levels',
       direction: 'Direction',
       ascending: 'Ascending',
       descending: 'Descending',
