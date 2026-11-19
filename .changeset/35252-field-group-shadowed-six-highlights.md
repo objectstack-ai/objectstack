@@ -6,7 +6,7 @@
 
 fix(lint): `field-group-shadowed` judges the six highlights the record page draws, from one shared constant
 
-Clause-②: yes (widening)
+Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
 
 The default record page draws the first six of an object's `highlightFields` (after the title field leaves the list) in its header strip and leaves those fields out of the Details body. The `field-group-shadowed` warning judged only the first four, so a field group whose only member sat fifth or sixth in `highlightFields` was empty on the record page and passed `os lint --strict`. It now judges the same six, and its hint says "first 6 highlightFields".
