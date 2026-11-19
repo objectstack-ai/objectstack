@@ -52,7 +52,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
       getClient: () => ({ meta: { saveItem } }),
       // objectstack#35054 — the page edits the app as stored (the layers read):
       // the served app minus its read decorations, which no layer carries.
-      getAuthoredItem: async (_type: string, name: string) => {
+      // objectstack#35101 — and reads each newly selected object as stored.
+      getAuthoredItem: async (type: string, name: string) => {
+        if (type === 'object') return OBJECTS.find((o) => o.name === name) ?? null;
         const served = apps.find((a) => a.name === name);
         return served ? Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_'))) : null;
       },
@@ -101,6 +103,7 @@ describe('objectui#10867 — member 1: a wizard app with a separator saves a doc
     next(); // → objects
     fireEvent.click(screen.getByTestId('object-card-account'));
     next(); // → navigation, generated from the selected object
+    await screen.findByTestId('wizard-step-navigation-content'); // the authored object reads settle
     fireEvent.click(screen.getByTestId('add-separator-btn'));
     next(); // → branding
     fireEvent.click(screen.getByTestId('wizard-complete'));
@@ -142,6 +145,7 @@ describe('objectui#10867 — member 2: an edit keeps every stored `branding` key
     await screen.findByTestId('edit-app-page');
     next(); // → objects
     next(); // → navigation
+    await screen.findByTestId('wizard-step-navigation-content'); // the authored object reads settle
     next(); // → branding
     onBranding?.();
     fireEvent.click(screen.getByTestId('wizard-complete'));

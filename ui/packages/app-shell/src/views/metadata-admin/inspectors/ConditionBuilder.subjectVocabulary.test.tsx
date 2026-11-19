@@ -43,6 +43,12 @@
  * `Builder` toggle would be on screen.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
@@ -212,12 +218,22 @@ beforeAll(() => {
   }
 });
 
-/** Open the row's SUBJECT dropdown and read back every subject it offers. */
+/**
+ * An option's CEL spelling. A field subject reads by its label with the
+ * spelling beside it as the hint (objectstack#34122), so the spelling is that
+ * hint; a subject with no label (`previous`, the context) is its spelling.
+ */
+function spellingOf(option: HTMLElement): string {
+  const hint = option.querySelector('.font-mono');
+  return (hint ?? option).textContent ?? '';
+}
+
+/** Open the row's SUBJECT dropdown and read back the spelling of every subject it offers. */
 async function subjectOptions(container: HTMLElement): Promise<string[]> {
   const trigger = container.querySelectorAll('[role="combobox"]')[0] as HTMLElement;
   await userEvent.click(trigger);
   const opts = await screen.findAllByRole('option');
-  return opts.map((o) => o.textContent ?? '');
+  return opts.map(spellingOf);
 }
 
 /** A mounted builder holding exactly one row, ready to have its subject read. */
@@ -283,7 +299,7 @@ describe('#6296 DEFAULT-PATH INVARIANCE — the record-scoped consumers are unto
     const { container, onCommit } = mountOneRow();
     const opts = await subjectOptions(container);
     expect(opts).toContain('record.amount');
-    await userEvent.click(screen.getByRole('option', { name: 'record.amount' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Amount record.amount' }));
     expect(onCommit).toHaveBeenCalledWith("record.amount == 'x'");
   });
 
