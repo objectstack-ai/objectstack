@@ -5368,6 +5368,7 @@ const fr = {
     loading: "Chargement de vos paramètres de notification…",
     loadFailed: "Impossible de lire vos paramètres de notification. Rechargez la page pour réessayer.",
     saveFailed: "La modification n'a pas été enregistrée : {{reason}}",
+    readOnly: "Vous pouvez consulter ces paramètres, mais vos droits ne vous permettent pas de les modifier. Un administrateur de votre organisation peut les modifier pour vous.",
     general: "Général",
     generalWarning: "Modifier le résumé ou les heures calmes enregistre votre propre paramètre général. Il s'applique ensuite à chaque sujet et canal que vous n'avez pas réglés vous-même, à la place des valeurs par défaut de votre organisation.",
     digest: "Résumé",
