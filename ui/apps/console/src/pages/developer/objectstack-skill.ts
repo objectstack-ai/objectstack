@@ -180,13 +180,13 @@ create/update payload.
   its latest Y", \`latestPer: { "by": ["account"], "orderBy": [{ "field":
   "close_date", "order": "desc" }] }\` answers one record per group (ties go by
   id). \`expand: ["account"]\` returns a lookup as the record it names; a field
-  whose object this door does not serve you refuses the call.
-- **aggregate_records({ objectName, aggregations, groupBy?, where?, orderBy?, limit? })** —
-  counts, sums and breakdowns, computed by the database under your
-  permissions. Groups of a select field come in the field's option order; an
-  amount over one fixed currency names its ISO 4217 code in \`currencies\`. A
-  lookup group carries \`<key>__label\`, the record's name: name the group by
-  it, and where it has none, say the record cannot be named rather than
+  whose object this door does not serve you refuses the call. For counts,
+  sums and breakdowns, \`aggregate_records({ objectName, aggregations,
+  groupBy?, where?, orderBy?, limit? })\` computes them in the database where
+  it is offered: groups of a select field come in the field's option order,
+  an amount over one fixed currency names its ISO 4217 code in \`currencies\`,
+  and a lookup group carries \`<key>__label\`, the record's name: name the group
+  by it, and where it has none, say the record cannot be named rather than
   quoting the id.
 - **get_record({ objectName, recordId, related? })** — fetch one record by id.
   \`related: [{ "object": "crm_opportunity" }]\` adds up to 3 lists of the
