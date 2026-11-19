@@ -144,7 +144,10 @@ export function refusalCarriedBy(err: unknown): CarriedRefusal {
  *  - Resumed at the CHILD's run id instead (the up-bubble leg, and the only
  *    leg a `map` item takes), the caller already holds the child's own
  *    terminal result, which carries the members; the ancestors that leg fails
- *    record no member, and no caller reads their result.
+ *    record no member, and no caller reads their result — except a PARENT
+ *    that lands on the `'stranded'` exit, whose members ride the
+ *    `SubflowParentStrand` the child's resumer takes (#34638,
+ *    `carriedRefusalOfResult(parentRes)` in `bubbleToParent`).
  *
  * On every carrier, a failure that met no refusal carries no member, which the
  * spec's "present only when a refusal was met" allows and which never invents

@@ -26,7 +26,7 @@
 // `./sharing-service.js` for the boundary and the measured consequence.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ErrorCode } from '../api/error-code-ledger.zod.js';
-import type { ResumeFailureDetails } from '../api/automation-api.zod.js';
+import type { FlowInnerRefusal, ResumeFailureDetails } from '../api/automation-api.zod.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -696,24 +696,33 @@ export interface ApprovalRecallInput {
  * (`api/automation-api.zod.ts`), the structure the automation resume door
  * already publishes inside its `400 FLOW_FAILED` `error.details` (#15221, the
  * ruling's third carrier). They are inherited here, never re-spelled, so the
- * two cannot drift. What this adds is the one member a success envelope
- * cannot leave to its envelope: on the resume door the registered code is
- * the answer's own `code`; on a success answer nothing else names the
- * failure class, so it rides here as {@link code}.
+ * two cannot drift. What this adds is what a success envelope
+ * cannot leave to its envelope: on the resume door the registered code is the
+ * answer's own `code`; on a success answer nothing else names the failure
+ * class, so it rides here as {@link code}. The same holds for the refusal that stranded
+ * the run (#34638): on the resume door `innerRefusal` rides beside these
+ * members in `error.details` (`FlowFailureDetailsSchema`) and `userMessage`
+ * at the envelope's top level, and on the decision doors' thrown
+ * `RESUME_FAILED` both ride the error body (#34579); a success answer has no
+ * envelope to carry either, so they ride here as {@link innerRefusal} and
+ * {@link userMessage} — the same names and shapes, so a caller reads one
+ * spelling on every channel.
  *
  * ⛔ Which is exactly why `ResumeFailureDetailsSchema` is NOT the reader for
- * this member. That schema declares the three shared members and not
- * {@link code}, and it is a plain non-strict `z.object`: parsing a report
- * with it SILENTLY STRIPS the code — the parse SUCCEEDS, raises no
- * `unrecognized_keys` issue, logs nothing, and hands back an object whose
- * failure class is simply gone. The one member the paragraph above calls
- * indispensable is the one the act of validating removes, and nothing in the
- * result says so. On the resume door that schema is the right reader,
- * because there the registered code rides on the `error` envelope it parses
- * beside; here there is no envelope, so read {@link code} off the report
- * itself — it is typed `ErrorCode`, required, and needs no parse at all. Use
- * that schema on this member to read the three shared facts if you like,
- * ⛔ never as a way to obtain the report. Both halves are measured in
+ * this member. That schema declares the three shared members and none of
+ * {@link code}, {@link innerRefusal} or {@link userMessage}, and it is a plain
+ * non-strict `z.object`: parsing a report with it SILENTLY STRIPS all three —
+ * the parse SUCCEEDS, raises no `unrecognized_keys` issue, logs nothing, and
+ * hands back an object whose failure class and refusal are simply gone. The
+ * one member the paragraph above calls indispensable, the code, is among
+ * those the act of validating removes, and nothing in the result says so. On
+ * the resume door that schema is the right reader, because there the
+ * registered code rides on the `error` envelope it parses beside, and the
+ * refusal pair on that envelope too; here there is no envelope, so read
+ * {@link code}, {@link innerRefusal} and {@link userMessage} off the report
+ * itself — the code is typed `ErrorCode`, required, and needs no parse at
+ * all. Use that schema on this member to read the three shared facts if you
+ * like, ⛔ never as a way to obtain the report. Both halves are measured in
  * `contracts/resume-failure-report.pin.test.ts`.
  *
  * ⛔ No new error code is minted under the ruling. `code` is typed as
@@ -728,7 +737,8 @@ export interface ApprovalRecallInput {
  * stands), and it stays exactly as it is. This structure is what a success
  * answer carries, and `finalized` / `decision` are already top-level members
  * of the results that carry it. The two share the `runId` / `repairable`
- * vocabulary through the spec declaration, on purpose.
+ * vocabulary through the spec declaration, on purpose — and the refusal pair
+ * ({@link innerRefusal}, {@link userMessage}) by the same names and shapes.
  *
  * Two halves of ONE telling. The prose `resumeError` beside this member is
  * the human-readable half; this is the machine-readable half. A producer
@@ -753,6 +763,47 @@ export interface ResumeFailureReport extends ResumeFailureDetails {
    * purpose: a success answer has no envelope `code` to fall back on.
    */
   code: ErrorCode;
+  /**
+   * [#34638] The refusal the stranded run's next step met, when it met one —
+   * the engine's own `AutomationResult.innerRefusal` (ruling B′ on #24914),
+   * copied verbatim: `code` in its wire spelling, `message` the refusal's own
+   * text without the node and operation prefixes. The value the decision
+   * doors' thrown `RESUME_FAILED` carries since #34579 (`innerRefusal` on
+   * `StrandedDecisionDetails`), told on the success channel for the strands
+   * that channel reports: a recall whose own resume stranded, and a subflow
+   * PARENT that stranded behind a resume that succeeded. Read the way the
+   * thrown envelope reads it: a value outside the declared shape (a `code`
+   * outside the closed ADR-0112 set, a `message` that is not a string) is
+   * dropped, never relayed.
+   *
+   * Optional, and absent when the run stranded on a fault that met no refusal
+   * (a crash, an unreachable store) — ⛔ never synthesised from the prose, and
+   * never part of the failure class: {@link code} and {@link repairable} are
+   * read the same way with or without it.
+   */
+  innerRefusal?: FlowInnerRefusal;
+  /**
+   * [#34638] The producer-marked end-user text of that refusal — the engine's
+   * `AutomationResult.userMessage`, verbatim. For a record hook that declares
+   * a `refusals` catalogue this is the declared sentence in the RUN's locale
+   * (`AutomationContext.locale`, `contracts/automation-service.ts`), while
+   * {@link innerRefusal}'s `message` keeps the diagnostic text. Every strand
+   * this report tells is a resumed leg, and a resumed leg renders in the
+   * language of whoever STARTED the run — usually the submitter, not this
+   * report's caller: a resume carries no locale of its own, and the decider's
+   * segment takes the decider's identity and grants and keeps the starter's
+   * locale. A run no person started (a record-change, schedule or webhook
+   * trigger) carries no locale, so there the sentence is the catalogue's
+   * authored message.
+   *
+   * Same semantics as on every other channel that carries it (the record
+   * save's error body, every flow door's `FLOW_FAILED`, the decision doors'
+   * `RESUME_FAILED`): presence IS the marking, and a blank or non-string
+   * value is no marking, so it is dropped. Absent when the run met no marked
+   * refusal; it can ride without {@link innerRefusal} (a marked failure that
+   * was no refusal).
+   */
+  userMessage?: string;
 }
 
 /** Result of a recall. */
@@ -789,7 +840,9 @@ export interface ApprovalRecallResult {
    * The machine-readable half of a resume failure this recall tolerated
    * (#15970; the #16472 ruling): the registered code, the `runId` of the run
    * that is actually stranded — which need not be {@link runId}, the run this
-   * request gated — and whether the engine says it is repairable.
+   * request gated — and whether the engine says it is repairable; and, when
+   * the strand met a refusal, that refusal (`innerRefusal` / `userMessage`,
+   * #34638).
    *
    * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
    * never that no run is stranded: a producer that predates this field
@@ -899,11 +952,12 @@ export interface ApprovalDecisionResult {
    * from that step: the engine routes the refusal down it like any run-time
    * failure, and the decision then answers normally.
    *
-   * ⛔ They are not members of this result and must never be added to it:
-   * they ride the ERROR, so declaring them here would declare a success shape
-   * that never carries them. ⛔ Nor are they {@link resumeFailure}, which
-   * reports the other event of the #16472 ruling — a resume failure behind an
-   * answer that still succeeded.
+   * ⛔ They are not top-level members of this result and must never be
+   * added to it: they ride the ERROR, so declaring them here would declare a
+   * success shape that never carries them. The other event of the #16472
+   * ruling — a resume failure behind an answer that still succeeded — is told
+   * on {@link resumeFailure}, which carries the same pair under the same
+   * names when THAT strand met a refusal (#34638).
    */
   resumed?: boolean;
   /**
@@ -924,7 +978,8 @@ export interface ApprovalDecisionResult {
    * answer (#15556; the #16472 ruling): the registered code, the `runId` of
    * the run that is actually stranded — the PARENT's when the strand is a
    * subflow's bubble-up, never the healthy child's that {@link runId} names —
-   * and whether the engine says it is repairable.
+   * and whether the engine says it is repairable; and, when the strand met a
+   * refusal, that refusal (`innerRefusal` / `userMessage`, #34638).
    *
    * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
    * never that no run is stranded: a producer that predates this field

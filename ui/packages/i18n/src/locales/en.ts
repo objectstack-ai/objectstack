@@ -6139,6 +6139,7 @@ const en = {
     loading: "Loading your notification settings…",
     loadFailed: "Could not read your notification settings. Reload the page to try again.",
     saveFailed: "The change was not saved: {{reason}}",
+    readOnly: "You can view these settings, but your access does not let you change them. An administrator of your organization can change them for you.",
     general: "General",
     generalWarning: "Changing your digest or quiet hours saves your own general setting. It then applies to every topic and channel you have not set yourself, in place of your organization's defaults.",
     digest: "Digest",
