@@ -72,6 +72,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "パスワード変更必須",
         help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_RESET_REQUIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
       },
+      dev_seed_credential: {
+        label: "開発シード資格情報",
+        help: "開発シードが作成したアカウントに設定されます。パスワードがシードのパスワードのままである間、本番サーバーはそのサインインと新しいセッションをすべて拒否します。os user set-password で新しいパスワードを設定すると消去されます。システム管理。読み取りでは返されません。"
+      },
       mfa_required_at: {
         label: "MFA 強制適用日時",
         help: "強制 MFA がこのユーザーに最初に適用された日時（猶予期間の起点）。mfa_required の基準になります。システム管理。"

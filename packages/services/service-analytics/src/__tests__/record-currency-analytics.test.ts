@@ -284,6 +284,9 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
   // The column's currency for a derived measure is the compile guard's own
   // resolved reading: a `sum` / `difference` whose operands all resolve to one
   // `fixed` code carries it, as `content/docs/data-modeling/currency.mdx` says.
+  // One whose operands are ALL in the tenant's currency carries the request's
+  // tenant currency, as a plain sum of one of them does (seat ruling record
+  // 7000265215, item 2); any other mix stays bare.
   describe('a derived measure column takes the currency its operands resolve to', () => {
     const DERIVED = DatasetSchema.parse({
       name: 'os28049_derived_currency',
@@ -301,17 +304,45 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
         { name: 'eur_twice', derived: { op: 'sum', of: ['eur', 'eur_restated'] } },
         { name: 'eur_net', derived: { op: 'difference', of: ['eur', 'eur'] } },
         { name: 'eur_twice_restated', derived: { op: 'sum', of: ['eur', 'eur'] }, currency: 'EUR' },
-        // Controls: no one `fixed` code, so today's answer stands.
-        { name: 'usd_and_tenant', derived: { op: 'sum', of: ['usd', 'tenant'] } },
+        // Every operand in the tenant's currency: the request's tenant currency.
         { name: 'tenant_twice', derived: { op: 'sum', of: ['tenant', 'tenant'] } },
+        { name: 'tenant_net', derived: { op: 'difference', of: ['tenant', 'tenant'] } },
+        { name: 'tenant_thrice', derived: { op: 'sum', of: ['tenant_twice', 'tenant'] } },
+        // Controls: no one `fixed` code and not all tenant, so today's answer stands.
+        { name: 'usd_and_tenant', derived: { op: 'sum', of: ['usd', 'tenant'] } },
+        { name: 'tenant_and_usd', derived: { op: 'sum', of: ['tenant', 'usd'] } },
+        { name: 'tenant_and_jpy', derived: { op: 'sum', of: ['tenant', 'tenant_as_jpy'] } },
+        { name: 'tenant_and_invoices', derived: { op: 'sum', of: ['tenant', 'invoices'] } },
+        { name: 'tenant_per_tenant', derived: { op: 'ratio', of: ['tenant', 'tenant'] } },
+        { name: 'tenant_product', derived: { op: 'product', of: ['tenant', 'tenant'] } },
+        { name: 'tenant_ratio_twice', derived: { op: 'sum', of: ['tenant_per_tenant', 'tenant_per_tenant'] } },
         { name: 'jpy_twice', derived: { op: 'sum', of: ['tenant_as_jpy', 'tenant_as_jpy'] } },
         { name: 'eur_per_invoice', derived: { op: 'ratio', of: ['eur', 'invoices'] } },
         { name: 'eur_product', derived: { op: 'product', of: ['eur', 'eur'] } },
         { name: 'total_twice', derived: { op: 'sum', of: ['total', 'total'] } },
       ],
     });
-    const LABELLED = { eur_twice: 'EUR', eur_net: 'EUR', eur_twice_restated: 'EUR' } as const;
-    const UNLABELLED = ['usd_and_tenant', 'tenant_twice', 'jpy_twice', 'eur_per_invoice', 'eur_product', 'total_twice'] as const;
+    const LABELLED = {
+      eur_twice: 'EUR',
+      eur_net: 'EUR',
+      eur_twice_restated: 'EUR',
+      tenant_twice: 'CNY',
+      tenant_net: 'CNY',
+      tenant_thrice: 'CNY',
+    } as const;
+    const UNLABELLED = [
+      'usd_and_tenant',
+      'tenant_and_usd',
+      'tenant_and_jpy',
+      'tenant_and_invoices',
+      'tenant_per_tenant',
+      'tenant_product',
+      'tenant_ratio_twice',
+      'jpy_twice',
+      'eur_per_invoice',
+      'eur_product',
+      'total_twice',
+    ] as const;
     const expectColumns = (result: AnalyticsResult) => {
       for (const [name, code] of Object.entries(LABELLED)) {
         expect(column(result, name)?.currency, name).toBe(code);
@@ -346,6 +377,19 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
         { previewDrafts: true },
       );
       expectColumns(result);
+    });
+
+    // The tenant step is the request's own: with no tenant currency set, the
+    // derived column is as bare as the plain sum under it.
+    it('with no tenant currency on the request, an all-tenant derived column carries none, like its operand', async () => {
+      const result = await services.objectql!.queryDataset(
+        DERIVED,
+        { dimensions: ['currency'], measures: ['tenant', 'tenant_twice', 'eur_twice'] },
+        {} as ExecutionContext,
+      );
+      expect(column(result, 'tenant')?.currency).toBeUndefined();
+      expect(column(result, 'tenant_twice')?.currency).toBeUndefined();
+      expect(column(result, 'eur_twice')?.currency).toBe('EUR');
     });
   });
 

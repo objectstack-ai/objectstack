@@ -18,6 +18,7 @@ import { z } from 'zod';
 import {
   ValueDomainSchema,
   ISO_3166_ALPHA2_CODES,
+  VALUE_DOMAIN_FIELD_NAMES,
   isValueDomainMember,
   type ValueDomain,
 } from './value-domain.zod';
@@ -264,5 +265,26 @@ describe('isValueDomainMember — an OFF-vocabulary domain is refused, never ans
     expect(isValueDomainMember('iana_time_zone', 'UTC')).toBe(true);
     expect(isValueDomainMember('iso_4217_currency', 'USD')).toBe(true);
     expect(isValueDomainMember('iso_3166_alpha2', 'US')).toBe(true);
+  });
+});
+
+describe('VALUE_DOMAIN_FIELD_NAMES — the one field-name word list', () => {
+  it('maps exactly the ruled names, and only onto vocabulary members', () => {
+    expect(VALUE_DOMAIN_FIELD_NAMES).toEqual({
+      iso_4217_currency: ['currency', 'currency_code'],
+      iso_3166_alpha2: ['country', 'country_code'],
+      iana_time_zone: ['time_zone', 'timezone', 'tz'],
+    });
+    for (const domain of Object.keys(VALUE_DOMAIN_FIELD_NAMES)) {
+      expect(ValueDomainSchema.safeParse(domain).success, domain).toBe(true);
+    }
+  });
+
+  it('names each word once, in lowercase, and is frozen', () => {
+    const words = Object.values(VALUE_DOMAIN_FIELD_NAMES).flat();
+    expect(new Set(words).size).toBe(words.length);
+    for (const w of words) expect(w).toBe(w.toLowerCase());
+    expect(Object.isFrozen(VALUE_DOMAIN_FIELD_NAMES)).toBe(true);
+    for (const list of Object.values(VALUE_DOMAIN_FIELD_NAMES)) expect(Object.isFrozen(list)).toBe(true);
   });
 });
