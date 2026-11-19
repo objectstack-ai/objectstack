@@ -5,8 +5,10 @@
 
 fix(plugin-chatbot): a file over the chat composer's size limit is named to the user with the limit, instead of only reaching `console.warn`
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
+
+The two widenings are additive: the new key `chatbot.composer.fileTooLarge` in every locale pack `@object-ui/i18n` publishes through `./locales`, and the optional `files` field on the `onError` argument of `PromptInputProps`, exported as `AIElements` from `@object-ui/plugin-chatbot`.
 
 A file picked, pasted or dropped into the chat composer that is larger than `maxFileSize` (10 MB by default) used to vanish: it did not attach and nothing told the user why. `ChatbotEnhanced` now shows a notice above the composer naming every refused file and the limit, in the user's language (new pack key `chatbot.composer.fileTooLarge`, in all eleven locales). The notice closes with its close button or on the next send, and a later refusal replaces it.
 
