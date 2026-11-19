@@ -172,8 +172,11 @@ export interface RecycleBinWrittenEntry {
   /**
    * Remove the entry when the root row's removal answered that it removed
    * nothing. Always removes, inside the covering transaction when there is
-   * one: no rollback follows a removal that did not throw. A failure to remove
-   * it is logged at `error` and never changes the delete's answer.
+   * one: the removal did not throw, so no rollback has taken the entry. The
+   * caller may still refuse afterwards (the engine's by-id delete answers a
+   * driver's `false` with `RECORD_NOT_FOUND`), and that refusal's rollback
+   * takes the write and its withdrawal together. A failure to remove it is
+   * logged at `error` and never changes the delete's answer.
    */
   withdraw(): Promise<void>;
 }

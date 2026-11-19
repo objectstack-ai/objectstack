@@ -191,20 +191,21 @@ describe.each([
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     trigger = await picker();
-    expect(trigger.textContent).toMatch(/^Fast/);
+    expect(trigger.textContent).toBe('Fast');
 
     fireEvent.click((await open(trigger))[2]);
     dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Switch model' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
-    await waitFor(() => expect(multiplierOf(screen.getByRole('combobox', { name: 'Model' }))).toBe('×20'));
+    // objectstack#35445 — the closed trigger names the model alone, so the switch reads off its name.
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('Expert'));
   });
 
   it('CONTROL: a ×5 pick applies at once, with no dialog', async () => {
     mount();
     fireEvent.click((await open(await picker()))[1]);
     expect(screen.queryByRole('alertdialog')).toBeNull();
-    await waitFor(() => expect(multiplierOf(screen.getByRole('combobox', { name: 'Model' }))).toBe('×5'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('Advanced'));
   });
 
   it('the allowance note shows with usage served', async () => {

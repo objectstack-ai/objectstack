@@ -11,10 +11,15 @@
  * the rail keeps the conversation history behind a History button, the full
  * window draws it as a column beside the chat. The phone sheet already takes
  * the screen, so it has no expand button, only History.
+ *
+ * objectstack#35445 — the title bar is ONE row: History, 「···」 and the
+ * drawer's 「×」 close. Usage, Share, filling the window and the Build Doctor
+ * are items of the 「···」 menu; the Build Doctor is listed only when the body
+ * reports it (a user who may build).
  */
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import React from 'react';
 import { ChatDockPanel, ChatDockMobileSheet, useChatDockState, type ChatDockState } from '../ChatDock';
 
@@ -39,20 +44,52 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
 vi.mock('../../hooks', () => ({
   useChatConversation: () => ({ conversationId: undefined, initialMessages: [] }),
 }));
-// The header usage indicator has its own tests; stub it so these chrome tests
-// stay focused and don't hit the usage endpoint.
-vi.mock('../AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
-// The default body, as a recorder of the presentation and history state the
-// chrome hands it (its own behaviour is pinned in the ChatDock.* body files).
-vi.mock('../ChatDockConversation', () => ({
-  ChatDockConversation: (props: { presentation?: string; historyOpen?: boolean }) => (
-    <div
-      data-testid="default-dock-body"
-      data-presentation={props.presentation}
-      data-history-open={String(Boolean(props.historyOpen))}
-    />
-  ),
+// The usage reading the 「···」 menu shows: the hook stands in for the endpoint.
+const usageState = { usage: null as null | { pool: Record<string, unknown> } };
+vi.mock('../../hooks/useAiUsage', () => ({
+  useAiUsage: () => ({ usage: usageState.usage, isLoading: false, error: undefined, refetch: () => {} }),
 }));
+// What the default body reports to the chrome (objectstack#35445); `undefined`
+// = a body that reports nothing.
+const bodyState = {
+  actions: undefined as undefined | { conversationId?: string; showDebug: boolean },
+};
+// The default body, as a recorder of the presentation, history and dialog
+// state the chrome hands it (its own behaviour is pinned in the ChatDock.*
+// body files).
+vi.mock('../ChatDockConversation', async () => {
+  const ReactActual = await import('react');
+  return {
+    ChatDockConversation: (props: {
+      presentation?: string;
+      historyOpen?: boolean;
+      shareOpen?: boolean;
+      debugOpen?: boolean;
+      onActionsChange?: (a: unknown) => void;
+    }) => {
+      const { onActionsChange } = props;
+      ReactActual.useEffect(() => {
+        onActionsChange?.(bodyState.actions);
+      }, [onActionsChange]);
+      return (
+        <div
+          data-testid="default-dock-body"
+          data-presentation={props.presentation}
+          data-history-open={String(Boolean(props.historyOpen))}
+          data-share-open={String(Boolean(props.shareOpen))}
+          data-debug-open={String(Boolean(props.debugOpen))}
+        />
+      );
+    },
+  };
+});
+
+/** Open the drawer's 「···」 menu and return its items' visible names. */
+function openMenu(): HTMLElement {
+  const trigger = screen.getByTestId('chat-dock-more');
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  return screen.getByTestId('chat-dock-menu');
+}
 
 function dockState(overrides: Partial<ChatDockState> = {}): ChatDockState {
   return {
@@ -79,15 +116,15 @@ describe('ChatDockPanel', () => {
     expect(screen.getByTestId('studio-dock-body')).toBeInTheDocument();
   });
 
-  it('the expand button asks the dock to fill the window; filled, the same button restores it', () => {
+  it('the menu\'s expand item asks the dock to fill the window; filled, the same item restores it', () => {
     const dock = dockState();
     const { rerender } = render(
       <ChatDockPanel dock={dock}>
         <div />
       </ChatDockPanel>,
     );
+    openMenu();
     const button = screen.getByTestId('chat-dock-maximize');
-    expect(button).toHaveAttribute('aria-pressed', 'false');
     expect(button).toHaveAccessibleName('Expand');
     expect(screen.getByTestId('chat-dock-panel')).not.toHaveAttribute('data-full-window');
     fireEvent.click(button);
@@ -105,8 +142,8 @@ describe('ChatDockPanel', () => {
     expect(panel.className).toContain('inset-0');
     // No resize handle on a window-filling panel.
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    openMenu();
     const restore = screen.getByTestId('chat-dock-maximize');
-    expect(restore).toHaveAttribute('aria-pressed', 'true');
     expect(restore).toHaveAccessibleName('Restore side panel');
     fireEvent.click(restore);
     expect(full.setFullWindow).toHaveBeenCalledWith(false);
@@ -136,10 +173,12 @@ describe('ChatDockPanel', () => {
     render(<Host />);
     const before = await screen.findByTestId('default-dock-body');
     const aside = screen.getByTestId('chat-dock-panel');
+    openMenu();
     fireEvent.click(screen.getByTestId('chat-dock-maximize'));
     expect(screen.getByTestId('chat-dock-panel')).toBe(aside);
     expect(aside).toHaveAttribute('data-full-window', 'true');
     expect(screen.getByTestId('default-dock-body')).toBe(before);
+    openMenu();
     fireEvent.click(screen.getByTestId('chat-dock-maximize'));
     expect(aside).not.toHaveAttribute('data-full-window');
   });
@@ -227,5 +266,98 @@ describe('useChatDockState — full window (objectstack#34608)', () => {
     render(<Probe onState={(s) => (state = s)} />);
     expect(state.fullWindow).toBe(true);
     window.sessionStorage.clear();
+  });
+});
+
+describe('the drawer title bar is one row: History, 「···」, Close (objectstack#35445)', () => {
+  afterEach(() => {
+    bodyState.actions = undefined;
+    usageState.usage = null;
+  });
+
+  /** The header's own controls, by accessible name, in order. */
+  function headerControls(): string[] {
+    const header = screen.getByTestId('chat-dock-header');
+    return Array.from(header.querySelectorAll('button')).map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent ?? '',
+    );
+  }
+
+  it('the rail draws History, 「···」 and Close, and nothing else; Close is the drawer 「×」 that keeps the thread', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: true };
+    usageState.usage = { pool: { fraction: 0.3, unmetered: false, upgrade: false, topUp: false } };
+    const dock = dockState();
+    render(<ChatDockPanel dock={dock} />);
+    await screen.findByTestId('default-dock-body');
+    expect(headerControls()).toEqual(['History', 'More actions', 'Close']);
+    // Usage, share, fill and the doctor are not header controls.
+    expect(screen.queryByTestId('ai-usage-indicator')).toBeNull();
+    expect(screen.queryByTestId('chat-dock-share')).toBeNull();
+    expect(screen.queryByTestId('chat-dock-maximize')).toBeNull();
+    expect(screen.queryByTestId('chat-dock-build-doctor')).toBeNull();
+    const close = screen.getByTestId('chat-dock-collapse');
+    expect(close).toHaveAccessibleName('Close');
+    expect(close.querySelector('svg.lucide-x')).not.toBeNull();
+    fireEvent.click(close);
+    expect(dock.collapse).toHaveBeenCalledTimes(1);
+  });
+
+  it('filled, the bar is 「···」 and the same 「×」 Close (history sits beside the chat)', async () => {
+    render(<ChatDockPanel dock={dockState({ fullWindow: true })} />);
+    await screen.findByTestId('default-dock-body');
+    expect(headerControls()).toEqual(['More actions', 'Close']);
+    expect(screen.getByTestId('chat-dock-collapse').querySelector('svg.lucide-x')).not.toBeNull();
+  });
+
+  it('the menu holds usage, Share, Expand and the Build Doctor, and opens the body\'s dialogs', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: true };
+    usageState.usage = { pool: { fraction: 0.3, unmetered: false, upgrade: false, topUp: false } };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    const menu = openMenu();
+    expect(within(menu).getByTestId('chat-dock-usage')).toHaveTextContent('AI usage');
+    expect(within(menu).getByTestId('chat-dock-usage')).toHaveTextContent('Plenty left');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Share',
+      'Expand',
+      'Build Doctor',
+    ]);
+    fireEvent.click(within(menu).getByTestId('chat-dock-share'));
+    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-share-open', 'true');
+    fireEvent.click(within(openMenu()).getByTestId('chat-dock-build-doctor'));
+    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-debug-open', 'true');
+  });
+
+  it('the Build Doctor is not listed when the body withholds it (a user who may not build)', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: false };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    const menu = openMenu();
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Share', 'Expand']);
+    expect(within(menu).queryByTestId('chat-dock-build-doctor')).toBeNull();
+  });
+
+  it('a pool running low marks the 「···」 trigger, so the warning is seen with the menu closed', async () => {
+    usageState.usage = { pool: { fraction: 0.9, unmetered: false, upgrade: false, topUp: false } };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(screen.getByTestId('chat-dock-more-usage-alert')).toBeInTheDocument();
+    expect(within(openMenu()).getByTestId('chat-dock-usage')).toHaveTextContent('Running low');
+  });
+
+  it('CONTROL: a pool with room left puts no marker on the trigger', async () => {
+    usageState.usage = { pool: { fraction: 0.3, unmetered: false, upgrade: false, topUp: false } };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(screen.queryByTestId('chat-dock-more-usage-alert')).toBeNull();
+  });
+
+  it('the phone sheet: History and 「···」 beside the title, no fill item', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: false };
+    render(<ChatDockMobileSheet open onOpenChange={() => {}} />);
+    await screen.findByTestId('default-dock-body');
+    const menu = openMenu();
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Share']);
+    expect(screen.queryByTestId('ai-usage-indicator')).toBeNull();
   });
 });

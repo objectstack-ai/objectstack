@@ -881,7 +881,9 @@ sees the identity provider's own sign-in page and no sign-in page of this
 deployment. Register that door's absolute address as a post-logout redirect URI
 at the provider. It cannot loop: the provider has just ended its own session,
 and the door starts a fresh sign-in without the browser's cookies, so the
-provider asks for credentials. The Console uses the door only while
+provider asks for credentials. A `state` the provider passes back from the
+sign-out is accepted once and ignored, since the door starts a new sign-in with
+its own. The Console uses the door only while
 `features.directSignIn` reads `true`; otherwise, and when the provider has no
 logout to go through, the sign-out ends on the held sign-in page as above.
 

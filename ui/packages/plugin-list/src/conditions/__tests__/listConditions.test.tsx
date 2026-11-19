@@ -1,0 +1,421 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The list's condition controls: the shared field list, the quick filter (a
+ * field, then its values by type, applied on every pick), the sort panel and
+ * the condition row of sort chips, the view's own locked chips and the
+ * reader's filter chips. Click budgets are counted from the view bar trigger,
+ * which the host owns: one click is spent before any of these panels mounts.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import * as React from 'react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import { FieldList, fieldTypeIcon, orderFieldList } from '../FieldList';
+import { FilterValuePanel, quickDateWindowValue } from '../FilterValuePanel';
+import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortDirectionLabel } from '../ListConditionControls';
+import {
+  addSortLevel,
+  chipsAreIndependent,
+  moveSortItem,
+  quickFilterFamily,
+  readViewConditions,
+  type ConditionField,
+} from '../conditionModel';
+import { LIST_CONDITION_DEFAULT_TRANSLATIONS } from '../conditionTranslations';
+
+const STAGE: ConditionField = {
+  value: 'stage',
+  label: 'Stage',
+  type: 'select',
+  options: [
+    { value: 'prospecting', label: 'Prospecting', color: 'blue' },
+    { value: 'proposal', label: 'Proposal', color: '#f59e0b' },
+    { value: 'negotiation', label: 'Negotiation', color: 'green' },
+    { value: 'closed_won', label: 'Closed won', color: 'gray' },
+  ],
+};
+const FIELDS: ConditionField[] = [
+  { value: 'name', label: 'Name', type: 'text' },
+  STAGE,
+  { value: 'amount', label: 'Amount', type: 'currency' },
+  { value: 'close_date', label: 'Close date', type: 'date' },
+  { value: 'is_won', label: 'Won', type: 'boolean' },
+  { value: 'account', label: 'Account', type: 'lookup', referenceTo: 'account' },
+  { value: 'secret_note', label: 'Internal note', type: 'textarea' },
+];
+const SHOWN = ['name', 'amount', 'stage'];
+const EMPTY: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
+
+/** Echo the host: hold the group the panel hands back and hand it in again. */
+function ControlledFilterPanel({ onGroup }: { onGroup: (g: FilterBuilderRowGroup) => void }) {
+  const [group, setGroup] = React.useState<FilterBuilderRowGroup>(EMPTY);
+  return (
+    <FilterPanel
+      fields={FIELDS}
+      shownFields={SHOWN}
+      value={group}
+      onChange={(next) => {
+        setGroup(next);
+        onGroup(next);
+      }}
+      renderAdvanced={() => <div data-testid="advanced-builder">advanced</div>}
+    />
+  );
+}
+
+describe('FieldList — the shared field list', () => {
+  it('lists the fields the view shows first, in column order, then the hidden ones', () => {
+    render(<FieldList fields={FIELDS} shownFields={SHOWN} onPick={() => {}} />);
+    const shown = within(screen.getByTestId('field-list-shown')).getAllByRole('option').map((o) => o.getAttribute('data-field'));
+    const hidden = within(screen.getByTestId('field-list-hidden')).getAllByRole('option').map((o) => o.getAttribute('data-field'));
+    expect(shown).toEqual(['name', 'amount', 'stage']);
+    expect(hidden).toEqual(['close_date', 'is_won', 'account', 'secret_note']);
+    expect(screen.getByText(LIST_CONDITION_DEFAULT_TRANSLATIONS['listConditions.fieldList.hidden'])).toBeTruthy();
+  });
+
+  it('draws a type icon on every row, one icon per type family', () => {
+    render(<FieldList fields={FIELDS} shownFields={SHOWN} onPick={() => {}} />);
+    expect(screen.getAllByTestId('field-list-icon')).toHaveLength(FIELDS.length);
+    expect(fieldTypeIcon('date')).not.toBe(fieldTypeIcon('text'));
+    expect(fieldTypeIcon('select')).not.toBe(fieldTypeIcon('lookup'));
+    expect(fieldTypeIcon('no_such_type')).toBe(fieldTypeIcon('text'));
+  });
+
+  it('narrows to the search on label or name, and Enter picks the first match', () => {
+    const onPick = vi.fn();
+    render(<FieldList fields={FIELDS} shownFields={SHOWN} onPick={onPick} />);
+    const search = screen.getByTestId('field-list-search');
+    fireEvent.change(search, { target: { value: 'sta' } });
+    expect(screen.getAllByRole('option').map((o) => o.getAttribute('data-field'))).toEqual(['stage']);
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ value: 'stage' }));
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(screen.getByTestId('field-list-empty')).toBeTruthy();
+  });
+
+  it('orderFieldList keeps a shown name the field list does not carry out of both halves', () => {
+    const { shown, hidden } = orderFieldList(FIELDS.slice(0, 2), ['ghost', 'stage']);
+    expect(shown.map((f) => f.value)).toEqual(['stage']);
+    expect(hidden.map((f) => f.value)).toEqual(['name']);
+  });
+});
+
+describe('FilterPanel — field, then values by type, applied on every pick', () => {
+  it('filters on one stage in two clicks after the trigger (three in all) and on two stages in four', () => {
+    const groups: FilterBuilderRowGroup[] = [];
+    render(<ControlledFilterPanel onGroup={(g) => groups.push(g)} />);
+    // click 2: the field
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-stage'));
+    // click 3: a value — the list filters now, no Apply
+    fireEvent.click(within(screen.getByTestId('filter-panel-values-option-negotiation')).getByRole('checkbox'));
+    expect(groups).toHaveLength(1);
+    expect(groups[0].conditions).toEqual([
+      expect.objectContaining({ field: 'stage', operator: 'in', value: ['negotiation'] }),
+    ]);
+    // click 4: a second value, applied again at once
+    fireEvent.click(within(screen.getByTestId('filter-panel-values-option-proposal')).getByRole('checkbox'));
+    expect(groups).toHaveLength(2);
+    expect(groups[1].conditions[0]).toEqual(expect.objectContaining({ operator: 'in', value: ['negotiation', 'proposal'] }));
+    // one row, edited in place
+    expect(groups[1].conditions[0].id).toBe(groups[0].conditions[0].id);
+  });
+
+  it('removes the row once its last value is unpicked, and hands nothing up before a value is picked', () => {
+    const groups: FilterBuilderRowGroup[] = [];
+    render(<ControlledFilterPanel onGroup={(g) => groups.push(g)} />);
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-stage'));
+    expect(groups).toHaveLength(0);
+    const box = () => within(screen.getByTestId('filter-panel-values-option-negotiation')).getByRole('checkbox');
+    fireEvent.click(box());
+    fireEvent.click(box());
+    expect(groups.at(-1)?.conditions).toEqual([]);
+  });
+
+  it('draws option values as coloured pills with checkboxes (a multi-pick), never a single-pick dropdown', () => {
+    render(<ControlledFilterPanel onGroup={() => {}} />);
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-stage'));
+    const options = STAGE.options!.map((o) => screen.getByTestId(`filter-panel-values-option-${o.value}`));
+    expect(options).toHaveLength(4);
+    expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBe('true');
+    // the declared hex reaches the pill through custom properties only
+    const hexPill = within(options[1]).getByText('Proposal');
+    expect(hexPill.getAttribute('style') ?? '').toContain('--os-badge-bg');
+    expect(hexPill.getAttribute('style') ?? '').not.toMatch(/(^|;)\s*(background-color|color)\s*:/);
+  });
+
+  it('a text field filters on what is typed (contains), after the typing pauses', () => {
+    vi.useFakeTimers();
+    try {
+      const groups: FilterBuilderRowGroup[] = [];
+      render(<ControlledFilterPanel onGroup={(g) => groups.push(g)} />);
+      fireEvent.click(screen.getByTestId('filter-panel-fields-item-name'));
+      fireEvent.change(screen.getByTestId('filter-panel-values-text'), { target: { value: 'acme' } });
+      expect(groups).toHaveLength(0);
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(groups.at(-1)?.conditions[0]).toEqual(expect.objectContaining({ field: 'name', operator: 'contains', value: 'acme' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a date field offers relative windows, stored as the spec preset macros', () => {
+    const groups: FilterBuilderRowGroup[] = [];
+    render(<ControlledFilterPanel onGroup={(g) => groups.push(g)} />);
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-close_date'));
+    fireEvent.click(screen.getByTestId('filter-panel-values-window-this_month'));
+    expect(groups.at(-1)?.conditions[0]).toEqual(
+      expect.objectContaining({ operator: 'between', value: quickDateWindowValue('this_month') }),
+    );
+    expect(screen.getByTestId('filter-panel-values-custom')).toBeTruthy();
+  });
+
+  it('a boolean field is yes / no; a number field is ≥ and a value', () => {
+    const groups: FilterBuilderRowGroup[] = [];
+    render(<ControlledFilterPanel onGroup={(g) => groups.push(g)} />);
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-is_won'));
+    fireEvent.click(screen.getByTestId('filter-panel-values-boolean-false'));
+    expect(groups.at(-1)?.conditions[0]).toEqual(expect.objectContaining({ field: 'is_won', operator: 'equals', value: false }));
+    fireEvent.click(screen.getByTestId('filter-panel-values-back'));
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-amount'));
+    fireEvent.change(screen.getByTestId('filter-panel-values-number'), { target: { value: '5000' } });
+    expect(groups.at(-1)?.conditions[1]).toEqual(
+      expect.objectContaining({ field: 'amount', operator: 'greater_than_or_equal', value: 5000 }),
+    );
+  });
+
+  it('opens the host’s advanced panel from its footer, and straight away on an OR group', () => {
+    const { unmount } = render(<ControlledFilterPanel onGroup={() => {}} />);
+    fireEvent.click(screen.getByTestId('filter-panel-open-advanced'));
+    expect(screen.getByTestId('advanced-builder')).toBeTruthy();
+    unmount();
+    const orGroup: FilterBuilderRowGroup = {
+      id: 'root',
+      logic: 'or',
+      conditions: [
+        { id: 'a', field: 'stage', operator: 'in', value: ['proposal'] },
+        { id: 'b', field: 'amount', operator: 'greater_than_or_equal', value: 10 },
+      ],
+    };
+    expect(chipsAreIndependent(orGroup)).toBe(false);
+    render(<FilterPanel fields={FIELDS} value={orGroup} onChange={() => {}} renderAdvanced={() => <div data-testid="advanced-builder" />} />);
+    expect(screen.getByTestId('advanced-builder')).toBeTruthy();
+  });
+
+  it('never says 「Where」 / 「其中」', () => {
+    const { container } = render(<ControlledFilterPanel onGroup={() => {}} />);
+    fireEvent.click(screen.getByTestId('filter-panel-fields-item-stage'));
+    expect(container.textContent).not.toMatch(/Where|其中/);
+  });
+});
+
+describe('FilterValuePanel', () => {
+  it('names the operator on top and keeps a row’s own operator selectable', () => {
+    render(
+      <FilterValuePanel
+        field={STAGE}
+        row={{ id: 'r', field: 'stage', operator: 'equals', value: 'proposal' }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('filter-values-operator').textContent).toBe('equals');
+  });
+});
+
+describe('SortPanel — the same field list with the direction on top', () => {
+  it('sorts by amount descending in two clicks after the trigger (three in all)', () => {
+    const onChange = vi.fn();
+    const onDone = vi.fn();
+    render(<SortPanel fields={FIELDS} shownFields={SHOWN} value={[]} onChange={onChange} onDone={onDone} />);
+    expect(screen.getByTestId('sort-panel-order-asc').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByTestId('sort-panel-order-desc'));
+    fireEvent.click(screen.getByTestId('sort-panel-fields-item-amount'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0]).toEqual([expect.objectContaining({ field: 'amount', order: 'desc' })]);
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it('adds a second level after the first; a field already sorting takes the new direction instead', () => {
+    const first: SortItem[] = [{ id: '1', field: 'stage', order: 'asc' }];
+    expect(addSortLevel(first, 'amount', 'desc', '2').map((s) => [s.field, s.order])).toEqual([
+      ['stage', 'asc'],
+      ['amount', 'desc'],
+    ]);
+    expect(addSortLevel(first, 'stage', 'desc', '2')).toEqual([{ id: '1', field: 'stage', order: 'desc' }]);
+  });
+
+  it('words the direction by type: time for dates, size for numbers, the alphabet for text', () => {
+    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
+    expect(sortDirectionLabel('date', 'asc', t as never)).toBe('Oldest → Newest');
+    expect(sortDirectionLabel('currency', 'desc', t as never)).toBe('High → Low');
+    expect(sortDirectionLabel('text', 'asc', t as never)).toBe('A → Z');
+  });
+});
+
+describe('ConditionChipRow — the row under the view bar', () => {
+  const twoStages: FilterBuilderRowGroup = {
+    id: 'root',
+    logic: 'and',
+    conditions: [{ id: 'r1', field: 'stage', operator: 'in', value: ['negotiation', 'proposal'] }],
+  };
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={FIELDS}
+        onSortChange={() => {}}
+        filters={EMPTY}
+        filterFields={FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div data-testid="advanced-builder" />}
+        {...props}
+      />
+    );
+  }
+
+  it('CONTROL: draws nothing at all with no sort, no view condition and no filter', () => {
+    const { container } = render(<div data-testid="slot"><Row onReset={() => {}} /></div>);
+    expect(screen.getByTestId('slot').childElementCount).toBe(0);
+    expect(container.textContent).toBe('');
+  });
+
+  it('a filter chip names the field and its values; × removes it', () => {
+    const onFiltersChange = vi.fn();
+    render(<Row filters={twoStages} onFiltersChange={onFiltersChange} />);
+    expect(screen.getByTestId('filter-chip-stage').textContent).toContain('Stage: Negotiation, Proposal');
+    fireEvent.click(screen.getByTestId('filter-chip-remove-stage'));
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ conditions: [] }));
+  });
+
+  it('clicking a filter chip reopens that condition’s values', () => {
+    render(<Row filters={twoStages} />);
+    fireEvent.click(screen.getByTestId('filter-chip-open-stage'));
+    const panel = screen.getByTestId('condition-panel-r1-values');
+    expect(panel.getAttribute('data-field')).toBe('stage');
+    expect(within(panel).getByTestId('condition-panel-r1-values-option-negotiation').getAttribute('data-checked')).toBe('true');
+  });
+
+  it('draws the view’s own conditions as locked chips with no ×', () => {
+    render(
+      <Row
+        viewFilter={[
+          { field: 'stage', operator: 'not_in', value: ['closed_won'] },
+          ['amount', '>=', 10],
+          { or: [{ field: 'is_won', operator: 'equals', value: false }, { field: 'name', operator: 'contains', value: 'x' }] },
+        ]}
+      />,
+    );
+    const chips = screen.getAllByTestId('view-condition-chip');
+    expect(chips).toHaveLength(3);
+    expect(chips[0].textContent).toBe('Stage: is none of Closed won');
+    expect(chips[0].getAttribute('data-locked')).toBe('true');
+    for (const chip of chips) expect(within(chip).queryByRole('button')).toBeNull();
+    expect(chips[2].textContent).toContain(' or ');
+  });
+
+  it('sort chips come before filter chips, name field and direction, and flip on click', () => {
+    const onSortChange = vi.fn();
+    render(<Row sort={[{ id: 's1', field: 'amount', order: 'asc' }]} filters={twoStages} onSortChange={onSortChange} />);
+    const row = screen.getByTestId('condition-chips');
+    const order = Array.from(row.querySelectorAll('[data-testid^="sort-chip-"], [data-testid^="filter-chip-"]'))
+      .map((el) => el.getAttribute('data-testid'))
+      .filter((id) => id === 'sort-chip-amount' || id === 'filter-chip-stage');
+    expect(order).toEqual(['sort-chip-amount', 'filter-chip-stage']);
+    const toggle = screen.getByTestId('sort-chip-toggle-amount');
+    expect(toggle.textContent).toBe('Amount');
+    expect(toggle.getAttribute('title')).toBe('Low → High');
+    fireEvent.click(toggle);
+    expect(onSortChange).toHaveBeenCalledWith([{ id: 's1', field: 'amount', order: 'desc' }]);
+  });
+
+  it('two sort levels: dragging the second chip onto the first changes the priority', () => {
+    const onSortChange = vi.fn();
+    const sort: SortItem[] = [
+      { id: 's1', field: 'stage', order: 'asc' },
+      { id: 's2', field: 'amount', order: 'desc' },
+    ];
+    render(<Row sort={sort} onSortChange={onSortChange} />);
+    const first = screen.getByTestId('sort-chip-stage');
+    const second = screen.getByTestId('sort-chip-amount');
+    expect(second.getAttribute('draggable')).toBe('true');
+    fireEvent.dragStart(second);
+    fireEvent.dragOver(first);
+    fireEvent.drop(first);
+    expect(onSortChange.mock.calls[0][0].map((s: SortItem) => s.field)).toEqual(['amount', 'stage']);
+    expect(moveSortItem(sort, 0, 1).map((s) => s.field)).toEqual(['amount', 'stage']);
+  });
+
+  it('「Reset」 calls the host, and is disabled while the list is the view’s own', () => {
+    const onReset = vi.fn();
+    const { rerender } = render(<Row filters={twoStages} onReset={onReset} />);
+    fireEvent.click(screen.getByTestId('condition-reset'));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    rerender(<Row viewFilter={[['amount', '>=', 10]]} onReset={onReset} resetDisabled />);
+    expect((screen.getByTestId('condition-reset') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('an OR group is one chip that opens the advanced panel', () => {
+    render(
+      <Row
+        filters={{
+          id: 'root',
+          logic: 'or',
+          conditions: [
+            { id: 'a', field: 'stage', operator: 'in', value: ['proposal'] },
+            { id: 'b', field: 'name', operator: 'contains', value: 'x' },
+          ],
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('filter-chip-stage')).toBeNull();
+    fireEvent.click(screen.getByTestId('filter-chip-open-advanced'));
+    expect(screen.getByTestId('advanced-builder')).toBeTruthy();
+  });
+
+  it('an unfinished row draws no chip', () => {
+    const { container } = render(
+      <div data-testid="slot">
+        <Row filters={{ id: 'root', logic: 'and', conditions: [{ id: 'x', field: 'stage', operator: 'in', value: [] }] }} />
+      </div>,
+    );
+    expect(container.querySelector('[data-testid="condition-chips"]')).toBeNull();
+  });
+});
+
+describe('condition model', () => {
+  it('picks the value control from the field type', () => {
+    expect(quickFilterFamily(STAGE)).toBe('option');
+    expect(quickFilterFamily({ type: 'lookup' })).toBe('lookup');
+    expect(quickFilterFamily({ type: 'currency' })).toBe('number');
+    expect(quickFilterFamily({ type: 'datetime' })).toBe('date');
+    expect(quickFilterFamily({ type: 'boolean' })).toBe('boolean');
+    expect(quickFilterFamily(undefined)).toBe('text');
+  });
+
+  it('reads a view filter of rules, triples and any-of groups; any other shape is one unnamed chip', () => {
+    expect(readViewConditions(undefined)).toEqual([]);
+    expect(readViewConditions([])).toEqual([]);
+    expect(readViewConditions(['status', '=', 'open'])).toEqual([{ key: 'view-0', field: 'status', operator: '=', value: 'open' }]);
+    expect(readViewConditions({ status: { $ne: 'closed' } })).toEqual([{ key: 'view-0' }]);
+    expect(readViewConditions(['and', ['a', '=', 1], ['b', '=', 2]])).toEqual([{ key: 'view-0' }]);
+  });
+
+  it('describes a chip value by operator: a bare list for 「is any of」, the operator named otherwise', () => {
+    const t = (key: string, o?: Record<string, unknown>) =>
+      (LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, k) => String(o?.[k] ?? ''));
+    expect(describeConditionValue(STAGE, 'in', ['proposal', 'negotiation'], t as never)).toBe('Proposal, Negotiation');
+    expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
+    expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
+    expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+  });
+});
