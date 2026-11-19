@@ -402,17 +402,19 @@ export function refuseStoredMetadataBodyReads<T>(api: T): T {
 /**
  * The symbol-keyed member of objectql's `ScopedContext` that derives the
  * platform's own system api (`platformSystemApi`, `platform-system-api.ts`),
- * named through `Symbol.for` because neither package entry exports it.
+ * named through `Symbol.for` because neither package entry exports it: the
+ * action door's provenance layer answers it with `sudo()` (`answeredBy`).
  */
 export const PLATFORM_SYSTEM_API: unique symbol = Symbol.for('objectstack.objectql.platformSystemApi');
 
 /**
  * The walk both layers share: `api`, and every context it can derive —
- * `object(name)`, `sudo()`, `withRunAs(...)`, the api `platformSystemApi(api)`
- * derives ({@link PLATFORM_SYSTEM_API}), the context a `transaction(fn)`
- * callback receives, and the `ctx` `beginTransaction()` returns — with each
- * repository passed through `wrapRepository`. One definition of what a scoped
- * API can derive, so neither layer can leave a route around it. [#28861] The
+ * `object(name)`, `sudo()`, `withRunAs(...)`, the api a symbol-keyed member
+ * derives (`platformSystemApi(api)`'s {@link PLATFORM_SYSTEM_API}, the
+ * user-grants seed), the context a `transaction(fn)` callback receives, and
+ * the `ctx` `beginTransaction()` returns — with each repository passed
+ * through `wrapRepository`. One definition of what a scoped API can derive,
+ * so neither layer can leave a route around it. [#28861] The
  * landed-write layer (`landed-write-answer.ts`) walks it too, and so does the
  * action door's provenance layer (`action-execution.ts`), which alone passes
  * `answeredBy`: a member named there is answered by the member it maps to (on
@@ -438,7 +440,6 @@ export function deriveThroughSeam<T>(
           return (name: string, ...rest: unknown[]) => wrapRepository(name, value.call(target, name, ...rest));
         case 'sudo':
         case 'withRunAs':
-        case PLATFORM_SYSTEM_API:
           return (...args: unknown[]) => wrap(value.apply(target, args));
         case 'transaction':
           return (callback: unknown, ...rest: unknown[]) =>
@@ -454,8 +455,25 @@ export function deriveThroughSeam<T>(
             const begun = await value.apply(target, args);
             return isPlainRecord(begun) && 'ctx' in begun ? { ...begun, ctx: wrap(begun.ctx) } : begun;
           };
-        default:
-          return value.bind(target);
+        default: {
+          if (typeof prop !== 'symbol') return value.bind(target);
+          // A symbol-keyed member: objectql's own, which no package entry
+          // names, reached through a published reader (`platformSystemApi`,
+          // `seedHookUserGrants`, `seedHookUnreadMembership`). One that derives
+          // an api answers one of this api's own kind, now or through a
+          // promise, and that api is wrapped as `sudo()`'s is; any other
+          // answer passes through as it is.
+          const derivedOrAsIs = (answer: unknown) =>
+            answer !== null && typeof answer === 'object' && Object.getPrototypeOf(answer) === Object.getPrototypeOf(target)
+              ? wrap(answer)
+              : answer;
+          return (...args: unknown[]) => {
+            const answer = value.apply(target, args);
+            return typeof (answer as PromiseLike<unknown> | null)?.then === 'function'
+              ? (answer as PromiseLike<unknown>).then(derivedOrAsIs)
+              : derivedOrAsIs(answer);
+          };
+        }
       }
     },
   }) as unknown as T;

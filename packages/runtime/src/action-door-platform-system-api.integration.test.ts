@@ -28,7 +28,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 // Paid at collection: the action path reaches a dynamic import of this package inside a clocked case.
 import '@objectstack/metadata';
-import { ObjectQL, platformSystemApi } from '@objectstack/objectql';
+import { ObjectQL, platformSystemApi, seedHookUserGrants, seedHookUnreadMembership } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -191,6 +191,21 @@ describe("what platformSystemApi derives from the action door's api stays inside
     expect((bare as any)[ACTION_DOOR_ORIGIN]).toBeUndefined();
     expect((platformSystemApi(bare) as any)[SERVED_BY_LANDED_WRITE_ANSWER]).toBeUndefined();
   }, 30000);
+});
+
+describe("what the published user-grants seeds derive from the action door's api keeps the flag and the mark", () => {
+  for (const [name, seed] of [['seedHookUserGrants', seedHookUserGrants], ['seedHookUnreadMembership', seedHookUnreadMembership]] as const) {
+    it(`${name}: the seeded api is served by all three layers, and an insert into sys_member through platformSystemApi on it is refused`, async () => {
+      const engine = await boot();
+      const seeded: any = await seed(actionApi(engine));
+      expect(seeded[ACTION_DOOR_ORIGIN]).toBe(true);
+      expect(seeded[SERVED_BY_READ_SEAM]).toBe(true);
+      expect(seeded[SERVED_BY_LANDED_WRITE_ANSWER]).toBe(true);
+
+      expectIdentityRefused(await refusal(() => platformSystemApi(seeded)!.object('sys_member').insert(ROWS.sys_member('seeded'))), 'sys_member');
+      expect(await stored(engine, 'sys_member', 'seeded')).toBe(null);
+    }, 30000);
+  }
 });
 
 describe("CONTROL: the api the audit writer holds is not the action door's", () => {

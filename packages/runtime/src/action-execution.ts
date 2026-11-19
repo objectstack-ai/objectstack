@@ -3960,7 +3960,9 @@ const ACTION_DOOR_ANSWERS: ReadonlyMap<PropertyKey, PropertyKey> = new Map([[PLA
 
 /**
  * The action door's provenance layer: `api`, and every api derived from it
- * (the shared walk, `deriveThroughSeam`), carry {@link ACTION_DOOR_ORIGIN},
+ * (the shared walk, `deriveThroughSeam`: `sudo()`, `withRunAs(...)`, a
+ * transaction's context, and the api a symbol-keyed member derives, the
+ * user-grants seed's included), carry {@link ACTION_DOOR_ORIGIN},
  * and on each the platform's own system api (`platformSystemApi`, objectql)
  * is the api's `sudo()`: the `'action'` mark {@link buildActionExecutionContext}
  * sets, and any `flowRunId`, stay. So a handler handing its own `ctx.api` to
