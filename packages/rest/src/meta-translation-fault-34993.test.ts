@@ -10,6 +10,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: the server's reach loads it lazily.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 const ACCOUNT = { name: 'showcase_account', label: 'Account', fields: { industry: { name: 'industry', type: 'text', label: 'Industry' } } };
