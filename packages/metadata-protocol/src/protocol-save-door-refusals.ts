@@ -1004,22 +1004,47 @@ const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'igno
  * The body of `ObjectStackProtocolImplementation#seedExternalIdSaveRefusal`;
  * the method's docblock there is its contract. Written here, beside the other
  * refusals the save door and the publish promotion ask in turn, rather than
- * moved: its reads are the engine's registered object and, on a draft save,
- * the object drafts.
+ * moved: its reads are the engine's registered object, the by-name object
+ * read (`readMetaItem`) and, on a draft save, the object drafts.
  */
 export async function seedExternalIdSaveRefusal(
-    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts'>,
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts' | 'readMetaItem'>,
     singularType: string,
     item: unknown,
     name: string,
     pending?: 'drafts' | ReadonlyArray<unknown>,
     writeFace?: MetadataWriteFace,
+    door?: 'save',
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'seed') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
     const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
     if (typeof seed.object !== 'string' || seed.object === '') return undefined;
     const objectName = seed.object;
+    // The object as the publish will have it: a draft of it in the same
+    // package batch, else the engine's registered definition (its fields as
+    // the runtime serves them, extension fields and injected columns
+    // included). On a draft save, an object that is itself still a draft may
+    // gain the field before it is published, so the seed is judged at its
+    // publish instead.
+    const pendingObject = Array.isArray(pending)
+        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
+        : undefined;
+    if (!pendingObject && pending === 'drafts'
+        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
+        return undefined;
+    }
+    const registry = this.engine?.registry as { getObject?(name: string): unknown } | undefined;
+    const registered = registry?.getObject?.(objectName) as { fields?: unknown } | undefined;
+    // [#34864] An object resolved by neither: the save door refuses it, so
+    // the seed is never stored to load into nothing; the publish promotion
+    // and the restore doors leave it to the load, which reports an object it
+    // cannot find (#27393 keeps the publish as it is).
+    if (!pendingObject && !registered) {
+        return door === 'save'
+            ? unknownSeedObjectRefusal(this, typeof registry?.getObject === 'function', objectName, name, pending, writeFace)
+            : undefined;
+    }
     // `SeedSchema`'s defaults, as the loader applies them (the `mode` default,
     // read from the schema rather than restated here [#30081], and
     // `externalId: 'name'`): a body read before the parse filled them keys the
@@ -1030,23 +1055,6 @@ export async function seedExternalIdSaveRefusal(
     const externalId = declared ? seed.externalId : 'name';
     const composite = Array.isArray(externalId);
     const members = (composite ? externalId : [externalId]) as unknown[];
-    // The object as the publish will have it: a draft of it in the same
-    // package batch, else the engine's registered definition (its fields as
-    // the runtime serves them, extension fields and injected columns
-    // included). On a draft save, an object that is itself still a draft may
-    // gain the field before it is published, so the seed is judged at its
-    // publish instead. An object resolved by neither is not judged here:
-    // the load reports an object it cannot find.
-    const pendingObject = Array.isArray(pending)
-        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
-        : undefined;
-    if (!pendingObject && pending === 'drafts'
-        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
-        return undefined;
-    }
-    const registered = (this.engine?.registry as { getObject?(name: string): unknown } | undefined)
-        ?.getObject?.(objectName) as { fields?: unknown } | undefined;
-    if (!pendingObject && !registered) return undefined;
     const fieldNames = new Set<string>(resolveInjectedSystemColumns(pendingObject ?? registered).names);
     for (const def of [registered, pendingObject]) {
         const fields = def?.fields;
@@ -1072,6 +1080,60 @@ export async function seedExternalIdSaveRefusal(
     }));
     const err = new Error(
         `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
+/**
+ * [#34864] The save door's refusal of a seed whose `object` neither a draft
+ * of the same save (asked by the caller) nor the engine's registry resolves.
+ * Before it, such a seed was stored 200; its publish then reported
+ * `published` with a failed load, and the probe asked the author to publish
+ * again, which could never work.
+ *
+ * Unknown follows the permission-set grant refusal ({@link unknownGrantObjectSaveRefusal}):
+ * a registry that cannot look an object up by name cannot say a name is
+ * unknown, so nothing is refused on it; an object the environment stores or
+ * the code layer defines that the registry has not (yet) registered is known
+ * (`readMetaItem`); a name two packages hold is held, so known too. An object
+ * of a dependency package answers the same registry read as the package's
+ * own. Answered as the schema gate answers: `422 INVALID_METADATA`, one
+ * finding at `object`, naming the seed and the object, and the fix.
+ */
+async function unknownSeedObjectRefusal(
+    host: Pick<SaveDoorRefusalHost, 'readMetaItem'>,
+    canLookUp: boolean,
+    objectName: string,
+    name: string,
+    pending: 'drafts' | ReadonlyArray<unknown> | undefined,
+    writeFace: MetadataWriteFace | undefined,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (!canLookUp) return undefined;
+    try {
+        if ((await host.readMetaItem({ type: 'object', name: objectName }))?.item) return undefined;
+    } catch (error) {
+        if (error instanceof PackageScopedNameRefusedError) return undefined;
+        throw error;
+    }
+    const draft = pending === 'drafts';
+    const looked = draft
+        ? 'no package registers an object of that name, and no object, published or draft, is saved here'
+        : 'no package registers an object of that name, and no published object is saved here';
+    const fix = draft
+        ? 'or create the object first: a draft of it is enough for this draft.'
+        : 'or create and publish the object first.';
+    const issues: MetadataIssueEntry[] = [{
+        path: 'object',
+        message: `Seed '${name}' loads its records into object '${objectName}', which is not defined: ${looked}, `
+            + "so publishing it would load no record. Correct the name to the object's full name "
+            + `(e.g. 'crm_lead', not 'lead'), ${fix}`,
+        code: 'custom',
+    }];
+    const err = new Error(
+        `seed/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
     ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
     err.code = 'INVALID_METADATA';
     err.status = 422;
