@@ -398,8 +398,9 @@ test.describe('app list in a narrowed main area — no fixed column covers a dat
       expect(r.actions.stick, 'the "⋮" column is not in the frozen zone').toBe('left');
       expect(r.frozen).toEqual(['name', '_actions']);
       expect(r.inlineButtons, 'inline buttons are drawn although the table overflows').toBe(0);
-      expect(r.box.scrollbarHeight, 'the horizontal scrollbar takes no room').toBeGreaterThan(0);
-      expect(r.box.scrollbarColor, 'the scrollbar is transparent at rest').not.toMatch(/^transparent/);
+      // Headless Chromium draws no scrollbar at all (its room reads 0 either
+      // way), so the bar is read from its colour at rest.
+      expect(r.box.scrollbarColor, 'the scrollbar is transparent at rest').not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))/);
       expect(await lastColumnReachable(page, 'close_date'), 'the last column cannot be reached by scrolling').toBe(true);
       await archiveFromMenu(page);
     });
@@ -417,6 +418,7 @@ test.describe('app list in a narrowed main area — no fixed column covers a dat
     expect(r.frozen).toEqual(['name']);
     expect(r.overlap.px).toBeLessThanOrEqual(0.5);
     expect(r.covered).toEqual([]);
+    expect(r.box.scrollbarColor, 'a table that fits draws its scrollbar at rest').toMatch(/^(transparent|rgba\(0, 0, 0, 0\))/);
     await archiveFromMenu(page);
   });
 
