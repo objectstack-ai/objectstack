@@ -640,10 +640,10 @@ describe('Seed.fallback on the boot and install paths', () => {
         });
 
         /**
-         * The shared `seed-datasets` list is appended to on every merge: boot
-         * rehydrate, install / upgrade and reseed each add the package's
-         * datasets again. The loader counts distinct declarations, so the
-         * second copy of the one fallback set is not a second fallback set.
+         * An un-owned merge appends to the shared `seed-datasets` list, as a
+         * config app's boot does (the install door replaces its package's
+         * entries instead, #35109). The loader counts distinct declarations,
+         * so a second copy of the one fallback set is not a second fallback set.
          */
         it('a replay after the same package merged twice still gets the fallback set, and the rest seeds', async () => {
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
@@ -684,9 +684,10 @@ describe('Seed.fallback on the boot and install paths', () => {
         });
 
         /**
-         * An upgrade in a running process appends version 2's datasets beside
-         * version 1's on the shared list. When the marked set changed between
-         * the versions, the list holds two distinct marked declarations of one
+         * Two un-owned merges of one app's versions leave version 2's datasets
+         * beside version 1's on the shared list (the install door's upgrade no
+         * longer does, #35109). When the marked set changed between the
+         * versions, the list holds two distinct marked declarations of one
          * object from one correctly authored package. Only the fallback choice
          * is refused: an `en` organization gets what the same versions give it
          * unmarked, and a `ja-JP` organization gets what it got before the key
