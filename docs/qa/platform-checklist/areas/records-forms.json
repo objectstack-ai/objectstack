@@ -3503,7 +3503,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3528,7 +3528,7 @@
       ],
       "steps": [
         "open showcase_task grid; screenshot",
-        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a density with the list's one density control, a button that steps to the next mode on each click (its title 'Density: MODE (click to cycle)', ui/packages/plugin-list/src/ListView.tsx; QA run #33861 met it in the Display popover), not a menu of options — three modes, Compact / Comfortable / Spacious, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
+        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery keeps one card-size button that steps to the next mode on each click) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
         "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
         "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
@@ -3543,7 +3543,7 @@
           "evidence": "before/after-reload screenshots + the storage value"
         },
         {
-          "clause": "the toolbar density persists across reload (Compact / Comfortable / Spacious — the runtime control offers three modes over the spec's five rowHeight values)",
+          "clause": "the toolbar row height persists across reload (Compact / Standard / Spacious — the runtime control offers three modes over the spec's five rowHeight values)",
           "oracle": "dom",
           "verify": "the reloaded grid renders at the chosen density (ObjectGrid rowHeightMode), and the preference row's rowHeight reads compact / medium / tall for the three modes",
           "evidence": "before/after screenshots"
@@ -3624,6 +3624,12 @@
           "date": "2026-11-15",
           "change": "steps[1] names the density control as one cycling button, and steps[3] says a runtime group-by persists in the URL (uf__group), not in the user's list preference, so a bare-URL reload drops it by design; 'Add group field' groups by the first field at once. QA run #33861, ledger row 142. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-19",
+          "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the grid's cycling density button; a gallery keeps its card-size button. Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
+          "ref": "#35551"
         }
       ]
     },
@@ -3632,7 +3638,7 @@
       "title": "Admin saved-view lifecycle: create kanban via dialog (staged as a per-item draft, live only after Publish), rename/set-default/pin/delete each hit the meta overlay and survive reload; non-admin affordances absent and server-refused",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3651,6 +3657,7 @@
       },
       "variants": [
         "create-kanban",
+        "create-in-place",
         "rename",
         "set-default",
         "pin",
@@ -3663,6 +3670,7 @@
         "set the view as default (unsets the prior default); capture the PUT(s). Where the prior default is a packaged view, its unset goes through the customization pair, POST /api/v1/packages/BASE/ensure-customization (BASE the view's package, com.example.showcase) then a PUT with ?package=com.example.showcase.custom, so the PUTs come in two shapes (QA run #33861); reload confirms the default moved",
         "pin the view; capture the PUT (isPinned); reload confirms it pinned",
         "delete the view; capture DELETE /api/v1/meta/view/<name>; reload confirms it is gone",
+        "as the admin, open the view dropdown (the view bar's switcher) and use 添加视图 / Add view at its foot: the dropdown turns into the create card (name, view type with icons, the one field the type needs — kanban: the group field — 包含当前的筛选和排序 while the list holds unsaved filters or sort, on by default, and a personal / shared switch for a reader who may create shared views). Create a kanban grouped by status with the switch left on personal: capture the write — one of the reader's own views, a sys_personal_view row whose config carries {type:'kanban', kanban:{groupByField:'status', columns:[…]}} — and confirm the list opens on it and it is listed under 我的视图 / My views in the dropdown. Repeat once with the switch on shared: the same draft PUT …?mode=draft and ?preview=draft landing as steps[0], under a machine key generated from the name (no key field is asked for). Count the clicks from the dropdown to the open new view",
         "as the non-admin, open the same object; confirm the create-view and manage-views (rename/default/pin/delete) affordances are ABSENT",
         "as the non-admin, forge a direct PUT /api/v1/meta/view/<name>; capture the refusal"
       ],
@@ -3678,6 +3686,12 @@
           "oracle": "network",
           "verify": "one PUT per rename/pin/isDefault (updateView read-merge-write) and a DELETE /api/v1/meta/view/<name> for delete (deleteView → meta.deleteItem); reload reflects each. On the PUBLISHED view (no draft pending) each write goes straight to the live overlay — a PUT with no ?mode=draft, and no publish step; while a draft is still pending, updateView writes that draft instead (data-objectstack updateView probes ?state=draft first)",
           "evidence": "the four traces + post-reload states"
+        },
+        {
+          "clause": "the dropdown's Add view creates in place: by default one of the reader's OWN views (a sys_personal_view row, no metadata write), opened at once; with the shared switch, the same draft-first create as acceptance[0], its machine key generated (unique among the object's views) and never asked for. The card offers the shared switch only to a reader who may create shared views",
+          "oracle": "network",
+          "verify": "the captured sys_personal_view create (personal) and the draft PUT + ?preview=draft landing (shared); the dropdown lists the new view under My views (personal) after a reload; the non-admin's card shows no shared switch",
+          "evidence": "the two create traces + the dropdown screenshot + the click count"
         },
         {
           "clause": "the non-admin lacks the mutation affordances: the create-view control and the Manage Views rename/default/pin/delete actions are ABSENT (ManageViewsDialog suppresses mutation affordances for system/read-only)",
@@ -3725,6 +3739,12 @@
           "date": "2026-11-15",
           "change": "steps[3] names the two PUT shapes: unsetting a packaged prior default goes through the customization pair (ensure-customization, then PUT ?package=com.example.showcase.custom), not a plain PUT. The clause still holds. QA run #33861, ledger row 151. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-19",
+          "change": "added the create-in-place variant, a step before the non-admin steps and an acceptance clause before the non-admin clause: the view dropdown's Add view turns into a create card that makes one of the reader's own views by default (sys_personal_view, opened at once) or, through the shared switch for a reader allowed to, the same draft-first create as acceptance[0] under a generated machine key. The existing clauses are unchanged.",
+          "ref": "#35553"
         }
       ]
     },
