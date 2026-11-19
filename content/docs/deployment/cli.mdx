@@ -147,7 +147,7 @@ os init my-app --no-install       # Skip dependency installation
 |----------|-----------------|
 | `app` | Full application with objects, barrel imports |
 | `plugin` | **Metadata package**: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
-| `empty` | Minimal project with just `objectstack.config.ts` |
+| `empty` | Minimal project: `objectstack.config.ts` and one starter test |
 
 The `app` and `plugin` templates declare their starter object with
 `ObjectSchema.create({ … })` — the one authorised shape for a `*.object.ts`, and the

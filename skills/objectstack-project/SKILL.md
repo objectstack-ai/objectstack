@@ -74,9 +74,9 @@ which automation fires · which screens change · translations ·
 ## 2 · Testing: what the app pins, what the platform checks
 
 The platform checks consistency. The app tests its own business facts. Run all
-four before calling a change done (a scaffolded project's CI runs the first
-three; add `pnpm test` to its `ci.yml`). A project from `os init` has no `test`
-script: add vitest, `@objectstack/verify` and the script first.
+four before calling a change done; a scaffolded project's CI runs them (an
+older scaffold may lack the `pnpm test` step: add it). No `test` script? Add
+vitest, `@objectstack/verify` and the script.
 Only errors fail `validate` and `lint`; a warning, such as label case or an
 unresolved navigation target, passes. `--strict` on either makes warnings fail:
 use it instead of re-checking them in a test.
