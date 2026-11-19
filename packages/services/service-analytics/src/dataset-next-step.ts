@@ -7,7 +7,8 @@ import type {
   DatasetTermCandidate,
   DatasetToolCatalogEntry,
 } from '@objectstack/spec/ai';
-import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/system';
+import { pickSentenceLocale } from '@objectstack/core';
+import type { PlatformLocaleTag } from '@objectstack/spec/system';
 
 /**
  * [ADR-0149 M1, the amendment note under it; ruling #34894 = A] The two
@@ -113,9 +114,9 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
  * the ones the door already put on the caller's `ExecutionContext` (`locale`,
  * `workspaceLocale`), the context the executor resolves every label with, so
  * the HTTP door and the stdio door get the same sentence for the same caller.
- * A code is read through the platform locale table (`platformLocaleTagOf`),
- * whole and then one subtag shorter at a time; a language with no sentences
- * here takes the next rung.
+ * A code is read through the platform locale table, whole and then one
+ * subtag shorter at a time, by the shared picker (`pickSentenceLocale`,
+ * `@objectstack/core`); a language with no sentences here takes the next rung.
  */
 
 /** The languages this file writes, keyed by platform locale tag; `en` is the floor. */
@@ -251,34 +252,18 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
   },
 };
 
-/**
- * The platform locale a code names, or `undefined`: the whole code through
- * `platformLocaleTagOf`, then each shorter prefix one subtag at a time (RFC
- * 4647 lookup: `zh-CN` → `zh-Hans`, `en-GB` → `en`, `zh-Hant-TW` → `zh-Hant`).
- * The first prefix the table names decides, so a Traditional Chinese code is
- * never handed the Simplified sentence.
- */
-function platformLocaleNamedBy(code: string | undefined): PlatformLocaleTag | undefined {
-  if (typeof code !== 'string' || code.length === 0) return undefined;
-  const subtags = code.split('-');
-  for (let n = subtags.length; n > 0; n -= 1) {
-    const tag = platformLocaleTagOf(subtags.slice(0, n).join('-'));
-    if (tag !== undefined) return tag;
-  }
-  return undefined;
-}
+/** The languages {@link COPY} writes, in its key order. */
+const NEXT_STEP_LOCALES = Object.keys(COPY) as NextStepLocale[];
 
 /**
  * The language a sentence is written in for an ordered list of candidate codes
  * (the request's locale, then the workspace default): the first that names a
- * language this file writes, else `en`.
+ * language this file writes, else `en`. The shared picker
+ * (`pickSentenceLocale`, `@objectstack/core`), so every sentence in a tool's
+ * result reads the caller's locale the same way.
  */
 export function datasetToolSentenceLocale(locales: readonly (string | undefined)[]): NextStepLocale {
-  for (const code of locales) {
-    const tag = platformLocaleNamedBy(code);
-    if (tag !== undefined && Object.prototype.hasOwnProperty.call(COPY, tag)) return tag as NextStepLocale;
-  }
-  return 'en';
+  return pickSentenceLocale(locales, NEXT_STEP_LOCALES);
 }
 
 /**

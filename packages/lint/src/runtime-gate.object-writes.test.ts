@@ -162,6 +162,9 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // at the metadata save gate and by `os validate`. Its refusal and the
       // re-save of a stored row that carries it are in the cases below.
       'validateTitleFormatRetired',
+      // A state machine with no entry guard, judged on the object's own body
+      // (`validate-inert-object-declarations.ts`).
+      'validateInertObjectDeclarations',
       'lintAutonumberFormats',
       // A ruled join: the card's acceptance names this door. R13 judges a
       // roll-up's aggregand against the child objects the snapshot carries
@@ -564,6 +567,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validatePresetComparands',
       'validateReferenceIntegrity', // [#15254]
       'validateTitleFormatRetired', // [#29007] — see the roster pin above
+      'validateInertObjectDeclarations', // see the roster pin above
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
       'lintDuplicateFieldLabels', // see the roster pin above

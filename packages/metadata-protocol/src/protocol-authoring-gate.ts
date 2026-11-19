@@ -51,6 +51,8 @@ import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from 
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
+import { noPendingDraftError } from './protocol-authoring-refusals.js';
+import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { withDisabledExtensionsFolded } from './metadata-diagnostics.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
@@ -97,6 +99,8 @@ export interface AuthoringGateHost {
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
+    /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
+    sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -317,7 +321,7 @@ export function withTargetFoldedWithout(
  * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
  * collections every judgement of the shared rules is made against.
  */
-type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>;
+type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'>;
 
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
@@ -605,6 +609,11 @@ export async function judgeRuntimeAuthoringRules(
     // gate stays pure.
     const rlsMembershipResolverKeys = this.rlsMembershipResolverKeys();
 
+    // The automation engine's node-type vocabulary, stated only once the engine
+    // has sealed it — a host fact of the same kind, read here per publish, on a
+    // flow write only, and passed in so the gate stays pure.
+    const flowNodeTypeVocabulary = singular === 'flow' ? this.sealedFlowNodeTypeVocabulary() : undefined;
+
     // [#26188] Is a hierarchy resolver mounted — a host fact of the same kind,
     // read here per publish and passed in so the gate stays pure.
     const hierarchyResolverMounted = this.hierarchyResolverMounted();
@@ -654,6 +663,8 @@ export async function judgeRuntimeAuthoringRules(
         // [#25234] The resolver's keys, read per publish; with them the
         // gate judges who owns each membership key.
         ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
+        // With it the gate refuses a flow node no executor of this deployment runs.
+        ...(flowNodeTypeVocabulary !== undefined ? { flowNodeTypeVocabulary } : {}),
         // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
         // [#28448] With it the gate refuses a rule copy that changes what the package owns.
@@ -746,20 +757,57 @@ export async function draftPublishVerdict(
  * publish checks before Publish is pressed. One run of the same rules;
  * `userTextLocales` picks the language of the advisories' user sentences and
  * nothing else.
+ *
+ * [#34766] The class method is PUBLIC: it is the publish verdict a door that
+ * cannot publish answers with (the open MCP draft door's save and its draft
+ * list), so its caller can tell its author what a publish would refuse before
+ * a person presses Publish. Each issue keeps every member the publish 422
+ * carries (`rule`, `path`, `where`, `message`, `hint`, `severity`); the draft
+ * read's `_diagnostics` folds them and drops the `hint`, the next step.
+ *
+ * Such a door holds no stored row, so `body` may be omitted: the judgement
+ * then reads the stored draft itself, at the address `packageId` (`null` = the
+ * package-unbound draft) and `member` name, exactly as the draft read hands
+ * the row it serves (the bytes as stored, never a served or redacted copy),
+ * and an address that holds no draft is refused `404 NO_DRAFT`, the strict
+ * draft read's own refusal ({@link noPendingDraftError}). Never a second
+ * judgement: the same rules, on the same body, as the draft read's verdict.
  */
 export async function draftPublishJudgement(
     this: DraftVerdictHost,
     draft: {
-        type: string; name: string; body: unknown; packageId: string | null;
+        /** [#34766] Omitted ⇒ the stored draft at (`type`, `name`, `packageId`, `member`) is read and judged. */
+        type: string; name: string; body?: unknown; packageId: string | null;
+        /** [#34766] The bundle member whose stored draft to read when `body` is omitted; omitted, the canonical member. */
+        member?: string;
         /**
          * [#34818] The locales the advisories' user sentences are composed in
          * (`GetMetaItemRequestSchema.userTextLocales`, stated by the draft read
          * doors). Absent ⇒ `en`. Selects a language, never a verdict.
          */
         userTextLocales?: readonly (string | undefined)[];
+        /**
+         * [#34766] One map per pass, for a caller that judges several drafts in
+         * one answer (the open MCP door's draft list): a package's closure is
+         * collected on its first draft and reused for the rest, since it is a
+         * function of the package alone, never of the draft judged. Absent ⇒
+         * collected on this call, as before.
+         */
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
     },
 ): Promise<DraftPublishJudgement> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
+    // [#34766] No body handed: the stored draft at the address, as stored.
+    let body = draft.body;
+    if (body === undefined) {
+        const repo = this.getOverlayRepo();
+        const stored = await repo.get(
+            { type: singular, name: draft.name, org: 'env' } as Parameters<typeof repo.get>[0],
+            { state: 'draft', packageId: draft.packageId, ...memberOption(draft.member) },
+        );
+        if (!stored) throw noPendingDraftError(draft.type, draft.name);
+        body = stored.body;
+    }
     // The closure "Publish all" judges this draft against: its package's other
     // drafts, collected by the batch door's own collector from the batch door's
     // own listing. A package-unbound draft has no batch; its publish is the
@@ -768,7 +816,13 @@ export async function draftPublishJudgement(
     if (draft.packageId) {
         const repo = this.getOverlayRepo();
         if (typeof repo.listDrafts === 'function') {
-            pending = await this.collectBatchPendingDeclarations(await repo.listDrafts({ packageId: draft.packageId }));
+            const packageId = draft.packageId;
+            let closure = draft.packageClosures?.get(packageId);
+            if (!closure) {
+                closure = repo.listDrafts({ packageId }).then((drafts) => this.collectBatchPendingDeclarations(drafts));
+                draft.packageClosures?.set(packageId, closure);
+            }
+            pending = await closure;
         }
     }
     // The promotion's restored-credential read: the stored draft holds no
@@ -780,11 +834,11 @@ export async function draftPublishJudgement(
         state: 'active',
         // [#29557] The body the promotion judges: a flow draft in its
         // D2-converted spelling, every other draft as stored.
-        body: storedFlowVerdictBody(singular, draft.body),
+        body: storedFlowVerdictBody(singular, body),
         packageId: draft.packageId,
         ...(pending !== undefined ? { pending } : {}),
         ...(channel
-            ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: draft.body }) }
+            ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: body }) }
             : {}),
         ...(draft.userTextLocales !== undefined ? { userTextLocales: draft.userTextLocales } : {}),
     });
@@ -824,4 +878,38 @@ export async function draftPublishJudgement(
         });
     }
     return { refusals: told.length > 0 ? [...told, ...issues] : issues, advisories: verdict.advisories };
+}
+
+/**
+ * [#34776] The node types the registered automation engine runs, read through
+ * its `getSealedNodeTypeVocabulary()`: the input the runtime publish gate
+ * refuses a flow node no executor runs with (`flow-node-type-no-executor`).
+ *
+ * Read per write, as the posture probes read their services, and recorded
+ * nowhere. `undefined` (the CLI's reading, under which no node type is judged)
+ * when the host has no registry, no automation service, or an engine that has
+ * not sealed its vocabulary yet: before the seal a plugin may still contribute
+ * a type, so "no executor" is not a verdict anyone may act on (AGENTS.md
+ * "Startup registry reads").
+ */
+export function sealedFlowNodeTypeVocabulary(
+    this: { readonly getServicesRegistry?: () => Map<string, any> },
+): readonly string[] | undefined {
+    let automation: unknown;
+    try {
+        automation = this.getServicesRegistry?.().get('automation');
+    } catch {
+        return undefined;
+    }
+    const read = (automation as { getSealedNodeTypeVocabulary?: () => unknown } | undefined)?.getSealedNodeTypeVocabulary;
+    if (typeof read !== 'function') return undefined;
+    let vocabulary: unknown;
+    try {
+        vocabulary = read.call(automation);
+    } catch {
+        return undefined;
+    }
+    return Array.isArray(vocabulary) && vocabulary.length > 0 && vocabulary.every((t) => typeof t === 'string')
+        ? (vocabulary as readonly string[])
+        : undefined;
 }

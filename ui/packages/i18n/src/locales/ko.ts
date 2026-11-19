@@ -546,6 +546,9 @@ const ko = {
       resultFailed: " · 실패 {{count}}",
       succeededRecords: "성공한 레코드",
       aggregateNotCompleted: "선택한 레코드에 대한 작업이 완료되지 않았습니다. 일부 레코드는 이미 변경되었을 수 있습니다. 닫으면 목록에 현재 값이 표시됩니다.",
+      resultNotConfirmed: " · 미확인 {{count}}",
+      notConfirmedRecords: "작업이 이 레코드에 대해 결과를 보고하지 않았습니다. 현재 값을 확인하세요:",
+      aggregateUnreadable: "작업은 끝났지만 결과를 읽을 수 없어 어떤 레코드가 변경되었는지 알 수 없습니다. 닫으면 목록에 현재 값이 표시됩니다.",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",
@@ -1563,7 +1566,6 @@ const ko = {
     widgetForbiddenMessage: "이 위젯의 데이터를 볼 수 있는 권한이 없습니다.",
     allWidgetsForbiddenMessage: "이 대시보드의 데이터를 볼 수 있는 권한이 없습니다.",
     details: "세부 정보",
-    exportCsv: "CSV 내보내기",
     openInList: "목록에서 열기",
     filters: {
       label: "대시보드 필터",
@@ -4063,6 +4065,7 @@ const ko = {
     composer: {
       queued: "현재 응답이 끝나면 전송됩니다",
       queuedCancel: "취소",
+      fileTooLarge: "파일이 너무 커서 첨부할 수 없습니다(최대 {{limit}}): {{files}}",
     },
     answer: {
       showFull: '전체 답변 보기',
@@ -4709,6 +4712,9 @@ const ko = {
         position: '직위 {{count}}',
         position_one: '직위 {{count}}',
         position_other: '직위 {{count}}',
+        capability: '기능 권한 {{count}}',
+        capability_one: '기능 권한 {{count}}',
+        capability_other: '기능 권한 {{count}}',
         tool: 'AI 도구 {{count}}',
         tool_one: 'AI 도구 {{count}}',
         tool_other: 'AI 도구 {{count}}',
@@ -5221,6 +5227,7 @@ const ko = {
     loading: "알림 설정을 불러오는 중…",
     loadFailed: "알림 설정을 읽을 수 없습니다. 페이지를 새로 고친 후 다시 시도하세요.",
     saveFailed: "변경 내용이 저장되지 않았습니다: {{reason}}",
+    readOnly: "이 설정을 볼 수는 있지만 권한이 없어 변경할 수 없습니다. 조직 관리자가 대신 변경할 수 있습니다.",
     general: "일반",
     generalWarning: "요약 또는 방해 금지 시간을 변경하면 본인의 일반 설정이 저장됩니다. 이후 직접 설정하지 않은 모든 주제와 채널에 조직 기본값 대신 이 설정이 적용됩니다.",
     digest: "요약",

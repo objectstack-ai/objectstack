@@ -73,6 +73,16 @@ const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
 const MANAGED_ADD_PERSON_VISIBLE =
   'current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true';
 
+/**
+ * Who is offered `remove_sso_user`, and on which row: the same standing and
+ * managed flag as Add / Import, then a row that is still pending
+ * (`source == 'idp_pending'`), the one row its door removes. Any other row is
+ * answered `409` there (a person who has signed in is deactivated instead).
+ * `has()` keeps it hidden on a row the console did not project `source` for.
+ */
+const MANAGED_REMOVE_PENDING_PERSON_VISIBLE =
+  `${MANAGED_ADD_PERSON_VISIBLE} && has(record.source) && record.source == 'idp_pending'`;
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -557,9 +567,12 @@ export const SysUser = ObjectSchema.create({
         // cell: `alreadyPending` and `host` only on a row that was added,
         // `error` only on one that was not, `notApplied` only on a re-add that
         // sent columns, `managerError` only when no manager was linked.
+        // "Already pending" says nothing about telling anyone: a deactivated
+        // pending person is re-added without a word to the host, so whether
+        // the host was told is the `host.*` columns' answer alone.
         fields: [
           { path: 'summary.added', label: 'Added', format: 'text' },
-          { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
+          { path: 'summary.alreadyPending', label: 'Already pending', format: 'text' },
           { path: 'summary.failed', label: 'Not added', format: 'text' },
           {
             path: 'rows',
@@ -569,7 +582,7 @@ export const SysUser = ObjectSchema.create({
               { path: 'row', label: 'Row', format: 'json' },
               { path: 'email', label: 'Email' },
               { path: 'ok', label: 'Succeeded', format: 'json' },
-              { path: 'alreadyPending', label: 'Already pending, told again', format: 'json' },
+              { path: 'alreadyPending', label: 'Already pending', format: 'json' },
               { path: 'host.notified', label: 'Hosting organization told', format: 'json' },
               { path: 'host.reason', label: 'Why not told' },
               { path: 'error.message', label: 'Not added because' },
@@ -579,6 +592,30 @@ export const SysUser = ObjectSchema.create({
           },
         ],
       },
+    },
+    // The undo of the two above: take a pending person back out, which also
+    // cancels their invitation. The door is plugin-auth's
+    // `admin/remove-sso-user` (`{ userId }`), platform-admin gated, answering
+    // only on a managed environment and only for a row that is still pending;
+    // it asks the hosting organisation first and removes no one when that
+    // organisation cannot be reached or refuses. No params, so the question
+    // rides `confirmText`. No `ai` block, as for its siblings.
+    {
+      name: 'remove_sso_user',
+      label: 'Remove Pending User',
+      icon: 'user-minus',
+      variant: 'danger',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/remove-sso-user',
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: MANAGED_REMOVE_PENDING_PERSON_VISIBLE,
+      recordIdParam: 'userId',
+      confirmText:
+        'Remove this person, who has not signed in yet, and cancel their invitation? '
+        + 'If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.',
+      successMessage: 'Pending user removed',
+      refreshAfter: true,
     },
     {
       name: 'set_user_password',
@@ -1367,6 +1404,28 @@ export const SysUser = ObjectSchema.create({
         'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
+    // The development seed's stamp (`plugin-auth` `dev-seed-credential.ts`):
+    // written on an account `os dev`'s admin seed or a stack's `demoStaff`
+    // creates, as a one-way digest of the password hash the seed stored. A
+    // production-mode server refuses that account's sign-in and every new
+    // session while its stored hash still has this digest; `os user
+    // set-password` sets a new password and clears it. A digest of a salted
+    // hash, so `internal`: never served on the generic data path, matched by
+    // the server alone. Owned by objectql (better-auth is oblivious to this
+    // column — like `ai_access`).
+    dev_seed_credential: Field.text({
+      label: 'Development Seed Credential',
+      required: false,
+      maxLength: 64, // a SHA-256 digest in base64url is 43 characters; keyed by the index below
+      readonly: true,
+      internal: true,
+      group: 'System',
+      description:
+        'Set on an account the development seed created. While its password is still the seed password, a ' +
+        'production server refuses its sign-in and every new session; os user set-password sets a new password ' +
+        'and clears it. System-managed; never returned on reads.',
+    }),
+
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the
     // grace clock. Stamped lazily at session validation; system-managed.
     mfa_required_at: Field.datetime({
@@ -1593,6 +1652,10 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1.5 — phone sign-in identifier; unique when present (null for
     // email-only accounts), also the upsert match key for identity import.
     { fields: ['phone_number'], unique: 'global' },
+    // The development seed's stamp, matched by the password verifier on a
+    // server that is not in development mode (`plugin-auth`
+    // `dev-seed-credential.ts`). Null on every account the seed never created.
+    { fields: ['dev_seed_credential'], unique: false },
   ],
 
   enable: {

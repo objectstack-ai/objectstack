@@ -395,4 +395,6 @@ export type {
   ProbeEngine,
   ProbeAnalytics,
   ProbeItemProtocol,
+  ProbeAutomation,
+  SeedLandedRows,
 } from './build-probes.js';

@@ -204,6 +204,33 @@ describe('[#34686] initialize instructions — host and configured texts are lef
   });
 });
 
+describe('[#34766] initialize instructions — the drafts line follows the authoring tools', () => {
+  const DRAFTS = 'They save drafts only';
+  const ONE_TOOL = { getAll: () => [{ name: 'save_metadata_draft', description: 'Save a draft.' }], execute: async () => ({}) as never };
+
+  it('a metadata:write request whose host registry lists a tool is told authoring lands as drafts a person publishes', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge(), {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoring: { registry: ONE_TOOL as never },
+    });
+    expect(text).toContain(DRAFTS);
+    // The rest of the open text is still there.
+    expect(carriesRule(text)).toBe(true);
+    expect(text).toContain('@objectstack/skills');
+  });
+
+  it('no drafts line where no authoring tool registers: an empty registry, a grant without metadata:write, no injection', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const cases: Opts[] = [
+      { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoring: {} },
+      { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], authoring: { registry: ONE_TOOL as never } },
+      {},
+    ];
+    for (const o of cases) expect(await instructionsOf(runtime, makeBridge(), o), JSON.stringify(o)).not.toContain(DRAFTS);
+  });
+});
+
 /**
  * [#34919] The rule tells the client to follow `list_datasets`' `nextStep`
  * and cite `query_dataset`'s `sourceLine`, and names the precedence among

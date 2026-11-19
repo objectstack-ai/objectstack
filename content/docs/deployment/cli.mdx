@@ -147,7 +147,7 @@ os init my-app --no-install       # Skip dependency installation
 |----------|-----------------|
 | `app` | Full application with objects, barrel imports |
 | `plugin` | **Metadata package**: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
-| `empty` | Minimal project with just `objectstack.config.ts` |
+| `empty` | Minimal project: `objectstack.config.ts` and one starter test |
 
 The `app` and `plugin` templates declare their starter object with
 `ObjectSchema.create({ … })` — the one authorised shape for a `*.object.ts`, and the
@@ -854,6 +854,47 @@ for its own keys.
 - A bundle proves what its checkpoints hold. Rows of a sealed window that no checkpoint
   lists (`late` and unsealed) are carried as the writing run found them.
 
+#### `os user set-password`
+
+Sets a user's password in the project database, on the server. A server that is not in
+development mode never accepts a development seed credential: a sign-in with the
+development seed password (`admin123`, or the `OS_SEED_ADMIN_PASSWORD` value) is refused
+on every account, and an account `os dev` seeded (its admin and the stack's `demoStaff`)
+opens no session while it still has the password it was seeded with, a custom
+`--admin-password` included. No session is offered to change it in, because whoever signed
+in first could. This command is the way out, and the refusal names it.
+
+```bash
+os user set-password admin@example.com                     # asks twice, unechoed
+printf %s "$NEW_PASSWORD" | os user set-password admin@example.com --password-stdin
+os user set-password admin@example.com --database-url "postgres://user:pass@host:5432/mydb"
+```
+
+**Options:**
+- `--password-stdin` — read the new password from standard input instead of asking for it
+- `--database-url <url>` — the database to write (defaults to `$OS_DATABASE_URL` / the project database)
+
+What one run does:
+
+- **The password never goes on the command line.** It is asked for on a terminal, or read
+  from standard input.
+- **It checks two things about the new password:** it is not a development seed password,
+  and it is 8 to 128 characters long. The deployment's own password policy and password
+  history are not applied. An address no account holds, and an account with no password
+  sign-in, are refused too. A refusal writes nothing.
+- **It sets the password with the hash every server verifies**, clears the account's
+  development seed mark and a sign-in lock, and records the change time.
+- **It deletes the account's outstanding password-reset links and codes from the project
+  database** before the new password lands.
+- **It ends every session and revokes every API key of the account**, as an
+  administrator's forced reset does: the sessions and keys issued under the old password do
+  not outlive it. It asks for no password change at the next sign-in.
+- **It writes the project database only.** A secondary storage the host configures for the
+  auth service (a cache that can hold reset links and sessions) is out of its reach, for the
+  reset links and the sessions alike. With one configured, run the command with the server
+  stopped, or restart the server afterwards; a secondary storage kept outside the server
+  process outlives a restart and is cleared of the account's entries by hand.
+
 ### Build & Validate
 
 | Command | Description |
@@ -887,7 +928,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (70)...
+  → Running author-time rules (73)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -2943,6 +2984,7 @@ os verify --delete-behaviors                   # Also prove each declared delete
 os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
 os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
 os verify --dashboard-windows                  # Also prove each dashboard date picker counts the rows its window selects
+os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   # Also run one flow and report its node trace
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -2980,7 +3022,16 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    instead, is reported as not judged. Then, for each object, a record derived
    from its fields is created, read
    back and compared (CRUD round-trip fidelity), and a create, read or
-   fidelity failure fails the run. With `--rls`, a second fresh boot proves the
+   fidelity failure fails the run. The boot connects the datasources the app
+   declares, as `os dev` does, but no stage below writes to an object on an
+   external datasource, even one whose write gate is open
+   (`external.allowWrites` on the datasource and `external.writable` on the
+   object): every stage reports it as not exercised, and the CRUD stage lists
+   it `skipped` as `external datasource "NAME" (writes allowed)` or
+   `(read-only)`, which does not fail the run. An object that requires a
+   reference to it is skipped too. A write the app itself makes there, its seed
+   or a hook or flow that a stage's write fires, goes where the app sends it,
+   as under `os dev`. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every
@@ -3092,6 +3143,50 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    ground truth cannot model (`$or`, a range, a
    relationship path, a condition on the window's own field), are reported
    `excluded`.
+   With `--flow <name>`, another fresh boot runs that one flow once and reports
+   what the engine did: each node's status as the run's log records it, the
+   first failure with its code and the node named, and every write the run
+   made. The run starts the way production starts it. A record-change flow is
+   started by its own trigger: the run writes the record `--flow-record`
+   names (its fields as a JSON object) as the dev admin, inserting it for a
+   create or write leg, seeding it and saving it unchanged for an update leg
+   (so a condition comparing old and new values sees no change), and seeding
+   it and deleting it for a delete leg. A flow its own trigger starts is
+   started with no caller, with the context that trigger builds: an
+   API-triggered flow is handed `--flow-input` (a JSON object) as its record
+   and its params, as the inbound hook hands it the request body; a
+   time-relative flow is handed the `--flow-record` row as its record, seeded
+   first so it is in the table, as a swept row is (the acting organization a
+   sweep can set, `tenantId`, is not reproduced); a schedule, or another
+   flow declared `runAs: 'system'`, is handed `--flow-input` as its params
+   (a real tick's own `jobId`, `flowName` and `schedule` params and a
+   binding's acting organization are not reproduced). Any other flow goes
+   through the trigger route as the dev admin, with `--flow-input` as its
+   params. Before the run starts, every node whose type no installed plugin
+   runs is named, reached or not, and a flow whose trigger never binds is
+   reported with the trigger and the engine's reason, and is not run. A
+   schedule or time-relative trigger the deployment's scheduled-work switch
+   keeps unarmed (the default) is not a defect: it is reported as not armed
+   and the flow is still run. A run that fails, a node with no executor, a
+   trigger that never binds, a record-change or time-relative flow given no
+   record, and a write refused because its object lives outside the
+   ephemeral stack each fail `os verify`; a run the start condition skipped,
+   one that paused at a screen, wait or approval, and one stopped at an
+   outbound node are reported and do not. The run writes to the in-memory
+   database this boot creates and nowhere else: a write to an object bound to
+   any other datasource is refused before that datasource's driver is called,
+   and the node that made it fails naming the object and the datasource.
+   Four outbound node types are not executed: `http`, `connector_action`
+   (which also runs every connector a plugin contributes), `notify` and
+   `script`. A plugin's own node type that calls out under another name is
+   not stood in, and runs for real. A run that ends at one of the four stops
+   there, and the report names it (`outbound_not_run`); every node before it
+   ran for real. A stop inside a child flow is named at the child's node, and
+   a `fault` edge on the calling `subflow` or `map` node is still followed.
+   Inside a `try_catch` region the catch region handles the stop as it would
+   a failed call, and the run goes on: the stop is listed
+   (`outboundStops`), and a later node that fails is still the first failure
+   and still fails `os verify`.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -3128,8 +3223,11 @@ document carries depends on where the run ended:
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
   wrote and who could not be provisioned), `dashboardWindows` (with
   `--dashboard-windows`; its `presets` name what each preset handed the door
-  and how it resolved) and `hardFailures`, the count the exit status is read
-  from.
+  and how it resolved), `flowRun` (with `--flow`: the `verdict`, how the run
+  started, the `trigger` and whether it is bound, the `steps`, the
+  `missingExecutors`, the `firstFailure`, the `outboundStops`, the `writes`
+  and the `confinement`)
+  and `hardFailures`, the count the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 

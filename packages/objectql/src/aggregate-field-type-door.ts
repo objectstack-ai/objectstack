@@ -113,6 +113,7 @@ import {
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  virtualFieldAggregateRemedy,
   type AggregationFunction,
 } from '@objectstack/spec/data';
 
@@ -217,6 +218,14 @@ function routeAndReason(first: RefusedAggregation): string {
       + 'A JSON-stored value is no distinct key the drivers share: one counted every row apart, one '
       + 'compared the serialized text, one refused the statement.';
   }
+  // A `sum` / `avg` / `min` / `max` over a VIRTUAL field (a `formula`) takes
+  // the spec's one prescription (ruling B on the virtual-field total): a field
+  // of the formula's return type carrying the same `expression`. ⛔ Not the
+  // count fallback below — a count substituted for a total is a plausible
+  // wrong number. The sentence carries its own reason (the field stores no
+  // value), so nothing follows it; the verdict stays the table's.
+  const remedy = virtualFieldAggregateRemedy(first.fn, first.type);
+  if (remedy !== undefined) return remedy;
   const route = `${first.fn} accepts a field of type ${acceptedTypesOf(first.fn)}: aggregate a field `
     + 'of one of those types, or count the rows with count.';
   const reason = first.multiValue || first.structuredJson

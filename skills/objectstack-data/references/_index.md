@@ -59,7 +59,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/system/deploy-bundle.zod.ts` — Deploy Bundle Protocol
 - `node_modules/@objectstack/spec/src/system/translation.zod.ts` — Exports: LocaleSchema, FieldTranslationSchema, ActionResultDialogTranslationSchema, ObjectTranslationDataSchema, TranslationDataSchema
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionRefusalSchema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.

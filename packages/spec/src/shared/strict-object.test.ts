@@ -526,3 +526,50 @@ describe('eager construction with this module entered first', () => {
     ).toBe('ok');
   }, 60_000);
 });
+
+/**
+ * The rename channel on SHORT keys, and the key that is no spelling at all.
+ * Below six characters the budget is the floor of 2, which exists for a swap of
+ * two adjacent letters; two unrelated edits on a four-letter key are half the
+ * key, and answered a removed `aria` with the app's `areas`.
+ */
+describe('short and empty unknown keys', () => {
+  const Nav = lazySchema(() =>
+    strictObject({ surface: 'this nav', history: 'h' }, {
+      name: z.string(),
+      areas: z.array(z.string()).optional(),
+      label: z.string().optional(),
+      id: z.string().optional(),
+    }),
+  );
+  const messageFor = (body: Record<string, unknown>) => {
+    const r = Nav.safeParse({ name: 'x', ...body });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues[0]!;
+    expect(issue.code).toBe('unrecognized_keys');
+    return issue.message;
+  };
+
+  it('a four-letter key two unrelated edits from a declared one gets no rename', () => {
+    const m = messageFor({ aria: { label: 'x' } });
+    expect(m.startsWith('Unrecognized key(s) on this nav: `aria`.')).toBe(true);
+    expect(m).not.toContain('Did you mean');
+    expect(m).not.toContain('`areas`');
+  });
+
+  it('a swap of two adjacent letters on a short key is still answered', () => {
+    expect(messageFor({ lable: 'x' })).toContain('Did you mean `lable` → `label`?');
+    expect(messageFor({ aeras: [] })).toContain('Did you mean `aeras` → `areas`?');
+  });
+
+  it('a one-letter slip on a short key is still answered', () => {
+    expect(messageFor({ labl: 'x' })).toContain('Did you mean `labl` → `label`?');
+  });
+
+  it('an empty key is named as one, and offered no rename', () => {
+    const m = messageFor({ '': 1 });
+    expect(m.startsWith('Unrecognized key(s) on this nav: an empty key (`""`).')).toBe(true);
+    expect(m).not.toContain('``');
+    expect(m).not.toContain('Did you mean');
+  });
+});

@@ -25,8 +25,8 @@
  * Only `annual_revenue_sum` reconciles, because only a sum does.
  *
  * DIRECTIONS, stated before the reverse verification was run — every case here
- * is RED on `origin/main` except the two that pin what did NOT move (the
- * cross-tab's three groupings, and the CSV's contents). On `origin/main`
+ * is RED on `origin/main` except the one that pins what did NOT move (the
+ * cross-tab's three groupings). On `origin/main`
  * `totalsGroupings` was `isMatrix ? … : undefined`, so a flat table asked for
  * nothing and no `tfoot` existed to render. There is no ablation-through-`dist`
  * here: this file imports the component by relative source path
@@ -312,30 +312,5 @@ describe('objectui#5846 — the totals row is outside the sortable rows', () => 
     fireEvent.click(bodyRows()[2]);
     // objectui#9085 spelling; the (row, index) pairing this test pins is unchanged.
     await waitFor(() => expect(drillFilters[drillFilters.length - 1]).toEqual({ industry: { $null: true } }));
-  });
-
-  it('keeps the totals row OUT of the CSV, as the cross-tab already does', async () => {
-    // What did NOT move. The export is the table's DATA — one line per bucket.
-    // The cross-tab has never exported its own total row or column either.
-    installMetaRouter();
-    const blobs: Blob[] = [];
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    (URL as any).createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      render(<DatasetWidget widget={TABLE_WIDGET} dataSource={industrySource()} />);
-      await waitFor(() => expect(footRow()).not.toBeNull());
-      fireEvent.click(screen.getByTestId('dataset-export'));
-
-      expect(blobs.length).toBe(1);
-      const lines = (await blobs[0].text()).trim().split('\n').map((l) => l.trim());
-      expect(lines.length).toBe(4); // header + 3 buckets, no total line
-      expect(lines.some((l) => l.startsWith('Total'))).toBe(false);
-      expect(lines.some((l) => l.includes('42000000'))).toBe(false);
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
   });
 });

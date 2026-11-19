@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@object-ui/components';
-import { usePrintPage } from '@object-ui/react';
+import { usePrintPage, useRecordPagePreferences } from '@object-ui/react';
 import type { DetailViewSection } from '@object-ui/types';
 import { hasCellValue } from './emptiness';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -143,6 +143,11 @@ export interface EmptySectionsLineProps {
   /** The record as the sections read it (record plus the inline-edit draft). */
   data: Record<string, unknown> | null | undefined;
   isEditing: boolean;
+  /**
+   * The object the record page shows; the line reads and writes the reader's
+   * remembered "show empty fields" choice for it (objectstack#35166).
+   */
+  objectName?: string;
   /** Draw one section (its error boundary included) at its index. */
   renderSection: (section: DetailViewSection, index: number) => React.ReactNode;
 }
@@ -161,16 +166,38 @@ export interface EmptySectionsLineProps {
  * section is empty the line names them all, so it takes that fold's place on
  * those bodies. Edit mode and a print page draw every section, for the
  * reasons that fold gives.
+ *
+ * Expanded or not is the reader's one remembered "show empty fields" choice
+ * for the object (objectstack#35166), the same `showEmptyFields` entry each
+ * section's own row reads (`DetailSection`, objectstack#25883): a reader who
+ * chose to see empty fields finds the line open on every record page of the
+ * object, default or authored, and expanding or collapsing the line writes
+ * that choice back. With no host store or no object name the line keeps its
+ * own state, forgotten on unmount, as before.
  */
 export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
   sections,
   data,
   isEditing,
+  objectName,
   renderSection,
 }) => {
   const { t } = useDetailTranslation();
   const isPrintPage = usePrintPage() !== null;
-  const [revealed, setRevealed] = React.useState(false);
+  const recordPagePreferences = useRecordPagePreferences();
+  const [localRevealed, setLocalRevealed] = React.useState(false);
+  const remembered =
+    recordPagePreferences && objectName
+      ? {
+          shown: recordPagePreferences.get(objectName).showEmptyFields === true,
+          set: (shown: boolean) => recordPagePreferences.update(objectName, { showEmptyFields: shown }),
+        }
+      : null;
+  const revealed = remembered ? remembered.shown : localRevealed;
+  const toggleRevealed = () => {
+    if (remembered) remembered.set(!remembered.shown);
+    else setLocalRevealed((r) => !r);
+  };
   const folded = isEditing || isPrintPage ? [] : sections.map((section) => isFoldableEmptySection(section, data));
   const foldedCount = folded.filter(Boolean).length;
   if (foldedCount === 0) return <>{sections.map(renderSection)}</>;
@@ -192,7 +219,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
       <button
         type="button"
         aria-expanded={revealed}
-        onClick={() => setRevealed((r) => !r)}
+        onClick={toggleRevealed}
         className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center sm:min-h-0 sm:min-w-0 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {revealed

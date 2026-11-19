@@ -8,11 +8,17 @@
  * under the placeholder "field / context", while the list-view filter in the
  * same product showed labels. A field subject now reads by its label, with the
  * spelling the CEL uses beside it; the compiled CEL is unchanged. A field with
- * no label keeps its spelling, and the context subjects are as before. The
- * label is the mount's choice (`labelSubjects`): a mount that lists spellings
- * keeps them.
+ * no label keeps its spelling, and the context subjects are as before. Labels
+ * are the default (objectstack#34122); a mount that must list spellings passes
+ * `labelSubjects={false}`.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -84,7 +90,29 @@ describe('ConditionBuilder · field subjects read by label (objectstack#27521)',
     expect(texts).toContain('Estimated Hours (before the change)previous.estimated_hours');
   });
 
-  it('CONTROL — a mount that does not ask for labels lists the spellings', async () => {
+  it('a mount that passes no `labelSubjects` reads labels: the default is on (objectstack#34122)', async () => {
+    // Rendered here rather than through `mount`: handing `mount` an
+    // `undefined` would take ITS default (`true`) and pass that explicitly,
+    // so the builder's own default would never be read.
+    render(<ConditionBuilder value="" onCommit={vi.fn()} fields={FIELDS} />);
+    fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.condition.add', 'en-US') }));
+    const texts = (await openSubjects()).map((o) => o.textContent);
+    expect(texts).toContain('Estimated Hoursrecord.estimated_hours');
+    expect(texts).toContain('record.code');
+  });
+
+  it('a label that only repeats the field name is no label: the field reads as its spelling (objectstack#34122)', async () => {
+    // The object-field catalog fills an unlabelled field's label with its name.
+    render(
+      <ConditionBuilder value="" onCommit={vi.fn()} fields={[{ name: 'code', label: 'code', type: 'text' }]} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.condition.add', 'en-US') }));
+    const option = (await openSubjects()).find((o) => o.textContent?.includes('record.code'))!;
+    expect(option.textContent).toBe('record.code');
+    expect(option.querySelector('.font-mono')).toBeNull();
+  });
+
+  it('CONTROL — a mount that opts out of labels lists the spellings', async () => {
     mount(false, false);
     const texts = (await openSubjects()).map((o) => o.textContent);
     expect(texts).toContain('record.estimated_hours');

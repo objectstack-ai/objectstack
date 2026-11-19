@@ -121,6 +121,27 @@ describe('the invite actions answer by delivery outcome', () => {
     expect(copy.link_only).toContain(INVITEE);
   });
 
+  // Accepting needs a verified address, so without mail the copied link admits
+  // the sign-up only: the link_only copy never hands the admin Copy Invite Link
+  // as the way in, in English or in any translated bundle.
+  it.each([
+    ['invite_user', INVITE_USER_OUTCOME_MESSAGES],
+    ['resend_invitation', RESEND_INVITATION_OUTCOME_MESSAGES],
+  ] as const)('%s: the link_only copy does not send the admin to Copy Invite Link', (name, copy) => {
+    const label = action(SysInvitation, 'copy_invitation_link').label;
+    expect(copy.link_only).not.toContain(label);
+    const objects = name === 'invite_user' ? MIRRORS.map(([object]) => object) : ['sys_invitation'];
+    for (const [locale, bundle] of TRANSLATED) {
+      const translated = bundleAction(bundle, 'sys_invitation', 'copy_invitation_link')?.label;
+      expect(translated, `${locale} copy_invitation_link.label`).toBeTruthy();
+      for (const object of objects) {
+        const outcome = bundleAction(bundle, object, name)?.outcomeMessages?.link_only;
+        expect(outcome, `${locale} ${object}.${name} link_only`).toBeTruthy();
+        expect(outcome, `${locale} ${object}.${name} link_only`).not.toContain(translated);
+      }
+    }
+  });
+
   it.each(MIRRORS)('%s.invite_user keeps its successMessage as the fallback', (_name, object) => {
     expect(action(object, 'invite_user').successMessage).toBeDefined();
   });

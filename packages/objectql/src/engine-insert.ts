@@ -67,7 +67,7 @@ import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonl
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
   WRITE_PRECONDITION_OPTION, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
+  droppedFieldEvents, formulaValuesFor, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
   callerInputRefusalLogMeta, writeFailureLogMeta,
@@ -324,13 +324,20 @@ export class InsertFacet {
   }
 
   /** The body of `ObjectQL#insert`; the method's docblock there is its contract. */
-  static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insert' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
+  static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     // [#22782, #34412] An aborting `afterInsert`, or a refusal after a `beforeInsert` hook's
     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.insert(object, data, options));
-    }
+    //
+    // [#35167] The unit opens around the ENGINE BODY (the executor below), as
+    // `update`'s does (#35142): the middleware chain runs first, outside it, as
+    // it does for an insert that opens no unit, so the authorization gate's
+    // reads do not hold a single-connection store's (SQLite) only connection
+    // while they run, and a middleware's work after `next()` runs after the
+    // commit on every object. Nothing between here and the executor writes.
+    const ownUnit = this.opensAfterAbortUnit('afterInsert', object, options?.context);
+    const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+      ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     // [#8844] The organization set is about to change. Dropped BEFORE the write
@@ -366,7 +373,7 @@ export class InsertFacet {
       context: options?.context,
     };
 
-    await this.executeWithMiddleware(opCtx, async () => {
+    await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
       // Resolve field `defaultValue`s (including the `current_user` and
       // `NOW()` tokens)
       // BEFORE the beforeInsert hook runs, so a hook that DERIVES one field
@@ -1359,7 +1366,9 @@ export class InsertFacet {
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0113 D1, as amended] `'deferred'`: a field required only when shown
+            // is judged by `evaluateValidationRules` below, against its visibility.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
@@ -1374,7 +1383,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]), formulaValues: formulaValuesFor(schemaForValidation, opCtx.context, insertPermissionsFor(rows[i])) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);
@@ -1740,7 +1749,7 @@ export class InsertFacet {
         await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
         throw e;
       }
-    });
+    }));
 
     return opCtx.result;
   }

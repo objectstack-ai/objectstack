@@ -3353,13 +3353,16 @@ const FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
       'resolved just before the query: `{ owner_id: \'{current_user_id}\', created_at: { $gte: ' +
       '\'{week_start}\' } }`. Only a whole-string placeholder counts (`{token}`, or `${token}`); a value ' +
       'that merely contains braces is left alone.',
-    // The context tokens are held equal to `CONTEXT_TOKENS` (`@objectstack/spec/data`) by the rule's test.
-    'Exactly two vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
+    // The context tokens and the period keys are held equal to `CONTEXT_TOKENS` and
+    // `PERIOD_KEY_TOKENS` (`@objectstack/spec/data`) by the rule's test.
+    'Three vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
       '`{current_org_id}`. The date macros: the instants `{today}`, `{yesterday}`, `{tomorrow}` and ' +
       '`{now}`; the start and end of the current, last or next week, month, quarter or year ' +
       '(`{current_quarter_start}`, `{last_year_end}`), with bare aliases for the current period ' +
       '(`{week_start}`, `{month_end}`); and counted offsets in minutes, hours, days, weeks, months or ' +
-      'years (`{30_days_ago}`, `{2_weeks_from_now}`).',
+      'years (`{30_days_ago}`, `{2_weeks_from_now}`). The period keys: `{current_iso_week}`, the ' +
+      'current ISO week\'s key such as `2026-W47`, which is text, not a date, for a field that stores ' +
+      'ISO week keys.',
     'Anything else does not resolve: the data engine refuses the query (`FILTER_TOKEN_UNKNOWN`, 400) ' +
       'rather than compare the placeholder as a literal string, so the surface never shows the data the ' +
       'filter meant. The rule makes that an error at build time, where an author — or an AI correcting ' +
@@ -3575,8 +3578,8 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
 
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
-// registry entries and on `os lint` through `lintDataModel`; the other three
-// are `lintDataModel`'s own sweep.
+// registry entries and on `os lint` through `lintDataModel`; the sweep ids
+// below are `lintDataModel`'s own.
 
 /** The ADR-0120 scope words, as the two uniqueness spellings read them (both write it out). */
 const UNIQUE_SCOPE_WORDS =
@@ -3585,7 +3588,7 @@ const UNIQUE_SCOPE_WORDS =
   '`\'organization\'` and stays valid; on a declared INDEX the same spelling states no scope, and ' +
   'is judged as `\'global\'`.';
 
-/** Where the three `lintDataModel` sweep ids are reported (all three write it out). */
+/** Where the `lintDataModel` sweep ids are reported (each entry writes it out). */
 const DATA_MODEL_SWEEP_REACH =
   'Reach: `os lint` and the metadata-generation rubric run this rule, and nothing else does — it ' +
   'is not an `os validate` / `os build` rule and does not run at the metadata save door, so its ' +
@@ -3758,6 +3761,28 @@ const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
       'to this rule. It fires only on the doors that never parse — `os lint` on a raw object-literal ' +
       'config, `defineStack(x, { strict: false })`, and the metadata-generation rubric beside its own ' +
       'schema verdict — where without it the key would ride unnamed to `os build`.',
+  ],
+};
+
+const FIELD_MISSING_VALUE_DOMAIN_EXPLANATION: RuleExplanation = {
+  rule: 'field/missing-value-domain',
+  covers: 'which field names read as a standard code',
+  paragraphs: [
+    'A `text` field declares `valueDomain` to hold one standard code, and the record write path then ' +
+      'refuses any value outside it: `iso_4217_currency` admits `USD` but not `Dollar`, ' +
+      '`iso_3166_alpha2` admits `CN` but not `China`, `iana_time_zone` admits `Asia/Shanghai` but ' +
+      'not `Beijing time`. Without it the field stores any text, and every later match, join or ' +
+      'conversion across apps starts with cleaning that text.',
+    'Names judged, as the whole field name compared case-insensitively: `currency`, `currency_code` ' +
+      '(`iso_4217_currency`); `country`, `country_code` (`iso_3166_alpha2`); `time_zone`, `timezone`, ' +
+      '`tz` (`iana_time_zone`). Not judged: any other name, a field that already declares a ' +
+      '`valueDomain`, and any type but `text` — a `select` takes its values from its options, and ' +
+      '`valueDomain` is declared on `text` only.',
+    'A warning, never an error: `os validate`, `os build` and the metadata save door are unchanged. A ' +
+      '`--strict` run (`os lint --strict`) fails on every warning, this one included; there is no per-rule ' +
+      'switch, so a strict CI step fails until the field declares the domain. Declaring it does not re-read ' +
+      'rows that already hold free text: only a later write that carries a non-member is refused.',
+    DATA_MODEL_SWEEP_REACH,
   ],
 };
 
@@ -5559,10 +5584,11 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
-      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
-      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
-      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'registers at boot; `MCP_DOOR_TOOL_NAMES` (same module), every tool the MCP door registers ' +
+      '(its record, file, action, federation and dataset tools), only for a skill offered over MCP: ' +
+      'a door tool no cloud package registers, such as `run_action` or `read_file`, is absent from an ' +
+      'in-product turn, so a skill kept out of MCP (`mcpPrompt: false`) is still reported for naming ' +
+      'one, by a verdict that says the name resolves over MCP only; and the materialised action tools, ' +
       'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
       '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
       '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
@@ -5580,7 +5606,9 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     'Family prefixes materialised by the runtime: action_. A materialised tool needs no tool record ' +
       '(the ADR-0109 default path), so backing a name means declaring the action, or referencing a ' +
       'platform tool by its registered name; otherwise remove the name and the instructions that mention ' +
-      'it. Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+      'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
+      'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
+      'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -6252,6 +6280,83 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Publish-time refusals of metadata that parses and does nothing ──────────
+// (`validate-flow-node-executors.ts`, `lint-flow-patterns.ts`,
+// `validate-inert-object-declarations.ts`, `validate-action-object-binding.ts`)
+
+const FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-type-no-executor',
+  covers: 'which node types a flow may use',
+  paragraphs: [
+    'A flow node\'s `type` is an open name: plugins contribute node types, so the schema cannot list them and ' +
+      'refuses only the retired callout names. A node typed after anything the deployment does not run — most ' +
+      'often an AI author\'s own tool name, such as `query_records` for a read — parses and publishes, and then ' +
+      'every run that reaches it fails with NO_EXECUTOR.',
+    'The rule judges against the node types the deployment\'s automation engine runs, and only once the engine ' +
+      'has declared that vocabulary closed, at the end of boot. Before that a plugin can still add a type, so ' +
+      '"no executor" would be a verdict the boot can contradict. The CLI commands therefore judge nothing here: ' +
+      'which plugins a deployment loads is not part of the stack. The publish door of a running server judges ' +
+      'every node, region bodies included, and its message lists the types that deployment runs.',
+  ],
+};
+
+const FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-approval-decision-unrouted',
+  covers: 'how an approval decision picks its branch',
+  paragraphs: [
+    'An approval node continues down the out-edge whose `label` is exactly `approve` or `reject`, matching the ' +
+      'decision. A decision that no edge claims is not an error at run time: the engine falls back to every ' +
+      'out-edge, so the approving and the rejecting branch both run on the same decision.',
+    'So both labels must be on an out-edge, spelled exactly: `Approve`, `approved` or a translated label is ' +
+      'another label. An approval with no out-edge at all simply ends the flow and is not reported, and a ' +
+      '`fault` edge routes failures rather than decisions, so it is not counted. A `revise` edge (send back ' +
+      'for revision) is checked by the `flow-approval-revise-*` rules.',
+  ],
+};
+
+const FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-http-timeout-missing',
+  covers: 'why an http node needs a timeout',
+  paragraphs: [
+    'The `http` node arms a timer only when `config.timeoutMs` is a positive number (`0` arms none), and the ' +
+      'engine races a node against its node-level `timeoutMs` only when that is positive. With neither, the call ' +
+      'waits for as long as the transport does: an endpoint that never answers holds the run, and a flow ' +
+      'triggered by a record save holds that save with it. A `durable: true` node is not reported: it hands the ' +
+      'request to the HTTP outbox and does not wait on the endpoint.',
+    'A warning, not an error: the run is held, not lost, and a slow endpoint may be expected. Set `timeoutMs` to ' +
+      'the longest answer the flow should wait for, in milliseconds.',
+  ],
+};
+
+const STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION: RuleExplanation = {
+  rule: 'state-machine-no-initial-states',
+  covers: 'why a state machine needs an entry guard',
+  paragraphs: [
+    'A `state_machine` validation\'s `transitions` judge UPDATES: from this state, a record may move to those. ' +
+      'Nothing in them judges an insert, and a select field accepts any of its options on create, so without ' +
+      '`initialStates` a record can be created already `approved` or `done` and skip the whole process. An ' +
+      'empty `initialStates` list is the same as none: the engine reads it as no entry contract.',
+    '`initialStates` lists the states a record may be created in, and the server refuses an insert in any ' +
+      'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process. ' +
+      'A machine with `active: false` is not run, so it is not reported.',
+  ],
+};
+
+const ACTION_NO_OBJECT_BINDING_EXPLANATION: RuleExplanation = {
+  rule: 'action-no-object-binding',
+  covers: 'which actions need an objectName',
+  paragraphs: [
+    'Every action location is a surface of an object: its list toolbar, a list row, a record\'s header, menu, ' +
+      'related list or section. A standalone action reaches them only through `objectName`, which folds it into ' +
+      'that object\'s actions and keys its dispatch. Without it the action registers under the global scope and ' +
+      'the button it declares renders nowhere. The handler itself still runs when called: an object-less action ' +
+      'answers every object\'s action route, so only the placement is lost.',
+    'An action written inside an object\'s own `actions` is bound by that object and is never reported. An ' +
+      'action with no UI surface at all declares `locations: []`; one that omits `locations` is ' +
+      '`action-no-placement`\'s question.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6392,6 +6497,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
+  [FIELD_MISSING_VALUE_DOMAIN_EXPLANATION.rule]: FIELD_MISSING_VALUE_DOMAIN_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,
@@ -6487,6 +6593,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
   [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
   [FIELD_LABEL_DUPLICATE_EXPLANATION.rule]: FIELD_LABEL_DUPLICATE_EXPLANATION,
+  [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
+  [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
+  [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
+  [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
+  [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

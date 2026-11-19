@@ -675,6 +675,15 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
+export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
+export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
+export type { FlowNodeExecutorFinding } from './validate-flow-node-executors.js';
+export {
+  validateInertObjectDeclarations,
+  STATE_MACHINE_NO_INITIAL_STATES,
+} from './validate-inert-object-declarations.js';
+export type { InertObjectDeclarationFinding } from './validate-inert-object-declarations.js';
 
 export {
   validatePageFieldBindings,
@@ -1106,6 +1115,8 @@ export {
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
   FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_DECISION_UNROUTED,
+  FLOW_HTTP_TIMEOUT_MISSING,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,
@@ -1230,6 +1241,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';

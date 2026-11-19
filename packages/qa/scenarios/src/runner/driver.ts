@@ -42,22 +42,25 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
 import { placeAskSkills, readAskSkills, SKILL_TOOL, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
+import { DOOR_WRITE_TOOLS, omitSkills, renderDoorRules, type DoorArm, type DoorRulesBundle } from './door.js';
 import { flowRefusalOf } from '../score/scenario-run-grade.js';
 import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
 import { WRITE_TOOLS } from './observe.js';
 import { promptChoiceText, statedPromptChoice, type PromptChoice } from './prompts.js';
-import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
+import { parseStreamJson, refusalCodeOf, type ParsedTurn } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
   card: string;
   /**
    * `scratch` (from nothing), `template` (from a verified build installed
-   * unmanaged, then changed) or `ask` (the Run half alone, on a verified build
-   * installed unmanaged; its turns are `run` questions and operations only).
+   * unmanaged, then changed), `ask` (the Run half alone, on a verified build
+   * installed unmanaged; its turns are `run` questions and operations only) or
+   * `door` (built through the MCP draft door with no project, then published by
+   * the runner as a person; its turns are the `build` author and `run` turns).
    */
-  mode: 'scratch' | 'template' | 'ask';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
   /** `build`, `iterate`, `run` (the first Run half) or `iterate-run` (the Run half after the iterate). */
   phase: 'build' | 'iterate' | 'run' | 'iterate-run';
   /** A question or operation id; `author` for an authoring turn. */
@@ -106,11 +109,29 @@ export const stepKey = (s: StepRef): string => {
 };
 
 export interface AuthorTask extends StepRef {
-  /** The project directory the agent edits. */
+  /**
+   * The project directory the agent edits. A door turn's ({@link door}) is an
+   * empty directory of the client's own, holding no project file: the client
+   * builds through the door alone.
+   */
   cwd: string;
   prompt: string;
   /** The card's tier: it sizes the live driver's turn cap ({@link DEFAULT_AUTHOR_MAX_TURNS}). Not part of the replay key. */
   tier: ScenarioTier;
+  /** Present on a door mode turn: the MCP draft door the client builds through, and nothing else. */
+  door?: DoorClient;
+}
+
+/** The door a door mode authoring turn is given ({@link AuthorTask.door}). */
+export interface DoorClient {
+  /** The booted app's MCP endpoint and an OAuth access token scoped to its authoring tools; the token is never recorded. */
+  mcp: { url: string; token: string };
+  /**
+   * The runner's own door to the app with the same token: one MCP
+   * `tools/call`. The replay driver re-sends the turn's recorded draft writes
+   * through it ({@link DOOR_WRITE_TOOLS}); a live driver ignores it.
+   */
+  callTool?: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>;
 }
 
 export interface AskTask extends StepRef {
@@ -164,6 +185,12 @@ export interface DriverInfo {
    * the `Skill` tool was not allowed. A replay states the recording's.
    */
   askSkills?: AskSkillsInfo;
+  /**
+   * The arm a door mode authoring turn ran in (`door.ts`): the skills and the
+   * rule ids its client was given, and those left out. Absent ⇒ no skills and
+   * no rules. A replay states the recording's.
+   */
+  door?: DoorArm;
 }
 
 export interface AgentDriver {
@@ -310,7 +337,23 @@ export interface ClaudeCodeDriverOptions {
    * tools. Absent ⇒ the turn runs as it always did.
    */
   askSkillsDir?: string;
+  /**
+   * Door mode's skills (`--door-skills`): read once here with the same reader
+   * and closed front-matter set as {@link askSkillsDir}, less
+   * {@link doorSkillOmit}, and written into each door turn's directory.
+   */
+  doorSkillsDir?: string;
+  /** Skill names left out of {@link doorSkillsDir} (`--door-skill-omit`): the arm without them. */
+  doorSkillOmit?: readonly string[];
+  /** Door mode's rules (`--door-rules`, `readDoorRules`): written into each door turn's directory as `CLAUDE.md`. */
+  doorRules?: DoorRulesBundle;
 }
+
+/**
+ * The built-in tools a door turn is denied outright: it runs no command and
+ * writes no file. Its one write path is the draft door.
+ */
+export const DOOR_DENIED_TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit'] as const;
 
 /** `claude-sonnet-4-5-20250929[1m]` → `['claude', 'sonnet', '4', '5', '20250929']`: the name's parts, the context-size suffix dropped. */
 const modelParts = (name: string): string[] => name.toLowerCase().replace(/\[[^\]]*\]$/, '').split('-').filter(Boolean);
@@ -367,12 +410,30 @@ export class ClaudeCodeDriver implements AgentDriver {
   private readonly version: string;
   private readonly authMethod: string;
   private readonly askSkills: AskSkillsBundle | undefined;
+  private readonly doorSkills: AskSkillsBundle | undefined;
+  private readonly door: DoorArm | undefined;
 
   constructor(opts: ClaudeCodeDriverOptions = {}) {
     this.opts = opts;
     this.bin = opts.bin ?? 'claude';
     // Read before any process starts: a directory that holds no skill is refused, and every turn gets these bytes.
     this.askSkills = opts.askSkillsDir !== undefined ? readAskSkills(opts.askSkillsDir) : undefined;
+    // Door mode's arm, read and judged here too: an omission naming no skill is refused before any process starts.
+    if (opts.doorSkillOmit?.length && opts.doorSkillsDir === undefined) throw new Error('--door-skill-omit leaves skills out of --door-skills, which is not given');
+    let omitted: string[] = [];
+    if (opts.doorSkillsDir !== undefined) {
+      const read = omitSkills(readAskSkills(opts.doorSkillsDir, '--door-skills'), opts.doorSkillOmit ?? []);
+      this.doorSkills = read.bundle;
+      omitted = read.omitted;
+    }
+    this.door =
+      this.doorSkills || opts.doorRules
+        ? {
+            ...(this.doorSkills ? { skills: this.doorSkills.info } : {}),
+            ...(omitted.length ? { skillsOmitted: omitted } : {}),
+            ...(opts.doorRules ? { rules: opts.doorRules.info } : {}),
+          }
+        : undefined;
     const ver = spawnSync(this.bin, ['--version'], { encoding: 'utf8', env: subscriptionOnlyEnv() });
     if (ver.status !== 0) throw new Error(`\`${this.bin} --version\` failed: is Claude Code installed? ${ver.stderr ?? ''}`.trim());
     this.version = ver.stdout.trim();
@@ -451,6 +512,7 @@ export class ClaudeCodeDriver implements AgentDriver {
       ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
       ...(this.askEffort ? { askEffort: this.askEffort } : {}),
       ...(this.askSkills ? { askSkills: this.askSkills.info } : {}),
+      ...(this.door ? { door: this.door } : {}),
     };
   }
 
@@ -462,6 +524,7 @@ export class ClaudeCodeDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
+    if (task.door) return this.doorAuthor(task, task.door);
     const empty = join(mkdtempSync(join(tmpdir(), 'scenario-mcp-')), 'none.json');
     writeFileSync(empty, JSON.stringify({ mcpServers: {} }));
     try {
@@ -482,6 +545,40 @@ export class ClaudeCodeDriver implements AgentDriver {
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
       rmSync(dirname(empty), { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * A door mode authoring turn: run in the task's own empty directory with the
+   * app's MCP server (the token in a 0600 file outside it, never on argv),
+   * the arm's skills under `.claude/skills/` and its rules as `CLAUDE.md`, and
+   * no other way to act: `mcp__app` (and `Skill` with skills) allowed,
+   * {@link DOOR_DENIED_TOOLS} denied. It records no files: there is no project.
+   */
+  private async doorAuthor(task: AuthorTask, door: DoorClient): Promise<AuthorResult> {
+    const cfgDir = mkdtempSync(join(tmpdir(), 'scenario-door-mcp-'));
+    const cfg = join(cfgDir, 'mcp.json');
+    writeFileSync(cfg, JSON.stringify({ mcpServers: { app: { type: 'http', url: door.mcp.url, headers: { Authorization: `Bearer ${door.mcp.token}` } } } }), { mode: 0o600 });
+    try {
+      if (this.doorSkills) placeAskSkills(this.doorSkills, task.cwd);
+      if (this.opts.doorRules) writeFileSync(join(task.cwd, 'CLAUDE.md'), renderDoorRules(this.opts.doorRules.rules));
+      const maxTurns = this.authorMaxTurns(task.tier);
+      const model = this.authorModel;
+      const effort = this.authorEffort;
+      const args = [
+        '-p',
+        ...this.base(maxTurns, model, effort),
+        '--mcp-config', cfg, '--strict-mcp-config',
+        '--allowedTools', 'mcp__app', ...(this.doorSkills ? [SKILL_TOOL] : []),
+        '--disallowedTools', ...DOOR_DENIED_TOOLS,
+      ];
+      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: this.turnEnv() });
+      const turn = parseStreamJson(run.stdout);
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
+      if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
+      return { turn };
+    } finally {
+      rmSync(cfgDir, { recursive: true, force: true });
     }
   }
 
@@ -610,9 +707,6 @@ export class ReplayNotFaithfulError extends Error {
   }
 }
 
-/** The calls of a recorded turn to the app's write doors, in recorded order (reads are never re-sent). */
-const recordedWrites = (turn: ParsedTurn): RunnerToolCall[] => turn.toolCalls.filter((c) => (WRITE_TOOLS as readonly string[]).includes(c.name));
-
 /** How a write door answered, as a replay compares it: `applied`, or the refusal it carried (rule 3 of `observe.ts`). */
 function answerOutcome(output: unknown, isError: boolean): string {
   const code = refusalCodeOf(output);
@@ -674,6 +768,9 @@ function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
  * ({@link ReplayNotFaithfulError}), when a recorded write has no recorded
  * answer (nothing is re-sent for that turn: whether it ran is unknown), or
  * when the app answers a re-sent write otherwise than it answered the run.
+ * A door mode authoring turn ({@link AuthorTask.door}) is replayed the same
+ * way: its recorded draft writes ({@link DOOR_WRITE_TOOLS}) are re-sent through
+ * the door with the replay's own token, and no file is written.
  */
 export class RecordedDriver implements AgentDriver {
   /** Recorded id → the id the replay's app gave the same created row. */
@@ -756,6 +853,8 @@ export class RecordedDriver implements AgentDriver {
       apiBilled: false,
       // The replayed answers were made with these skills: the record says so, as it says whose turns they are.
       ...(made.askSkills ? { askSkills: made.askSkills } : {}),
+      // And a door turn in this arm.
+      ...(made.door ? { door: made.door } : {}),
     };
   }
 
@@ -764,6 +863,11 @@ export class RecordedDriver implements AgentDriver {
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
     if (turn.thrown) throw new RecordedThrowError(key, turn.thrown);
+    // A door turn wrote through the door, never into a project: its draft writes are re-sent there.
+    if (task.door) {
+      if (task.door.callTool !== undefined) await this.resend(key, turn, DOOR_WRITE_TOOLS, task.door.callTool);
+      return { turn };
+    }
     const files = this.recording.files[key] ?? {};
     const root = resolve(task.cwd);
     for (const [rel, content] of Object.entries(files)) {
@@ -780,8 +884,19 @@ export class RecordedDriver implements AgentDriver {
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
     if (turn.thrown) throw new RecordedThrowError(key, turn.thrown);
-    const writes = recordedWrites(turn);
-    if (writes.length === 0 || task.callTool === undefined) return turn;
+    if (task.callTool !== undefined) await this.resend(key, turn, WRITE_TOOLS, task.callTool);
+    return turn;
+  }
+
+  /**
+   * Re-send `turn`'s recorded calls to the write tools `tools`, in recorded
+   * order, through `callTool`, and throw {@link ReplayNotFaithfulError} when the
+   * recording cannot say whether a write ran, or the app answers one otherwise
+   * than it answered the recorded run (the class header states the rules).
+   */
+  private async resend(key: string, turn: ParsedTurn, tools: readonly string[], callTool: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>): Promise<void> {
+    const writes = turn.toolCalls.filter((c) => tools.includes(c.name));
+    if (writes.length === 0) return;
     const unanswered = writes.filter((c) => c.output === undefined);
     if (unanswered.length > 0) {
       const names = unanswered.map((c) => `\`${c.name}\``).join(', ');
@@ -790,12 +905,12 @@ export class RecordedDriver implements AgentDriver {
     const broken: string[] = [];
     for (const c of writes) {
       const input = (typeof c.input === 'object' && c.input !== null && !Array.isArray(c.input) ? c.input : {}) as Record<string, unknown>;
-      const target = typeof input.objectName === 'string' ? ` on ${input.objectName}` : '';
+      const target = typeof input.objectName === 'string' ? ` on ${input.objectName}` : typeof input.type === 'string' && typeof input.name === 'string' ? ` on ${input.type} ${input.name}` : '';
       const recorded = answerOutcome(c.output, c.isError === true);
       let replayed: string;
       let answer: ToolAnswer | undefined;
       try {
-        answer = await task.callTool(c.name, remapIds(input, this.ids) as Record<string, unknown>);
+        answer = await callTool(c.name, remapIds(input, this.ids) as Record<string, unknown>);
         replayed = answerOutcome(answer.output, answer.isError);
       } catch (e) {
         replayed = `not sent (${e instanceof Error ? e.message : String(e)})`;
@@ -811,7 +926,6 @@ export class RecordedDriver implements AgentDriver {
       }
     }
     if (broken.length > 0) throw new ReplayNotFaithfulError(key, `the booted app answered a re-sent write otherwise than the recorded run: ${broken.join('; ')}`, turn);
-    return turn;
   }
 }
 

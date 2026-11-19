@@ -499,6 +499,12 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.requiredWhen': '必填条件',
   'designer.field.conditionalRulesHint':
     '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
+  'designer.field.requiredVisibleWhenReference':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。条件经由引用字段 {fields} 读取关联记录，服务器在这里无法读取，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。请改为读取本对象自己的字段。',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录都仍要求填写。会计算本对象公式的表单同样无法计算它，因此会显示该字段并保持必填；不计算公式的表单检查用的是上次读取的值，可能隐藏该字段或不要求填写。',
+  'designer.field.requiredVisibleWhenFormulaFormOnly':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。{fields} 读取了 os（直接或通过其他公式）：服务器会计算它（按登录用户和租户绑定 os），可能免除该字段的必填；但表单无法计算，因此会计算本对象公式的表单会显示该字段并保持必填；不计算公式的表单检查用的是上次读取的值，可能隐藏该字段或不要求填写。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',
@@ -1731,6 +1737,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.create.submit': '创建软件包',
   'engine.packages.create.failed': '创建软件包失败',
   'engine.packages.create.exists': '已存在相同 ID 的软件包。',
+  'engine.packages.create.created': '已创建软件包「{name}」。',
   // objectstack#8270 — 这条正是在 zh 控制台里显示为英文原文的服务端拒绝信息。
   'engine.packages.noCapability': '你没有在本系统管理软件包的权限 — 该操作需要「管理元数据」权限。',
   'engine.packages.form.basics': '基本信息',
@@ -2497,6 +2504,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.operation': '操作',
   'engine.studio.access.explain.run': '解释',
   'engine.studio.access.explain.running': '解释中…',
+  'engine.studio.access.explain.needObject': '请先选择对象',
   'engine.studio.access.explain.allowedLine': '该主体对「{object}」执行 {operation} 将被【允许】。',
   'engine.studio.access.explain.deniedLine': '该主体对「{object}」执行 {operation} 将被【拒绝】。',
   'engine.studio.access.explain.principal': '主体',
@@ -3091,6 +3099,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.appsHint': '应用本身由厂商升级；你的改动单独保存，升级不会冲掉。',
   'engine.studio.landing.marketplaceInstall': '从应用市场安装',
   'engine.studio.landing.customizeTitle': '定制 {name}',
+  'engine.studio.landing.manage': '管理',
+  'engine.studio.landing.manageTitle': '管理 {name}：信息、停用或启用、导出',
+  'engine.studio.landing.allPackages': '全部软件包',
+  'engine.studio.landing.allPackagesTitle': '本环境的全部软件包，可停用、启用和导出',
   'engine.studio.landing.customizations.none': '还没有改动',
   'engine.studio.landing.ownHeading': '自己的应用',
   'engine.studio.landing.newApp': '新建自己的应用',

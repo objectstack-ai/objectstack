@@ -224,7 +224,8 @@ describe('[#20215] the `app` and `plugin` templates wire every generator barrel'
   });
 
   it('`empty` stays a bare config: it writes no directory to wire', () => {
-    expect(Object.keys(TEMPLATES.empty.srcFiles)).toEqual([]);
+    // Its one file is the root-level starter test (#35218), outside `src/`.
+    expect(Object.keys(TEMPLATES.empty.srcFiles).filter((f) => f.includes('/'))).toEqual([]);
     expect(TEMPLATES.empty.configContent(PROJECT, NS)).not.toContain('import * as');
   });
 });
@@ -400,7 +401,7 @@ describe('[#32212] a scaffolded project lists its objects in an app, each with a
   });
 
   it('`empty`: scaffolds no object, so it has nothing for an app or a view to name', () => {
-    expect(Object.keys(TEMPLATES.empty.srcFiles)).toEqual([]);
+    expect(Object.keys(TEMPLATES.empty.srcFiles).filter((f) => f.startsWith('src/'))).toEqual([]);
   });
 
   // The route the card asked to be named: the object is referenced through an

@@ -1,14 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
-import { t } from './i18n';
+import { toast } from 'sonner';
+import { t, tFormat } from './i18n';
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches dynamic `import('@objectstack/formula')` and
+// `import('@objectstack/lint')` (the spec form's CEL fields); pay those loads
+// during collection, never inside a case's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 // Which console language the dialog renders in. Only `useMetadataLocale` is
@@ -197,5 +203,79 @@ describe('PackageFormDialog — capability refusal (objectstack#8270)', () => {
 
     expect(await screen.findByText(t('engine.packages.create.exists', 'en-US'))).toBeInTheDocument();
     expect(screen.queryByText(t('engine.packages.noCapability', 'en-US'))).toBeNull();
+  });
+});
+
+/**
+ * objectstack#33865 (`ux-conventions.write-feedback`) — a package create is a
+ * write, and it answers with a toast naming the new package by its display
+ * name (label first). The dialog closes on success and every caller then
+ * navigates or re-lists, so without the toast nothing on screen says the
+ * write landed.
+ *
+ * Pinned:
+ *  - a create the server accepts toasts the created sentence once, naming the
+ *    package by its display name, not its id;
+ *  - zh: the same toast in the zh sentence;
+ *  - CONTROL: a refused create (409) toasts nothing and keeps its banner;
+ *  - CONTROL: an edit save does not answer with the created sentence.
+ */
+describe('PackageFormDialog — a create answers with a toast naming the package (objectstack#33865)', () => {
+  let success: MockInstance<typeof toast.success>;
+  beforeEach(() => {
+    success = vi.spyOn(toast, 'success').mockImplementation(() => 'toast');
+  });
+  afterEach(() => success.mockRestore());
+
+  it('toasts the created sentence once, naming the package by its display name', async () => {
+    const onSaved = vi.fn();
+    render(<PackageFormDialog mode="create" open onOpenChange={vi.fn()} onSaved={onSaved} />);
+    await submitCreate();
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success).toHaveBeenCalledWith(tFormat('engine.packages.create.created', 'en-US', { name: 'New App' }));
+    expect(success.mock.calls[0][0]).not.toContain('com.acme.new');
+  });
+
+  it('zh: the toast reads the zh sentence', async () => {
+    localeFixture = 'zh-CN';
+    const onSaved = vi.fn();
+    render(<PackageFormDialog mode="create" open onOpenChange={vi.fn()} onSaved={onSaved} />);
+    await submitCreate('zh-CN');
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const zh = tFormat('engine.packages.create.created', 'zh-CN', { name: 'New App' });
+    expect(zh).not.toBe(tFormat('engine.packages.create.created', 'en-US', { name: 'New App' }));
+    expect(success).toHaveBeenCalledWith(zh);
+  });
+
+  it('CONTROL: a refused create toasts nothing and keeps its banner', async () => {
+    stubRefusal(409, "Package 'com.acme.new' already exists");
+    const onSaved = vi.fn();
+    render(<PackageFormDialog mode="create" open onOpenChange={vi.fn()} onSaved={onSaved} />);
+    await submitCreate();
+
+    expect(await screen.findByText(t('engine.packages.create.exists', 'en-US'))).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: an edit save does not answer with the created sentence', async () => {
+    const onSaved = vi.fn();
+    render(
+      <PackageFormDialog
+        mode="edit"
+        open
+        onOpenChange={vi.fn()}
+        manifest={{ id: 'com.acme.new', name: 'New App', version: '0.1.0', type: 'app', namespace: 'new' }}
+        onSaved={onSaved}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('package-form-submit'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(calls[0].init.method).toBe('PATCH');
+    expect(success).not.toHaveBeenCalled();
   });
 });

@@ -53,7 +53,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
       getClient: () => ({ meta: { saveItem } }),
       // objectstack#35054 — the page edits the app as stored (the layers read):
       // the served app minus its read decorations, which no layer carries.
-      getAuthoredItem: async (_type: string, name: string) => {
+      // objectstack#35101 — and reads each newly selected object as stored.
+      getAuthoredItem: async (type: string, name: string) => {
+        if (type === 'object') return OBJECTS.find((o) => o.name === name) ?? null;
         const served = apps.find((a) => a.name === name);
         return served ? Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_'))) : null;
       },
@@ -124,6 +126,7 @@ async function editThrough(stored: Record<string, unknown>, onObjects?: () => vo
   onObjects?.();
   if (leave === 'Next') next();
   else fireEvent.click(screen.getByTestId('wizard-step-navigation'));
+  await screen.findByTestId('wizard-step-navigation-content'); // the authored object reads settle
   const listed = within(screen.getByTestId('wizard-step-navigation-content'))
     .queryAllByTestId(/^nav-item-/)
     .map((el) => el.getAttribute('data-testid')!.slice('nav-item-'.length));
@@ -208,6 +211,7 @@ describe('objectui#10894 — the create path still generates navigation for an e
     fireEvent.click(screen.getByTestId('object-card-contact'));
     fireEvent.click(screen.getByTestId('object-card-account'));
     next(); // → navigation, generated from the selected objects
+    await screen.findByTestId('wizard-step-navigation-content'); // the authored object reads settle
     next(); // → branding
     fireEvent.click(screen.getByTestId('wizard-complete'));
     const body = await savedBody();

@@ -328,8 +328,9 @@ Whichever tier wins, its filter goes through `resolveFilterPlaceholders` from
 `@object-ui/core` before it leaves `ObjectView` (objectui#10506), on all three
 paths: the query a non-grid view issues, the grid, and a host's
 `renderListView`. So the spec's context tokens (`{current_user_id}`,
-`{current_org_id}`) and the relative-date macros (`{today}`,
-`{current_quarter_start}`, …) arrive as real values. The user and organization
+`{current_org_id}`), the relative-date macros (`{today}`,
+`{current_quarter_start}`, …) and the current ISO week's key
+(`{current_iso_week}`, `2026-W47`) arrive as real values. The user and organization
 come from the nearest `FilterScopeProvider` (`@object-ui/react`), which the
 console shell mounts; with none mounted a context token is left as written and
 the resolver warns. The filter is never widened: the ObjectStack server resolves

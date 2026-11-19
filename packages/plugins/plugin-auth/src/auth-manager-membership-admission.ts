@@ -70,6 +70,7 @@ import { withSystemReadContext } from './objectql-adapter.js';
 import { reconcileMembership, type ReconcileOutcome } from './reconcile-membership.js';
 import { isSsoProviderSource, readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
+import { stageDevSeedCredential } from './dev-seed-credential.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -234,7 +235,8 @@ export async function validateAudienceAdmission(
     const provisioningTicket = (ctx as { body?: Record<string, unknown> } | undefined)?.body?.[
       AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD
     ];
-    const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email, provisioningTicket)
+    const seedTicketProven = this.isOperatorProvisioning(email, provisioningTicket);
+    const creationClass: AudienceCreationClass = seedTicketProven
       ? 'operator'
       : classifyCreationMethod(data?.source, {
           enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
@@ -326,6 +328,14 @@ export async function validateAudienceAdmission(
     ) {
       this.stageOwnerVerifiedStamp(email);
     }
+    // The development seed's own creation (`os dev`'s admin, a stack's
+    // `demoStaff`) is the one that proved the boot's provisioning ticket for
+    // this address. The operator CLASS is wider (an administrator's
+    // create-user, a bulk import, directory provisioning all earn it from
+    // `classifyCreationMethod`), so the mark is staged on the proven ticket
+    // alone, never on the class. It is written when the creation's password
+    // credential lands (`dev-seed-credential.ts`).
+    if (email && seedTicketProven) await stageDevSeedCredential(email);
     // Admitted by its invitation alone (`isAdmittedByInvitationAlone`): the
     // membership settle does not bind this sign-up while its address is
     // unverified (`settleMembership`).

@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
-import { DatasetWidget, buildDrillFilter, buildPivot, pivotCellKey, toCsv } from '../DatasetWidget';
+import { DatasetWidget, buildDrillFilter, buildPivot, pivotCellKey } from '../DatasetWidget';
 import { DashboardRenderer } from '../DashboardRenderer';
 // The drill-through case below mounts DrillDownDrawer's record list, which is
 // rendered through the component registry. Imported at module scope, not in a
@@ -958,51 +958,32 @@ describe('DatasetWidget', () => {
     expect(screen.queryByTestId('matrix-total-col-header')).not.toBeInTheDocument();
   });
 
-  // ── CSV export ───────────────────────────────────────────────────────────
-  it('toCsv serializes a 2D array, quoting/escaping as needed', () => {
-    expect(toCsv([['a', 'b'], [1, 2]])).toBe('a,b\r\n1,2');
-    // comma, embedded quote (doubled), and newline force quoting.
-    expect(toCsv([['x,y', 'a"b', 'l1\nl2']])).toBe('"x,y","a""b","l1\nl2"');
-    // null/undefined → empty field.
-    expect(toCsv([[null, undefined, 0]])).toBe(',,0');
-  });
-
-  it('shows an export button on table and pivot widgets', async () => {
-    const src = makeSource(async () => ({ rows: [{ status: 'Open', task_count: 5 }] }));
-    render(<DatasetWidget widget={{ type: 'table', dataset: 'tasks', dimensions: ['status'], values: ['task_count'] }} dataSource={src} />);
-    expect(await screen.findByTestId('dataset-export')).toBeInTheDocument();
-  });
-
-  it('does NOT show an export button on a metric widget', async () => {
-    const src = makeSource(async () => ({ rows: [{ task_count: 5 }] }));
-    render(<DatasetWidget widget={{ type: 'metric', dataset: 'tasks', values: ['task_count'] }} dataSource={src} />);
-    expect(await screen.findByText('5')).toBeInTheDocument();
-    expect(screen.queryByTestId('dataset-export')).not.toBeInTheDocument();
-  });
-
-  it('exports display-label headers + grouped rows (measures stay numeric) on click', async () => {
-    const calls: any[] = [];
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    (URL as any).createObjectURL = (b: any) => { calls.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      const src = { queryDataset: vi.fn(async () => ({
-        rows: [{ status: 'Open', task_count: 5 }],
-        fields: [{ name: 'status', type: 'string', label: 'Status' }, { name: 'task_count', type: 'number', label: 'Tasks' }],
-      })) };
-      render(<DatasetWidget widget={{ type: 'table', dataset: 'tasks', title: 'My Tasks', dimensions: ['status'], values: ['task_count'] }} dataSource={src} />);
-      fireEvent.click(await screen.findByTestId('dataset-export'));
-      // A Blob was created → download was triggered.
-      expect(calls.length).toBe(1);
-      const text: string = await calls[0].text();
-      expect(text).toContain('Status,Tasks');
-      expect(text).toContain('Open,5');
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
-  });
+  // ── No download control (objectstack#34906) ─────────────────────────────
+  // The table widget used to build a CSV in the browser and download it, which
+  // skipped the export grant and the export audit row that list export
+  // enforces. The maintainer ruled the control removed; exporting stays on the
+  // paths that enforce the grant. Neither table shape renders a download.
+  for (const [shape, widget, ready] of [
+    ['flat table', { type: 'table', dataset: 'tasks', dimensions: ['status'], values: ['task_count'] }, 'Open'],
+    ['cross-tab', { type: 'pivot', dataset: 'tasks', dimensions: ['status', 'priority'], values: ['task_count'] }, 'High'],
+  ] as const) {
+    it(`renders no export control on the ${shape}`, async () => {
+      const createObjectURL = vi.fn(() => 'blob:x');
+      const origCreate = URL.createObjectURL;
+      (URL as any).createObjectURL = createObjectURL;
+      try {
+        const src = makeSource(async () => ({ rows: [{ status: 'Open', priority: 'High', task_count: 5 }] }));
+        render(<DatasetWidget widget={widget as any} dataSource={src} />);
+        expect(await screen.findByText(ready), 'CONTROL: the table rendered').toBeInTheDocument();
+        expect(screen.queryByTestId('dataset-export')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /export|csv|download/i })).not.toBeInTheDocument();
+        for (const button of screen.queryAllByRole('button')) fireEvent.click(button);
+        expect(createObjectURL, 'no button builds a file').not.toHaveBeenCalled();
+      } finally {
+        (URL as any).createObjectURL = origCreate;
+      }
+    });
+  }
 });
 
 /**
@@ -1346,8 +1327,9 @@ describe('DatasetWidget — the dashboard\'s package as the reader\'s package on
 });
 
 // objectstack#34907 — a dimension whose `field` is a `relationship.field` path
-// drills through the related ids, and a drill that cannot list shows the
-// viewer a localized sentence in the drawer, never the server's diagnostic.
+// drills as one nested-relation condition (objectstack#34990: no related id is
+// read), and a drill that cannot list shows the viewer a localized sentence in
+// the drawer, never the server's diagnostic.
 describe('DatasetWidget — drilling a relationship-path dimension (objectstack#34907)', () => {
   const SCHEMAS: Record<string, unknown> = {
     crm_order: { fields: { crm_account: { type: 'lookup', reference: 'crm_account', label: 'Account' }, status: { type: 'select' } } },
@@ -1370,26 +1352,25 @@ describe('DatasetWidget — drilling a relationship-path dimension (objectstack#
   });
   const widget = { type: 'pivot', dataset: 'sales', dimensions: ['owner'], values: ['amount'] };
 
-  it('reads the related ids, then lists the base object on the lookup field $in them', async () => {
+  it('lists the base object on one nested condition beneath the lookup field, reading no related record', async () => {
     const src = dottedSource();
     render(<DatasetWidget widget={widget} dataSource={src} />);
     fireEvent.click(await screen.findByTestId('dataset-drill-row'));
     await waitFor(() => expect(src.find.mock.calls.some(([o]) => o === 'crm_order')).toBe(true));
-    expect(src.find.mock.calls[0]).toEqual(['crm_account', { $filter: { owner_id: 'user_zhang' }, $select: ['id'], $top: 201 }]);
+    expect(src.find.mock.calls.map(([o]) => o)).toEqual(['crm_order']);
     const orderRead = src.find.mock.calls.find(([o]) => o === 'crm_order');
-    expect((orderRead?.[1] as { $filter: unknown }).$filter).toEqual({ crm_account: { $in: ['acc1', 'acc2'] } });
+    expect((orderRead?.[1] as { $filter: unknown }).$filter).toEqual({ crm_account: { owner_id: 'user_zhang' } });
     // No query ever names the dotted path.
     expect(JSON.stringify(src.find.mock.calls)).not.toContain('crm_account.owner_id');
   });
 
-  it('shows a localized notice, and lists nothing, when more related records match than the drill may list', async () => {
+  it('lists the base object however many related records match: no related-record cap, no notice', async () => {
     const src = dottedSource({ accounts: Array.from({ length: 201 }, (_, i) => ({ id: `a${i}` })) });
     render(<DatasetWidget widget={widget} dataSource={src} />);
     fireEvent.click(await screen.findByTestId('dataset-drill-row'));
-    const notice = await screen.findByTestId('drill-down-notice');
-    expect(notice).toHaveAttribute('data-notice', 'too-many');
-    expect(notice).toHaveTextContent('Too many records are related to this value to list them here.');
-    expect(src.find.mock.calls.some(([o]) => o === 'crm_order')).toBe(false);
+    await waitFor(() => expect(src.find.mock.calls.some(([o]) => o === 'crm_order')).toBe(true));
+    expect(src.find.mock.calls.some(([o]) => o === 'crm_account')).toBe(false);
+    expect(screen.queryByTestId('drill-down-notice')).not.toBeInTheDocument();
   });
 
   it('offers no drill for a path past the hop limit', async () => {

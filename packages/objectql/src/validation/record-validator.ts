@@ -291,6 +291,12 @@ interface FieldDef {
   required?: boolean;
   readonly?: boolean;
   system?: boolean;
+  /**
+   * The field's own visibility predicate (ADR-0036 B2). Read here for one
+   * question only — {@link requiredWhenShown}: does the engine judge this
+   * field's `required` against its visibility (ADR-0113 D1 as amended)?
+   */
+  visibleWhen?: unknown;
   multiple?: boolean;
   maxLength?: number;
   minLength?: number;
@@ -2271,6 +2277,31 @@ function keptOptionsFor(
 }
 
 /**
+ * [ADR-0113 D1, as amended] Is this field's `required` judged together with its
+ * own `visibleWhen`? A field that declares both is "required when shown": the
+ * engine waives the requirement for a write whose merged record the predicate
+ * cleanly hides, and judges the rest by the non-regression invariant against
+ * the prior record. That judgement needs the merged and prior records and the
+ * acting user, which this module never holds, so it lives in the rule
+ * validator (`evaluateValidationRules`) and the engine's write path asks this
+ * module to leave such a field's presence to it ({@link validateRecordInScope}'s
+ * `requiredVisibility: 'deferred'`).
+ *
+ * A `readonly` field is never required here (the engine owns its presence) and
+ * an `autonumber` is runtime-owned, so neither is in the set: the same two
+ * exemptions the `required` arm below makes.
+ */
+export function requiredWhenShown(
+  def: { required?: boolean; readonly?: boolean; type?: string; visibleWhen?: unknown } | undefined | null,
+): boolean {
+  return !!def
+    && def.required === true
+    && def.visibleWhen != null
+    && def.readonly !== true
+    && def.type !== 'autonumber';
+}
+
+/**
  * Validate a payload against a list of declared fields. `objectSchema`
  * comes from `ObjectQL.getRegistry().getObject(name)` and exposes a
  * `fields` map of `{ [fieldName]: FieldDef }`.
@@ -2355,6 +2386,12 @@ export function validateRecordInScope(
   mode: Mode,
   scope: ReadonlyValueScope,
   options: ValidateRecordOptions = {},
+  // [ADR-0113 D1, as amended] `'deferred'` leaves the presence of a field that
+  // is required when shown ({@link requiredWhenShown}) to the rule validator,
+  // which the engine's write path runs on the same write. ⛔ Only a caller that
+  // does run `evaluateValidationRules` afterwards may pass it; the default keeps
+  // such a field required unconditionally, the "counts as shown" answer.
+  requiredVisibility: 'enforced' | 'deferred' = 'enforced',
 ): void {
   if (!objectSchema?.fields || !data) return;
 
@@ -2374,7 +2411,8 @@ export function validateRecordInScope(
       // [#21663] A readonly value: its SHAPE, never required (the engine owns
       // its presence) and never a constraint — see ReadonlyValueScope.
       const shapeOnly = def.readonly === true;
-      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly, keptOptionsFor(kept, name));
+      const deferRequired = requiredVisibility === 'deferred' && requiredWhenShown(def);
+      const err = validateOne(name, def, data[name], shapeOnly || deferRequired, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly, keptOptionsFor(kept, name));
       if (err) errors.push(err);
     }
   } else {
@@ -2397,7 +2435,11 @@ export function validateRecordInScope(
       // write that does not touch the field never reaches this check. (The
       // one over-approximation — explicit null onto an already-null legacy
       // row — is rejected too; that write was a no-op plus a false claim.)
-      if (def.required && isEmptyForRequired(def, value) && def.type !== 'autonumber') {
+      // [ADR-0113 D1, as amended] …unless the field is required only when
+      // shown and the caller runs the rule validator, which judges the clear
+      // against the field's visibility and the prior record.
+      const deferRequired = requiredVisibility === 'deferred' && requiredWhenShown(def);
+      if (def.required && !deferRequired && isEmptyForRequired(def, value) && def.type !== 'autonumber') {
         // Same catalog as every other built-in message (#3957) — one wire code
         // (`required`), a distinct sentence for the clear-out case.
         errors.push(buildFieldError(

@@ -273,6 +273,7 @@ import {
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
+    sealedFlowNodeTypeVocabulary,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1858,20 +1859,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof assertRuntimeAuthoringRules> = {
-            get authoringChannel() { return readAuthoringChannel(); },
-            get engine() { return readEngine(); },
-            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
-            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
-            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
-            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
-            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
-            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
-            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-        };
-        return assertRuntimeAuthoringRules.call(host, evt);
+        // [#34776] Its host is the draft verdicts' (a superset of the members it reads), so the two cannot drift.
+        return assertRuntimeAuthoringRules.call(this.draftVerdictHost(), evt);
     }
 
     /**
@@ -1912,10 +1901,11 @@ export class ObjectStackProtocolImplementation implements
         return draftPublishVerdict.call(this.draftVerdictHost(), draft);
     }
 
-    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
-    private draftPublishJudgement(draft: {
-        type: string; name: string; body: unknown; packageId: string | null;
+    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    draftPublishJudgement(draft: {
+        type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
+        packageClosures?: Map<string, Promise<RuntimePendingDeclarations | undefined>>;
     }): Promise<DraftPublishJudgement> {
         return draftPublishJudgement.call(this.draftVerdictHost(), draft);
     }
@@ -1938,6 +1928,7 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return host;
@@ -2233,6 +2224,15 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
+    }
+
+    /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
+    private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return sealedFlowNodeTypeVocabulary.call(host);
     }
 
     /**
@@ -4272,11 +4272,11 @@ export class ObjectStackProtocolImplementation implements
      * (`rowHeldBaseAddressOf`) are no ambiguity here, as the registry names
      * the base the one holder there; {@link getMetaItemLayered} reads the
      * base's stack, as the plain read serves the base's row. Beside a
-     * package-less row they are still refused (#33210). The writes naming no
-     * package are not moved: the save, delete, publish, draft and history
-     * doors still refuse the same rows naming base and dependent, so here the
-     * view loads where the save it then sends is refused (a follow-up card
-     * judges whether the writes follow the base).
+     * package-less row they are still refused (#33210). [#34681] The writes
+     * naming no package follow the same base
+     * (`packagelessRowHeldBaseAddress`): the save, delete, draft discard,
+     * publish, history, diff and rollback doors act on the base's row, so the
+     * view loads where the save it then sends lands.
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;
@@ -7870,13 +7870,13 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#23165, ADR-0048] THE package-less write address: which row of an item a
-     * write that names no package addresses, read from the item's stored rows
-     * at `state`. The item's own package when those rows are bound to exactly
-     * one, else the package-unbound row. `candidates` is every distinct
-     * binding, sorted; two or more is a name several packages hold, which the
-     * doors refuse ({@link packagelessAddressAmbiguityRefusal}) and for which
-     * `packageId` is `null`. `unbound` says whether a package-unbound row sits
+     * [#23165, ADR-0048] THE package-less write address: which row of an item a write that
+     * names no package addresses, read from the item's stored rows at `state`. The item's
+     * own package when those rows are bound to exactly one, else the package-unbound row.
+     * `candidates` is every distinct binding, sorted; two or more is a name several
+     * packages hold, which the doors refuse ({@link packagelessAddressAmbiguityRefusal})
+     * and for which `packageId` is `null`, unless the bare read serves the row-held base,
+     * whose row they address (#34681). `unbound` says whether a package-unbound row sits
      * beside them, which is what a delete of a package's row leaves served.
      *
      * The one resolution its three readers take, so they cannot disagree:
@@ -7964,9 +7964,9 @@ export class ObjectStackProtocolImplementation implements
      *    next. Neither present: no draft (`none`), whatever other packages'
      *    drafts are stored; the strict draft read answers `404 NO_DRAFT` here
      *    too, and those drafts are addressed by naming their package.
-     *  - bound to two or more packages: `ambiguous`, refused by both doors
-     *    with the refusal the draft save answers
-     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`).
+     *  - bound to two or more packages: `ambiguous`, refused by both doors with
+     *    the draft save's {@link packagelessAddressAmbiguityRefusal} (`409`),
+     *    unless the bare read serves the row-held base, whose draft they address (#34681).
      *  - bound to none (an item never published into a package): the
      *    package-unbound draft. With no such draft, the one package's draft
      *    when exactly one package holds a draft (the only draft the read
@@ -9064,10 +9064,9 @@ export class ObjectStackProtocolImplementation implements
      * same package batch (`pending` as the batch's object declarations), else
      * the engine's registered definition, whose fields include extension
      * fields; the columns the registry injects (`id`, the audit and tenant
-     * columns) count. Not refused when the object cannot be resolved: on a
-     * draft save, an object that is itself still a draft (`pending` as
-     * `'drafts'`) is judged at the seed's publish; an object resolved by
-     * neither is reported by the load.
+     * columns) count; on a draft save, an object itself still a draft (`pending`
+     * as `'drafts'`) is judged at the seed's publish. [#34864] One nothing resolves is
+     * refused by the save door alone (`door`): `unknownSeedObjectRefusal`'s docblock.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
      * schema gate (except a `migrate-stored` re-save, the platform healing
@@ -9088,13 +9087,15 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         pending?: 'drafts' | ReadonlyArray<unknown>,
         writeFace?: MetadataWriteFace,
+        door?: 'save',
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
             get engine() { return readEngine(); },
             listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
     }
 
     /**
@@ -9618,11 +9619,11 @@ export class ObjectStackProtocolImplementation implements
      * on a control-plane kernel — appends no `sys_metadata_history` row.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold, or one the bare plain read refuses, is refused
-     * `409` naming every holder when no package is named, and `packageId`
-     * reads that holder's versions alone: its own, plus those attributed to
-     * no package or to the environment while it is the name's only slot
-     * (`protocol-history-slots.ts`). A name one holder holds reads as before.
+     * name two row slots hold, or one the bare plain read refuses, is refused `409` naming
+     * every holder when no package is named (but the row-held base the bare read serves is
+     * read as named, #34681), and `packageId` reads that holder's versions alone: its own,
+     * plus those attributed to no package or to the environment while it is the name's
+     * only slot (`protocol-history-slots.ts`). A name one holder holds reads as before.
      * `packageId` on any other type is refused `400 VALIDATION_ERROR`.
      */
     async historyMetaItem(request: {
@@ -11058,16 +11059,16 @@ export class ObjectStackProtocolImplementation implements
      * declared override over a row bound to its read-only base.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold is refused `409` naming every holder when no
-     * package is named, with nothing written (so is a name the bare plain
-     * read refuses); `packageId` restores into that holder's row (its own,
-     * its pair's declared override, or the package-less row its read falls
-     * back to), and the version must be that holder's: another holder's, or
-     * one attributed to no package or to the environment while another slot
-     * holds the name, answers 404 `VERSION_NOT_FOUND`. A name one holder
-     * holds, named bare, restores any of its versions as before.
-     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and
-     * one naming no installed package where no row is stored is refused
+     * name two row slots hold is refused `409` naming every holder when no package is
+     * named, with nothing written (so is a name the bare plain read refuses), but the
+     * row-held base the bare read serves is restored as named (#34681); `packageId`
+     * restores into that holder's row (its own, its pair's declared override, or the
+     * package-less row its read falls back to), and the version must be that
+     * holder's: another holder's, or one attributed to no package or to the
+     * environment while another slot holds the name, answers 404 `VERSION_NOT_FOUND`.
+     * A name one holder holds, named bare, restores any of its versions as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and one naming
+     * no installed package where no row is stored is refused
      * `422 WRITABLE_PACKAGE_REQUIRED` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is

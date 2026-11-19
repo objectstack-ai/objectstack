@@ -546,6 +546,9 @@ const de = {
       resultFailed: " · Fehlgeschlagen {{count}}",
       succeededRecords: "Erfolgreiche Datensätze",
       aggregateNotCompleted: "Die Aktion wurde für die ausgewählten Datensätze nicht abgeschlossen. Einige Datensätze wurden möglicherweise bereits geändert; nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
+      resultNotConfirmed: " · Nicht bestätigt {{count}}",
+      notConfirmedRecords: "Die Aktion hat zu diesen Datensätzen nichts gemeldet. Prüfen Sie ihre aktuellen Werte:",
+      aggregateUnreadable: "Die Aktion wurde beendet, aber ihr Ergebnis konnte nicht gelesen werden, daher ist nicht bekannt, welche Datensätze geändert wurden. Nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",
@@ -1563,7 +1566,6 @@ const de = {
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
     allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
     details: "Details",
-    exportCsv: "CSV exportieren",
     openInList: "In Liste öffnen",
     filters: {
       label: "Dashboard-Filter",
@@ -4064,6 +4066,7 @@ const de = {
     composer: {
       queued: "Wird gesendet, sobald die aktuelle Antwort fertig ist",
       queuedCancel: "Abbrechen",
+      fileTooLarge: "Zu groß zum Anhängen (Limit {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'Ganze Antwort anzeigen',
@@ -4710,6 +4713,9 @@ const de = {
         position: '{{count}} Positionen',
         position_one: '{{count}} Position',
         position_other: '{{count}} Positionen',
+        capability: '{{count}} Capabilities',
+        capability_one: '{{count}} Capability',
+        capability_other: '{{count}} Capabilities',
         tool: '{{count}} KI-Werkzeuge',
         tool_one: '{{count}} KI-Werkzeug',
         tool_other: '{{count}} KI-Werkzeuge',
@@ -5223,6 +5229,7 @@ const de = {
     loading: "Ihre Benachrichtigungseinstellungen werden geladen…",
     loadFailed: "Ihre Benachrichtigungseinstellungen konnten nicht gelesen werden. Laden Sie die Seite neu und versuchen Sie es erneut.",
     saveFailed: "Die Änderung wurde nicht gespeichert: {{reason}}",
+    readOnly: "Sie können diese Einstellungen ansehen, aber Ihre Berechtigungen erlauben keine Änderung. Eine Administratorin oder ein Administrator Ihrer Organisation kann sie für Sie ändern.",
     general: "Allgemein",
     generalWarning: "Wenn Sie Zusammenfassung oder Ruhezeiten ändern, wird Ihre eigene allgemeine Einstellung gespeichert. Sie gilt dann für jedes Thema und jeden Kanal, die Sie nicht selbst festgelegt haben, anstelle der Standardwerte Ihrer Organisation.",
     digest: "Zusammenfassung",

@@ -557,7 +557,7 @@ describe('[#14179] reachability: the legacy exit is confined to bootstrap mode',
         // Non-empty: the branch is not dead code.
         expect(codeOnly.length).toBeGreaterThan(0);
         expect(codeOnly.map((e) => e.type).sort())
-            .toEqual(['agent', 'api', 'assignment_rule', 'capability', 'field', 'job', 'picklist', 'queue',
+            .toEqual(['agent', 'api', 'assignment_rule', 'field', 'job', 'picklist', 'queue',
                 'sharing_rule']);
         // …and the #6960 carve-out reaches none of them, which is what makes
         // the 403 below total rather than incidental.

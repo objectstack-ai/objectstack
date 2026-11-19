@@ -423,13 +423,26 @@ export const fr: PlatformTranslationData = {
         multi_factor: { title: 'Multifacteur', description: 'Qui, dans cette organisation, doit protéger son compte avec une application d’authentification (TOTP).' },
       },
       keys: {
-        allowed_ip_ranges: { label: 'Plages d’adresses IP autorisées' },
-        session_idle_timeout_minutes: { label: 'Délai d’inactivité (minutes)' },
-        session_absolute_max_hours: { label: 'Durée de vie maximale de la session (heures)' },
-        max_concurrent_sessions_per_user: { label: 'Sessions simultanées max. par utilisateur' },
+        allowed_ip_ranges: {
+          label: 'Plages d’adresses IP autorisées',
+          help: 'Plages CIDR ou IP exactes (une par ligne, ou séparées par des virgules), par ex. 203.0.113.0/24. Une fois définies, la session d’un membre n’est pas ouverte pour cette organisation depuis l’extérieur de ces plages, et une session qui arrive ensuite de l’extérieur est déconnectée ; il en va de même pour toute requête dont le serveur ne peut établir l’adresse cliente. Chaque plage doit se trouver dans les plages d’adresses IP autorisées du déploiement, s’il en définit, et la liste doit inclure l’adresse depuis laquelle vous l’enregistrez. Vide = seules les plages du déploiement s’appliquent. Les administrateurs de la plateforme ne sont soumis qu’aux plages du déploiement.',
+        },
+        session_idle_timeout_minutes: {
+          label: 'Délai d’inactivité (minutes)',
+          help: 'Déconnecte un membre après ce nombre de minutes d’inactivité. Pas plus long que le délai d’inactivité du déploiement, s’il en définit un. 0 = le délai d’inactivité du déploiement.',
+        },
+        session_absolute_max_hours: {
+          label: 'Durée de vie maximale de la session (heures)',
+          help: 'Impose une nouvelle authentification ce nombre d’heures après la connexion, quelle que soit l’activité. Pas plus longue que la durée de vie du déploiement, s’il en définit une. 0 = la durée de vie du déploiement.',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'Sessions simultanées max. par utilisateur',
+          help: 'Plafonne les sessions connectées simultanées d’un membre dans cette organisation ; au-delà du plafond, les plus anciennes sont déconnectées, et les sessions dans d’autres organisations ne sont ni comptées ni déconnectées. Vérifié à la connexion et lorsqu’un membre bascule vers cette organisation. Pas plus élevé que le plafond du déploiement, s’il en définit un, qui compte toujours toutes les sessions d’un membre. 0 = le plafond du déploiement uniquement.',
+        },
         mfa_required: {
           label: 'Exiger l’authentification multifacteur',
           options: { off: 'Désactivé', administrators: 'Administrateurs', everyone: 'Tout le monde' },
+          help: 'Qui doit utiliser une application d’authentification : les administrateurs (de la plateforme, de l’organisation et délégués) ou tout le monde. Les personnes concernées qui ne se sont pas enregistrées perdent l’accès aux données à la fin du délai de grâce du déploiement. Un niveau plus faible que celui du déploiement est refusé ; Désactivé = l’exigence du déploiement. Nécessite que l’authentification à deux facteurs soit activée pour ce déploiement ; tant qu’elle est désactivée, l’enregistrement d’une exigence est refusé.',
         },
       },
     },

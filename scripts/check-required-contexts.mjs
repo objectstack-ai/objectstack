@@ -653,7 +653,7 @@ export const INSTRUCTION_SURFACES = [
   {
     // The seat's readings ledger states the required set it reads before a PR
     // may be enqueued ⇒ statesTheSet, the whole registry.
-    file: '.claude/skills/pm-dispatch/references/platform-readings.md',
+    file: '.claude/skills/pm-dispatch/references/readings-ci.md',
     statesTheSet: true,
     mustName: [
       'Lint & Repo Gates',
@@ -2580,7 +2580,7 @@ async function selfTest() {
   // The readings ledger, the copy a seat consults at the moment it decides
   // whether a PR may be enqueued: enrolled, and carrying every required
   // context rather than a subset.
-  const LEDGER_SURFACE = '.claude/skills/pm-dispatch/references/platform-readings.md';
+  const LEDGER_SURFACE = '.claude/skills/pm-dispatch/references/readings-ci.md';
   const ledgerEntry = INSTRUCTION_SURFACES.find((s) => s.file === LEDGER_SURFACE);
   assert(
     ledgerEntry !== undefined &&

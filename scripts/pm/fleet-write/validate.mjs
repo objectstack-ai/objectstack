@@ -1107,7 +1107,7 @@ export function payloadInStepEnv(text) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the envelope: four keys, every one required, nothing else admitted': 9,
   'the fields: request_id shape and cap, the one organization, the session id': 8,
-  'the actions: count, the closed op list, closed keys per op, typed values': 30,
+  'the actions: count, the closed op list, closed keys per op, typed values': 33,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
   'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 24,
   "the mailbox_branch_delete row: pull and a claude/mailbox-* branch and nothing else, any other name refused before the dispatch and never echoed; ONE bodiless DELETE of that one ref, carrying the pull and the branch to the executor's fences; contents write, a literal grant, so the mint widens nothing; and it rides the close stroke": 6,
@@ -1245,7 +1245,10 @@ export async function selfTest() {
     t('a label named twice is refused', refuses(one({ op: 'labels_add', issue: 1, labels: ['a', 'a'] }), 'twice'));
     t('eleven assignees is refused', refuses(one({ op: 'assign', issue: 1, assignees: Array.from({ length: 11 }, (_, i) => `u${i}`) }), 'over its cap of 10'));
     t('an unknown state is refused', refuses(one({ op: 'issue_patch', issue: 1, state: 'archived' }), 'must be one of "open", "closed"'));
-    t('issue_patch with nothing to change is refused', refuses(one({ op: 'issue_patch', issue: 1 }), 'at least one of title, body, state, state_reason'));
+    t('issue_patch with nothing to change is refused', refuses(one({ op: 'issue_patch', issue: 1 }), 'at least one of title, body, state, state_reason, type'));
+    t('issue_patch: a type is one of Bug, Feature, Task — alone or beside the other keys', [validatePayload(one({ op: 'issue_patch', issue: 1, type: 'Bug' })).ok, validatePayload(one({ op: 'issue_patch', issue: 1, type: 'Task', state: 'closed', state_reason: 'completed' })).ok, validatePayload(one({ op: 'issue_patch', issue: 1, type: 'Feature', title: 't' })).payload.actions[0]], [true, true, { op: 'issue_patch', issue: 1, title: 't', type: 'Feature' }]);
+    t('⛔ …any other type is refused naming the three: another name, another case, empty, a number, an object', ['Epic', 'bug', 'BUG', '', 7, { name: 'Bug' }, null].map((type) => refuses(one({ op: 'issue_patch', issue: 1, type }), 'actions[0].type must be one of "Bug", "Feature", "Task"')), [true, true, true, true, true, true, true]);
+    t('⛔ …and no other op takes a type: the key is unknown on a create and on a label write', [refuses(one({ op: 'issue_create', title: 't', body: 'b', type: 'Bug' }), 'type'), refuses(one({ op: 'labels_add', issue: 1, labels: ['a'], type: 'Bug' }), 'type')], [true, true]);
     t('pr_request_reviewers with neither list is refused', refuses(one({ op: 'pr_request_reviewers', pull: 1 }), 'at least one of reviewers, team_reviewers'));
     // pr_update_branch: the sha is judged HERE, before the dispatch — a short one never reaches the platform's 422.
     t('pr_update_branch: a short sha is refused before the dispatch, naming the full shape', refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: SHA.slice(0, 7) }), 'full 40-hex commit sha'));
@@ -1272,7 +1275,7 @@ export async function selfTest() {
       labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] },
       unassign: { issue: 1, assignees: ['u'] },
-      issue_patch: { issue: 1, state: 'closed', state_reason: 'completed' },
+      issue_patch: { issue: 1, state: 'closed', state_reason: 'completed', type: 'Bug' },
       issue_create: { title: 't', body: 'b', labels: ['l'], assignees: ['u'] },
       pr_create: { title: 't', head: 'h', base: 'main', body: 'b', assignees: ['u'], labels: ['l'] },
       pr_request_reviewers: { pull: 1, reviewers: ['u'] },

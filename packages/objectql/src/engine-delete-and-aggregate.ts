@@ -81,6 +81,10 @@ import {
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import {
+    aggregateOrderCutDirective, aggregateOrderCutRefusal, aggregateOrderCutRequestOf, assertAggregateOrderCutShape,
+    takeAggregateGroupCount, withAggregateOrderCutDirective,
+} from './aggregate-order-cut.js';
+import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
   RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
   relationGroupDriverRefusal, relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
@@ -145,13 +149,19 @@ export interface DeleteAndAggregateHost {
 /** The bodies of the "Delete, count, aggregate and execute" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class DeleteAndAggregateFacet {
   /** The body of `ObjectQL#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'delete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
+  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782, #34412] An aborting `afterDelete`, or a refusal after a `beforeDelete` hook's
     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.delete(object, options));
-    }
+    //
+    // [#35167] As in `insert` and `update`: the unit opens around the ENGINE
+    // BODY (the executor below), never around the door, so the middleware
+    // chain — the authorization gate's reads, and whatever a middleware does
+    // after `next()` — runs outside it. Nothing between here and the executor
+    // writes; the cascade claim below is an in-memory marker.
+    const ownUnit = this.opensAfterAbortUnit('afterDelete', object, options?.context);
+    const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+      ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -221,7 +231,7 @@ export class DeleteAndAggregateFacet {
       opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
     }
 
-    await this.executeWithMiddleware(opCtx, async () => {
+    await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
       // [ADR-0139 D1] As in `update`: a leaf the middleware chain wrote into a
       // delete's predicate is refused at the executor's entry, before the
       // pre-image reads reach the driver.
@@ -926,7 +936,7 @@ export class DeleteAndAggregateFacet {
           );
           throw e;
       }
-    });
+    }));
 
     return opCtx.result;
   }
@@ -971,6 +981,12 @@ export class DeleteAndAggregateFacet {
       // related read a relation group join is built from is this verb,
       // stopped at its driver call. Only the engine's own planner sets it.
       const scopePlan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
+      // [aggregate order and cut] The engine-internal request to order the
+      // groups by an aggregated column, cut them and count them, in the
+      // driver's own statement (`aggregate-order-cut.ts`). Its shape is judged
+      // once every door below has judged the query; the driver and the path
+      // are judged at the driver call.
+      const orderCut = aggregateOrderCutRequestOf(options);
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
@@ -1303,6 +1319,11 @@ export class DeleteAndAggregateFacet {
           );
           if (numeric !== query.having) query = { ...query, having: numeric };
       }
+      // [aggregate order and cut] Every door above has judged the query; now
+      // the request's order keys against the aggregated row it orders.
+      if (orderCut !== undefined) {
+          assertAggregateOrderCutShape(object, orderCut, aggregatedRowColumns(query.groupBy, query.aggregations));
+      }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
       // [relation group join] Every door above has judged the base query;
@@ -1486,6 +1507,21 @@ export class DeleteAndAggregateFacet {
             });
         const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
         const nativeAggregate = typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative);
+        // [aggregate order and cut] Served only as the driver's own statement,
+        // and refused — before the driver is asked — on every path that is not
+        // one (`aggregateOrderCutRefusal`): no in-memory sort, no slower path.
+        if (orderCut !== undefined) {
+            const refused = aggregateOrderCutRefusal(object, {
+                driver: drv,
+                nativeAggregate,
+                hasHaving: ast.having != null && typeof ast.having === 'object' && Object.keys(ast.having).length > 0,
+                hasRelationGroup: relationGroup !== undefined,
+            });
+            if (refused !== undefined) throw refused;
+            const directive = aggregateOrderCutDirective(orderCut, aggregatedRowColumns(ast.groupBy, []));
+            const cut = await drv.aggregate(object, withBucketZone(withAggregateOrderCutDirective(ast, directive)), aggregateOptions);
+            return takeAggregateGroupCount(object, drv, cut, orderCut);
+        }
         // [relation group join] Served only as the driver's own statement:
         // the rows path below cannot join. Each planned related read is
         // answered at this boundary, under these driver options, by the rule

@@ -92,6 +92,16 @@
       }
     },
     {
+      "id": 13,
+      "prompt": "The `submit_signoff` action on `crm_invoice` declares `refusals: { NOT_DRAFT: { message: 'Only a draft invoice can be signed off.', status: 409 }, STAGE_LOCKED: { message: 'This stage change is not allowed.', params: ['stage'], reasons: { closed: { message: 'A {{ stage }} invoice can no longer change.' } } } }`, and its body throws those codes. zh-CN users still read the English sentences. Which bundle keys translate them, and what does a caller get in a locale no bundle covers?",
+      "expected_output": "`objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message` and `….refusals.STAGE_LOCKED.message`, and the reason's sentence at `objects.crm_invoice._actions.submit_signoff.refusals.STAGE_LOCKED.reasons.closed.message`; an action with no `objectName` takes the same keys under `globalActions.submit_signoff`. The reason's translation keeps its `{{ stage }}` hole, which the server fills after picking the translation. The server answers the sentence in the caller's locale, negotiated over the locales the app's bundles hold, on the refusal's `userMessage`; a locale no bundle covers gets the declared sentence as written, with no `en` floor. A key for a code or reason the action does not declare is `translation-target-unknown`. Not a hook's refusal key, and not a `messages` entry the body looks up itself.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_actions", "submit_signoff", "refusals", "NOT_DRAFT", "reasons", "closed"],
+        "must_not_contain": ["hooks.submit_signoff"]
+      }
+    },
+    {
       "id": 10,
       "prompt": "In zh-CN the `crm_renew` action on `crm_opportunity` opens its param dialog with the rows of its pre-submit read still in English. Its `preflight.fields` declares the paths `amount` and `verdict.summary`.",
       "expected_output": "`objects.crm_opportunity._actions.crm_renew.preflight.fields`, keyed by each declared field's literal `path`: `amount` and `'verdict.summary'` (one key, dots included, never split into nested objects), each value the translated label string itself, with no `.label`. Beside `fields` the node holds only `columns` (a table field's column headers): the panel has no heading of its own to translate, and `defineTranslationBundle` refuses any other key under `preflight`. A path the action's `preflight.fields` does not declare is `translation-target-unknown`.",
@@ -104,7 +114,7 @@
     {
       "id": 11,
       "prompt": "Our app's metadata is authored in English — every inline `label:` is English — but it is sold to Chinese users, who should get Chinese without choosing a language. How do we declare the stack's `i18n` config?",
-      "expected_output": "Declare `sourceLocale: 'en'` beside `defaultLocale: 'zh-CN'` in the stack's `i18n` block, with `zh-CN` in `supportedLocales`: `defaultLocale` is the locale a user who has not chosen one gets, `sourceLocale` the language the inline labels are written in. `os lint`, `os i18n check` and `os i18n extract` then treat `en` as the source — extract fills the `en` bundle from the inline text, and the rows the tooling asks for are the zh-CN ones. Also declare `fallbackLocale: 'en'`: label serving still reads inline text as `defaultLocale` text, so without it an `en` request reaches the zh-CN bundle before the English inline label.",
+      "expected_output": "Declare `sourceLocale: 'en'` beside `defaultLocale: 'zh-CN'` in the stack's `i18n` block, with `zh-CN` in `supportedLocales`: `defaultLocale` is the locale a user who has not chosen one gets, `sourceLocale` the language the inline labels are written in. `os lint`, `os i18n check` and `os i18n extract` then treat `en` as the source — extract fills the `en` bundle from the inline text, and the rows the tooling asks for are the zh-CN ones. Label serving then answers an `en` request from the English inline label. Also declare `fallbackLocale: 'en'`: validation and refusal messages still read labels through `t()`, which falls back to `fallbackLocale`, else `defaultLocale`, so without it an `en` refusal names a field by its zh-CN row.",
       "files": [],
       "assertions": {
         "must_contain": ["sourceLocale", "defaultLocale: 'zh-CN'", "fallbackLocale: 'en'", "supportedLocales"],
@@ -119,6 +129,26 @@
       "assertions": {
         "must_contain": ["_actions", "import_leads", "resultDialog.columns.rows", "error.message"],
         "must_not_contain": ["error: {"]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "Our package ships a named import mapping `lead_csv` with `label: 'Lead CSV (standard)'`. zh-CN users still see that English label in the import wizard's saved-mapping picker. Where does the translation go?",
+      "expected_output": "`mappings.lead_csv.label` in the zh-CN `TranslationData`: `mappings` is a top-level group beside `objects`, keyed by the mapping's `name` — `mappings: { lead_csv: { label: '线索 CSV（标准）' } }`. `label` is the only key (a mapping declares no description). The mapped fields' own labels stay under `objects.<object>.fields.<field>.label`. Not an `objects` entry and not a `messages` key.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["mappings", "lead_csv", "label"],
+        "must_not_contain": ["objects: { lead_csv", "messages: {"]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "The `lead_follow_up` hook declares `texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } }` and writes a task subject with `ctx.text('follow_up_subject', { lead: ctx.input.name })`. Our organization works in zh-CN, but the tasks still read English. Which bundle key translates it, and whose language is picked?",
+      "expected_output": "`hooks.lead_follow_up.texts.follow_up_subject.message` in the zh-CN bundle, keyed by the hook's `name` (not under `objects` or `messages`), the translation keeping its `{{ lead }}` hole, which the runtime fills after picking it: `'跟进已确认的线索：{{ lead }}'`. It is picked in the organization's language — the Localization setting if somebody set it, else `i18n.defaultLocale` — never the language of the person whose save fired the hook.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["hooks", "lead_follow_up", "texts", "follow_up_subject", "defaultLocale"],
+        "must_not_contain": ["messages: {", "_hooks"]
       }
     }
   ]

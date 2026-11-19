@@ -584,6 +584,12 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.requiredWhen': 'Required when',
   'designer.field.conditionalRulesHint':
     'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
+  'designer.field.requiredVisibleWhenReference':
+    'This field is required, and the server decides that from this condition on every save. The condition reads through {fields}, a reference the server cannot follow here, so it counts the field as shown: it stays required on every record, including the ones this condition hides it on. Read a field of this object instead.',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    'This field is required, and the server decides that from this condition on every save. {fields} reads through a reference, or calls label() or current_user.can(), itself or through another formula, which the server cannot compute on a save (current_user.can() only on a save that picks no permission-gated option): it counts this field as shown, so it stays required on every record. A form that computes this object\'s formulas cannot compute it either, so it shows this field and keeps it required; a form check that computes no formulas judges the value it last read instead and can hide this field or not ask for it.',
+  'designer.field.requiredVisibleWhenFormulaFormOnly':
+    'This field is required, and the server decides that from this condition on every save. {fields} reads os, itself or through another formula: the server computes it (it binds os from the signed-in user and the tenant) and can waive this field, but the form cannot, so a form that computes this object\'s formulas shows this field and keeps it required; a form check that computes no formulas judges the value it last read instead and can hide this field or not ask for it.',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '{n} selected',
   'designer.canvas.bulkMoveTo': 'Move to section',
@@ -1948,6 +1954,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.submit': 'Create package',
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
+  'engine.packages.create.created': 'Created package “{name}”.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2793,6 +2800,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.operation': 'Operation',
   'engine.studio.access.explain.run': 'Explain',
   'engine.studio.access.explain.running': 'Explaining…',
+  'engine.studio.access.explain.needObject': 'Choose an object first',
   'engine.studio.access.explain.allowedLine': '{operation} on “{object}” is ALLOWED for this principal.',
   'engine.studio.access.explain.deniedLine': '{operation} on “{object}” is DENIED for this principal.',
   'engine.studio.access.explain.principal': 'Principal',
@@ -3503,6 +3511,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
   'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
   'engine.studio.landing.customizeTitle': 'Customize {name}',
+  'engine.studio.landing.manage': 'Manage',
+  'engine.studio.landing.manageTitle': 'Manage {name}: details, disable or enable, export',
+  'engine.studio.landing.allPackages': 'All packages',
+  'engine.studio.landing.allPackagesTitle': 'Every package in this environment, with its disable, enable and export actions',
   'engine.studio.landing.customizations.none': 'No changes yet',
   'engine.studio.landing.ownHeading': 'Your own apps',
   'engine.studio.landing.newApp': 'New app of your own',

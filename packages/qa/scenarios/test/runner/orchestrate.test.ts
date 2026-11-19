@@ -31,11 +31,11 @@ import { reseedDoorAnswer, seedDoorAnswer, type SeedDoorRecord } from './seed-do
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
-import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
+import { buildPrompt, CONFIRMATION_WORDS, doorBuildPrompt, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -2885,7 +2885,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(parseArgs(['--template', 'dist/objectstack.json', '--modes', 'ask']).modes).toEqual(['ask']);
     expect(parseArgs(['--modes', 'scratch,ask']).modes).toEqual(['scratch', 'ask']);
     expect(parseArgs([]).modes).toEqual(['scratch', 'template']); // the default is unchanged
-    expect(() => parseArgs(['--modes', 'asks'])).toThrow('unknown mode `asks` (scratch, template, ask)');
+    expect(() => parseArgs(['--modes', 'asks'])).toThrow('unknown mode `asks` (scratch, template, ask, door)');
 
     const { scenario, ops, driver } = setup();
     await expect(runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN })).rejects.toThrow(ASK_REFUSAL);
@@ -3598,13 +3598,13 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     expect(renderScorecard(cardScorecard(run))).toContain('| Run-operations | 2/2 |');
   });
 
-  it('⛔ with no fresh copy (template mode), a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
+  it('⛔ with no fresh copy (a Run half given none), a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
     class NoDeleteApp extends FakeApp {
       override async deleteRow(): Promise<HttpAnswer> {
         return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'refused by the double' };
       }
     }
-    /** The Run half on the booted app alone, as template mode runs it: no fresh copy, so the rows are written back through its doors. */
+    /** The Run half on the booted app alone, given no fresh copy, so the rows are written back through its doors. */
     const halfOn = async (app: () => FakeApp) => {
       const { scenario, ops, driver, apps } = setup({ app });
       await ops.boot('host');
@@ -3653,10 +3653,23 @@ describe('runHalf — an operation an earlier write would meet runs on a fresh s
   const ASSET_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json');
   const REFUSAL = 'That status change is not allowed: a request is approved or rejected once, and only an approved one is disposed of.';
 
-  /** The asset card's app as a well-built one is: a decided scrap request never goes back to submitted (400 VALIDATION_FAILED). Counts the writes its doors take. */
+  /**
+   * The asset card's app as a well-built one is: a decided scrap request never goes back to submitted (400 VALIDATION_FAILED).
+   * Counts the writes its doors take. Its metadata reads carry the platform's read decoration (`_diagnostics`), and its
+   * unmanaged install door refuses an item that still carries one, as a blank 18.6.0 host refuses a served flow.
+   */
   class OneWayApp extends FakeApp {
     writes = { insert: 0, update: 0, delete: 0 };
     refusedTransitions = 0;
+    override async metadataAsArtifact(collections: readonly string[]) {
+      const served = await super.metadataAsArtifact(collections);
+      return Object.fromEntries(Object.entries(served).map(([k, items]) => [k, items.map((i) => (typeof i === 'object' && i !== null ? { ...i, _diagnostics: { valid: true } } : i))]));
+    }
+    override async installUnmanaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+      const decorated = Object.values(manifest).some((v) => Array.isArray(v) && v.some((i) => typeof i === 'object' && i !== null && '_diagnostics' in i));
+      if (decorated) return { ok: false, status: 422, body: {}, code: 'INVALID_METADATA', message: 'Unrecognized key(s): `_diagnostics`' };
+      return super.installUnmanaged(manifest);
+    }
     override async insertRow(object: string, row: Record<string, unknown>) {
       this.writes.insert++;
       return super.insertRow(object, row);
@@ -3710,15 +3723,25 @@ describe('runHalf — an operation an earlier write would meet runs on a fresh s
     expect([life.boots, life.stops]).toEqual([apps.length, apps.length]);
   });
 
-  it('⛔ without a fresh copy the same rule refuses the write-back, and the disposal stays NOT MEASURED with the refusal named', async () => {
-    const { scenario, ops, driver, apps } = assetRun(() => new OneWayApp());
-    await ops.boot('host');
-    const half = await runHalf(namespacedScenario(scenario), apps[0]!, driver, { card: scenario.card.id, mode: 'template', phase: 'iterate-run' });
-    const dispose = half.operations.find((o) => o.operation === 'dispose_scrapped_asset')!;
-    expect(dispose.notMeasured).toMatch(/^restore: the rows could not be restored to the seeded state: demoasset_disposal_request: 1 changed \(dr06: status, decided_on\)/);
-    expect(dispose.notMeasured).toContain(`update demoasset_disposal_request dr06: 400 VALIDATION_FAILED ${REFUSAL.slice(0, 60)}`);
-    expect([dispose.turn, dispose.grade]).toEqual([undefined, undefined]);
-    expect(apps[0]!.refusedTransitions).toBeGreaterThan(0);
+  it('template mode: the iterate Run half measures all six operations, each one an earlier write would meet on a copy installed with what the app serves after the iterate (#34497)', async () => {
+    const { scenario, ops, driver, apps, life } = assetRun(() => new OneWayApp());
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact({ ns: 'demoasset' }) });
+    const half = run.modes[0]!.iterate!.run!;
+    expect(half.operations.map((o) => o.operation)).toEqual(['receive_and_issue_from_text', 'extend_overdue_loaner', 'manager_approves_scrap', 'dispose_scrapped_asset', 'employee_approves_own_scrap', 'check_out_asset_in_repair']);
+    // Six of six measured and asked: the approval moved DR-0006 one way, and the disposal after it ran all the same.
+    expect(half.operations.filter((o) => o.notMeasured !== undefined)).toEqual([]);
+    for (const o of half.operations) expect([o.operation, o.turn !== undefined, o.error]).toEqual([o.operation, true, undefined]);
+    expect(half.operations.find((o) => o.operation === 'dispose_scrapped_asset')!.restored).toEqual({ freshCopy: ['demoasset_disposal_request/dr06'] });
+    // The one-way rule judged no restore, and the host the agent iterated took no write after its seed.
+    expect(apps.map((a) => a.refusedTransitions)).toEqual(apps.map(() => 0));
+    const secondPass = Object.values(half.seed.secondPass ?? {}).reduce((a, b) => a + b, 0);
+    expect([apps[0]!.writes.update, apps[0]!.writes.delete, apps[0]!.writes.insert]).toEqual([secondPass, 0, half.seed.inserted]);
+    // Every copy holds the agent's iterate: installed with the items the iterated host serves, read decorations off.
+    const names = (a: OneWayApp) => ((a.installed!.objects ?? []) as Array<{ name: string }>).map((o) => o.name);
+    expect(names(apps[0]!)).toContain('democrm_opportunity'); // the scripted iterate's object, made live on the host only
+    expect(apps.length).toBeGreaterThan(1);
+    for (const copy of apps.slice(1)) expect(names(copy)).toEqual(names(apps[0]!));
+    expect([life.boots, life.stops]).toEqual([apps.length, apps.length]);
   });
 
   it('⛔ a copy whose seed does not load as the run\'s did, or that does not boot, leaves the operation NOT MEASURED with the reason, never graded on other rows', async () => {
@@ -4082,5 +4105,219 @@ describe('the card stamp: the record and the scorecard name the card file a run 
     const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp' }, run);
     expect('card' in record).toBe(false);
     expect(renderScorecard(cardScorecard(run, PUBLISHED))).not.toContain('card: ');
+  });
+});
+
+// ── Door mode: built through the MCP draft door, with no project, then published as a person would ──
+
+/**
+ * An app with door mode's doors: a package a person creates, an OAuth token
+ * for the client, the draft door's save (a draft per package, refused for a
+ * token it never minted or a package it does not hold), the drafts list, and
+ * the publish that makes them live — or refuses them on a 200, as the
+ * packages door answers a refused publish (`outcome: refused` under `data`).
+ */
+class DoorApp extends FakeApp {
+  static minted = 0;
+  packages: Array<Record<string, unknown>> = [];
+  tokens: string[] = [];
+  drafts: Array<{ token: string; type: string; name: string; package: string; item: Record<string, unknown> }> = [];
+  mintAnswer: (HttpAnswer & { token?: string }) | undefined;
+  /** The item name the publish refuses, refusing the whole publish as the door does. */
+  refusesPublishOf: string | undefined;
+  /** The draft door refuses every save (a replay against an app that answers otherwise). */
+  refusesSaves = false;
+  /** The outcome a publish that refuses no draft answers (default `published`). */
+  publishOutcome = 'published';
+  async createPackage(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    this.packages.push(manifest);
+    return { ok: true, status: 201, body: {} };
+  }
+  async mintAuthoringToken(scope: string): Promise<HttpAnswer & { token?: string }> {
+    if (this.mintAnswer) return this.mintAnswer;
+    const token = `tok-${++DoorApp.minted}`;
+    this.tokens.push(token);
+    return { ok: true, status: 200, body: { scope }, token };
+  }
+  override async callTool(token: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    if (tool !== 'save_metadata_draft') return super.callTool(token, tool, args);
+    const refuse = (code: string, status: number) => ({ output: JSON.stringify({ error: { code, message: code, status } }, null, 2), isError: true });
+    if (!this.tokens.includes(token)) return refuse('UNAUTHORIZED', 401);
+    if (this.refusesSaves) return refuse('VALIDATION_FAILED', 400);
+    if (!this.packages.some((p) => p.id === args.package)) return refuse('NOT_FOUND', 404);
+    const { type, name, item } = args as { type: string; name: string; item: Record<string, unknown> };
+    this.drafts = this.drafts.filter((d) => !(d.type === type && d.name === name));
+    this.drafts.push({ token, type, name, package: String(args.package), item });
+    return { output: JSON.stringify({ saved: true, type, name }), isError: false };
+  }
+  async listDrafts(packageId: string): Promise<HttpAnswer & { drafts: Array<{ type: string; name: string }> }> {
+    return { ok: true, status: 200, body: {}, drafts: this.drafts.filter((d) => d.package === packageId).map(({ type, name }) => ({ type, name })) };
+  }
+  async publishDrafts(packageId: string): Promise<HttpAnswer> {
+    const mine = this.drafts.filter((d) => d.package === packageId);
+    const failed = mine.filter((d) => d.name === this.refusesPublishOf).map((d) => ({ type: d.type, name: d.name, code: 'PUBLISH_REFUSED', error: 'refused by an invented check' }));
+    if (failed.length) {
+      return { ok: true, status: 200, body: { success: true, data: { success: false, outcome: 'refused', publishedCount: 0, failedCount: failed.length, published: [], failed } } };
+    }
+    const src = (this.installed ??= {}) as Record<string, unknown[]>;
+    for (const d of mine) (src[`${d.type}s`] ??= []).push(d.item);
+    this.drafts = this.drafts.filter((d) => d.package !== packageId);
+    return { ok: true, status: 200, body: { success: true, data: { success: true, outcome: this.publishOutcome, publishedCount: mine.length, failedCount: 0, published: mine.map(({ type, name }) => ({ type, name })), failed: [] } } };
+  }
+}
+
+/**
+ * The scripted model building through the door: it saves the fixture build's
+ * objects and permission sets as drafts into the package its prompt names,
+ * and notes what its working directory held when the turn began.
+ */
+class DoorDriver extends ScriptedDriver {
+  readonly doorTasks: AuthorTask[] = [];
+  readonly cwdAtTurn: string[][] = [];
+  override async author(task: AuthorTask) {
+    if (task.mode !== 'door') return super.author(task);
+    this.seen.push(stepKey(task));
+    this.doorTasks.push(task);
+    this.cwdAtTurn.push(readdirSync(task.cwd));
+    const pkg = /package `([^`]+)`/.exec(task.prompt)![1]!;
+    const built = artifact();
+    const calls: ParsedTurn['toolCalls'] = [];
+    for (const [type, items] of [['object', built.objects], ['permission', built.permissions]] as const) {
+      for (const item of items as Array<Record<string, unknown>>) {
+        const input = { type, name: String(item.name), package: pkg, item };
+        const answer = await task.door!.callTool!('save_metadata_draft', input);
+        calls.push({ name: 'save_metadata_draft', rawName: 'mcp__app__save_metadata_draft', input, output: answer.output, isError: answer.isError });
+      }
+    }
+    return { turn: turn('Saved every item as a draft.', calls) };
+  }
+}
+
+function doorSetup(opts: { app?: () => DoorApp | FakeApp } = {}) {
+  const { scenario, ops, apps } = setup<FakeApp>({ app: opts.app ?? (() => new DoorApp()) });
+  const bootOptions: Array<{ authoringDoor?: boolean } | undefined> = [];
+  const boot = ops.boot.bind(ops);
+  ops.boot = async (dir, o) => {
+    bootOptions.push(o);
+    return boot(dir, o);
+  };
+  const driver = new DoorDriver(scenario, ops, () => apps[apps.length - 1]!, undefined);
+  return { scenario, ops, apps, driver, bootOptions };
+}
+
+describe('runCard — `--modes door` builds through the MCP draft door with no project, publishes as a person, and grades as today', () => {
+  it('the client works in an empty directory outside the host; the package, the token, the drafts and the publish are recorded; the build and the Run half are scored', async () => {
+    const { scenario, ops, apps, driver, bootOptions } = doorSetup();
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    const [mode] = run.modes;
+    const app = apps[0] as DoorApp;
+
+    // The host is its own namespace's project; it boots with the authorization server the client's token comes from.
+    expect(ops.scaffolded).toHaveLength(1);
+    expect(ops.scaffolded[0]).toMatch(/\/hostcrm$/);
+    expect(bootOptions).toEqual([{ authoringDoor: true }]);
+
+    // ⛔ The client is handed no project: an empty directory of its own, outside the host, gone after the turn.
+    const [task] = driver.doorTasks;
+    expect(driver.cwdAtTurn).toEqual([[]]);
+    expect(task!.cwd.startsWith(ops.scaffolded[0]!)).toBe(false);
+    expect(existsSync(task!.cwd)).toBe(false);
+    expect(task!.door!.mcp).toEqual({ url: 'http://fake/api/v1/mcp', token: app.tokens[0] });
+    expect(task!.prompt).toBe(doorBuildPrompt(namespacedScenario(scenario).card, { packageId: 'com.scenario.democrm' }));
+
+    // The person-equivalent steps: a package in the card's namespace, a token scoped to the authoring tools, the publish.
+    expect(app.packages).toEqual([{ id: 'com.scenario.democrm', name: scenario.card.title.en, version: '0.1.0', type: 'app', namespace: 'democrm' }]);
+    expect(mode!.door).toMatchObject({
+      package: { id: 'com.scenario.democrm', namespace: 'democrm', create: { ok: true, status: 201 } },
+      token: { ok: true, scope: 'openid metadata:write' },
+      drafts: { answer: { ok: true }, items: expect.arrayContaining([{ type: 'object', name: 'democrm_account' }]) },
+      publish: { ok: true, outcome: 'published', publishedCount: 4 },
+    });
+    expect(mode!.findings).toEqual([]);
+
+    // Graded exactly as a scratch build is: the Build half on what the environment serves, then the Run half.
+    const sc = cardScorecard(run);
+    const [door] = sc.modes;
+    expect(door!.mode).toBe('door');
+    expect(door!.first.build).toMatchObject({ degraded: false });
+    expect(door!.first.build!.passed).toBe(door!.first.build!.total);
+    expect(door!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
+    expect(door!.first.operations).toMatchObject({ passed: 6, total: 6 });
+    expect(driver.seen).toContain('crm_account_with_contacts/door/build/author/-');
+    expect(driver.seen).toContain('crm_account_with_contacts/door/run/account_count/sdr');
+    expect(renderScorecard(sc)).toContain('- door: package `com.scenario.democrm` created · client connected (openid metadata:write) · 4 drafts pending · publish: published, 4 published');
+
+    // ⛔ The token is the turn's, never the record's.
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    expect(JSON.stringify(record)).not.toContain(app.tokens[0]!);
+    const results = record.results as Array<{ id: string; verdict: string; notes: string }>;
+    expect(results.find((r) => r.id === 'crm_account_with_contacts.door.build')!.verdict).toBe('pass');
+    expect(results.find((r) => r.id === 'crm_account_with_contacts.door.iterate-build')).toMatchObject({ verdict: 'not-run', notes: 'not run: door mode builds once and runs no iterate' });
+  });
+
+  it('⛔ a publish the door refuses on a 200 is a finding naming each refused draft, and the build is graded on what is served', async () => {
+    const { scenario, ops, driver } = doorSetup({
+      app: () => Object.assign(new DoorApp(), { refusesPublishOf: 'democrm_contact' }),
+    });
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    const [mode] = run.modes;
+    expect(mode!.door!.publish).toMatchObject({ ok: true, outcome: 'refused', publishedCount: 0, failed: [{ type: 'object', name: 'democrm_contact', code: 'PUBLISH_REFUSED' }] });
+    expect(mode!.findings).toContain('the publish of `com.scenario.democrm` answered refused: object democrm_contact (PUBLISH_REFUSED)');
+    const build = cardScorecard(run).modes[0]!.first.build!;
+    expect(build.passed).toBeLessThan(build.total);
+    expect(renderScorecard(cardScorecard(run))).toContain('publish: refused, 0 published; refused: object democrm_contact PUBLISH_REFUSED');
+  });
+
+  it('⛔ a publish that lands short of `published` with no draft refused is still a finding, naming the outcome', async () => {
+    const { scenario, ops, driver } = doorSetup({ app: () => Object.assign(new DoorApp(), { publishOutcome: 'published_unregistered' }) });
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    expect(run.modes[0]!.door!.publish).toMatchObject({ ok: true, outcome: 'published_unregistered', publishedCount: 4 });
+    expect(run.modes[0]!.door!.publish!.failed).toBeUndefined();
+    expect(run.modes[0]!.findings).toEqual(['the publish of `com.scenario.democrm` answered published_unregistered']);
+  });
+
+  it('⛔ no token, no turn: a refused authorization is a finding with the door’s answer, and the client is never asked to author', async () => {
+    const { scenario, ops, driver } = doorSetup({
+      app: () => Object.assign(new DoorApp(), { mintAnswer: { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'the consent step answered 403' } }),
+    });
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    const [mode] = run.modes;
+    expect(driver.doorTasks).toEqual([]);
+    expect(mode!.build).toBeUndefined();
+    expect(mode!.findings).toEqual(['no token for the draft door: 403 PERMISSION_DENIED the consent step answered 403']);
+    expect(mode!.door!.token).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('an app harness without the door’s steps skips the mode, naming each missing step', async () => {
+    const { scenario, ops, driver } = doorSetup({ app: () => new FakeApp() });
+    expect(doorHarnessGap(new FakeApp())).toMatch(/has no createPackage, mintAuthoringToken, listDrafts, publishDrafts/);
+    expect(doorHarnessGap(new DoorApp())).toBeUndefined();
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    expect(run.modes[0]!.skipped).toMatch(/door mode creates a package, connects a client, lists and publishes its drafts/);
+    expect(driver.doorTasks).toEqual([]);
+  });
+
+  it('a replay re-sends the recorded draft saves through the replay’s own door and token; an app that answers a save otherwise makes the build not measured', async () => {
+    const live = doorSetup();
+    const recorder = new RecordingDriver(live.driver);
+    await runCard(live.scenario, recorder, live.ops, { modes: ['door'], admin: ADMIN });
+    const recorded = recorder.recording.turns['crm_account_with_contacts/door/build/author/-']!;
+    expect(recorded.toolCalls.map((c) => c.name)).toEqual(Array(4).fill('save_metadata_draft'));
+    expect(recorder.recording.files['crm_account_with_contacts/door/build/author/-']).toBeUndefined();
+
+    const again = doorSetup();
+    const replay = new RecordedDriver(recorder.recording);
+    const run = await runCard(again.scenario, replay, again.ops, { modes: ['door'], admin: ADMIN });
+    const app = again.apps[0] as DoorApp;
+    expect(app.tokens).toHaveLength(1);
+    expect(app.tokens[0]).not.toBe((live.apps[0] as DoorApp).tokens[0]);
+    expect(run.modes[0]!.door!.publish).toMatchObject({ outcome: 'published', publishedCount: 4 });
+    const build = cardScorecard(run).modes[0]!.first.build!;
+    expect(build.passed).toBe(build.total);
+
+    const refusing = doorSetup({ app: () => Object.assign(new DoorApp(), { refusesSaves: true }) });
+    const unfaithful = await runCard(refusing.scenario, new RecordedDriver(recorder.recording), refusing.ops, { modes: ['door'], admin: ADMIN });
+    expect(unfaithful.modes[0]!.build!.notMeasured).toMatch(/`save_metadata_draft` on object democrm_account was applied in the recorded run and refused VALIDATION_FAILED on replay/);
+    expect(unfaithful.modes[0]!.door!.publish).toBeUndefined();
   });
 });

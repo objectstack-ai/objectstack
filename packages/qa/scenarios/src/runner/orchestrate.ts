@@ -37,6 +37,16 @@
  *             row can hold, such as a `capability`) it installs the same build
  *             managed instead, and records which mode it ran on
  *             (`ModeRun.template.installMode`); no other refusal falls back.
+ *   door      scaffold a blank host → boot → the runner, as a person, creates a
+ *             writable package in the card's namespace and connects an MCP
+ *             client (an OAuth token scoped to the draft door) → the agent
+ *             builds from the card prompt through the draft door ALONE, in an
+ *             empty directory of its own with no project file → the runner
+ *             publishes the package's drafts as Studio's Changes > Publish
+ *             does → score what the environment then serves, as template mode
+ *             scores its iterate → seed → the Run half. No iterate. The arm
+ *             the client ran in (skills and rules given and left out, `door.ts`)
+ *             is the driver's, on the record (`DriverInfo.door`).
  *
  * Names: the app is always in the card's own namespace, `demo` + its code
  * (`democrm`). Scratch mode scaffolds the project under that name; template
@@ -48,7 +58,12 @@
  * else; this module only gathers what the graders take.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { resolveStackCollection } from '@objectstack/core';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
 
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
@@ -81,12 +96,14 @@ import {
 } from '../score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
+import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
   confirmPrompt,
+  doorBuildPrompt,
   datasetQuestionPrompt,
   iteratePrompt,
   operationPrompt,
@@ -121,7 +138,12 @@ export interface ProjectOps {
   scaffold(name: string, under: string): Promise<{ dir: string; result: CommandResult }>;
   os(dir: string, args: readonly string[]): Promise<CommandResult>;
   readArtifact(dir: string): unknown | undefined;
-  boot(dir: string): Promise<BootedApp>;
+  /**
+   * `objectstack dev` in `dir`. `options.authoringDoor` (door mode) boots it
+   * with the OAuth authorization server on (`OS_OIDC_PROVIDER_ENABLED`), which
+   * the draft door's tokens come from.
+   */
+  boot(dir: string, options?: { authoringDoor?: boolean }): Promise<BootedApp>;
   harness(url: string): AppHarness;
   /** The `namespace` the scaffolded project's manifest declares; checked against the card's own before a build. */
   namespace?(dir: string): string | undefined;
@@ -129,10 +151,11 @@ export interface ProjectOps {
 
 /**
  * Another copy of the app a Run half runs on: booted anew from the same
- * project, with the same build installed the same way, holding no rows of
- * the card's yet ({@link runHalf} seeds it). `release` stops it. A half that
- * has one starts an operation an earlier turn's write would otherwise meet on
- * a copy of its own instead of writing the rows back
+ * project, with the same build installed the same way (template mode: the
+ * metadata its app serves after the iterate, {@link iteratedManifest}),
+ * holding no rows of the card's yet ({@link runHalf} seeds it). `release`
+ * stops it. A half that has one starts an operation an earlier turn's write
+ * would otherwise meet on a copy of its own instead of writing the rows back
  * ({@link restoreSeededRows}).
  */
 export type FreshCopy = () => Promise<{ app: AppHarness; release(): Promise<void> }>;
@@ -151,7 +174,7 @@ function freshBoot(ops: Pick<ProjectOps, 'boot' | 'harness'>, dir: string): Fres
 }
 
 export interface RunOptions {
-  modes: ReadonlyArray<'scratch' | 'template' | 'ask'>;
+  modes: ReadonlyArray<'scratch' | 'template' | 'ask' | 'door'>;
   /** Re-run the Run half after the iterate (scratch mode). Default true. */
   iterateRun?: boolean;
   /**
@@ -472,7 +495,7 @@ export interface ChangeSize {
 }
 
 export interface ModeRun {
-  mode: 'scratch' | 'template' | 'ask';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
   /** Absent in template and ask modes, which build nothing first. */
   build?: BuildHalf;
   run?: RunHalf;
@@ -484,8 +507,31 @@ export interface ModeRun {
    * install door answered the install the mode ran on ({@link InstalledBuild}).
    */
   template?: InstalledBuild;
+  /** Door mode's own steps, each as its door answered ({@link DoorSteps}). */
+  door?: DoorSteps;
   skipped?: string;
   findings: string[];
+}
+
+/**
+ * What door mode's person-equivalent steps met, each as its door answered:
+ * the package created for the build, the token minted for the client (never
+ * the token itself), the drafts the client left pending, and the publish.
+ */
+export interface DoorSteps {
+  package: { id: string; namespace: string; create: InstallAnswer };
+  token?: InstallAnswer & { scope?: string };
+  /** The package's pending drafts when the client finished, as Studio's Changes review lists them. */
+  drafts?: { answer: InstallAnswer; items: Array<{ type: string; name: string }> };
+  /** The publish of the package's drafts, as Studio's Changes > Publish sends it. */
+  publish?: DoorPublish;
+}
+
+/** The publish's answer: its `outcome`, and each draft it refused with the reason. */
+export interface DoorPublish extends InstallAnswer {
+  outcome?: string;
+  publishedCount?: number;
+  failed?: Array<{ type: string; name: string; code?: string; error: string }>;
 }
 
 /** A refused install, as the door answered it. */
@@ -651,6 +697,28 @@ export function withoutItems(artifact: Record<string, unknown[]>, baseline: Reco
       return [key, items.filter((item) => !there.has(nameOf(item)))];
     }),
   );
+}
+
+/**
+ * Template mode's iterated app as a manifest the install door takes: the
+ * manifest the run's own install sent, with every collection the app serves
+ * (`served`, the environment's items less what it served before the install)
+ * replaced by the items served now, so a fresh host installed with it holds
+ * the agent's iterate, made live through the app's doors, which a host booted
+ * again from the project would not. A collection served empty is left out, as
+ * {@link installableManifest} leaves one out. Each item comes off its read
+ * decorations first (`stripReadDecorations`, `@objectstack/spec/kernel`): a
+ * served body is no valid input to the schema that produced it until they are
+ * removed, and the unmanaged install door refuses a flow that carries one
+ * (`unrecognized_keys: _diagnostics`, measured on a blank 18.6.0 host).
+ */
+function iteratedManifest(installed: Record<string, unknown>, served: Record<string, unknown[]>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...installed };
+  for (const [key, items] of Object.entries(served)) {
+    if (items.length) out[key] = items.map(stripReadDecorations);
+    else delete out[key];
+  }
+  return out;
 }
 
 /** Seed objects in lookup order: a row's lookup target is inserted before it, wherever a reference cycle allows ({@link seedPlan}). */
@@ -2002,14 +2070,19 @@ interface VerifiedBuild {
  * unmanaged install makes the environment's own. `fresh` boots another blank
  * host from the same directory and installs the same build into it, the same
  * way — in the mode the run's own install landed in ({@link FreshCopy}); a
- * refused install there is that copy's failure.
+ * refused install there is that copy's failure. `copyOf` is the same with
+ * another manifest installed in its place (template mode's iterated app,
+ * {@link iteratedManifest}); `manifest` is the one the run's install sent.
  */
 async function withInstalledBuild(
   original: LoadedScenario,
   ops: ProjectOps,
   mode: ModeRun,
   verified: VerifiedBuild | undefined,
-  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; fresh: FreshCopy }) => Promise<void>,
+  use: (
+    app: AppHarness,
+    installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; manifest: Record<string, unknown>; fresh: FreshCopy; copyOf: (manifest: Record<string, unknown>) => FreshCopy },
+  ) => Promise<void>,
   options: { managedFallback?: boolean } = {},
 ): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
@@ -2068,19 +2141,21 @@ async function withInstalledBuild(
       mode.findings.push(`unmanaged install refused ${install.code} (${install.status}): installed the same build managed instead`);
       landed = { manifest: managed.manifest, install: (a, m) => a.installManaged!(m), mode: 'managed' };
     }
-    const fresh: FreshCopy = async () => {
-      const copy = await freshBoot(ops, dir)();
-      try {
-        await copy.app.signInAdmin();
-        const again = await landed.install(copy.app, landed.manifest);
-        if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
-        return copy;
-      } catch (e) {
-        await copy.release();
-        throw e;
-      }
-    };
-    await use(app, { dir, url: booted.url, collections, baseline, fresh });
+    const copyOf =
+      (installs: Record<string, unknown>): FreshCopy =>
+      async () => {
+        const copy = await freshBoot(ops, dir)();
+        try {
+          await copy.app.signInAdmin();
+          const again = await landed.install(copy.app, installs);
+          if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+          return copy;
+        } catch (e) {
+          await copy.release();
+          throw e;
+        }
+      };
+    await use(app, { dir, url: booted.url, collections, baseline, manifest: landed.manifest, fresh: copyOf(landed.manifest), copyOf });
   });
 }
 
@@ -2090,7 +2165,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   const card = scenario.card;
   const mode: ModeRun = { mode: 'template', findings: [] };
   const iterated = iteratedScenario(scenario);
-  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
+  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline, manifest, copyOf }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
     await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
@@ -2102,10 +2177,136 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    // No fresh copy here: the app holds the agent's iterate, made live through its doors, which a host booted
-    // again would not hold; an earlier write is undone through those doors instead (`restoreSeededRows`).
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
+    // The app holds the agent's iterate, made live through its doors, which a host booted again would not hold:
+    // a fresh copy is a blank host with what the app serves now installed the same way (`iteratedManifest`).
+    const fresh = copyOf(iteratedManifest(manifest, served));
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh);
   });
+  return mode;
+}
+
+/** The package door mode builds into: `com.scenario.<namespace>`, declaring the card's namespace. */
+export function doorPackageOf(card: { code: string }): { id: string; namespace: string } {
+  const namespace = scenarioNamespace(card);
+  return { id: `com.scenario.${namespace}`, namespace };
+}
+
+/** A publish's answer as the record keeps it: `outcome`, the counts, and each refused draft. */
+function doorPublishOf(a: HttpAnswer): DoorPublish {
+  const bag = (v: unknown): Record<string, unknown> | undefined => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
+  const body = bag(a.body);
+  const data = bag(body?.data) ?? body;
+  const failed = Array.isArray(data?.failed)
+    ? data.failed.map(bag).filter((f): f is Record<string, unknown> => f !== undefined).map((f) => ({
+        type: String(f.type ?? ''),
+        name: String(f.name ?? ''),
+        ...(typeof f.code === 'string' ? { code: f.code } : {}),
+        error: String(f.error ?? '').slice(0, 500),
+      }))
+    : undefined;
+  return {
+    ...installAnswerOf(a),
+    ...(typeof data?.outcome === 'string' ? { outcome: data.outcome } : {}),
+    ...(typeof data?.publishedCount === 'number' ? { publishedCount: data.publishedCount } : {}),
+    ...(failed?.length ? { failed } : {}),
+  };
+}
+
+/** Why a harness cannot run door mode, or `undefined` when it can: each door it needs, named. */
+export function doorHarnessGap(app: AppHarness): string | undefined {
+  const missing = (['createPackage', 'mintAuthoringToken', 'listDrafts', 'publishDrafts'] as const).filter((m) => typeof app[m] !== 'function');
+  return missing.length ? `this app harness has no ${missing.join(', ')}: door mode creates a package, connects a client, lists and publishes its drafts` : undefined;
+}
+
+/**
+ * Door mode (the module header states the steps). The client's directory is
+ * a fresh empty one, made here and removed after the turn: the turn's `cwd`
+ * holds no project file, and the host project lives elsewhere. The token is
+ * minted for the turn and handed to the driver, never recorded. A step the
+ * app refuses is a finding with the door's answer, and what needed it does
+ * not run; a publish that refuses drafts is recorded with each refusal, and
+ * what the environment then serves is scored as it is.
+ */
+async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const card = scenario.card;
+  const mode: ModeRun = { mode: 'door', findings: [] };
+  const target = doorPackageOf(card);
+  // The host gets a namespace of its own (`templateHostName`): the package the runner creates holds the card's.
+  const { dir, result } = await ops.scaffold(templateHostName(card), modeDir(card, 'door'));
+  if (result.exit !== 0) {
+    mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
+    return mode;
+  }
+  let booted: BootedApp | undefined;
+  try {
+    booted = await ops.boot(dir, { authoringDoor: true });
+    const app = ops.harness(booted.url);
+    const gap = doorHarnessGap(app);
+    if (gap) {
+      mode.skipped = gap;
+      return mode;
+    }
+    await app.signInAdmin();
+    const baseline = await app.metadataAsArtifact(DOOR_COLLECTIONS);
+    // The person: a new package in Studio, in the card's namespace.
+    const created = await app.createPackage!({ id: target.id, name: card.title.en, version: '0.1.0', type: 'app', namespace: target.namespace });
+    mode.door = { package: { ...target, create: installAnswerOf(created) } };
+    if (!created.ok) {
+      mode.findings.push(`the package \`${target.id}\` was not created: ${created.status} ${created.code ?? ''} ${created.message ?? ''}`.trim());
+      return mode;
+    }
+    // The person connects an MCP client: an OAuth token scoped to the authoring tools.
+    const minted = await app.mintAuthoringToken!(DOOR_TOKEN_SCOPE);
+    const scope = (minted.body as { scope?: unknown } | null)?.scope;
+    mode.door.token = { ...installAnswerOf(minted), ...(typeof scope === 'string' ? { scope } : {}) };
+    if (!minted.ok || minted.token === undefined) {
+      mode.findings.push(`no token for the draft door: ${minted.status} ${minted.code ?? ''} ${minted.message ?? ''}`.trim());
+      return mode;
+    }
+    const token = minted.token;
+    const build: BuildHalf = { commands: [], score: null };
+    const cwd = mkdtempSync(join(tmpdir(), 'scenario-door-client-'));
+    try {
+      await authorInto(build, async () =>
+        (
+          await driver.author({
+            card: card.id,
+            mode: 'door',
+            phase: 'build',
+            step: 'author',
+            cwd,
+            prompt: doorBuildPrompt(card, { packageId: target.id }, opts.promptChoice),
+            tier: card.tier,
+            door: { mcp: { url: app.mcpUrl, token }, callTool: (tool, args) => app.callTool(token, tool, args) },
+          })
+        ).turn,
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+    mode.build = build;
+    if (build.notMeasured) return mode;
+    // The person reviews the package's drafts, then publishes them.
+    const drafts = await app.listDrafts!(target.id);
+    mode.door.drafts = { answer: installAnswerOf(drafts), items: drafts.drafts };
+    const published = await app.publishDrafts!(target.id);
+    const publish = (mode.door.publish = doorPublishOf(published));
+    // A refusal answers on a 200 (`outcome: refused` under `data`): only a whole `published` is a clean publish.
+    if (!published.ok || publish.outcome !== 'published' || publish.failed?.length) {
+      const failed = publish.failed?.map((f) => `${f.type} ${f.name}${f.code ? ` (${f.code})` : ''}`).join(', ');
+      mode.findings.push(`the publish of \`${target.id}\` answered ${publish.outcome ?? `${published.status} ${published.code ?? ''}`.trim()}${failed ? `: ${failed}` : ''}`);
+    }
+    // What the environment serves now is the build, as a person meets it.
+    const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
+    scoreInto(build, scenario, scenario, served);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+  } catch (e) {
+    mode.findings.push(`boot/run: ${errText(e)}`);
+  } finally {
+    await booted?.stop();
+  }
   return mode;
 }
 
@@ -2179,5 +2380,6 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   }
   if (opts.modes.includes('template')) out.modes.push(await templateMode(scenario, driver, ops, opts, verified));
   if (opts.modes.includes('ask')) out.modes.push(await askMode(scenario, driver, ops, opts, verified));
+  if (opts.modes.includes('door')) out.modes.push(await doorMode(scenario, driver, ops, opts));
   return out;
 }
